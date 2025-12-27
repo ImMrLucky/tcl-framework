@@ -72,6 +72,7 @@ async function validateOnce(input: ValidateInput, adapter?: LLMAdapter): Promise
         }
       });
       console.log("Claim graph built successfully");
+      console.log(`Graph stats: ${graph.supports.length} supports, ${graph.contradictions.length} contradictions, ${graph.grounding.length} grounding edges`);
     } catch (error: any) {
       console.error("Error building claim graph:", error);
       console.error("Error stack:", error?.stack);
@@ -92,10 +93,12 @@ async function validateOnce(input: ValidateInput, adapter?: LLMAdapter): Promise
     let spectral: SpectralReport | undefined;
     let coherenceScore = 50;
     if (spectralEnabled) {
+      console.log(`Spectral enabled. Checking URL: ${spectralServiceUrl ? 'configured' : 'NOT configured'}`);
       if (!spectralServiceUrl) {
         console.warn("Spectral enabled but no spectralServiceUrl/TCL_SPECTRAL_URL configured. Skipping Spectral analysis.");
       } else {
         try {
+          console.log(`Calling Spectral service at: ${spectralServiceUrl}`);
           spectral = await callSpectralService(
             spectralServiceUrl,
             evidenceRes.claims.map((c) => ({ id: c.id, text: c.text })),
@@ -104,11 +107,16 @@ async function validateOnce(input: ValidateInput, adapter?: LLMAdapter): Promise
             graph.groundedClaimIds
           );
           coherenceScore = spectral.coherenceScore;
+          console.log(`Spectral analysis complete. Coherence score: ${coherenceScore}`);
         } catch (error: any) {
           console.error("Spectral service error:", error);
+          console.error("Error message:", error?.message);
+          console.error("Error stack:", error?.stack);
           // Continue without Spectral - don't fail the entire validation
         }
       }
+    } else {
+      console.log("Spectral disabled in options");
     }
 
     // 6) scores

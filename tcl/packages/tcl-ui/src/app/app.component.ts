@@ -231,8 +231,10 @@ export class AppComponent {
       }
     });
 
-    // Fallback: If no graph provided, infer support relationships (simplified)
-    if (!graph || graph.supports.length === 0) {
+    // Fallback: If no graph provided or graph is empty, infer support relationships (simplified)
+    if (!graph || (graph.supports.length === 0 && graph.contradictions.length === 0 && graph.grounding.length === 0)) {
+      console.log("Graph is empty or not provided, using fallback inference");
+      // Create support edges between sequential claims
       for (let i = 0; i < claims.length - 1; i++) {
         const claimA = claims[i];
         const claimB = claims[i + 1];
@@ -241,17 +243,30 @@ export class AppComponent {
         );
         const claimAMeta = claimMap.get(claimA.id);
         const claimBMeta = claimMap.get(claimB.id);
-        if (!hasContradiction && claimAMeta?.grounded && claimBMeta?.grounded) {
-          if (claimAMeta && claimBMeta) {
-            claimAMeta.supportCount++;
-            supports.push({
-              from: claimA.id,
-              to: claimB.id,
-              type: 'support',
-              weight: 0.6,
-            });
-          }
+        // Add support if no contradiction and both claims exist
+        if (!hasContradiction && claimAMeta && claimBMeta) {
+          claimAMeta.supportCount++;
+          supports.push({
+            from: claimA.id,
+            to: claimB.id,
+            type: 'support',
+            weight: 0.6,
+          });
         }
+      }
+      
+      // Also add grounding edges from claim evidence if available
+      if (graph && graph.grounding.length === 0) {
+        claims.forEach(claim => {
+          claim.evidence.forEach(ev => {
+            grounding.push({
+              from: claim.id,
+              to: ev.source_id,
+              type: 'grounding',
+              weight: ev.weight || 0.5,
+            });
+          });
+        });
       }
     }
 
