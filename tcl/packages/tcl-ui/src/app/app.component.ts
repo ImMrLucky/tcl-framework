@@ -5,7 +5,7 @@ import { SummaryPanelComponent } from './summary-panel/summary-panel.component';
 import { ClaimTableComponent } from './claim-table/claim-table.component';
 import { GraphViewComponent } from './graph-view/graph-view.component';
 import { TclService } from './tcl.service';
-import { ValidateOutput, ClaimWithMetadata, GraphEdge } from './types';
+import { ValidateOutput, ClaimWithMetadata, GraphEdge, SupportEdge, ContradictionEdge, GroundingEdge } from './types';
 
 @Component({
   selector: 'app-root',
@@ -165,7 +165,7 @@ export class AppComponent {
     // Use graph edges from backend if available
     if (graph) {
       // Process support edges from graph
-      graph.supports.forEach(edge => {
+      graph.supports.forEach((edge: SupportEdge) => {
         const claimA = claimMap.get(edge.claimA);
         const claimB = claimMap.get(edge.claimB);
         if (claimA && claimB) {
@@ -180,7 +180,7 @@ export class AppComponent {
       });
 
       // Process contradiction edges from graph (these are from semantic analysis)
-      graph.contradictions.forEach(edge => {
+      graph.contradictions.forEach((edge: ContradictionEdge) => {
         const claimA = claimMap.get(edge.claimA);
         const claimB = claimMap.get(edge.claimB);
         if (claimA && claimB) {
@@ -196,7 +196,7 @@ export class AppComponent {
       });
 
       // Process grounding edges from graph
-      graph.grounding.forEach(edge => {
+      graph.grounding.forEach((edge: GroundingEdge) => {
         const claim = claimMap.get(edge.claimId);
         if (claim) {
           grounding.push({

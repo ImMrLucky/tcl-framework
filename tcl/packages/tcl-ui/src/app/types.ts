@@ -18,6 +18,10 @@ export type SpectralReport = {
   heatTrace?: number[];
 };
 
+export type SupportEdge = { claimA: string; claimB: string; weight: number };
+export type ContradictionEdge = { claimA: string; claimB: string; weight: number };
+export type GroundingEdge = { claimId: string; sourceId: string; weight: number; quote?: string };
+
 export type ValidateOutput = {
   answer: string;
   refusal: boolean;
@@ -28,6 +32,11 @@ export type ValidateOutput = {
     missingEvidence: { claimId: string; reason: string }[];
     contradictions: { claimA: string; claimB: string; reason: string }[];
     spectral?: SpectralReport;
+    graph?: {
+      supports: SupportEdge[];
+      contradictions: ContradictionEdge[];
+      grounding: GroundingEdge[];
+    };
   };
 };
 
