@@ -101,12 +101,33 @@ async function validateOnce(input, adapter, startTime) {
         try {
             console.log("Building claim graph...");
             console.log(`Using scorer: ${scorer.id}, Claims: ${evidenceRes.claims.length}, Sources: ${sources?.length || 0}`);
-            // Use lower thresholds for TokenHeuristicScorer to find more relationships
-            // But allow user-provided thresholds to override defaults
+            // Use appropriate thresholds based on scorer type
+            // TokenHeuristicScorer: lower thresholds (less accurate)
+            // TransformersNliScorer: medium thresholds (local model, decent accuracy)
+            // HttpNliScorer/MistralNliScorer: higher thresholds (more accurate)
             const isHeuristic = scorer.id === "token-heuristic-v1" || scorer.id === "token-heuristic";
-            const defaultSupportThreshold = isHeuristic ? 0.40 : 0.58;
-            const defaultContradictionThreshold = isHeuristic ? 0.50 : 0.70;
-            const defaultGroundingThreshold = isHeuristic ? 0.40 : 0.60;
+            const isLocalTransformers = scorer.id.includes("transformers");
+            let defaultSupportThreshold;
+            let defaultContradictionThreshold;
+            let defaultGroundingThreshold;
+            if (isHeuristic) {
+                // Token heuristic: very low thresholds
+                defaultSupportThreshold = 0.40;
+                defaultContradictionThreshold = 0.50;
+                defaultGroundingThreshold = 0.40;
+            }
+            else if (isLocalTransformers) {
+                // Local Transformers model: medium thresholds (balance between accuracy and coverage)
+                defaultSupportThreshold = 0.45;
+                defaultContradictionThreshold = 0.55;
+                defaultGroundingThreshold = 0.45;
+            }
+            else {
+                // HTTP NLI or Mistral API: higher thresholds (more accurate models)
+                defaultSupportThreshold = 0.58;
+                defaultContradictionThreshold = 0.70;
+                defaultGroundingThreshold = 0.60;
+            }
             console.log(`Building graph with ${evidenceRes.claims.length} claims, scorer: ${scorer.id}`);
             console.log(`Thresholds: support=${options?.supportThreshold ?? defaultSupportThreshold}, contradiction=${options?.contradictionThreshold ?? defaultContradictionThreshold}, grounding=${options?.groundingThreshold ?? defaultGroundingThreshold}`);
             graph = await buildClaimGraph(evidenceRes.claims, sources, {
