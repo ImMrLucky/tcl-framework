@@ -133,12 +133,12 @@ import { MatSliderModule } from '@angular/material/slider';
                 <label>Support Threshold</label>
                 <div class="threshold-control">
                   <mat-slider
-                    [(ngModel)]="options.supportThreshold"
+                    [value]="options.supportThreshold || 0.58"
+                    (input)="onSliderInput('supportThreshold', $event)"
                     [min]="0"
                     [max]="1"
                     [step]="0.01"
                     [displayWith]="formatLabel"
-                    name="supportThreshold"
                   ></mat-slider>
                   <input
                     type="number"
@@ -157,12 +157,12 @@ import { MatSliderModule } from '@angular/material/slider';
                 <label>Contradiction Threshold</label>
                 <div class="threshold-control">
                   <mat-slider
-                    [(ngModel)]="options.contradictionThreshold"
+                    [value]="options.contradictionThreshold || 0.70"
+                    (input)="onSliderInput('contradictionThreshold', $event)"
                     [min]="0"
                     [max]="1"
                     [step]="0.01"
                     [displayWith]="formatLabel"
-                    name="contradictionThreshold"
                   ></mat-slider>
                   <input
                     type="number"
@@ -181,12 +181,12 @@ import { MatSliderModule } from '@angular/material/slider';
                 <label>Grounding Threshold</label>
                 <div class="threshold-control">
                   <mat-slider
-                    [(ngModel)]="options.groundingThreshold"
+                    [value]="options.groundingThreshold || 0.60"
+                    (input)="onSliderInput('groundingThreshold', $event)"
                     [min]="0"
                     [max]="1"
                     [step]="0.01"
                     [displayWith]="formatLabel"
-                    name="groundingThreshold"
                   ></mat-slider>
                   <input
                     type="number"
@@ -215,12 +215,12 @@ import { MatSliderModule } from '@angular/material/slider';
                 <label>Max Pairwise Edges</label>
                 <div class="threshold-control">
                   <mat-slider
-                    [(ngModel)]="options.maxPairwiseEdges"
+                    [value]="options.maxPairwiseEdges || 200"
+                    (input)="onSliderInput('maxPairwiseEdges', $event)"
                     [min]="0"
                     [max]="10000"
                     [step]="10"
                     [displayWith]="formatInteger"
-                    name="maxPairwiseEdges"
                   ></mat-slider>
                   <input
                     type="number"
@@ -239,12 +239,12 @@ import { MatSliderModule } from '@angular/material/slider';
                 <label>Neighbor K</label>
                 <div class="threshold-control">
                   <mat-slider
-                    [(ngModel)]="options.neighborK"
+                    [value]="options.neighborK || 12"
+                    (input)="onSliderInput('neighborK', $event)"
                     [min]="1"
                     [max]="50"
                     [step]="1"
                     [displayWith]="formatInteger"
-                    name="neighborK"
                   ></mat-slider>
                   <input
                     type="number"
@@ -484,6 +484,14 @@ export class InputPanelComponent implements OnInit, OnChanges {
 
   formatInteger(value: number): string {
     return Math.round(value).toString();
+  }
+
+  onSliderInput(key: string, event: any) {
+    // Handle MatSliderChange event - extract value from event object
+    const value = event?.value ?? event;
+    if (typeof value === 'number') {
+      (this.options as any)[key] = value;
+    }
   }
 
   onThresholdInputChange(key: string, value: number) {
