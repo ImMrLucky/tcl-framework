@@ -133,7 +133,8 @@ import { MatSliderModule } from '@angular/material/slider';
                 <label>Support Threshold</label>
                 <div class="threshold-control">
                   <mat-slider
-                    [(ngModel)]="options.supportThreshold"
+                    [value]="options.supportThreshold"
+                    (valueChange)="onSliderChange('supportThreshold', $event)"
                     [min]="0"
                     [max]="1"
                     [step]="0.01"
@@ -157,7 +158,8 @@ import { MatSliderModule } from '@angular/material/slider';
                 <label>Contradiction Threshold</label>
                 <div class="threshold-control">
                   <mat-slider
-                    [(ngModel)]="options.contradictionThreshold"
+                    [value]="options.contradictionThreshold"
+                    (valueChange)="onSliderChange('contradictionThreshold', $event)"
                     [min]="0"
                     [max]="1"
                     [step]="0.01"
@@ -181,7 +183,8 @@ import { MatSliderModule } from '@angular/material/slider';
                 <label>Grounding Threshold</label>
                 <div class="threshold-control">
                   <mat-slider
-                    [(ngModel)]="options.groundingThreshold"
+                    [value]="options.groundingThreshold"
+                    (valueChange)="onSliderChange('groundingThreshold', $event)"
                     [min]="0"
                     [max]="1"
                     [step]="0.01"
@@ -215,7 +218,8 @@ import { MatSliderModule } from '@angular/material/slider';
                 <label>Max Pairwise Edges</label>
                 <div class="threshold-control">
                   <mat-slider
-                    [(ngModel)]="options.maxPairwiseEdges"
+                    [value]="options.maxPairwiseEdges"
+                    (valueChange)="onSliderChange('maxPairwiseEdges', $event)"
                     [min]="0"
                     [max]="10000"
                     [step]="10"
@@ -239,7 +243,8 @@ import { MatSliderModule } from '@angular/material/slider';
                 <label>Neighbor K</label>
                 <div class="threshold-control">
                   <mat-slider
-                    [(ngModel)]="options.neighborK"
+                    [value]="options.neighborK"
+                    (valueChange)="onSliderChange('neighborK', $event)"
                     [min]="1"
                     [max]="50"
                     [step]="1"
@@ -464,6 +469,12 @@ export class InputPanelComponent implements OnInit, OnChanges {
 
   formatInteger(value: number): string {
     return Math.round(value).toString();
+  }
+
+  onSliderChange(key: string, event: any) {
+    // mat-slider valueChange emits MatSliderChange object with .value property
+    const value = event?.value ?? event;
+    (this.options as any)[key] = value;
   }
 
   onThresholdInputChange(key: string, value: number) {
