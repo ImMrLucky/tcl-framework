@@ -1,11 +1,11 @@
-import { ValidateInput, ValidateOutput, SpectralReport } from "./types";
-import { extractClaims } from "./claim_extractor";
-import { attachEvidenceAndFindViolations } from "./evidence";
-import { findLogicViolations } from "./logic";
-import { blendScores, shouldRefuse } from "./scoring";
-import { collectFailingClaimIds, repairOnce } from "./repair";
-import type { LLMAdapter } from "./adapters/llm_adapter";
-import { buildClaimGraph, HttpNliScorer, TokenHeuristicScorer } from "./graph/edge_builder";
+import { ValidateInput, ValidateOutput, SpectralReport } from "./types.js";
+import { extractClaims } from "./claim_extractor.js";
+import { attachEvidenceAndFindViolations } from "./evidence.js";
+import { findLogicViolations } from "./logic.js";
+import { blendScores, shouldRefuse } from "./scoring.js";
+import { collectFailingClaimIds, repairOnce } from "./repair.js";
+import type { LLMAdapter } from "./adapters/llm_adapter.js";
+import { buildClaimGraph, HttpNliScorer, TokenHeuristicScorer } from "./graph/edge_builder.js";
 
 async function callSpectralService(
   spectralServiceUrl: string,

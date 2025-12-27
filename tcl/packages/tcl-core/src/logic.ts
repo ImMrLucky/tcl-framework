@@ -1,4 +1,4 @@
-import { Claim, Violation } from "./types";
+import { Claim, Violation } from "./types.js";
 
 function normalize(s: string) {
   return s.toLowerCase().replace(/\s+/g, " ").trim();

@@ -1,4 +1,4 @@
-import { Claim } from "./types";
+import { Claim } from "./types.js";
 
 function splitSentences(text: string): string[] {
   return text

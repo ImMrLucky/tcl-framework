@@ -1,5 +1,5 @@
-import { Claim, Source, ValidateOutput } from "./types";
-import { LLMAdapter } from "./adapters/llm_adapter";
+import { Claim, Source, ValidateOutput } from "./types.js";
+import { LLMAdapter } from "./adapters/llm_adapter.js";
 
 export function collectFailingClaimIds(report: ValidateOutput["report"]): string[] {
   const failing = new Set<string>();

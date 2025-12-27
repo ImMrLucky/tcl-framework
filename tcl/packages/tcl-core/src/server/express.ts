@@ -1,7 +1,7 @@
 import express from "express";
-import { validate } from "../orchestrator";
-import { OpenAIAdapter } from "../adapters/openai_adapter";
-import type { ValidateInput } from "../types";
+import { validate } from "../orchestrator.js";
+import { OpenAIAdapter } from "../adapters/openai_adapter.js";
+import type { ValidateInput } from "../types.js";
 
 const app = express();
 app.use(express.json({ limit: "4mb" }));

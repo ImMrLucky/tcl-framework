@@ -1,4 +1,4 @@
-import { Source, Claim } from "../types";
+import { Source, Claim } from "../types.js";
 
 export type ExtractArtifactsInput = {
   question: string;

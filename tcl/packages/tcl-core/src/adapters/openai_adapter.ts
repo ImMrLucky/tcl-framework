@@ -1,5 +1,5 @@
-import { LLMAdapter, ExtractArtifactsInput, ExtractArtifactsOutput, RepairInput, RepairOutput } from "./llm_adapter";
-import { Claim, Source } from "../types";
+import { LLMAdapter, ExtractArtifactsInput, ExtractArtifactsOutput, RepairInput, RepairOutput } from "./llm_adapter.js";
+import { Claim, Source } from "../types.js";
 
 type OpenAIAdapterConfig = { apiKey: string; model: string; baseUrl?: string };
 

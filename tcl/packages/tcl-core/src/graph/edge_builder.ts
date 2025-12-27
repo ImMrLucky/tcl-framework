@@ -1,6 +1,6 @@
-import { Claim, Source } from "../types";
-import { EmbeddingProvider, SparseHashEmbeddingProvider, CandidateIndex, BruteForceIndex, HnswIndex } from "./ann";
-import { SemanticCache } from "./cache";
+import { Claim, Source } from "../types.js";
+import { EmbeddingProvider, SparseHashEmbeddingProvider, CandidateIndex, BruteForceIndex, HnswIndex } from "./ann.js";
+import { SemanticCache } from "./cache.js";
 
 /**
  * PRODUCTION EDGE BUILDER (ANN + CACHE)
