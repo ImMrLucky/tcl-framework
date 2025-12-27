@@ -202,6 +202,11 @@ async function buildIndexForClaims(
   return { provider, index, vectors };
 }
 
+// Type guard to check if scorer has scoreBatch method
+function hasScoreBatch(scorer: SemanticScorer): scorer is SemanticScorer & { scoreBatch: (pairs: BatchPair[]) => Promise<BatchScore[]> } {
+  return typeof (scorer as any).scoreBatch === 'function';
+}
+
 export async function buildClaimGraph(
   claims: Claim[],
   sources: Source[] | undefined,
@@ -237,7 +242,7 @@ export async function buildClaimGraph(
   // -----------------------------
   if (sources?.length) {
     // batch score grounding where possible
-    if (scorer.scoreBatch) {
+    if (hasScoreBatch(scorer)) {
       const pairs: BatchPair[] = [];
       for (const c of claims) {
         for (const s of sources) {
@@ -245,13 +250,10 @@ export async function buildClaimGraph(
           if (!cache.get(key)) pairs.push({ task: "grounding", a: c.text, b: s.text, key });
         }
       }
-      const scoreBatchFn = scorer.scoreBatch;
-      if (scoreBatchFn) {
-        await runBatches(pairs, batchSize, async (batch) => {
-          const out = await scoreBatchFn(batch);
-          for (const r of out) cache.set(r.key, r.score, r.quote);
-        });
-      }
+      await runBatches(pairs, batchSize, async (batch) => {
+        const out = await scorer.scoreBatch(batch);
+        for (const r of out) cache.set(r.key, r.score, r.quote);
+      });
     }
 
     for (const c of claims) {
@@ -318,14 +320,11 @@ export async function buildClaimGraph(
     if (!cache.get(kEnt)) pairsToScore.push({ task: "entailment", a: A, b: B, key: kEnt });
   }
 
-  if (scorer.scoreBatch && pairsToScore.length) {
-    const scoreBatchFn = scorer.scoreBatch;
-    if (scoreBatchFn) {
-      await runBatches(pairsToScore, batchSize, async (batch) => {
-        const out = await scoreBatchFn(batch);
-        for (const r of out) cache.set(r.key, r.score, r.quote);
-      });
-    }
+  if (hasScoreBatch(scorer) && pairsToScore.length) {
+    await runBatches(pairsToScore, batchSize, async (batch) => {
+      const out = await scorer.scoreBatch(batch);
+      for (const r of out) cache.set(r.key, r.score, r.quote);
+    });
   }
 
   for (const { i, j } of candPairs) {
