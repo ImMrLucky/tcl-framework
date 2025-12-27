@@ -19,34 +19,35 @@ import { ValidateOutput } from '../types';
   template: `
     <mat-card class="summary-panel">
       <mat-card-header>
-        <mat-card-title>Summary</mat-card-title>
+        <mat-card-title>Compliance Score</mat-card-title>
       </mat-card-header>
       <mat-card-content>
         <div *ngIf="loading" class="loading-container">
           <mat-spinner diameter="40"></mat-spinner>
-          <p>Validating...</p>
+          <p>Analyzing call...</p>
         </div>
 
         <div *ngIf="!loading && result" class="summary-content">
-          <div class="coherence-score">
-            <div class="score-circle" [class]="getScoreClass(result.scores.coherence)">
-              <span class="score-value">{{ result.scores.coherence }}</span>
-              <span class="score-label">Coherence</span>
-              <span *ngIf="!result.report.spectral" class="spectral-badge" title="Spectral analysis not enabled">Default</span>
-              <span *ngIf="result.report.spectral" class="spectral-badge active" title="Spectral analysis active">Spectral</span>
+          <div class="compliance-score">
+            <div class="score-circle" [class]="getComplianceScoreClass(result.scores.overall)">
+              <span class="score-value">{{ result.scores.overall }}</span>
+              <span class="score-label">Compliance</span>
+              <span class="risk-badge" [class]="getRiskLevelClass(result.scores.overall)">
+                {{ getRiskLevel(result.scores.overall) }}
+              </span>
             </div>
           </div>
 
           <div class="flags-section">
-            <h3>Flags</h3>
+            <h3>Compliance Flags</h3>
             <div class="flags-grid">
               <div class="flag-item" *ngIf="hasContradictions()">
-                <mat-icon class="flag-icon error">cancel</mat-icon>
-                <span>Contradictions</span>
+                <mat-icon class="flag-icon error">gavel</mat-icon>
+                <span>Policy Violations ({{ result.report.contradictions.length }})</span>
               </div>
               <div class="flag-item" *ngIf="hasUngroundedClaims()">
                 <mat-icon class="flag-icon warning">warning</mat-icon>
-                <span>Ungrounded Claims</span>
+                <span>Risky Statements ({{ result.report.missingEvidence.length }})</span>
               </div>
               <div class="flag-item" *ngIf="hasCircularReasoning()">
                 <mat-icon class="flag-icon circular">refresh</mat-icon>
@@ -64,7 +65,7 @@ import { ValidateOutput } from '../types';
           <div class="scores-breakdown">
             <h3>Score Breakdown</h3>
             <div class="score-item">
-              <span class="score-name">Truth:</span>
+              <span class="score-name">Truth (Evidence):</span>
               <span class="score-value-small">{{ result.scores.truth }}</span>
             </div>
             <div class="score-item">
@@ -76,7 +77,7 @@ import { ValidateOutput } from '../types';
               <span class="score-value-small">{{ result.scores.coherence }}</span>
             </div>
             <div class="score-item overall">
-              <span class="score-name">Overall:</span>
+              <span class="score-name">Compliance Score:</span>
               <span class="score-value-small">{{ result.scores.overall }}</span>
             </div>
           </div>
@@ -91,8 +92,8 @@ import { ValidateOutput } from '../types';
         </div>
 
         <div *ngIf="!loading && !result" class="empty-state">
-          <mat-icon>info</mat-icon>
-          <p>Enter a question and answer to see validation results</p>
+          <mat-icon>phone</mat-icon>
+          <p>Upload a call transcript to see compliance analysis</p>
         </div>
       </mat-card-content>
     </mat-card>
@@ -367,6 +368,27 @@ export class SummaryPanelComponent {
     if (score >= 70) return 'pass';
     if (score >= 50) return 'warn';
     return 'fail';
+  }
+
+  getComplianceScoreClass(score: number): string {
+    if (score >= 80) return 'low-risk';
+    if (score >= 60) return 'medium-risk';
+    if (score >= 40) return 'high-risk';
+    return 'critical-risk';
+  }
+
+  getRiskLevel(score: number): string {
+    if (score >= 80) return 'Low Risk';
+    if (score >= 60) return 'Medium Risk';
+    if (score >= 40) return 'High Risk';
+    return 'Critical Risk';
+  }
+
+  getRiskLevelClass(score: number): string {
+    if (score >= 80) return 'low';
+    if (score >= 60) return 'medium';
+    if (score >= 40) return 'high';
+    return 'critical';
   }
 
   getStatusClass(): string {

@@ -28,31 +28,48 @@ import { MatSliderModule } from '@angular/material/slider';
   template: `
     <mat-card class="input-panel">
       <mat-card-header>
-        <mat-card-title>Input</mat-card-title>
+        <mat-card-title>Call Transcript</mat-card-title>
       </mat-card-header>
       <mat-card-content>
         <form (ngSubmit)="onSubmit()">
           <mat-form-field appearance="outline" class="full-width">
-            <mat-label>Question</mat-label>
+            <mat-label>Call Transcript</mat-label>
             <textarea
               matInput
-              [(ngModel)]="question"
-              name="question"
-              rows="3"
-              placeholder="Enter your question here..."
+              [(ngModel)]="transcript"
+              name="transcript"
+              rows="12"
+              placeholder="Paste call transcript here... (Agent and customer conversation)"
             ></textarea>
+            <mat-hint>Enter the full call transcript for compliance and risk analysis</mat-hint>
           </mat-form-field>
 
-          <mat-form-field appearance="outline" class="full-width">
-            <mat-label>Model Answer</mat-label>
-            <textarea
-              matInput
-              [(ngModel)]="answer"
-              name="answer"
-              rows="6"
-              placeholder="Enter the model's answer here..."
-            ></textarea>
-          </mat-form-field>
+          <mat-expansion-panel>
+            <mat-expansion-panel-header>
+              <mat-panel-title>
+                <mat-icon>info</mat-icon>
+                Call Metadata (Optional)
+              </mat-panel-title>
+            </mat-expansion-panel-header>
+            <div class="metadata-section">
+              <mat-form-field appearance="outline" class="full-width">
+                <mat-label>Agent ID</mat-label>
+                <input matInput [(ngModel)]="callMetadata.agentId" name="agentId" placeholder="e.g., AGT-12345">
+              </mat-form-field>
+              <mat-form-field appearance="outline" class="full-width">
+                <mat-label>Customer ID</mat-label>
+                <input matInput [(ngModel)]="callMetadata.customerId" name="customerId" placeholder="e.g., CUST-67890">
+              </mat-form-field>
+              <mat-form-field appearance="outline" class="full-width">
+                <mat-label>Call Date</mat-label>
+                <input matInput type="date" [(ngModel)]="callMetadata.callDate" name="callDate">
+              </mat-form-field>
+              <mat-form-field appearance="outline" class="full-width">
+                <mat-label>Call Duration (minutes)</mat-label>
+                <input matInput type="number" [(ngModel)]="callMetadata.duration" name="duration" placeholder="e.g., 5.5">
+              </mat-form-field>
+            </div>
+          </mat-expansion-panel>
 
           <mat-expansion-panel>
             <mat-expansion-panel-header>
@@ -254,7 +271,7 @@ import { MatSliderModule } from '@angular/material/slider';
             color="primary"
             type="submit"
             class="submit-button"
-            [disabled]="loading || !question || !answer"
+            [disabled]="loading || !transcript"
           >
             <mat-icon>play_arrow</mat-icon>
             Run TCL
@@ -356,13 +373,26 @@ import { MatSliderModule } from '@angular/material/slider';
       outline: none;
       border-color: #1976d2;
     }
+
+    .metadata-section {
+      padding: 16px 0;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+    }
   `]
 })
 export class InputPanelComponent implements OnInit, OnChanges {
   @Output() validate = new EventEmitter<{
-    question: string;
-    answer: string;
+    question: string; // For backend compatibility, transcript goes in "question"
+    answer: string;   // Empty for call center QA
     sources?: { id: string; text: string }[];
+    callMetadata?: {
+      agentId?: string;
+      customerId?: string;
+      callDate?: string;
+      duration?: number;
+    };
     options: {
       spectral: boolean;
       ann: boolean;
@@ -380,8 +410,13 @@ export class InputPanelComponent implements OnInit, OnChanges {
   @Input() initialSources: { id: string; text: string }[] | undefined = undefined;
   @Input() initialOptions: any = {};
 
-  question = '';
-  answer = '';
+  transcript = '';
+  callMetadata = {
+    agentId: '',
+    customerId: '',
+    callDate: '',
+    duration: undefined as number | undefined
+  };
   sources: { id: string; text: string }[] = [{ id: 's1', text: '' }];
   options = {
     spectral: false, // Disabled by default
@@ -397,10 +432,7 @@ export class InputPanelComponent implements OnInit, OnChanges {
   ngOnInit() {
     // Set initial values if provided (ONLY inputs, never results)
     if (this.initialQuestion) {
-      this.question = this.initialQuestion;
-    }
-    if (this.initialAnswer) {
-      this.answer = this.initialAnswer;
+      this.transcript = this.initialQuestion; // Transcript goes in question field for backend
     }
     if (this.initialSources && this.initialSources.length > 0) {
       this.sources = this.initialSources.map(s => ({ ...s }));
@@ -413,10 +445,7 @@ export class InputPanelComponent implements OnInit, OnChanges {
   ngOnChanges(changes: SimpleChanges) {
     // Update if initial values change (ONLY inputs, never results)
     if (changes['initialQuestion'] && this.initialQuestion) {
-      this.question = this.initialQuestion;
-    }
-    if (changes['initialAnswer'] && this.initialAnswer) {
-      this.answer = this.initialAnswer;
+      this.transcript = this.initialQuestion;
     }
     if (changes['initialSources'] && this.initialSources && this.initialSources.length > 0) {
       this.sources = this.initialSources.map(s => ({ ...s }));
@@ -460,10 +489,18 @@ export class InputPanelComponent implements OnInit, OnChanges {
 
   onSubmit() {
     const validSources = this.sources.filter(s => s.text.trim().length > 0);
+    // For call center QA: transcript goes in "question", empty "answer"
+    // Backend will treat transcript as the content to analyze
     this.validate.emit({
-      question: this.question,
-      answer: this.answer,
+      question: this.transcript,
+      answer: '', // Empty for call center QA
       sources: validSources.length > 0 ? validSources : undefined,
+      callMetadata: {
+        agentId: this.callMetadata.agentId || undefined,
+        customerId: this.callMetadata.customerId || undefined,
+        callDate: this.callMetadata.callDate || undefined,
+        duration: this.callMetadata.duration || undefined
+      },
       options: this.options,
     });
   }

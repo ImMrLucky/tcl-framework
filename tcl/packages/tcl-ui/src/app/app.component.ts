@@ -28,10 +28,26 @@ import { MatTooltipModule } from '@angular/material/tooltip';
       <header class="app-header">
         <div class="header-content">
           <div class="header-title">
-            <h1>TCL Framework Demo</h1>
-            <p class="subtitle">Truth & Consistency Layer - Reasoning Structure Visualization</p>
+            <h1>Call Center QA</h1>
+            <p class="subtitle">Compliance & Risk Analysis for Call Transcripts</p>
           </div>
           <div class="header-actions" *ngIf="result">
+            <button
+              mat-icon-button
+              matTooltip="Export to CSV"
+              (click)="exportToCSV()"
+              color="primary"
+            >
+              <mat-icon>table_chart</mat-icon>
+            </button>
+            <button
+              mat-icon-button
+              matTooltip="Export to PDF"
+              (click)="exportToPDF()"
+              color="primary"
+            >
+              <mat-icon>picture_as_pdf</mat-icon>
+            </button>
             <button
               mat-icon-button
               matTooltip="Download Report JSON"
@@ -39,14 +55,6 @@ import { MatTooltipModule } from '@angular/material/tooltip';
               color="primary"
             >
               <mat-icon>download</mat-icon>
-            </button>
-            <button
-              mat-icon-button
-              matTooltip="Share Link"
-              (click)="shareLink()"
-              color="primary"
-            >
-              <mat-icon>share</mat-icon>
             </button>
           </div>
         </div>
@@ -194,6 +202,12 @@ export class AppComponent implements OnInit {
   currentQuestion = '';
   currentAnswer = '';
   currentSources: { id: string; text: string }[] | undefined = undefined;
+  currentCallMetadata: {
+    agentId?: string;
+    customerId?: string;
+    callDate?: string;
+    duration?: number;
+  } | undefined = undefined;
   currentOptions: any = {};
 
   constructor(private tclService: TclService) {}
@@ -248,13 +262,13 @@ export class AppComponent implements OnInit {
         neighborK: neighborK ? parseInt(neighborK, 10) : undefined,
       };
 
-      // Auto-run if both question and answer are provided
+      // Auto-run if transcript is provided
       // This will call /validate and generate fresh results
-      if (decodedQuestion && decodedAnswer) {
+      if (decodedQuestion) {
         setTimeout(() => {
           this.onValidate({
             question: decodedQuestion,
-            answer: decodedAnswer,
+            answer: '', // Empty for call center QA
             sources: decodedSources,
             options: this.currentOptions
           });
@@ -276,8 +290,8 @@ export class AppComponent implements OnInit {
       ...this.result,
       metadata: {
         timestamp: new Date().toISOString(),
-        question: this.currentQuestion,
-        answer: this.currentAnswer,
+        transcript: this.currentQuestion,
+        callMetadata: this.currentCallMetadata,
         options: this.currentOptions,
         latency: this.latency,
         cacheHitRate: this.cacheHitRate,
@@ -289,16 +303,130 @@ export class AppComponent implements OnInit {
     const url = window.URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `tcl-report-${new Date().toISOString().split('T')[0]}.json`;
+    a.download = `call-qa-report-${new Date().toISOString().split('T')[0]}.json`;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
     window.URL.revokeObjectURL(url);
   }
 
+  exportToCSV() {
+    if (!this.result) return;
+
+    const rows: string[] = [];
+    // Header
+    rows.push('Call ID,Agent ID,Customer ID,Call Date,Duration (min),Compliance Score,Risk Level,Contradictions,Ungrounded Claims,Timestamp');
+    
+    // Data row
+    const callId = this.currentCallMetadata?.agentId ? `CALL-${this.currentCallMetadata.agentId}-${Date.now()}` : 'CALL-UNKNOWN';
+    const agentId = this.currentCallMetadata?.agentId || 'N/A';
+    const customerId = this.currentCallMetadata?.customerId || 'N/A';
+    const callDate = this.currentCallMetadata?.callDate || new Date().toISOString().split('T')[0];
+    const duration = this.currentCallMetadata?.duration?.toString() || 'N/A';
+    const complianceScore = this.result.scores.overall;
+    const riskLevel = complianceScore >= 80 ? 'Low' : complianceScore >= 60 ? 'Medium' : complianceScore >= 40 ? 'High' : 'Critical';
+    const contradictions = this.result.report.contradictions.length;
+    const ungrounded = this.result.report.missingEvidence.length;
+    const timestamp = new Date().toISOString();
+    
+    rows.push(`${callId},${agentId},${customerId},${callDate},${duration},${complianceScore},${riskLevel},${contradictions},${ungrounded},${timestamp}`);
+    
+    const csv = rows.join('\n');
+    const blob = new Blob([csv], { type: 'text/csv' });
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `call-qa-export-${new Date().toISOString().split('T')[0]}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    window.URL.revokeObjectURL(url);
+  }
+
+  exportToPDF() {
+    if (!this.result) {
+      alert('No call analysis data to export. Please analyze a call first.');
+      return;
+    }
+    
+    // For now, create a simple HTML-based PDF using window.print()
+    // In production, you'd use a library like jsPDF or send to backend for PDF generation
+    const printWindow = window.open('', '_blank');
+    if (!printWindow) {
+      alert('Please allow popups to generate PDF');
+      return;
+    }
+    
+    const complianceScore = this.result.scores.overall;
+    const riskLevel = complianceScore >= 80 ? 'Low' : complianceScore >= 60 ? 'Medium' : complianceScore >= 40 ? 'High' : 'Critical';
+    
+    printWindow.document.write(`
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <title>Call QA Report</title>
+        <style>
+          body { font-family: Arial, sans-serif; padding: 20px; }
+          h1 { color: #1976d2; }
+          .score { font-size: 48px; font-weight: bold; margin: 20px 0; }
+          .risk-${riskLevel.toLowerCase()} { color: ${riskLevel === 'Low' ? '#4caf50' : riskLevel === 'Medium' ? '#ff9800' : riskLevel === 'High' ? '#f44336' : '#d32f2f'}; }
+          table { width: 100%; border-collapse: collapse; margin: 20px 0; }
+          th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
+          th { background-color: #f5f5f5; }
+        </style>
+      </head>
+      <body>
+        <h1>Call Center QA Report</h1>
+        <p><strong>Agent ID:</strong> ${this.currentCallMetadata?.agentId || 'N/A'}</p>
+        <p><strong>Customer ID:</strong> ${this.currentCallMetadata?.customerId || 'N/A'}</p>
+        <p><strong>Call Date:</strong> ${this.currentCallMetadata?.callDate || new Date().toISOString().split('T')[0]}</p>
+        <p><strong>Duration:</strong> ${this.currentCallMetadata?.duration || 'N/A'} minutes</p>
+        
+        <h2>Compliance Score</h2>
+        <div class="score risk-${riskLevel.toLowerCase()}">${complianceScore}</div>
+        <p><strong>Risk Level:</strong> ${riskLevel}</p>
+        
+        <h2>Score Breakdown</h2>
+        <table>
+          <tr><th>Metric</th><th>Score</th></tr>
+          <tr><td>Truth</td><td>${this.result.scores.truth}</td></tr>
+          <tr><td>Consistency</td><td>${this.result.scores.consistency}</td></tr>
+          <tr><td>Coherence</td><td>${this.result.scores.coherence}</td></tr>
+          <tr><td><strong>Overall Compliance</strong></td><td><strong>${this.result.scores.overall}</strong></td></tr>
+        </table>
+        
+        <h2>Issues Found</h2>
+        <p><strong>Contradictions:</strong> ${this.result.report.contradictions.length}</p>
+        <p><strong>Ungrounded Claims:</strong> ${this.result.report.missingEvidence.length}</p>
+        <p><strong>Total Violations:</strong> ${this.result.report.violations.length}</p>
+        
+        <h2>Risky Statements</h2>
+        <table>
+          <tr><th>Statement</th><th>Risk</th></tr>
+          ${this.result.report.claims.slice(0, 10).map(claim => `
+            <tr>
+              <td>${claim.text.substring(0, 100)}${claim.text.length > 100 ? '...' : ''}</td>
+              <td>${claim.evidence.length === 0 ? 'High (Ungrounded)' : 'Medium'}</td>
+            </tr>
+          `).join('')}
+        </table>
+        
+        <p style="margin-top: 40px; font-size: 12px; color: #666;">
+          Generated: ${new Date().toISOString()}<br>
+          Engine Version: ${this.engineVersion || 'N/A'}
+        </p>
+      </body>
+      </html>
+    `);
+    printWindow.document.close();
+    setTimeout(() => {
+      printWindow.print();
+    }, 250);
+  }
+
   shareLink() {
-    if (!this.currentQuestion || !this.currentAnswer) {
-      alert('No validation data to share. Please run a validation first.');
+    if (!this.currentQuestion) {
+      alert('No call transcript to share. Please analyze a call first.');
       return;
     }
 
@@ -306,8 +434,8 @@ export class AppComponent implements OnInit {
     const params = new URLSearchParams();
     
     // Encode ONLY inputs - never results
-    params.set('q', encodeURIComponent(this.currentQuestion));
-    params.set('a', encodeURIComponent(this.currentAnswer));
+    params.set('q', encodeURIComponent(this.currentQuestion)); // Transcript
+    // Note: 'a' parameter not needed for call center QA (transcript is in 'q')
     
     // Encode options (spectral, ann, cache)
     if (this.currentOptions.spectral) params.set('spectral', '1');
@@ -392,9 +520,10 @@ export class AppComponent implements OnInit {
     this.cacheHitRate = null;
     
     // Store current inputs for share link (ONLY inputs, never results)
-    this.currentQuestion = event.question;
-    this.currentAnswer = event.answer;
+    this.currentQuestion = event.question; // Transcript
+    this.currentAnswer = event.answer; // Empty for call center
     this.currentSources = event.sources;
+    this.currentCallMetadata = event.callMetadata;
     this.currentOptions = event.options;
 
     // Track start time for latency

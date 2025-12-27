@@ -147,3 +147,192 @@ def spectral_metrics(n: int,
         "heatTrace": heat,
         "coherenceScore": coherenceScore
     }
+
+# ============================================================================
+# NEW PLATFORM-GRADE ANALYSIS FUNCTIONS (Additive - does not modify existing)
+# ============================================================================
+
+def spectral_truth_vector(
+    n: int,
+    support_edges: List[Tuple[int,int,float]],
+    contradiction_edges: List[Tuple[int,int,float]],
+    grounded_ids: Set[int],
+    w_support: float = 1.0,
+    w_contradiction: float = 1.0,
+    alpha: float = 0.25,
+    beta: float = 1.0,
+    clip: float = 1.0,
+    tau: float = 0.15
+) -> Dict[str, object]:
+    """
+    Compute per-claim truth vector using signed Laplacian with grounding bias.
+    
+    Solves: (H + alpha * I) x = beta * b
+    where H is signed Laplacian, b is grounding bias vector.
+    
+    Returns:
+        truthVector: List[float] - normalized truth values per claim
+        truthStates: List[str] - state labels ("Supported", "Contradicted", "Ungrounded", "Inconclusive")
+    """
+    if n <= 0:
+        return {
+            "truthVector": [],
+            "truthStates": []
+        }
+    
+    # Build signed adjacency using existing helper
+    A_signed, _, _ = _adjacency_directed(n, support_edges, contradiction_edges, w_support, w_contradiction)
+    
+    # Build signed Laplacian using existing helper
+    H = _signed_laplacian_from_directed(A_signed)
+    
+    # Build grounding bias vector
+    b = np.zeros(n, dtype=np.float64)
+    for i in grounded_ids:
+        if 0 <= i < n:
+            b[i] = 1.0
+    
+    # Solve (H + alpha * I) x = beta * b
+    H_reg = H + alpha * np.eye(n, dtype=np.float64)
+    rhs = beta * b
+    
+    try:
+        # Try direct solve first
+        x = np.linalg.solve(H_reg, rhs)
+    except np.linalg.LinAlgError:
+        # Fall back to least squares if singular
+        x, _, _, _ = np.linalg.lstsq(H_reg, rhs, rcond=None)
+    
+    # Normalize by max absolute value if nonzero
+    max_abs = float(np.max(np.abs(x))) if n > 0 else 1.0
+    if max_abs > 1e-10:
+        x = x / max_abs
+    
+    # Clamp to [-clip, clip]
+    x = np.clip(x, -clip, clip)
+    
+    # Convert to list of floats
+    truth_vector = [float(x[i]) for i in range(n)]
+    
+    # Map to truth states
+    truth_states = []
+    for i in range(n):
+        x_i = truth_vector[i]
+        if abs(x_i) <= tau:
+            if i in grounded_ids:
+                truth_states.append("Inconclusive")
+            else:
+                truth_states.append("Ungrounded")
+        elif x_i > tau:
+            truth_states.append("Supported")
+        else:  # x_i < -tau
+            truth_states.append("Contradicted")
+    
+    return {
+        "truthVector": truth_vector,
+        "truthStates": truth_states
+    }
+
+def spectral_edge_attribution(
+    truth_vector: List[float],
+    support_edges: List[Tuple[int,int,float]],
+    contradiction_edges: List[Tuple[int,int,float]],
+    top_k: int = 10
+) -> Dict[str, object]:
+    """
+    Identify problematic edges that drive low coherence.
+    
+    For support edges: bad if nodes have opposite signs (contradicts support)
+    For contradiction edges: bad if nodes have same sign (contradiction not working)
+    
+    Returns:
+        topBadContradictions: List of problematic contradiction edges
+        topBadSupports: List of problematic support edges
+        nodeBlame: List[float] - blame score per node (sum of incident badness)
+    """
+    n = len(truth_vector)
+    x = np.array(truth_vector, dtype=np.float64)
+    
+    # Score support edges
+    bad_supports = []
+    for i, j, w in support_edges:
+        if 0 <= i < n and 0 <= j < n:
+            # Bad if opposite signs (support edge connecting contradictory nodes)
+            if x[i] * x[j] < 0:
+                badness = float(w * max(0.0, -x[i] * x[j]))
+                bad_supports.append({
+                    "claimAIndex": int(i),
+                    "claimBIndex": int(j),
+                    "weight": float(w),
+                    "badness": badness
+                })
+    
+    # Score contradiction edges
+    bad_contradictions = []
+    for i, j, w in contradiction_edges:
+        if 0 <= i < n and 0 <= j < n:
+            # Bad if same sign (contradiction edge connecting agreeing nodes)
+            if x[i] * x[j] > 0:
+                badness = float(w * max(0.0, x[i] * x[j]))
+                bad_contradictions.append({
+                    "claimAIndex": int(i),
+                    "claimBIndex": int(j),
+                    "weight": float(w),
+                    "badness": badness
+                })
+    
+    # Sort by badness descending and take top_k
+    bad_supports.sort(key=lambda e: e["badness"], reverse=True)
+    bad_contradictions.sort(key=lambda e: e["badness"], reverse=True)
+    
+    top_bad_supports = bad_supports[:top_k]
+    top_bad_contradictions = bad_contradictions[:top_k]
+    
+    # Compute node blame (sum of incident badness)
+    node_blame = np.zeros(n, dtype=np.float64)
+    
+    for edge in bad_supports:
+        i = edge["claimAIndex"]
+        j = edge["claimBIndex"]
+        badness = edge["badness"]
+        if 0 <= i < n:
+            node_blame[i] += badness
+        if 0 <= j < n:
+            node_blame[j] += badness
+    
+    for edge in bad_contradictions:
+        i = edge["claimAIndex"]
+        j = edge["claimBIndex"]
+        badness = edge["badness"]
+        if 0 <= i < n:
+            node_blame[i] += badness
+        if 0 <= j < n:
+            node_blame[j] += badness
+    
+    node_blame_list = [float(node_blame[i]) for i in range(n)]
+    
+    return {
+        "topBadContradictions": top_bad_contradictions,
+        "topBadSupports": top_bad_supports,
+        "nodeBlame": node_blame_list
+    }
+
+def spectral_fingerprint(
+    coherence_score: int,
+    spectral_gap: float,
+    contradiction_energy: float,
+    circularity_score: int,
+    heat_trace: List[float]
+) -> Dict[str, object]:
+    """
+    Generate a monitoring fingerprint for drift detection.
+    
+    Returns a compact representation that can be stored and compared over time.
+    """
+    return {
+        "coherenceScore": coherence_score,
+        "spectralGap": float(spectral_gap),
+        "contradictionEnergy": float(contradiction_energy),
+        "circularityScore": circularity_score,
+        "heatTrace": [float(h) for h in heat_trace]
+    }

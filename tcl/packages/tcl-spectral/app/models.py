@@ -1,5 +1,5 @@
 from pydantic import BaseModel, Field
-from typing import List, Optional
+from typing import List, Optional, Dict
 
 class ClaimIn(BaseModel):
     id: str
@@ -30,3 +30,31 @@ class SpectralResponse(BaseModel):
     spectralGap: float
     cycleMass: float
     heatTrace: Optional[List[float]] = None
+
+# ============================================================================
+# NEW PLATFORM-GRADE MODELS (Additive - does not modify existing)
+# ============================================================================
+
+class EdgeAttribution(BaseModel):
+    claimAIndex: int
+    claimBIndex: int
+    weight: float
+    badness: float
+
+class SpectralAnalyzeResponse(BaseModel):
+    # Required existing fields (same as SpectralResponse)
+    coherenceScore: int
+    contradictionEnergy: float
+    supportEnergy: float
+    circularityScore: int
+    spectralGap: float
+    cycleMass: float
+    heatTrace: Optional[List[float]] = None
+    
+    # New platform-grade fields
+    truthVector: List[float]
+    truthStates: List[str]
+    topBadContradictions: List[EdgeAttribution]
+    topBadSupports: List[EdgeAttribution]
+    nodeBlame: Optional[List[float]] = None
+    fingerprint: Optional[Dict[str, object]] = None
