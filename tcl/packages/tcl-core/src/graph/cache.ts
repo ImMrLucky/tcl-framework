@@ -29,8 +29,20 @@ export class SemanticCache {
   private map = new Map<string, CacheEntry>();
   private dirty: CacheRecord[] = [];
   private loaded = false;
+  private hits = 0;
+  private misses = 0;
 
   constructor(private cfg: CacheConfig) {}
+
+  getStats() {
+    const total = this.hits + this.misses;
+    return {
+      hits: this.hits,
+      misses: this.misses,
+      total,
+      hitRate: total > 0 ? (this.hits / total) * 100 : 0
+    };
+  }
 
   private nowMs() { return Date.now(); }
 
@@ -67,11 +79,16 @@ export class SemanticCache {
 
   get(key: string): CacheEntry | undefined {
     const e = this.map.get(key);
-    if (!e) return undefined;
-    if (e.exp && this.nowMs() > e.exp) {
-      this.map.delete(key);
+    if (!e) {
+      this.misses++;
       return undefined;
     }
+    if (e.exp && this.nowMs() > e.exp) {
+      this.map.delete(key);
+      this.misses++;
+      return undefined;
+    }
+    this.hits++;
     return e;
   }
 

@@ -46,6 +46,12 @@ export type ValidationOptions = {
   ann?: boolean;
   cache?: boolean;
   spectralServiceUrl?: string;
+  // Graph thresholds
+  supportThreshold?: number;
+  contradictionThreshold?: number;
+  groundingThreshold?: number;
+  maxPairwiseEdges?: number;
+  neighborK?: number;
 };
 
 // Extended types for UI

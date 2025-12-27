@@ -41,7 +41,8 @@ async function callSpectralService(
   return result;
 }
 
-async function validateOnce(input: ValidateInput, adapter?: LLMAdapter): Promise<ValidateOutput> {
+async function validateOnce(input: ValidateInput, adapter?: LLMAdapter, startTime?: number): Promise<ValidateOutput> {
+  const validationStartTime = startTime ?? Date.now();
   try {
     const { question, answer, sources, options } = input;
     const spectralEnabled = !!options?.spectral;
@@ -112,12 +113,17 @@ async function validateOnce(input: ValidateInput, adapter?: LLMAdapter): Promise
       console.log("Building claim graph...");
       console.log(`Using scorer: ${scorer.id}, Claims: ${evidenceRes.claims.length}, Sources: ${sources?.length || 0}`);
       // Use lower thresholds for TokenHeuristicScorer to find more relationships
+      // But allow user-provided thresholds to override defaults
       const isHeuristic = scorer.id === "token-heuristic-v1" || scorer.id === "token-heuristic";
+      const defaultSupportThreshold = isHeuristic ? 0.40 : 0.58;
+      const defaultContradictionThreshold = isHeuristic ? 0.50 : 0.70;
+      const defaultGroundingThreshold = isHeuristic ? 0.40 : 0.60;
+      
       graph = await buildClaimGraph(evidenceRes.claims, sources, {
         scorer,
-        supportThreshold: isHeuristic ? 0.40 : 0.58, // Lower threshold for heuristic
-        contradictionThreshold: isHeuristic ? 0.50 : 0.70, // Lower threshold for heuristic
-        groundingThreshold: isHeuristic ? 0.40 : 0.60, // Lower threshold for heuristic
+        supportThreshold: options?.supportThreshold ?? defaultSupportThreshold,
+        contradictionThreshold: options?.contradictionThreshold ?? defaultContradictionThreshold,
+        groundingThreshold: options?.groundingThreshold ?? defaultGroundingThreshold,
         maxPairwiseEdges: options?.maxPairwiseEdges ?? 200, // Increased to find more edges
         batchSize: options?.batchSize ?? 32,
         ann: {
@@ -198,11 +204,23 @@ async function validateOnce(input: ValidateInput, adapter?: LLMAdapter): Promise
     const overall = blendScores(truthScore, consistencyScore, coherenceScore);
     const refusal = shouldRefuse(overall, truthScore, consistencyScore, options?.thresholds);
 
+    // Calculate latency
+    const latency = Date.now() - validationStartTime;
+    
+    // Get cache hit rate from graph
+    const cacheHitRate = graph.cacheStats?.hitRate;
+
+    // Get engine version (from package.json or git)
+    const engineVersion = process.env.TCL_ENGINE_VERSION || process.env.GIT_COMMIT || 'v0.2.0';
+
     return {
       answer,
       refusal,
       scores: { truth: truthScore, consistency: consistencyScore, coherence: coherenceScore, overall },
       scorerId: scorer.id, // Include scorer ID so UI can display it
+      latency,
+      cacheHitRate,
+      engineVersion,
       report: {
         claims: evidenceRes.claims,
         violations: [...evidenceRes.violations, ...logicRes.violations],
@@ -223,10 +241,11 @@ async function validateOnce(input: ValidateInput, adapter?: LLMAdapter): Promise
 }
 
 export async function validate(input: ValidateInput): Promise<ValidateOutput> {
+  const startTime = Date.now();
   try {
     const adapter = input.options?.llmAdapter;
 
-    const first = await validateOnce(input, adapter);
+    const first = await validateOnce(input, adapter, startTime);
 
     const repairEnabled = !!input.options?.repair && !!adapter;
     const hasSources = !!input.sources?.length;
@@ -253,7 +272,8 @@ export async function validate(input: ValidateInput): Promise<ValidateOutput> {
 
     const second = await validateOnce(
       { ...input, answer: repaired.repairedAnswer, options: { ...input.options, repair: false } },
-      adapter
+      adapter,
+      startTime
     );
 
     return second;

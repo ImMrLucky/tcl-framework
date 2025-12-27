@@ -33,6 +33,11 @@ export class TclService {
       options: {
         spectral: options.spectral,
         spectralServiceUrl: options.spectralServiceUrl,
+        supportThreshold: options.supportThreshold,
+        contradictionThreshold: options.contradictionThreshold,
+        groundingThreshold: options.groundingThreshold,
+        maxPairwiseEdges: options.maxPairwiseEdges,
+        neighborK: options.neighborK,
       },
     });
   }

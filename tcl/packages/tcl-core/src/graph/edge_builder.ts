@@ -18,6 +18,7 @@ export type ClaimGraph = {
   contradictions: ContradictionEdge[];
   grounding: GroundingEdge[];
   groundedClaimIds: string[];
+  cacheStats?: { hits: number; misses: number; total: number; hitRate: number };
 };
 
 export type ScoreTask = "entailment" | "contradiction" | "grounding";
@@ -459,5 +460,12 @@ export async function buildClaimGraph(
   });
 
   await cache.flush();
-  return { supports, contradictions: contradictionsDedup, grounding, groundedClaimIds };
+  const cacheStats = cacheEnabled ? cache.getStats() : undefined;
+  return { 
+    supports, 
+    contradictions: contradictionsDedup, 
+    grounding, 
+    groundedClaimIds,
+    cacheStats
+  };
 }

@@ -39,6 +39,9 @@ export type ValidationOptions = {
   mistralApiKey?: string; // optional Mistral API key (auto-enables MistralNliScorer)
   mistralModel?: string; // optional Mistral model (defaults to mistral-small-latest)
   useLocalNli?: boolean; // use local transformers.js model (defaults to true, downloads on first run)
+  supportThreshold?: number; // threshold for support edges (0-1, default: 0.58)
+  contradictionThreshold?: number; // threshold for contradiction edges (0-1, default: 0.70)
+  groundingThreshold?: number; // threshold for grounding edges (0-1, default: 0.60)
   maxPairwiseEdges?: number; // cap O(n^2)
   neighborK?: number; // candidates per claim
   batchSize?: number; // NLI scoring batch size
@@ -64,6 +67,9 @@ export type ValidateOutput = {
   refusal: boolean;
   scores: { truth: number; consistency: number; coherence: number; overall: number };
   scorerId?: string; // ID of the NLI scorer used (e.g., "transformers-deberta-v3-base", "token-heuristic-v1")
+  latency?: number; // Request latency in milliseconds
+  cacheHitRate?: number; // Cache hit rate percentage (0-100)
+  engineVersion?: string; // Engine version/commit hash
   report: {
     claims: Claim[];
     violations: Violation[];
