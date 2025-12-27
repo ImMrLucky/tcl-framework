@@ -30,6 +30,60 @@ import { ClaimWithMetadata, GraphEdge } from '../types';
           <p>No graph data to display</p>
         </div>
 
+        <div *ngIf="!loading && claims.length > 0 && edges.length > 0" class="graph-legend">
+          <div class="legend-item">
+            <div class="legend-color" style="background-color: #4caf50;"></div>
+            <span>Grounded & Valid</span>
+          </div>
+          <div class="legend-item">
+            <div class="legend-color" style="background-color: #ff9800;"></div>
+            <span>Has Contradictions</span>
+          </div>
+          <div class="legend-item">
+            <div class="legend-color" style="background-color: #f44336;"></div>
+            <span>Ungrounded</span>
+          </div>
+          <div class="legend-item">
+            <div class="legend-color" style="background-color: #ffc107;"></div>
+            <span>In Cycles</span>
+          </div>
+          <div class="legend-edges">
+            <div class="legend-edge">
+              <svg width="40" height="20">
+                <line x1="0" y1="10" x2="40" y2="10" stroke="#4caf50" stroke-width="2" marker-end="url(#arrow-green)"/>
+                <defs>
+                  <marker id="arrow-green" viewBox="0 -5 10 10" refX="35" refY="0" markerWidth="6" markerHeight="6" orient="auto">
+                    <path d="M0,-5L10,0L0,5" fill="#4caf50"/>
+                  </marker>
+                </defs>
+              </svg>
+              <span>Support</span>
+            </div>
+            <div class="legend-edge">
+              <svg width="40" height="20">
+                <line x1="0" y1="10" x2="40" y2="10" stroke="#f44336" stroke-width="2" marker-end="url(#arrow-red)"/>
+                <defs>
+                  <marker id="arrow-red" viewBox="0 -5 10 10" refX="35" refY="0" markerWidth="6" markerHeight="6" orient="auto">
+                    <path d="M0,-5L10,0L0,5" fill="#f44336"/>
+                  </marker>
+                </defs>
+              </svg>
+              <span>Contradiction</span>
+            </div>
+            <div class="legend-edge">
+              <svg width="40" height="20">
+                <line x1="0" y1="10" x2="40" y2="10" stroke="#2196f3" stroke-width="2" stroke-dasharray="5,5" marker-end="url(#arrow-blue)"/>
+                <defs>
+                  <marker id="arrow-blue" viewBox="0 -5 10 10" refX="35" refY="0" markerWidth="6" markerHeight="6" orient="auto">
+                    <path d="M0,-5L10,0L0,5" fill="#2196f3"/>
+                  </marker>
+                </defs>
+              </svg>
+              <span>Grounding</span>
+            </div>
+          </div>
+        </div>
+
         <div #graphContainer class="graph-container"></div>
       </mat-card-content>
     </mat-card>
@@ -70,6 +124,48 @@ import { ClaimWithMetadata, GraphEdge } from '../types';
       border-radius: 4px;
       background: #fafafa;
       overflow: hidden;
+    }
+
+    .graph-legend {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 16px;
+      padding: 12px;
+      margin-bottom: 12px;
+      background: #f5f5f5;
+      border-radius: 4px;
+      font-size: 12px;
+    }
+
+    .legend-item {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .legend-color {
+      width: 16px;
+      height: 16px;
+      border-radius: 50%;
+      border: 2px solid #fff;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.2);
+    }
+
+    .legend-edges {
+      display: flex;
+      gap: 20px;
+      margin-left: auto;
+      align-items: center;
+    }
+
+    .legend-edge {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .legend-edge svg {
+      display: block;
     }
   `]
 })
@@ -207,13 +303,13 @@ export class GraphViewComponent implements AfterViewInit, OnChanges {
 
     // Create force simulation with better spacing
     this.simulation = d3.forceSimulation(nodes as any)
-      .force('link', d3.forceLink(links).id((d: any) => d.id).distance(150))
-      .force('charge', d3.forceManyBody().strength(-500))
+      .force('link', d3.forceLink(links).id((d: any) => d.id).distance(200))
+      .force('charge', d3.forceManyBody().strength(-800))
       .force('center', d3.forceCenter(this.width / 2, this.height / 2))
       .force('collision', d3.forceCollide().radius((d: any) => {
-        // Larger radius for nodes with longer labels
+        // Larger radius for nodes with longer labels - increased base spacing
         const labelLength = d.label ? d.label.length : 0;
-        return Math.max(50, 30 + labelLength * 2);
+        return Math.max(70, 50 + labelLength * 3);
       }));
 
     // Draw links
