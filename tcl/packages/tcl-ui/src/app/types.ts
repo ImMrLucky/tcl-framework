@@ -27,6 +27,9 @@ export type ValidateOutput = {
   refusal: boolean;
   scores: { truth: number; consistency: number; coherence: number; overall: number };
   scorerId?: string; // ID of the NLI scorer used
+  latency?: number; // Request latency in milliseconds
+  cacheHitRate?: number; // Cache hit rate percentage (0-100)
+  engineVersion?: string; // Engine version/commit hash
   report: {
     claims: Claim[];
     violations: any[];

@@ -501,6 +501,12 @@ export class AppComponent implements OnInit {
     question: string;
     answer: string;
     sources?: { id: string; text: string }[];
+    callMetadata?: {
+      agentId?: string;
+      customerId?: string;
+      callDate?: string;
+      duration?: number;
+    };
     options: {
       spectral: boolean;
       ann: boolean;
@@ -544,7 +550,7 @@ export class AppComponent implements OnInit {
         neighborK: event.options.neighborK,
       }
     ).subscribe({
-      next: (result) => {
+      next: (result: ValidateOutput) => {
         // Calculate latency
         if (this.validationStartTime) {
           this.latency = Date.now() - this.validationStartTime;
@@ -560,7 +566,7 @@ export class AppComponent implements OnInit {
         this.processResult(result);
         this.loading = false;
       },
-      error: (error) => {
+      error: (error: any) => {
         console.error('Validation error:', error);
         alert('Error: ' + (error.error?.error || error.message || 'Unknown error'));
         this.loading = false;

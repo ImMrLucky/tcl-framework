@@ -472,6 +472,7 @@ export class InputPanelComponent implements OnInit, OnChanges {
   }
 
   onThresholdChange(key: string, value: number) {
+    // mat-slider valueChange emits a number
     (this.options as any)[key] = value;
   }
 
