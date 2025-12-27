@@ -12,8 +12,20 @@ app.get("/health", (req, res) => {
 });
 
 app.post("/validate", async (req, res) => {
+  const timeout = setTimeout(() => {
+    if (!res.headersSent) {
+      res.status(504).json({ error: "Request timeout" });
+    }
+  }, 300000); // 5 minute timeout
+
   try {
+    console.log("Received validate request");
     const input = req.body as ValidateInput;
+
+    if (!input.question || !input.answer) {
+      clearTimeout(timeout);
+      return res.status(400).json({ error: "question and answer are required" });
+    }
 
     const apiKey = process.env.OPENAI_API_KEY;
     const model = process.env.OPENAI_MODEL || "gpt-4.1-mini";
@@ -22,10 +34,19 @@ app.post("/validate", async (req, res) => {
       input.options.llmAdapter = new OpenAIAdapter({ apiKey, model });
     }
 
+    console.log("Starting validation...");
     const out = await validate(input);
+    console.log("Validation complete");
+    clearTimeout(timeout);
     res.json(out);
   } catch (e: any) {
-    res.status(500).json({ error: e?.message ?? "unknown error" });
+    clearTimeout(timeout);
+    console.error("Validation error:", e);
+    console.error("Error stack:", e?.stack);
+    res.status(500).json({ 
+      error: e?.message ?? "unknown error",
+      stack: process.env.NODE_ENV === "development" ? e?.stack : undefined
+    });
   }
 });
 

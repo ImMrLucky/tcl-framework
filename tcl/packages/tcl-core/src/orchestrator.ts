@@ -53,19 +53,33 @@ async function validateOnce(input: ValidateInput, adapter?: LLMAdapter): Promise
         })
       : new TokenHeuristicScorer();
 
-  const graph = await buildClaimGraph(evidenceRes.claims, sources, {
-    scorer,
-    maxPairwiseEdges: options?.maxPairwiseEdges ?? 6000,
-    batchSize: options?.batchSize ?? 256,
-    ann: {
-      index: options?.annIndex ?? "hnsw",
-      neighborK: options?.annNeighborK ?? options?.neighborK ?? 12
-    },
-    cache: {
-      enabled: true,
-      persistPath: options?.cachePersistPath
-    }
-  });
+  let graph;
+  try {
+    console.log("Building claim graph...");
+    graph = await buildClaimGraph(evidenceRes.claims, sources, {
+      scorer,
+      maxPairwiseEdges: options?.maxPairwiseEdges ?? 6000,
+      batchSize: options?.batchSize ?? 256,
+      ann: {
+        index: options?.annIndex ?? "hnsw",
+        neighborK: options?.annNeighborK ?? options?.neighborK ?? 12
+      },
+      cache: {
+        enabled: true,
+        persistPath: options?.cachePersistPath
+      }
+    });
+    console.log("Claim graph built successfully");
+  } catch (error: any) {
+    console.error("Error building claim graph:", error);
+    // Fallback: return empty graph if build fails
+    graph = {
+      supports: [],
+      contradictions: [],
+      grounding: [],
+      groundedClaimIds: []
+    };
+  }
 
   // merge hard contradictions found by rule layer into graph contradictions (weight=1)
   const hardContradictions = logicRes.contradictions.map((x) => ({ claimA: x.claimA, claimB: x.claimB, weight: 1.0 }));
@@ -107,37 +121,42 @@ async function validateOnce(input: ValidateInput, adapter?: LLMAdapter): Promise
 }
 
 export async function validate(input: ValidateInput): Promise<ValidateOutput> {
-  const adapter = input.options?.llmAdapter;
+  try {
+    const adapter = input.options?.llmAdapter;
 
-  const first = await validateOnce(input, adapter);
+    const first = await validateOnce(input, adapter);
 
-  const repairEnabled = !!input.options?.repair && !!adapter;
-  const hasSources = !!input.sources?.length;
-  const requireCitations = input.options?.requireCitations ?? hasSources;
+    const repairEnabled = !!input.options?.repair && !!adapter;
+    const hasSources = !!input.sources?.length;
+    const requireCitations = input.options?.requireCitations ?? hasSources;
 
-  const failingClaimIds = collectFailingClaimIds(first.report);
+    const failingClaimIds = collectFailingClaimIds(first.report);
 
-  const needsRepair =
-    repairEnabled &&
-    failingClaimIds.length > 0 &&
-    (first.refusal || first.scores.truth < (input.options?.thresholds?.truth ?? 60));
+    const needsRepair =
+      repairEnabled &&
+      failingClaimIds.length > 0 &&
+      (first.refusal || first.scores.truth < (input.options?.thresholds?.truth ?? 60));
 
-  if (!needsRepair) return first;
+    if (!needsRepair) return first;
 
-  const repaired = await repairOnce({
-    adapter: adapter!,
-    question: input.question,
-    originalAnswer: input.answer,
-    claims: first.report.claims,
-    sources: input.sources,
-    failingClaimIds,
-    requireCitations
-  });
+    const repaired = await repairOnce({
+      adapter: adapter!,
+      question: input.question,
+      originalAnswer: input.answer,
+      claims: first.report.claims,
+      sources: input.sources,
+      failingClaimIds,
+      requireCitations
+    });
 
-  const second = await validateOnce(
-    { ...input, answer: repaired.repairedAnswer, options: { ...input.options, repair: false } },
-    adapter
-  );
+    const second = await validateOnce(
+      { ...input, answer: repaired.repairedAnswer, options: { ...input.options, repair: false } },
+      adapter
+    );
 
-  return second;
+    return second;
+  } catch (error: any) {
+    console.error("Validate function error:", error);
+    throw error;
+  }
 }
