@@ -248,7 +248,8 @@ export async function buildClaimGraph(
   if (sources?.length) {
     // batch score grounding where possible
     // Check if scorer has scoreBatch method
-    if (scorer && typeof (scorer as any).scoreBatch === 'function') {
+    // @ts-ignore - scoreBatch is optional, checked at runtime
+    if (scorer && typeof scorer.scoreBatch === 'function') {
       const pairs: BatchPair[] = [];
       for (const c of claims) {
         for (const s of sources) {
@@ -256,7 +257,8 @@ export async function buildClaimGraph(
           if (!cache.get(key)) pairs.push({ task: "grounding", a: c.text, b: s.text, key });
         }
       }
-      const scoreBatchFn = (scorer as any).scoreBatch as (pairs: BatchPair[]) => Promise<BatchScore[]>;
+      // @ts-ignore - scoreBatch is optional, checked at runtime
+      const scoreBatchFn = scorer.scoreBatch;
       await runBatches(pairs, batchSize, async (batch) => {
         const out = await scoreBatchFn(batch);
         for (const r of out) cache.set(r.key, r.score, r.quote);
@@ -328,8 +330,10 @@ export async function buildClaimGraph(
   }
 
   // Check if scorer has scoreBatch method
-  if (scorer && typeof (scorer as any).scoreBatch === 'function' && pairsToScore.length) {
-    const scoreBatchFn = (scorer as any).scoreBatch as (pairs: BatchPair[]) => Promise<BatchScore[]>;
+  // @ts-ignore - scoreBatch is optional, checked at runtime
+  if (scorer && typeof scorer.scoreBatch === 'function' && pairsToScore.length) {
+    // @ts-ignore - scoreBatch is optional, checked at runtime
+    const scoreBatchFn = scorer.scoreBatch;
     await runBatches(pairsToScore, batchSize, async (batch) => {
       const out = await scoreBatchFn(batch);
       for (const r of out) cache.set(r.key, r.score, r.quote);
