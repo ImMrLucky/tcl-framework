@@ -1,6 +1,20 @@
 // Netlify serverless function to proxy API requests to TCL Core
 exports.handler = async (event, context) => {
-  const TCL_CORE_URL = process.env.NETLIFY_TCL_CORE_URL || 'http://localhost:8787';
+  const TCL_CORE_URL = process.env.NETLIFY_TCL_CORE_URL;
+  
+  if (!TCL_CORE_URL) {
+    console.error('NETLIFY_TCL_CORE_URL environment variable is not set');
+    return {
+      statusCode: 500,
+      headers: {
+        'Content-Type': 'application/json',
+        'Access-Control-Allow-Origin': '*',
+      },
+      body: JSON.stringify({ 
+        error: 'Server configuration error: NETLIFY_TCL_CORE_URL not set' 
+      }),
+    };
+  }
   
   // Handle CORS preflight
   if (event.httpMethod === 'OPTIONS') {
@@ -15,23 +29,58 @@ exports.handler = async (event, context) => {
     };
   }
   
-  // Extract the path from query parameters (set by redirect rule)
-  // The redirect sends: /api/validate -> /.netlify/functions/proxy?path=validate
+  // Extract the path from the original request
+  // Netlify sets headers with the original request info
   let path = '/validate'; // default
   
-  if (event.queryStringParameters && event.queryStringParameters.path) {
-    const pathParam = event.queryStringParameters.path;
-    // Ensure it starts with /
-    path = pathParam.startsWith('/') ? pathParam : '/' + pathParam;
+  // Method 1: Check X-Original-URL header (set by Netlify redirects)
+  const originalUrl = event.headers['x-original-url'] || event.headers['X-Original-URL'];
+  if (originalUrl) {
+    try {
+      const url = new URL(originalUrl);
+      const match = url.pathname.match(/^\/api(\/.*)$/);
+      if (match) {
+        path = match[1];
+      }
+    } catch (e) {
+      console.error('Error parsing original URL:', e);
+    }
   }
   
-  // Fallback: try to extract from event.path
-  const functionPath = '/.netlify/functions/proxy';
-  if (event.path && event.path.startsWith(functionPath) && event.path.length > functionPath.length) {
-    path = event.path.substring(functionPath.length);
+  // Method 2: Check rawUrl
+  if (path === '/validate' && event.rawUrl) {
+    try {
+      const url = new URL(event.rawUrl);
+      const match = url.pathname.match(/^\/api(\/.*)$/);
+      if (match) {
+        path = match[1];
+      }
+    } catch (e) {
+      // rawUrl might not be a full URL
+    }
+  }
+  
+  // Method 3: Check query parameters (if redirect passes it)
+  if (path === '/validate' && event.queryStringParameters?.path) {
+    path = event.queryStringParameters.path.startsWith('/') 
+      ? event.queryStringParameters.path 
+      : '/' + event.queryStringParameters.path;
+  }
+  
+  // Ensure path starts with /
+  if (!path.startsWith('/')) {
+    path = '/' + path;
   }
   
   const url = `${TCL_CORE_URL}${path}`;
+  
+  console.log('Proxy request:', {
+    method: event.httpMethod,
+    originalUrl: originalUrl,
+    path: path,
+    targetUrl: url,
+    hasBody: !!event.body
+  });
   
   try {
     // Forward the request to TCL Core
