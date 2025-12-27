@@ -12,6 +12,12 @@ export class TransformersNliScorer {
         this.modelName = cfg.modelName || "Xenova/deberta-v3-base";
         this.cacheDir = cfg.cacheDir || ".tcl_models";
         this.id = `transformers-${this.modelName.split("/").pop()}`;
+        // Bind methods to preserve 'this' context
+        this.loadModel = this.loadModel.bind(this);
+        this.scoreBatch = this.scoreBatch.bind(this);
+        this.entailment = this.entailment.bind(this);
+        this.contradiction = this.contradiction.bind(this);
+        this.grounding = this.grounding.bind(this);
     }
     async loadModel() {
         if (this.model)
@@ -34,7 +40,11 @@ export class TransformersNliScorer {
         }
     }
     async scoreBatch(pairs) {
-        await this.loadModel();
+        // Load model first and store reference
+        const model = await this.loadModel();
+        if (!model) {
+            throw new Error("Failed to load NLI model");
+        }
         const scores = await Promise.all(pairs.map(async (pair) => {
             const { task, a, b, key } = pair;
             try {
@@ -54,8 +64,8 @@ export class TransformersNliScorer {
                 }
                 // Format input for NLI
                 const input = `${a} [SEP] ${b}`;
-                // Run inference
-                const result = await this.model(input, labels);
+                // Run inference using the loaded model
+                const result = await model(input, labels);
                 // Extract score for the relevant label
                 const labelIndex = result.labels.indexOf(labels[0]);
                 const score = result.scores[labelIndex] || 0.0;
