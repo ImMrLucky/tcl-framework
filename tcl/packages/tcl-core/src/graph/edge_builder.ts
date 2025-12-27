@@ -1,4 +1,4 @@
-import { Claim, Source } from "../types.js";
+import { Claim, Source, SupportEdge, ContradictionEdge, GroundingEdge } from "../types.js";
 import { EmbeddingProvider, SparseHashEmbeddingProvider, CandidateIndex, BruteForceIndex, HnswIndex } from "./ann.js";
 import { SemanticCache } from "./cache.js";
 
@@ -12,10 +12,6 @@ import { SemanticCache } from "./cache.js";
  *
  * This is the module you harden and protect. It is a major part of your moat.
  */
-
-export type SupportEdge = { claimA: string; claimB: string; weight: number };
-export type ContradictionEdge = { claimA: string; claimB: string; weight: number };
-export type GroundingEdge = { claimId: string; sourceId: string; weight: number; quote?: string };
 
 export type ClaimGraph = {
   supports: SupportEdge[];
