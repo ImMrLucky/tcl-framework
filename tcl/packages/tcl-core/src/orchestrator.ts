@@ -74,14 +74,19 @@ async function validateOnce(input: ValidateInput, adapter?: LLMAdapter): Promise
     let graph;
     try {
       console.log("Building claim graph...");
-      // Disable ANN for now to avoid potential issues
+      console.log(`Using scorer: ${scorer.id}, Claims: ${evidenceRes.claims.length}, Sources: ${sources?.length || 0}`);
+      // Use lower thresholds for TokenHeuristicScorer to find more relationships
+      const isHeuristic = scorer.id === "token-heuristic";
       graph = await buildClaimGraph(evidenceRes.claims, sources, {
         scorer,
-        maxPairwiseEdges: options?.maxPairwiseEdges ?? 100, // Reduced for faster processing
-        batchSize: options?.batchSize ?? 32, // Smaller batches
+        supportThreshold: isHeuristic ? 0.40 : 0.58, // Lower threshold for heuristic
+        contradictionThreshold: isHeuristic ? 0.50 : 0.70, // Lower threshold for heuristic
+        groundingThreshold: isHeuristic ? 0.40 : 0.60, // Lower threshold for heuristic
+        maxPairwiseEdges: options?.maxPairwiseEdges ?? 200, // Increased to find more edges
+        batchSize: options?.batchSize ?? 32,
         ann: {
           index: "bruteforce", // Use brute force instead of HNSW to avoid dependency issues
-          neighborK: options?.annNeighborK ?? options?.neighborK ?? 12
+          neighborK: options?.annNeighborK ?? options?.neighborK ?? Math.min(12, evidenceRes.claims.length - 1) // Don't exceed claim count
         },
         cache: {
           enabled: false, // Disable cache for now to avoid file system issues
