@@ -70,6 +70,8 @@ async function validateOnce(input: ValidateInput, adapter?: LLMAdapter): Promise
             modelId: options.nliModelId || "nli-default"
           })
         : new TokenHeuristicScorer();
+    
+    console.log(`Using scorer: ${scorer.id}`);
 
     let graph;
     try {
@@ -114,24 +116,28 @@ async function validateOnce(input: ValidateInput, adapter?: LLMAdapter): Promise
     // 5) spectral
     let spectral: SpectralReport | undefined;
     let coherenceScore = 50;
+    const envSpectralUrl = process.env.TCL_SPECTRAL_URL || "";
+    const urlToUse = spectralServiceUrl || envSpectralUrl;
+    console.log(`Spectral check: enabled=${spectralEnabled}, URL from options=${spectralServiceUrl ? 'SET' : 'NOT SET'}, URL from env=${envSpectralUrl ? 'SET' : 'NOT SET'}, final URL=${urlToUse ? 'SET' : 'NOT SET'}`);
+    
     if (spectralEnabled) {
-      console.log(`Spectral enabled. Checking URL: ${spectralServiceUrl ? 'configured' : 'NOT configured'}`);
-      if (!spectralServiceUrl) {
-        console.warn("Spectral enabled but no spectralServiceUrl/TCL_SPECTRAL_URL configured. Skipping Spectral analysis.");
+      if (!urlToUse) {
+        console.warn("⚠️ Spectral enabled but no spectralServiceUrl/TCL_SPECTRAL_URL configured. Skipping Spectral analysis.");
+        console.warn("Please set TCL_SPECTRAL_URL environment variable in Railway.");
       } else {
         try {
-          console.log(`Calling Spectral service at: ${spectralServiceUrl}`);
+          console.log(`📡 Calling Spectral service at: ${urlToUse}`);
           spectral = await callSpectralService(
-            spectralServiceUrl,
+            urlToUse,
             evidenceRes.claims.map((c) => ({ id: c.id, text: c.text })),
             graph.supports,
             contradictions,
             graph.groundedClaimIds
           );
           coherenceScore = spectral.coherenceScore;
-          console.log(`Spectral analysis complete. Coherence score: ${coherenceScore}`);
+          console.log(`✅ Spectral analysis complete. Coherence score: ${coherenceScore}`);
         } catch (error: any) {
-          console.error("Spectral service error:", error);
+          console.error("❌ Spectral service error:", error);
           console.error("Error message:", error?.message);
           console.error("Error stack:", error?.stack);
           // Continue without Spectral - don't fail the entire validation
