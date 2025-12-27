@@ -54,6 +54,9 @@ export type ValidationOptions = {
     mistralApiKey?: string;
     mistralModel?: string;
     useLocalNli?: boolean;
+    supportThreshold?: number;
+    contradictionThreshold?: number;
+    groundingThreshold?: number;
     maxPairwiseEdges?: number;
     neighborK?: number;
     batchSize?: number;
@@ -92,6 +95,10 @@ export type ValidateOutput = {
         coherence: number;
         overall: number;
     };
+    scorerId?: string;
+    latency?: number;
+    cacheHitRate?: number;
+    engineVersion?: string;
     report: {
         claims: Claim[];
         violations: Violation[];

@@ -16,8 +16,19 @@ export class SemanticCache {
     map = new Map();
     dirty = [];
     loaded = false;
+    hits = 0;
+    misses = 0;
     constructor(cfg) {
         this.cfg = cfg;
+    }
+    getStats() {
+        const total = this.hits + this.misses;
+        return {
+            hits: this.hits,
+            misses: this.misses,
+            total,
+            hitRate: total > 0 ? (this.hits / total) * 100 : 0
+        };
     }
     nowMs() { return Date.now(); }
     norm(s) {
@@ -54,12 +65,16 @@ export class SemanticCache {
     }
     get(key) {
         const e = this.map.get(key);
-        if (!e)
-            return undefined;
-        if (e.exp && this.nowMs() > e.exp) {
-            this.map.delete(key);
+        if (!e) {
+            this.misses++;
             return undefined;
         }
+        if (e.exp && this.nowMs() > e.exp) {
+            this.map.delete(key);
+            this.misses++;
+            return undefined;
+        }
+        this.hits++;
         return e;
     }
     set(key, value, quote) {

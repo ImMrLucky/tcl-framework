@@ -56,11 +56,23 @@ app.post("/validate", async (req, res) => {
     }
 
     console.log("Received validate request");
+    console.log("Request body:", JSON.stringify(req.body, null, 2));
     const input = req.body as ValidateInput;
 
-    if (!input.question || !input.answer) {
+    // Validate question (required)
+    if (!input.question || typeof input.question !== 'string' || input.question.trim().length === 0) {
       clearTimeout(timeout);
-      return res.status(400).json({ error: "question and answer are required" });
+      return res.status(400).json({ error: "question is required and must be a non-empty string" });
+    }
+    
+    // Validate answer - allow empty string for call center QA, but ensure it's a string
+    if (input.answer === undefined || input.answer === null) {
+      input.answer = "";
+    }
+    
+    // Ensure answer is a string
+    if (typeof input.answer !== 'string') {
+      input.answer = String(input.answer);
     }
 
     const apiKey = process.env.OPENAI_API_KEY;

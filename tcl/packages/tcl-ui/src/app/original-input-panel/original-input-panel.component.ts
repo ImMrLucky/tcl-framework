@@ -455,10 +455,19 @@ export class OriginalInputPanelComponent implements OnInit, OnChanges {
   }
 
   onSubmit() {
+    // Validate that both question and answer are provided and not empty
+    const trimmedQuestion = this.question?.trim() || '';
+    const trimmedAnswer = this.answer?.trim() || '';
+    
+    if (!trimmedQuestion || !trimmedAnswer) {
+      alert('Please provide both a question and an answer before validating.');
+      return;
+    }
+    
     const validSources = this.sources.filter(s => s.text.trim().length > 0);
     this.validate.emit({
-      question: this.question,
-      answer: this.answer,
+      question: trimmedQuestion,
+      answer: trimmedAnswer,
       sources: validSources.length > 0 ? validSources : undefined,
       options: this.options,
     });

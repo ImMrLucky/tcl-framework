@@ -15,6 +15,12 @@ export type ClaimGraph = {
     contradictions: ContradictionEdge[];
     grounding: GroundingEdge[];
     groundedClaimIds: string[];
+    cacheStats?: {
+        hits: number;
+        misses: number;
+        total: number;
+        hitRate: number;
+    };
 };
 export type ScoreTask = "entailment" | "contradiction" | "grounding";
 export type BatchPair = {

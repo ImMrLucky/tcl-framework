@@ -358,5 +358,12 @@ export async function buildClaimGraph(claims, sources, opts = {}) {
         return { claimA, claimB, weight: w };
     });
     await cache.flush();
-    return { supports, contradictions: contradictionsDedup, grounding, groundedClaimIds };
+    const cacheStats = cacheEnabled ? cache.getStats() : undefined;
+    return {
+        supports,
+        contradictions: contradictionsDedup,
+        grounding,
+        groundedClaimIds,
+        cacheStats
+    };
 }

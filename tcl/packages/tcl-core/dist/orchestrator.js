@@ -28,7 +28,8 @@ async function callSpectralService(spectralServiceUrl, claims, supports, contrad
     console.log(`Spectral response:`, result);
     return result;
 }
-async function validateOnce(input, adapter) {
+async function validateOnce(input, adapter, startTime) {
+    const validationStartTime = startTime ?? Date.now();
     try {
         const { question, answer, sources, options } = input;
         const spectralEnabled = !!options?.spectral;
@@ -40,7 +41,10 @@ async function validateOnce(input, adapter) {
             claims = art.claims;
         }
         else {
-            claims = extractClaims(answer);
+            // For call center QA: if answer is empty, extract claims from question (transcript)
+            // For original QA: extract claims from answer
+            const textToExtract = answer && answer.trim().length > 0 ? answer : question;
+            claims = extractClaims(textToExtract);
         }
         // 2) grounding (legacy MVP evidence check)
         const evidenceRes = attachEvidenceAndFindViolations(claims, sources);
@@ -98,12 +102,16 @@ async function validateOnce(input, adapter) {
             console.log("Building claim graph...");
             console.log(`Using scorer: ${scorer.id}, Claims: ${evidenceRes.claims.length}, Sources: ${sources?.length || 0}`);
             // Use lower thresholds for TokenHeuristicScorer to find more relationships
-            const isHeuristic = scorer.id === "token-heuristic";
+            // But allow user-provided thresholds to override defaults
+            const isHeuristic = scorer.id === "token-heuristic-v1" || scorer.id === "token-heuristic";
+            const defaultSupportThreshold = isHeuristic ? 0.40 : 0.58;
+            const defaultContradictionThreshold = isHeuristic ? 0.50 : 0.70;
+            const defaultGroundingThreshold = isHeuristic ? 0.40 : 0.60;
             graph = await buildClaimGraph(evidenceRes.claims, sources, {
                 scorer,
-                supportThreshold: isHeuristic ? 0.40 : 0.58, // Lower threshold for heuristic
-                contradictionThreshold: isHeuristic ? 0.50 : 0.70, // Lower threshold for heuristic
-                groundingThreshold: isHeuristic ? 0.40 : 0.60, // Lower threshold for heuristic
+                supportThreshold: options?.supportThreshold ?? defaultSupportThreshold,
+                contradictionThreshold: options?.contradictionThreshold ?? defaultContradictionThreshold,
+                groundingThreshold: options?.groundingThreshold ?? defaultGroundingThreshold,
                 maxPairwiseEdges: options?.maxPairwiseEdges ?? 200, // Increased to find more edges
                 batchSize: options?.batchSize ?? 32,
                 ann: {
@@ -137,7 +145,18 @@ async function validateOnce(input, adapter) {
         let coherenceScore = 50;
         const envSpectralUrl = process.env.TCL_SPECTRAL_URL || "";
         const urlToUse = spectralServiceUrl || envSpectralUrl;
-        console.log(`Spectral check: enabled=${spectralEnabled}, URL from options=${spectralServiceUrl ? 'SET' : 'NOT SET'}, URL from env=${envSpectralUrl ? 'SET' : 'NOT SET'}, final URL=${urlToUse ? 'SET' : 'NOT SET'}`);
+        // Debug logging
+        console.log(`Spectral check: enabled=${spectralEnabled}`);
+        console.log(`  - URL from options: ${spectralServiceUrl || 'NOT SET'}`);
+        console.log(`  - URL from env (TCL_SPECTRAL_URL): ${envSpectralUrl || 'NOT SET'}`);
+        console.log(`  - Final URL to use: ${urlToUse || 'NOT SET'}`);
+        if (envSpectralUrl) {
+            console.log(`  - Environment variable TCL_SPECTRAL_URL is set to: ${envSpectralUrl.substring(0, 50)}...`);
+        }
+        else {
+            console.log(`  - Environment variable TCL_SPECTRAL_URL is NOT set`);
+            console.log(`  - Available env vars: ${Object.keys(process.env).filter(k => k.includes('SPECTRAL') || k.includes('TCL')).join(', ') || 'none'}`);
+        }
         if (spectralEnabled) {
             if (!urlToUse) {
                 console.warn("⚠️ Spectral enabled but no spectralServiceUrl/TCL_SPECTRAL_URL configured. Skipping Spectral analysis.");
@@ -166,10 +185,20 @@ async function validateOnce(input, adapter) {
         const consistencyScore = logicRes.consistencyScore;
         const overall = blendScores(truthScore, consistencyScore, coherenceScore);
         const refusal = shouldRefuse(overall, truthScore, consistencyScore, options?.thresholds);
+        // Calculate latency
+        const latency = Date.now() - validationStartTime;
+        // Get cache hit rate from graph
+        const cacheHitRate = graph.cacheStats?.hitRate;
+        // Get engine version (from package.json or git)
+        const engineVersion = process.env.TCL_ENGINE_VERSION || process.env.GIT_COMMIT || 'v0.2.0';
         return {
             answer,
             refusal,
             scores: { truth: truthScore, consistency: consistencyScore, coherence: coherenceScore, overall },
+            scorerId: scorer.id, // Include scorer ID so UI can display it
+            latency,
+            cacheHitRate,
+            engineVersion,
             report: {
                 claims: evidenceRes.claims,
                 violations: [...evidenceRes.violations, ...logicRes.violations],
@@ -190,9 +219,10 @@ async function validateOnce(input, adapter) {
     }
 }
 export async function validate(input) {
+    const startTime = Date.now();
     try {
         const adapter = input.options?.llmAdapter;
-        const first = await validateOnce(input, adapter);
+        const first = await validateOnce(input, adapter, startTime);
         const repairEnabled = !!input.options?.repair && !!adapter;
         const hasSources = !!input.sources?.length;
         const requireCitations = input.options?.requireCitations ?? hasSources;
@@ -211,7 +241,7 @@ export async function validate(input) {
             failingClaimIds,
             requireCitations
         });
-        const second = await validateOnce({ ...input, answer: repaired.repairedAnswer, options: { ...input.options, repair: false } }, adapter);
+        const second = await validateOnce({ ...input, answer: repaired.repairedAnswer, options: { ...input.options, repair: false } }, adapter, startTime);
         return second;
     }
     catch (error) {

@@ -31,7 +31,15 @@ export declare class SemanticCache {
     private map;
     private dirty;
     private loaded;
+    private hits;
+    private misses;
     constructor(cfg: CacheConfig);
+    getStats(): {
+        hits: number;
+        misses: number;
+        total: number;
+        hitRate: number;
+    };
     private nowMs;
     private norm;
     private sha256;

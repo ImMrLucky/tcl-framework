@@ -54,7 +54,10 @@ async function validateOnce(input: ValidateInput, adapter?: LLMAdapter, startTim
       const art = await adapter.extractArtifacts({ question, answer, sources });
       claims = art.claims;
     } else {
-      claims = extractClaims(answer);
+      // For call center QA: if answer is empty, extract claims from question (transcript)
+      // For original QA: extract claims from answer
+      const textToExtract = answer && answer.trim().length > 0 ? answer : question;
+      claims = extractClaims(textToExtract);
     }
 
     // 2) grounding (legacy MVP evidence check)
