@@ -139,7 +139,7 @@ export class AppComponent {
   }
 
   private processResult(result: ValidateOutput) {
-    const { claims, contradictions: reportContradictions, missingEvidence, spectral } = result.report;
+    const { claims, contradictions: reportContradictions, missingEvidence, spectral, graph } = result.report;
     
     // Build claim metadata
     const claimMap = new Map<string, ClaimWithMetadata>();
@@ -157,62 +157,117 @@ export class AppComponent {
       });
     });
 
-    // Build graph edges
+    // Build graph edges - use graph from backend if available, otherwise fallback to inferred
     const supports: GraphEdge[] = [];
     const contradictionEdges: GraphEdge[] = [];
     const grounding: GraphEdge[] = [];
 
-    // Process contradictions from report
+    // Use graph edges from backend if available
+    if (graph) {
+      // Process support edges from graph
+      graph.supports.forEach(edge => {
+        const claimA = claimMap.get(edge.claimA);
+        const claimB = claimMap.get(edge.claimB);
+        if (claimA && claimB) {
+          claimA.supportCount++;
+          supports.push({
+            from: edge.claimA,
+            to: edge.claimB,
+            type: 'support',
+            weight: edge.weight,
+          });
+        }
+      });
+
+      // Process contradiction edges from graph (these are from semantic analysis)
+      graph.contradictions.forEach(edge => {
+        const claimA = claimMap.get(edge.claimA);
+        const claimB = claimMap.get(edge.claimB);
+        if (claimA && claimB) {
+          claimA.contradictionCount++;
+          claimB.contradictionCount++;
+          contradictionEdges.push({
+            from: edge.claimA,
+            to: edge.claimB,
+            type: 'contradiction',
+            weight: edge.weight,
+          });
+        }
+      });
+
+      // Process grounding edges from graph
+      graph.grounding.forEach(edge => {
+        const claim = claimMap.get(edge.claimId);
+        if (claim) {
+          grounding.push({
+            from: edge.claimId,
+            to: edge.sourceId,
+            type: 'grounding',
+            weight: edge.weight,
+          });
+        }
+      });
+    }
+
+    // Also process contradictions from report (rule-based contradictions)
     reportContradictions.forEach(cont => {
       const claimA = claimMap.get(cont.claimA);
       const claimB = claimMap.get(cont.claimB);
       if (claimA && claimB) {
-        claimA.contradictionCount++;
-        claimB.contradictionCount++;
-        contradictionEdges.push({
-          from: cont.claimA,
-          to: cont.claimB,
-          type: 'contradiction',
-          weight: 1.0,
-        });
+        // Only add if not already in graph contradictions
+        const exists = contradictionEdges.some(
+          e => (e.from === cont.claimA && e.to === cont.claimB) || (e.from === cont.claimB && e.to === cont.claimA)
+        );
+        if (!exists) {
+          claimA.contradictionCount++;
+          claimB.contradictionCount++;
+          contradictionEdges.push({
+            from: cont.claimA,
+            to: cont.claimB,
+            type: 'contradiction',
+            weight: 1.0,
+          });
+        }
       }
     });
 
-    // Infer support relationships (simplified - claims that appear sequentially might support each other)
-    // In a real implementation, this would come from the graph builder
-    for (let i = 0; i < claims.length - 1; i++) {
-      const claimA = claims[i];
-      const claimB = claims[i + 1];
-      // Only add support if neither has contradictions with the other
-      const hasContradiction = contradictionEdges.some(
-        e => (e.from === claimA.id && e.to === claimB.id) || (e.from === claimB.id && e.to === claimA.id)
-      );
-      const claimAMeta = claimMap.get(claimA.id);
-      const claimBMeta = claimMap.get(claimB.id);
-      if (!hasContradiction && claimAMeta?.grounded && claimBMeta?.grounded) {
-        if (claimAMeta && claimBMeta) {
-          claimAMeta.supportCount++;
-          supports.push({
-            from: claimA.id,
-            to: claimB.id,
-            type: 'support',
-            weight: 0.6,
-          });
+    // Fallback: If no graph provided, infer support relationships (simplified)
+    if (!graph || graph.supports.length === 0) {
+      for (let i = 0; i < claims.length - 1; i++) {
+        const claimA = claims[i];
+        const claimB = claims[i + 1];
+        const hasContradiction = contradictionEdges.some(
+          e => (e.from === claimA.id && e.to === claimB.id) || (e.from === claimB.id && e.to === claimA.id)
+        );
+        const claimAMeta = claimMap.get(claimA.id);
+        const claimBMeta = claimMap.get(claimB.id);
+        if (!hasContradiction && claimAMeta?.grounded && claimBMeta?.grounded) {
+          if (claimAMeta && claimBMeta) {
+            claimAMeta.supportCount++;
+            supports.push({
+              from: claimA.id,
+              to: claimB.id,
+              type: 'support',
+              weight: 0.6,
+            });
+          }
         }
       }
     }
 
-    // Process grounding edges
-    claims.forEach(claim => {
-      claim.evidence.forEach(ev => {
-        grounding.push({
-          from: claim.id,
-          to: ev.source_id,
-          type: 'grounding',
-          weight: ev.weight || 0.5,
+    // Fallback: Process grounding from claim evidence if graph grounding not available
+    if (!graph || graph.grounding.length === 0) {
+      claims.forEach(claim => {
+        claim.evidence.forEach(ev => {
+          grounding.push({
+            from: claim.id,
+            to: ev.source_id,
+            type: 'grounding',
+            weight: ev.weight || 0.5,
+          });
         });
       });
-    });
+    }
 
     // Detect cycles based on spectral circularity score
     if (spectral?.circularityScore && spectral.circularityScore > 50) {

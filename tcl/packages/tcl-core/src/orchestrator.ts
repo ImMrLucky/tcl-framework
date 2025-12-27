@@ -126,7 +126,12 @@ async function validateOnce(input: ValidateInput, adapter?: LLMAdapter): Promise
         violations: [...evidenceRes.violations, ...logicRes.violations],
         missingEvidence: evidenceRes.missing,
         contradictions: logicRes.contradictions.map((c) => ({ claimA: c.claimA, claimB: c.claimB, reason: c.reason })),
-        spectral
+        spectral,
+        graph: {
+          supports: graph.supports,
+          contradictions: graph.contradictions,
+          grounding: graph.grounding
+        }
       }
     };
   } catch (error: any) {
