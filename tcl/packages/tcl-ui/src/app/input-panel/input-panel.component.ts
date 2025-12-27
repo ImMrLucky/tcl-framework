@@ -138,7 +138,6 @@ import { MatSliderModule } from '@angular/material/slider';
                     [max]="1"
                     [step]="0.01"
                     [displayWith]="formatLabel"
-                    (valueChange)="onThresholdChange('supportThreshold', $event.value)"
                     name="supportThreshold"
                   ></mat-slider>
                   <input
@@ -163,7 +162,6 @@ import { MatSliderModule } from '@angular/material/slider';
                     [max]="1"
                     [step]="0.01"
                     [displayWith]="formatLabel"
-                    (valueChange)="onThresholdChange('contradictionThreshold', $event.value)"
                     name="contradictionThreshold"
                   ></mat-slider>
                   <input
@@ -188,7 +186,6 @@ import { MatSliderModule } from '@angular/material/slider';
                     [max]="1"
                     [step]="0.01"
                     [displayWith]="formatLabel"
-                    (valueChange)="onThresholdChange('groundingThreshold', $event.value)"
                     name="groundingThreshold"
                   ></mat-slider>
                   <input
@@ -223,7 +220,6 @@ import { MatSliderModule } from '@angular/material/slider';
                     [max]="10000"
                     [step]="10"
                     [displayWith]="formatInteger"
-                    (valueChange)="onThresholdChange('maxPairwiseEdges', $event.value)"
                     name="maxPairwiseEdges"
                   ></mat-slider>
                   <input
@@ -248,7 +244,6 @@ import { MatSliderModule } from '@angular/material/slider';
                     [max]="50"
                     [step]="1"
                     [displayWith]="formatInteger"
-                    (valueChange)="onThresholdChange('neighborK', $event.value)"
                     name="neighborK"
                   ></mat-slider>
                   <input
@@ -469,11 +464,6 @@ export class InputPanelComponent implements OnInit, OnChanges {
 
   formatInteger(value: number): string {
     return Math.round(value).toString();
-  }
-
-  onThresholdChange(key: string, value: number) {
-    // mat-slider valueChange emits a number
-    (this.options as any)[key] = value;
   }
 
   onThresholdInputChange(key: string, value: number) {
