@@ -1,0 +1,18 @@
+[build]
+  command = "npm run build"
+  publish = "dist/tcl-ui/browser"
+
+# Redirect API calls to the TCL Core service via proxy function
+# You'll need to set NETLIFY_TCL_CORE_URL environment variable in Netlify dashboard
+[[redirects]]
+  from = "/api/*"
+  to = "/.netlify/functions/proxy"
+  status = 200
+  force = true
+
+# SPA fallback - all routes should serve index.html
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200
+

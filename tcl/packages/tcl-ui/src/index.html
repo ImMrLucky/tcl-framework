@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>TCL Framework Demo</title>
+  <base href="/">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="icon" type="image/x-icon" href="favicon.ico">
+  <script>
+    // Allow setting API URL via environment variable or Netlify build-time injection
+    // This can be overridden by Netlify's environment variable injection
+    if (typeof window !== 'undefined' && !window.__TCL_API_URL) {
+      // Default to proxy path for Netlify
+      window.__TCL_API_URL = null; // null means use relative /api path
+    }
+  </script>
+</head>
+<body>
+  <app-root></app-root>
+</body>
+</html>
+

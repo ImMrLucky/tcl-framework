@@ -1,0 +1,9 @@
+node_modules
+.angular
+dist
+*.log
+.env
+.env.local
+.vscode
+.idea
+
