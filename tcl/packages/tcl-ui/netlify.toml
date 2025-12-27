@@ -5,8 +5,8 @@
 # Redirect API calls to the TCL Core service via proxy function
 # You'll need to set NETLIFY_TCL_CORE_URL environment variable in Netlify dashboard
 [[redirects]]
-  from = "/api/*"
-  to = "/.netlify/functions/proxy"
+  from = "/api/:path*"
+  to = "/.netlify/functions/proxy?path=:splat"
   status = 200
   force = true
 
