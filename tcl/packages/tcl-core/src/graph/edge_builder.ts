@@ -247,9 +247,8 @@ export async function buildClaimGraph(
   // -----------------------------
   if (sources?.length) {
     // batch score grounding where possible
-    if (hasScoreBatch(scorer)) {
-      // Type guard ensures scorer is SemanticScorerWithBatch here
-      const batchScorer = scorer as SemanticScorerWithBatch;
+    // Check if scorer has scoreBatch method
+    if (scorer && typeof (scorer as any).scoreBatch === 'function') {
       const pairs: BatchPair[] = [];
       for (const c of claims) {
         for (const s of sources) {
@@ -257,8 +256,9 @@ export async function buildClaimGraph(
           if (!cache.get(key)) pairs.push({ task: "grounding", a: c.text, b: s.text, key });
         }
       }
+      const scoreBatchFn = (scorer as any).scoreBatch as (pairs: BatchPair[]) => Promise<BatchScore[]>;
       await runBatches(pairs, batchSize, async (batch) => {
-        const out = await batchScorer.scoreBatch(batch);
+        const out = await scoreBatchFn(batch);
         for (const r of out) cache.set(r.key, r.score, r.quote);
       });
     }
@@ -327,11 +327,11 @@ export async function buildClaimGraph(
     if (!cache.get(kEnt)) pairsToScore.push({ task: "entailment", a: A, b: B, key: kEnt });
   }
 
-  if (hasScoreBatch(scorer) && pairsToScore.length) {
-    // Type guard ensures scorer is SemanticScorerWithBatch here
-    const batchScorer = scorer as SemanticScorerWithBatch;
+  // Check if scorer has scoreBatch method
+  if (scorer && typeof (scorer as any).scoreBatch === 'function' && pairsToScore.length) {
+    const scoreBatchFn = (scorer as any).scoreBatch as (pairs: BatchPair[]) => Promise<BatchScore[]>;
     await runBatches(pairsToScore, batchSize, async (batch) => {
-      const out = await batchScorer.scoreBatch(batch);
+      const out = await scoreBatchFn(batch);
       for (const r of out) cache.set(r.key, r.score, r.quote);
     });
   }
