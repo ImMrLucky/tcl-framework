@@ -32,6 +32,8 @@ import { ValidateOutput } from '../types';
             <div class="score-circle" [class]="getScoreClass(result.scores.coherence)">
               <span class="score-value">{{ result.scores.coherence }}</span>
               <span class="score-label">Coherence</span>
+              <span *ngIf="!result.report.spectral" class="spectral-badge" title="Spectral analysis not enabled">Default</span>
+              <span *ngIf="result.report.spectral" class="spectral-badge active" title="Spectral analysis active">Spectral</span>
             </div>
           </div>
 
@@ -269,6 +271,22 @@ import { ValidateOutput } from '../types';
 
     .score-value-small {
       font-weight: 500;
+    }
+
+    .spectral-badge {
+      position: absolute;
+      top: -8px;
+      right: -8px;
+      background: #ccc;
+      color: white;
+      font-size: 0.65rem;
+      padding: 2px 6px;
+      border-radius: 10px;
+      font-weight: 500;
+    }
+
+    .spectral-badge.active {
+      background: #4caf50;
     }
   `]
 })
