@@ -217,7 +217,7 @@ export async function buildClaimGraph(
   sources: Source[] | undefined,
   opts: EdgeBuilderOptions = {}
 ): Promise<ClaimGraph> {
-  const scorer = opts.scorer ?? new TokenHeuristicScorer();
+  const scorer: SemanticScorer = opts.scorer ?? new TokenHeuristicScorer();
   const tSup = opts.supportThreshold ?? 0.58;
   const tCon = opts.contradictionThreshold ?? 0.70;
   const tGnd = opts.groundingThreshold ?? 0.60;
@@ -248,7 +248,8 @@ export async function buildClaimGraph(
   if (sources?.length) {
     // batch score grounding where possible
     if (hasScoreBatch(scorer)) {
-      const batchScorer: SemanticScorerWithBatch = scorer; // Explicitly type the narrowed scorer
+      // Type guard ensures scorer is SemanticScorerWithBatch here
+      const batchScorer = scorer as SemanticScorerWithBatch;
       const pairs: BatchPair[] = [];
       for (const c of claims) {
         for (const s of sources) {
@@ -327,7 +328,8 @@ export async function buildClaimGraph(
   }
 
   if (hasScoreBatch(scorer) && pairsToScore.length) {
-    const batchScorer: SemanticScorerWithBatch = scorer; // Explicitly type the narrowed scorer
+    // Type guard ensures scorer is SemanticScorerWithBatch here
+    const batchScorer = scorer as SemanticScorerWithBatch;
     await runBatches(pairsToScore, batchSize, async (batch) => {
       const out = await batchScorer.scoreBatch(batch);
       for (const r of out) cache.set(r.key, r.score, r.quote);
