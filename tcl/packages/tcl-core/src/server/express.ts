@@ -86,18 +86,37 @@ app.post("/validate", async (req, res) => {
   }
 });
 
+// Railway sets PORT automatically, but we default to 8787
 const port = Number(process.env.PORT || 8787);
+
+console.log(`Starting server...`);
+console.log(`PORT environment variable: ${process.env.PORT || 'not set'}`);
+console.log(`Using port: ${port}`);
 
 // Start server with error handling
 try {
-  app.listen(port, '0.0.0.0', () => {
+  const server = app.listen(port, '0.0.0.0', () => {
     console.log(`✅ TCL-Core listening on ${port}`);
     console.log(`Health check available at http://0.0.0.0:${port}/health`);
-    console.log(`Environment: PORT=${process.env.PORT}, NODE_ENV=${process.env.NODE_ENV}`);
+    console.log(`Environment: PORT=${process.env.PORT || 'default (8787)'}, NODE_ENV=${process.env.NODE_ENV || 'not set'}`);
+    
+    // Verify server is actually listening
+    const address = server.address();
+    if (address && typeof address === 'object') {
+      console.log(`Server bound to ${address.address}:${address.port}`);
+    }
+    
     // Try to load modules after server starts
     loadModules().catch((err) => {
       console.error("Module loading failed (non-critical for health check):", err?.message);
     });
+  });
+  
+  server.on('error', (error: any) => {
+    console.error('Server error:', error);
+    if (error.code === 'EADDRINUSE') {
+      console.error(`Port ${port} is already in use`);
+    }
   });
 } catch (error: any) {
   console.error("Failed to start server:", error);
