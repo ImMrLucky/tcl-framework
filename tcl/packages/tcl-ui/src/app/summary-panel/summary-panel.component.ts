@@ -277,11 +277,11 @@ export class SummaryPanelComponent {
   @Input() loading = false;
 
   hasContradictions(): boolean {
-    return this.result?.report.contradictions.length > 0;
+    return (this.result?.report.contradictions?.length ?? 0) > 0;
   }
 
   hasUngroundedClaims(): boolean {
-    return this.result?.report.missingEvidence.length > 0;
+    return (this.result?.report.missingEvidence?.length ?? 0) > 0;
   }
 
   hasCircularReasoning(): boolean {

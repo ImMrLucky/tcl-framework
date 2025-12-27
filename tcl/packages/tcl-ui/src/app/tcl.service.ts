@@ -32,7 +32,7 @@ export class TclService {
       sources,
       options: {
         spectral: options.spectral,
-        spectralServiceUrl: options.spectralServiceUrl || (typeof process !== 'undefined' && process.env?.['VITE_SPECTRAL_URL']),
+        spectralServiceUrl: options.spectralServiceUrl,
       },
     });
   }

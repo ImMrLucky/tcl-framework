@@ -187,9 +187,9 @@ export class AppComponent {
       const hasContradiction = contradictionEdges.some(
         e => (e.from === claimA.id && e.to === claimB.id) || (e.from === claimB.id && e.to === claimA.id)
       );
-      if (!hasContradiction && claimA.grounded && claimB.grounded) {
-        const claimAMeta = claimMap.get(claimA.id);
-        const claimBMeta = claimMap.get(claimB.id);
+      const claimAMeta = claimMap.get(claimA.id);
+      const claimBMeta = claimMap.get(claimB.id);
+      if (!hasContradiction && claimAMeta?.grounded && claimBMeta?.grounded) {
         if (claimAMeta && claimBMeta) {
           claimAMeta.supportCount++;
           supports.push({
