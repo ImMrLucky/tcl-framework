@@ -1,6 +1,13 @@
 // Types matching TCL framework output
 export type Source = { id: string; text: string };
 
+export type CallMetadata = {
+  agentId?: string;
+  customerId?: string;
+  callDate?: string;
+  duration?: number; // in minutes
+};
+
 export type Claim = {
   id: string;
   text: string;

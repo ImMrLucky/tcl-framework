@@ -9,6 +9,7 @@ import { MatCheckboxModule } from '@angular/material/checkbox';
 import { MatExpansionModule } from '@angular/material/expansion';
 import { MatIconModule } from '@angular/material/icon';
 import { MatSliderModule } from '@angular/material/slider';
+import { CallMetadata } from '../types';
 
 @Component({
   selector: 'app-input-panel',
@@ -403,6 +404,7 @@ export class InputPanelComponent implements OnInit, OnChanges {
   @Input() initialQuestion = '';
   @Input() initialAnswer = '';
   @Input() initialSources: { id: string; text: string }[] | undefined = undefined;
+  @Input() initialCallMetadata: CallMetadata | undefined = undefined;
   @Input() initialOptions: any = {};
 
   transcript = '';
@@ -432,6 +434,9 @@ export class InputPanelComponent implements OnInit, OnChanges {
     if (this.initialSources && this.initialSources.length > 0) {
       this.sources = this.initialSources.map(s => ({ ...s }));
     }
+    if (this.initialCallMetadata && Object.keys(this.initialCallMetadata).length > 0) {
+      this.callMetadata = { ...this.callMetadata, ...this.initialCallMetadata };
+    }
     if (this.initialOptions && Object.keys(this.initialOptions).length > 0) {
       // Merge options but ensure slider values are never undefined
       this.options = {
@@ -454,6 +459,9 @@ export class InputPanelComponent implements OnInit, OnChanges {
     }
     if (changes['initialSources'] && this.initialSources && this.initialSources.length > 0) {
       this.sources = this.initialSources.map(s => ({ ...s }));
+    }
+    if (changes['initialCallMetadata'] && this.initialCallMetadata && Object.keys(this.initialCallMetadata).length > 0) {
+      this.callMetadata = { ...this.callMetadata, ...this.initialCallMetadata };
     }
     if (changes['initialOptions'] && this.initialOptions && Object.keys(this.initialOptions).length > 0) {
       // Merge options but ensure slider values are never undefined
