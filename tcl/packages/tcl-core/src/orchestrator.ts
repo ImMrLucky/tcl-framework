@@ -92,15 +92,23 @@ async function validateOnce(input: ValidateInput, adapter?: LLMAdapter): Promise
     let spectral: SpectralReport | undefined;
     let coherenceScore = 50;
     if (spectralEnabled) {
-      if (!spectralServiceUrl) throw new Error("spectral=true but no spectralServiceUrl/TCL_SPECTRAL_URL configured");
-      spectral = await callSpectralService(
-        spectralServiceUrl,
-        evidenceRes.claims.map((c) => ({ id: c.id, text: c.text })),
-        graph.supports,
-        contradictions,
-        graph.groundedClaimIds
-      );
-      coherenceScore = spectral.coherenceScore;
+      if (!spectralServiceUrl) {
+        console.warn("Spectral enabled but no spectralServiceUrl/TCL_SPECTRAL_URL configured. Skipping Spectral analysis.");
+      } else {
+        try {
+          spectral = await callSpectralService(
+            spectralServiceUrl,
+            evidenceRes.claims.map((c) => ({ id: c.id, text: c.text })),
+            graph.supports,
+            contradictions,
+            graph.groundedClaimIds
+          );
+          coherenceScore = spectral.coherenceScore;
+        } catch (error: any) {
+          console.error("Spectral service error:", error);
+          // Continue without Spectral - don't fail the entire validation
+        }
+      }
     }
 
     // 6) scores

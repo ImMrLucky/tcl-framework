@@ -184,7 +184,7 @@ export class InputPanelComponent {
   answer = '';
   sources: { id: string; text: string }[] = [{ id: 's1', text: '' }];
   options = {
-    spectral: true,
+    spectral: false, // Set to true only if TCL_SPECTRAL_URL is configured
     ann: true,
     cache: true,
   };
