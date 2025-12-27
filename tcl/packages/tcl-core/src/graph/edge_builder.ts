@@ -245,10 +245,13 @@ export async function buildClaimGraph(
           if (!cache.get(key)) pairs.push({ task: "grounding", a: c.text, b: s.text, key });
         }
       }
-      await runBatches(pairs, batchSize, async (batch) => {
-        const out = await scorer.scoreBatch!(batch);
-        for (const r of out) cache.set(r.key, r.score, r.quote);
-      });
+      const scoreBatchFn = scorer.scoreBatch;
+      if (scoreBatchFn) {
+        await runBatches(pairs, batchSize, async (batch) => {
+          const out = await scoreBatchFn(batch);
+          for (const r of out) cache.set(r.key, r.score, r.quote);
+        });
+      }
     }
 
     for (const c of claims) {
@@ -316,10 +319,13 @@ export async function buildClaimGraph(
   }
 
   if (scorer.scoreBatch && pairsToScore.length) {
-    await runBatches(pairsToScore, batchSize, async (batch) => {
-      const out = await scorer.scoreBatch!(batch);
-      for (const r of out) cache.set(r.key, r.score, r.quote);
-    });
+    const scoreBatchFn = scorer.scoreBatch;
+    if (scoreBatchFn) {
+      await runBatches(pairsToScore, batchSize, async (batch) => {
+        const out = await scoreBatchFn(batch);
+        for (const r of out) cache.set(r.key, r.score, r.quote);
+      });
+    }
   }
 
   for (const { i, j } of candPairs) {
