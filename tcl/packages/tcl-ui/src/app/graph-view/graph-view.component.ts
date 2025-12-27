@@ -27,7 +27,8 @@ import { ClaimWithMetadata, GraphEdge } from '../types';
 
         <div *ngIf="!loading && (claims.length === 0 || edges.length === 0)" class="empty-state">
           <mat-icon>account_tree</mat-icon>
-          <p>No graph data to display</p>
+          <p *ngIf="claims.length === 0">No claims to display</p>
+          <p *ngIf="claims.length > 0 && edges.length === 0">Graph not available from engine<br><small>No edges above threshold</small></p>
         </div>
 
         <div *ngIf="!loading && claims.length > 0 && edges.length > 0" class="graph-legend">

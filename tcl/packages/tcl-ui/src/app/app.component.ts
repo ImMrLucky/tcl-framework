@@ -101,6 +101,8 @@ export class AppComponent {
   result: ValidateOutput | null = null;
   claimsWithMetadata: ClaimWithMetadata[] = [];
   graphEdges: GraphEdge[] = [];
+  
+  
 
   constructor(private tclService: TclService) {}
 
@@ -157,7 +159,8 @@ export class AppComponent {
       });
     });
 
-    // Build graph edges - use graph from backend if available, otherwise fallback to inferred
+    // Build graph edges - ONLY use data explicitly provided by backend
+    // No inference, no heuristics, no fallbacks
     const supports: GraphEdge[] = [];
     const contradictionEdges: GraphEdge[] = [];
     const grounding: GraphEdge[] = [];
@@ -210,6 +213,7 @@ export class AppComponent {
     }
 
     // Also process contradictions from report (rule-based contradictions)
+    // These are explicitly provided by the backend, so we include them
     reportContradictions.forEach(cont => {
       const claimA = claimMap.get(cont.claimA);
       const claimB = claimMap.get(cont.claimB);
@@ -231,69 +235,9 @@ export class AppComponent {
       }
     });
 
-    // Fallback: If no graph provided or graph is empty, infer support relationships (simplified)
-    if (!graph || (graph.supports.length === 0 && graph.contradictions.length === 0 && graph.grounding.length === 0)) {
-      console.log("Graph is empty or not provided, using fallback inference");
-      // Create support edges between sequential claims
-      for (let i = 0; i < claims.length - 1; i++) {
-        const claimA = claims[i];
-        const claimB = claims[i + 1];
-        const hasContradiction = contradictionEdges.some(
-          e => (e.from === claimA.id && e.to === claimB.id) || (e.from === claimB.id && e.to === claimA.id)
-        );
-        const claimAMeta = claimMap.get(claimA.id);
-        const claimBMeta = claimMap.get(claimB.id);
-        // Add support if no contradiction and both claims exist
-        if (!hasContradiction && claimAMeta && claimBMeta) {
-          claimAMeta.supportCount++;
-          supports.push({
-            from: claimA.id,
-            to: claimB.id,
-            type: 'support',
-            weight: 0.6,
-          });
-        }
-      }
-      
-      // Also add grounding edges from claim evidence if available
-      if (graph && graph.grounding.length === 0) {
-        claims.forEach(claim => {
-          claim.evidence.forEach(ev => {
-            grounding.push({
-              from: claim.id,
-              to: ev.source_id,
-              type: 'grounding',
-              weight: ev.weight || 0.5,
-            });
-          });
-        });
-      }
-    }
-
-    // Fallback: Process grounding from claim evidence if graph grounding not available
-    if (!graph || graph.grounding.length === 0) {
-      claims.forEach(claim => {
-        claim.evidence.forEach(ev => {
-          grounding.push({
-            from: claim.id,
-            to: ev.source_id,
-            type: 'grounding',
-            weight: ev.weight || 0.5,
-          });
-        });
-      });
-    }
-
-    // Detect cycles based on spectral circularity score
-    if (spectral?.circularityScore && spectral.circularityScore > 50) {
-      // Mark ungrounded claims with contradictions as likely in cycles
-      claimMap.forEach(claim => {
-        if ((claim.contradictionCount > 0 && !claim.grounded) || 
-            (spectral.circularityScore && spectral.circularityScore > 70 && claim.contradictionCount > 0)) {
-          claim.inCycles = true;
-        }
-      });
-    }
+    // Note: We only use data explicitly provided by the backend.
+    // No fallback inference, no heuristic cycle marking.
+    // If graph is missing or empty, we show an empty graph with a message.
 
     this.claimsWithMetadata = Array.from(claimMap.values());
     this.graphEdges = [...supports, ...contradictionEdges, ...grounding];
