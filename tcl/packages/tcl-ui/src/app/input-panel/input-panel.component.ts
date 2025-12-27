@@ -138,7 +138,7 @@ import { MatSliderModule } from '@angular/material/slider';
                     [max]="1"
                     [step]="0.01"
                     [displayWith]="formatLabel"
-                    (valueChange)="onThresholdChange('supportThreshold', $event)"
+                    (valueChange)="onThresholdChange('supportThreshold', $event.value)"
                     name="supportThreshold"
                   ></mat-slider>
                   <input
@@ -163,7 +163,7 @@ import { MatSliderModule } from '@angular/material/slider';
                     [max]="1"
                     [step]="0.01"
                     [displayWith]="formatLabel"
-                    (valueChange)="onThresholdChange('contradictionThreshold', $event)"
+                    (valueChange)="onThresholdChange('contradictionThreshold', $event.value)"
                     name="contradictionThreshold"
                   ></mat-slider>
                   <input
@@ -188,7 +188,7 @@ import { MatSliderModule } from '@angular/material/slider';
                     [max]="1"
                     [step]="0.01"
                     [displayWith]="formatLabel"
-                    (valueChange)="onThresholdChange('groundingThreshold', $event)"
+                    (valueChange)="onThresholdChange('groundingThreshold', $event.value)"
                     name="groundingThreshold"
                   ></mat-slider>
                   <input
@@ -223,7 +223,7 @@ import { MatSliderModule } from '@angular/material/slider';
                     [max]="10000"
                     [step]="10"
                     [displayWith]="formatInteger"
-                    (valueChange)="onThresholdChange('maxPairwiseEdges', $event)"
+                    (valueChange)="onThresholdChange('maxPairwiseEdges', $event.value)"
                     name="maxPairwiseEdges"
                   ></mat-slider>
                   <input
@@ -248,7 +248,7 @@ import { MatSliderModule } from '@angular/material/slider';
                     [max]="50"
                     [step]="1"
                     [displayWith]="formatInteger"
-                    (valueChange)="onThresholdChange('neighborK', $event)"
+                    (valueChange)="onThresholdChange('neighborK', $event.value)"
                     name="neighborK"
                   ></mat-slider>
                   <input
