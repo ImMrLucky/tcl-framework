@@ -205,12 +205,16 @@ export class GraphViewComponent implements AfterViewInit, OnChanges {
     g.selectAll('.link').remove();
     g.selectAll('.node').remove();
 
-    // Create force simulation
+    // Create force simulation with better spacing
     this.simulation = d3.forceSimulation(nodes as any)
-      .force('link', d3.forceLink(links).id((d: any) => d.id).distance(100))
-      .force('charge', d3.forceManyBody().strength(-300))
+      .force('link', d3.forceLink(links).id((d: any) => d.id).distance(150))
+      .force('charge', d3.forceManyBody().strength(-500))
       .force('center', d3.forceCenter(this.width / 2, this.height / 2))
-      .force('collision', d3.forceCollide().radius(40));
+      .force('collision', d3.forceCollide().radius((d: any) => {
+        // Larger radius for nodes with longer labels
+        const labelLength = d.label ? d.label.length : 0;
+        return Math.max(50, 30 + labelLength * 2);
+      }));
 
     // Draw links
     const link = g.append('g')
@@ -254,14 +258,40 @@ export class GraphViewComponent implements AfterViewInit, OnChanges {
       .attr('stroke', '#fff')
       .attr('stroke-width', 2);
 
-    // Add labels
-    node.append('text')
-      .text((d: any) => d.label)
-      .attr('dx', 25)
+    // Add labels with better positioning and wrapping
+    const labels = node.append('text')
+      .text((d: any) => {
+        // Truncate long labels
+        const maxLength = 40;
+        return d.label && d.label.length > maxLength 
+          ? d.label.substring(0, maxLength) + '...' 
+          : d.label;
+      })
+      .attr('dx', 30)
       .attr('dy', 5)
-      .attr('font-size', '12px')
+      .attr('font-size', '11px')
       .attr('fill', '#333')
-      .attr('pointer-events', 'none');
+      .attr('pointer-events', 'none')
+      .attr('text-anchor', 'start')
+      .style('user-select', 'none');
+    
+    // Add background rectangles for better readability
+    labels.each(function(d: any) {
+      const text = d3.select(this);
+      const bbox = (this as SVGTextElement).getBBox();
+      const padding = 4;
+      d3.select(this.parentNode)
+        .insert('rect', 'text')
+        .attr('x', bbox.x - padding)
+        .attr('y', bbox.y - padding)
+        .attr('width', bbox.width + padding * 2)
+        .attr('height', bbox.height + padding * 2)
+        .attr('fill', 'rgba(255, 255, 255, 0.9)')
+        .attr('stroke', '#ddd')
+        .attr('stroke-width', 1)
+        .attr('rx', 3)
+        .lower();
+    });
 
     // Add tooltips
     node.append('title')

@@ -14,13 +14,30 @@ async function callSpectralService(
   contradictions: { claimA: string; claimB: string; weight?: number }[],
   groundedClaimIds: string[]
 ): Promise<SpectralReport> {
-  const res = await fetch(`${spectralServiceUrl.replace(/\/$/, "")}/spectral/score`, {
+  const url = `${spectralServiceUrl.replace(/\/$/, "")}/spectral/score`;
+  console.log(`Spectral request URL: ${url}`);
+  console.log(`Spectral request payload:`, {
+    claimsCount: claims.length,
+    supportsCount: supports.length,
+    contradictionsCount: contradictions.length,
+    groundedCount: groundedClaimIds.length
+  });
+  
+  const res = await fetch(url, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ claims, supports, contradictions, grounded: groundedClaimIds })
   });
-  if (!res.ok) throw new Error(`Spectral service error: ${res.status}`);
-  return (await res.json()) as SpectralReport;
+  
+  if (!res.ok) {
+    const errorText = await res.text().catch(() => '');
+    console.error(`Spectral service HTTP error ${res.status}: ${errorText}`);
+    throw new Error(`Spectral service error: ${res.status} - ${errorText}`);
+  }
+  
+  const result = await res.json() as SpectralReport;
+  console.log(`Spectral response:`, result);
+  return result;
 }
 
 async function validateOnce(input: ValidateInput, adapter?: LLMAdapter): Promise<ValidateOutput> {
