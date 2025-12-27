@@ -62,16 +62,20 @@ async function validateOnce(input: ValidateInput, adapter?: LLMAdapter): Promise
     const logicRes = findLogicViolations(evidenceRes.claims);
 
     // 4) production graph build
-    const scorer =
-      options?.nliEndpoint
-        ? new HttpNliScorer({ 
-            endpoint: options.nliEndpoint, 
-            apiKey: options.nliApiKey,
-            modelId: options.nliModelId || "nli-default"
-          })
-        : new TokenHeuristicScorer();
+    // Check for NLI endpoint in options or environment
+    const nliEndpoint = options?.nliEndpoint || process.env.TCL_NLI_ENDPOINT || "";
+    const nliApiKey = options?.nliApiKey || process.env.TCL_NLI_API_KEY;
+    const nliModelId = options?.nliModelId || process.env.TCL_NLI_MODEL_ID || "nli-default";
     
-    console.log(`Using scorer: ${scorer.id}`);
+    const scorer = nliEndpoint
+      ? new HttpNliScorer({ 
+          endpoint: nliEndpoint, 
+          apiKey: nliApiKey,
+          modelId: nliModelId
+        })
+      : new TokenHeuristicScorer();
+    
+    console.log(`Using scorer: ${scorer.id}${nliEndpoint ? ` (endpoint: ${nliEndpoint})` : ' (heuristic - no NLI endpoint configured)'}`);
 
     let graph;
     try {
