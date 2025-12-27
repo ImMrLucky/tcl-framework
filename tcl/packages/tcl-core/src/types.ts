@@ -35,6 +35,7 @@ export type ValidationOptions = {
   // Production knobs (graph)
   nliEndpoint?: string;   // optional HTTP scorer endpoint for entail/contradiction
   nliApiKey?: string;     // optional auth
+  nliModelId?: string;    // optional model ID for NLI scorer
   maxPairwiseEdges?: number; // cap O(n^2)
   neighborK?: number; // candidates per claim
   batchSize?: number; // NLI scoring batch size
