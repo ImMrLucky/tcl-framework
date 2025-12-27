@@ -433,7 +433,17 @@ export class InputPanelComponent implements OnInit, OnChanges {
       this.sources = this.initialSources.map(s => ({ ...s }));
     }
     if (this.initialOptions && Object.keys(this.initialOptions).length > 0) {
-      this.options = { ...this.options, ...this.initialOptions };
+      // Merge options but ensure slider values are never undefined
+      this.options = {
+        ...this.options,
+        ...this.initialOptions,
+        // Ensure all slider values are numbers (not undefined)
+        supportThreshold: this.initialOptions.supportThreshold ?? this.options.supportThreshold,
+        contradictionThreshold: this.initialOptions.contradictionThreshold ?? this.options.contradictionThreshold,
+        groundingThreshold: this.initialOptions.groundingThreshold ?? this.options.groundingThreshold,
+        maxPairwiseEdges: this.initialOptions.maxPairwiseEdges ?? this.options.maxPairwiseEdges,
+        neighborK: this.initialOptions.neighborK ?? this.options.neighborK,
+      };
     }
   }
 
@@ -446,7 +456,17 @@ export class InputPanelComponent implements OnInit, OnChanges {
       this.sources = this.initialSources.map(s => ({ ...s }));
     }
     if (changes['initialOptions'] && this.initialOptions && Object.keys(this.initialOptions).length > 0) {
-      this.options = { ...this.options, ...this.initialOptions };
+      // Merge options but ensure slider values are never undefined
+      this.options = {
+        ...this.options,
+        ...this.initialOptions,
+        // Ensure all slider values are numbers (not undefined)
+        supportThreshold: this.initialOptions.supportThreshold ?? this.options.supportThreshold,
+        contradictionThreshold: this.initialOptions.contradictionThreshold ?? this.options.contradictionThreshold,
+        groundingThreshold: this.initialOptions.groundingThreshold ?? this.options.groundingThreshold,
+        maxPairwiseEdges: this.initialOptions.maxPairwiseEdges ?? this.options.maxPairwiseEdges,
+        neighborK: this.initialOptions.neighborK ?? this.options.neighborK,
+      };
     }
   }
 
