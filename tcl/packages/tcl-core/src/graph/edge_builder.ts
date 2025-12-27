@@ -179,6 +179,102 @@ export class HttpNliScorer implements SemanticScorer {
   }
 }
 
+/**
+ * Built-in Mistral API scorer. Auto-enabled if MISTRAL_API_KEY is set.
+ * No separate service deployment needed.
+ */
+export class MistralNliScorer implements SemanticScorer {
+  id: string;
+  private apiKey: string;
+  private model: string;
+  private endpoint: string;
+
+  constructor(cfg: { apiKey: string; model?: string; endpoint?: string }) {
+    this.apiKey = cfg.apiKey;
+    this.model = cfg.model || "mistral-small-latest";
+    this.endpoint = cfg.endpoint || "https://api.mistral.ai/v1";
+    this.id = `mistral-${this.model}`;
+  }
+
+  private async callMistral(prompt: string): Promise<number> {
+    try {
+      const response = await fetch(`${this.endpoint}/chat/completions`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${this.apiKey}`
+        },
+        body: JSON.stringify({
+          model: this.model,
+          messages: [{ role: "user", content: prompt }],
+          temperature: 0.1,
+          max_tokens: 10
+        })
+      });
+
+      if (!response.ok) {
+        const error = await response.text();
+        throw new Error(`Mistral API error ${response.status}: ${error}`);
+      }
+
+      const data = await response.json();
+      const content = data.choices?.[0]?.message?.content?.trim() || "0.0";
+      
+      // Extract number from response (handle cases like "0.85" or "The score is 0.85")
+      const match = content.match(/(\d+\.?\d*)/);
+      return match ? Math.max(0, Math.min(1, parseFloat(match[1]))) : 0.0;
+    } catch (error: any) {
+      console.error("Mistral API error:", error);
+      throw error;
+    }
+  }
+
+  async scoreBatch(pairs: BatchPair[]): Promise<BatchScore[]> {
+    // Mistral API doesn't support true batching, so we parallelize individual calls
+    const scores = await Promise.all(
+      pairs.map(async (pair) => {
+        const { task, a, b, key } = pair;
+        
+        let prompt: string;
+        if (task === "entailment") {
+          prompt = `Given the premise: "${a}"\n\nDoes this hypothesis follow from the premise: "${b}"?\n\nRespond with ONLY a number between 0.0 and 1.0, where 1.0 means the hypothesis definitely follows from the premise, and 0.0 means it does not follow at all.`;
+        } else if (task === "contradiction") {
+          prompt = `Do these two statements contradict each other?\n\nStatement A: "${a}"\nStatement B: "${b}"\n\nRespond with ONLY a number between 0.0 and 1.0, where 1.0 means they strongly contradict, and 0.0 means they do not contradict.`;
+        } else if (task === "grounding") {
+          prompt = `Does this source text support this claim?\n\nClaim: "${a}"\nSource: "${b}"\n\nRespond with ONLY a number between 0.0 and 1.0, where 1.0 means the source strongly supports the claim, and 0.0 means it does not support it.`;
+        } else {
+          return { key, score: 0.0 };
+        }
+
+        try {
+          const score = await this.callMistral(prompt);
+          return { key, score };
+        } catch (error) {
+          console.error(`Error scoring pair ${key}:`, error);
+          return { key, score: 0.0 };
+        }
+      })
+    );
+
+    return scores;
+  }
+
+  async entailment(premise: string, hypothesis: string): Promise<number> {
+    const out = await this.scoreBatch([{ task: "entailment", a: premise, b: hypothesis, key: "0" }]);
+    return Number(out[0]?.score ?? 0);
+  }
+
+  async contradiction(a: string, b: string): Promise<number> {
+    const out = await this.scoreBatch([{ task: "contradiction", a, b, key: "0" }]);
+    return Number(out[0]?.score ?? 0);
+  }
+
+  async grounding(claim: string, sourceText: string): Promise<{ score: number; quote?: string }> {
+    const out = await this.scoreBatch([{ task: "grounding", a: claim, b: sourceText, key: "0" }]);
+    return { score: Number(out[0]?.score ?? 0) };
+  }
+}
+
 async function buildIndexForClaims(
   claims: Claim[],
   ann: AnnConfig | undefined

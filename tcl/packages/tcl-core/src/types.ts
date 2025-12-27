@@ -36,6 +36,9 @@ export type ValidationOptions = {
   nliEndpoint?: string;   // optional HTTP scorer endpoint for entail/contradiction
   nliApiKey?: string;     // optional auth
   nliModelId?: string;    // optional model ID for NLI scorer
+  mistralApiKey?: string; // optional Mistral API key (auto-enables MistralNliScorer)
+  mistralModel?: string; // optional Mistral model (defaults to mistral-small-latest)
+  useLocalNli?: boolean; // use local transformers.js model (defaults to true, downloads on first run)
   maxPairwiseEdges?: number; // cap O(n^2)
   neighborK?: number; // candidates per claim
   batchSize?: number; // NLI scoring batch size

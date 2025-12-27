@@ -4,7 +4,7 @@ The TCL framework uses **scorers** to determine relationships between claims (su
 
 ## Available Scorers
 
-### 1. TokenHeuristicScorer (Default) ⚠️ Basic
+### 1. TokenHeuristicScorer (Default - Free) ⚠️ Basic
 
 **What it does:**
 - Simple token overlap matching
@@ -15,17 +15,44 @@ The TCL framework uses **scorers** to determine relationships between claims (su
 - Development/testing
 - When you don't have an NLI service
 - For simple use cases
+- **Default** - Works immediately, no setup needed
 
 **Limitations:**
 - Can't detect semantic contradictions (e.g., "should remove" vs "should not censor")
 - Misses nuanced relationships
 - Low accuracy for complex text
 
-**Current status:** This is what you're using now, which is why graph edges are empty.
+**Status:** This is the default. Works out of the box, but with limited accuracy.
 
 ---
 
-### 2. HttpNliScorer (Recommended) ✅ Production
+### 2. MistralNliScorer (Easy Upgrade) ✅ Recommended
+
+**What it does:**
+- Built-in Mistral 7B API integration
+- Auto-enabled if `MISTRAL_API_KEY` is set
+- No separate service deployment needed
+- Much better accuracy than heuristic
+
+**When to use:**
+- Production deployments
+- When you want better accuracy without deploying a service
+- Quick upgrade path (just set API key)
+
+**How to enable:**
+```bash
+# Set in Railway environment variables
+MISTRAL_API_KEY=your-mistral-api-key
+MISTRAL_MODEL=mistral-small-latest  # optional, defaults to mistral-small-latest
+```
+
+**Cost:** ~$0.60 per 1M input tokens (mistral-small)
+
+**Status:** Auto-enabled when `MISTRAL_API_KEY` is set. No code changes needed!
+
+---
+
+### 3. HttpNliScorer (Custom Service) ✅ Advanced
 
 **What it does:**
 - Calls an external NLI (Natural Language Inference) service
@@ -45,35 +72,97 @@ The TCL framework uses **scorers** to determine relationships between claims (su
 
 ## How to Configure Scorers
 
-### Option 1: Use TokenHeuristicScorer (Current - No Config Needed)
+### Option 1: Use TokenHeuristicScorer (Default - No Config Needed)
 
 This is the default. It's already working, but with limited accuracy.
 
 **To improve it:**
-- I've already lowered the thresholds (done in recent changes)
+- Lowered thresholds (already done)
 - The graph should now find more relationships
 
 ---
 
-### Option 2: Use HttpNliScorer (Recommended for Production)
+### Option 2: Use MistralNliScorer (Recommended - Easy Upgrade)
+
+**Option A: Mistral API (Cloud)**
+
+Just set one environment variable:
+
+```bash
+MISTRAL_API_KEY=your-api-key-here
+```
+
+That's it! The framework will automatically use Mistral for better accuracy.
+
+**Optional:**
+```bash
+MISTRAL_MODEL=mistral-tiny-latest  # Cheaper, still good
+# or
+MISTRAL_MODEL=mistral-medium-latest  # Best accuracy, more expensive
+```
+
+**Get Mistral API Key:**
+1. Sign up at https://mistral.ai
+2. Get your API key from the dashboard
+3. Set it in Railway environment variables
+
+**Option B: Local Mistral Model (No API Key Needed!)**
+
+If you have Mistral 7B running locally (via Ollama, llama.cpp, etc.):
+
+1. **Run the local NLI service:**
+   ```bash
+   cd packages/tcl-nli-local
+   npm install
+   export OLLAMA_URL=http://localhost:11434  # or your local inference server
+   npm start
+   ```
+
+2. **Point TCL Core to it:**
+   ```bash
+   export TCL_NLI_ENDPOINT=http://localhost:8081
+   ```
+
+No API key needed! See `packages/tcl-nli-local/README.md` for details.
+
+---
+
+### Option 3: Use HttpNliScorer (Custom Service - Advanced)
 
 You need to provide an NLI endpoint. Here are your options:
 
-#### A. Use OpenAI's API (Easiest)
+#### A. Use Hugging Face (FREE - Recommended for Testing!)
 
-You can create a simple NLI service that wraps OpenAI's API, or use a service like:
+**Easiest free option!**
 
-**Option: Use Hugging Face Inference API**
+1. **Get a free API key** (optional but recommended):
+   - Sign up at https://huggingface.co (free)
+   - Get token at https://huggingface.co/settings/tokens
 
-1. Get a Hugging Face API key: https://huggingface.co/settings/tokens
-2. Use a model like `microsoft/deberta-v3-base` or `roberta-large-mnli`
-3. Create a simple proxy service (or use Railway to host it)
+2. **Run the Hugging Face NLI service:**
+   ```bash
+   cd packages/tcl-nli-hf
+   npm install
+   export HUGGINGFACE_API_KEY=your-token-here  # optional
+   npm start
+   ```
+
+3. **Point TCL Core to it:**
+   ```bash
+   export TCL_NLI_ENDPOINT=http://localhost:8081
+   ```
+
+**Free tier:** 1,000 requests/month (no credit card needed!)
+
+See `packages/tcl-nli-hf/README.md` for full setup.
+
+#### B. Use Other Services
 
 **Option: Use a hosted NLI service**
 
 Services like:
-- **Inference API** (Hugging Face)
-- **Cohere API** (has NLI endpoints)
+- **Hugging Face Inference API** (free tier available)
+- **Cohere API** (has NLI endpoints, free tier)
 - **Custom service** you build
 
 #### B. Build Your Own NLI Service
@@ -164,16 +253,27 @@ Since you're using `TokenHeuristicScorer`, the recent changes I made should help
 
 ## Recommendation
 
-For **production/demos**, you should:
+### For Testing/Quick Start (FREE!):
+- ✅ **Use Hugging Face NLI** (1,000 free requests/month)
+  - Run: `cd packages/tcl-nli-hf && npm install && npm start`
+  - Set: `TCL_NLI_ENDPOINT=http://localhost:8081`
+  - No credit card needed!
 
-1. **Short term:** Use the improved TokenHeuristicScorer (current setup)
-   - Should work better now with lower thresholds
-   - Good enough for demos
+### For New Users:
+- ✅ **Start with TokenHeuristicScorer** (default, free, works immediately)
+- ✅ **Try Hugging Face NLI** for free to see real NLI quality
 
-2. **Long term:** Set up an NLI service
-   - Much more accurate
-   - Better graph quality
-   - Required for production use
+### For Production:
+- ✅ **Use MistralNliScorer** (easiest, built-in, good accuracy)
+- ✅ **Or use Hugging Face** (free tier or paid for more requests)
+- ✅ **Or use local model** (best for high volume, zero ongoing costs)
+
+### Scorer Priority (Auto-detected):
+1. **Custom NLI endpoint** (`TCL_NLI_ENDPOINT`) - Most flexible (can be local model or Hugging Face!)
+2. **Mistral API** (`MISTRAL_API_KEY`) - Easiest cloud upgrade
+3. **TokenHeuristicScorer** (default) - Free, works out of box
+
+**💡 Pro Tip:** Start with Hugging Face free tier to test real NLI quality, then upgrade to local model or paid service for production!
 
 ---
 

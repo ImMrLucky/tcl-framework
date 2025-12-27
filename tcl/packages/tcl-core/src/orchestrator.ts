@@ -6,6 +6,7 @@ import { blendScores, shouldRefuse } from "./scoring.js";
 import { collectFailingClaimIds, repairOnce } from "./repair.js";
 import type { LLMAdapter } from "./adapters/llm_adapter.js";
 import { buildClaimGraph, HttpNliScorer, TokenHeuristicScorer } from "./graph/edge_builder.js";
+import { TransformersNliScorer } from "./graph/transformers_scorer.js";
 
 async function callSpectralService(
   spectralServiceUrl: string,
@@ -62,20 +63,49 @@ async function validateOnce(input: ValidateInput, adapter?: LLMAdapter): Promise
     const logicRes = findLogicViolations(evidenceRes.claims);
 
     // 4) production graph build
-    // Check for NLI endpoint in options or environment
+    // Scorer priority: Custom NLI endpoint > Mistral API > Local Transformers > TokenHeuristicScorer (default)
     const nliEndpoint = options?.nliEndpoint || process.env.TCL_NLI_ENDPOINT || "";
     const nliApiKey = options?.nliApiKey || process.env.TCL_NLI_API_KEY;
     const nliModelId = options?.nliModelId || process.env.TCL_NLI_MODEL_ID || "nli-default";
+    const mistralApiKey = options?.mistralApiKey || process.env.MISTRAL_API_KEY;
+    const mistralModel = options?.mistralModel || process.env.MISTRAL_MODEL;
+    const useLocalNli = options?.useLocalNli ?? (process.env.TCL_USE_LOCAL_NLI !== "false"); // Default: true
     
-    const scorer = nliEndpoint
-      ? new HttpNliScorer({ 
-          endpoint: nliEndpoint, 
-          apiKey: nliApiKey,
-          modelId: nliModelId
-        })
-      : new TokenHeuristicScorer();
-    
-    console.log(`Using scorer: ${scorer.id}${nliEndpoint ? ` (endpoint: ${nliEndpoint})` : ' (heuristic - no NLI endpoint configured)'}`);
+    let scorer;
+    if (nliEndpoint) {
+      // Priority 1: Custom NLI endpoint (most flexible - user's own NLI)
+      scorer = new HttpNliScorer({ 
+        endpoint: nliEndpoint, 
+        apiKey: nliApiKey,
+        modelId: nliModelId
+      });
+      console.log(`Using scorer: ${scorer.id} (custom NLI endpoint: ${nliEndpoint})`);
+    } else if (mistralApiKey) {
+      // Priority 2: Built-in Mistral API (easy upgrade, no deployment needed)
+      const { MistralNliScorer } = await import("./graph/edge_builder.js");
+      scorer = new MistralNliScorer({
+        apiKey: mistralApiKey,
+        model: mistralModel
+      });
+      console.log(`Using scorer: ${scorer.id} (Mistral API - auto-enabled)`);
+    } else if (useLocalNli) {
+      // Priority 3: Local Transformers model (downloads on first run, no API keys)
+      try {
+        scorer = new TransformersNliScorer({
+          modelName: process.env.TCL_LOCAL_NLI_MODEL || "Xenova/deberta-v3-base"
+        });
+        console.log(`Using scorer: ${scorer.id} (local model - downloads ~200MB on first run)`);
+      } catch (error: any) {
+        console.warn(`Failed to load local NLI model, falling back to heuristic:`, error.message);
+        scorer = new TokenHeuristicScorer();
+        console.log(`Using scorer: ${scorer.id} (fallback - basic accuracy)`);
+      }
+    } else {
+      // Priority 4: Default heuristic (free, works out of box)
+      scorer = new TokenHeuristicScorer();
+      console.log(`Using scorer: ${scorer.id} (free, basic accuracy)`);
+      console.log(`💡 Tip: Set TCL_USE_LOCAL_NLI=true to use local NLI model (downloads on first run)`);
+    }
 
     let graph;
     try {

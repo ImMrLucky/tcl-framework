@@ -51,6 +51,9 @@ export type ValidationOptions = {
     nliEndpoint?: string;
     nliApiKey?: string;
     nliModelId?: string;
+    mistralApiKey?: string;
+    mistralModel?: string;
+    useLocalNli?: boolean;
     maxPairwiseEdges?: number;
     neighborK?: number;
     batchSize?: number;
@@ -63,6 +66,22 @@ export type ValidateInput = {
     answer: string;
     sources?: Source[];
     options?: ValidationOptions;
+};
+export type SupportEdge = {
+    claimA: string;
+    claimB: string;
+    weight: number;
+};
+export type ContradictionEdge = {
+    claimA: string;
+    claimB: string;
+    weight: number;
+};
+export type GroundingEdge = {
+    claimId: string;
+    sourceId: string;
+    weight: number;
+    quote?: string;
 };
 export type ValidateOutput = {
     answer: string;
@@ -86,5 +105,10 @@ export type ValidateOutput = {
             reason: string;
         }[];
         spectral?: SpectralReport;
+        graph?: {
+            supports: SupportEdge[];
+            contradictions: ContradictionEdge[];
+            grounding: GroundingEdge[];
+        };
     };
 };

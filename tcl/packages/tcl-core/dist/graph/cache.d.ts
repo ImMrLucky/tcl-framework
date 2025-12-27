@@ -35,7 +35,7 @@ export declare class SemanticCache {
     private nowMs;
     private norm;
     private sha256;
-    makeKey(task: "ent" | "con" | "gnd", a: string, b: string): any;
+    makeKey(task: "ent" | "con" | "gnd", a: string, b: string): string;
     loadIfNeeded(): Promise<void>;
     get(key: string): CacheEntry | undefined;
     set(key: string, value: number, quote?: string): void;

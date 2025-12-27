@@ -1,12 +1,35 @@
 import express from "express";
-import { validate } from "../orchestrator.js";
-import { OpenAIAdapter } from "../adapters/openai_adapter.js";
 const app = express();
 app.use(express.json({ limit: "4mb" }));
-// Health check endpoint
+// Health check endpoint - must work even if other imports fail
 app.get("/health", (req, res) => {
     res.json({ status: "ok", service: "tcl-core" });
 });
+// Lazy load these to avoid startup crashes
+let validate;
+let OpenAIAdapter;
+async function loadModules() {
+    try {
+        console.log("Starting to load modules...");
+        const orchestrator = await import("../orchestrator.js");
+        console.log("Orchestrator imported");
+        validate = orchestrator.validate;
+        console.log("Validate function assigned");
+        const adapter = await import("../adapters/openai_adapter.js");
+        console.log("Adapter imported");
+        OpenAIAdapter = adapter.OpenAIAdapter;
+        console.log("OpenAIAdapter assigned");
+        console.log("✅ Modules loaded successfully");
+    }
+    catch (error) {
+        console.error("❌ Failed to load modules:", error);
+        console.error("Error message:", error?.message);
+        console.error("Error stack:", error?.stack);
+        throw error;
+    }
+}
+// Don't load modules on startup - let server start first, then load modules
+// This ensures health check works even if modules fail to load
 app.post("/validate", async (req, res) => {
     const timeout = setTimeout(() => {
         if (!res.headersSent) {
@@ -14,6 +37,14 @@ app.post("/validate", async (req, res) => {
         }
     }, 300000); // 5 minute timeout
     try {
+        // Ensure modules are loaded
+        if (!validate) {
+            await loadModules();
+            if (!validate) {
+                clearTimeout(timeout);
+                return res.status(503).json({ error: "Service initializing, please try again" });
+            }
+        }
         console.log("Received validate request");
         const input = req.body;
         if (!input.question || !input.answer) {
@@ -22,7 +53,7 @@ app.post("/validate", async (req, res) => {
         }
         const apiKey = process.env.OPENAI_API_KEY;
         const model = process.env.OPENAI_MODEL || "gpt-4.1-mini";
-        if (apiKey && !input.options?.llmAdapter) {
+        if (apiKey && !input.options?.llmAdapter && OpenAIAdapter) {
             input.options = input.options ?? {};
             input.options.llmAdapter = new OpenAIAdapter({ apiKey, model });
         }
@@ -42,5 +73,42 @@ app.post("/validate", async (req, res) => {
         });
     }
 });
+// Railway sets PORT automatically, but we default to 8787
 const port = Number(process.env.PORT || 8787);
-app.listen(port, '0.0.0.0', () => console.log(`TCL-Core listening on ${port}`));
+console.log(`Starting server...`);
+console.log(`PORT environment variable: ${process.env.PORT || 'not set'}`);
+console.log(`Using port: ${port}`);
+// Start server with error handling
+try {
+    const server = app.listen(port, '0.0.0.0', () => {
+        console.log(`✅ TCL-Core listening on ${port}`);
+        console.log(`Health check available at http://0.0.0.0:${port}/health`);
+        console.log(`Environment: PORT=${process.env.PORT || 'default (8787)'}, NODE_ENV=${process.env.NODE_ENV || 'not set'}`);
+        // Verify server is actually listening
+        const address = server.address();
+        if (address && typeof address === 'object') {
+            console.log(`Server bound to ${address.address}:${address.port}`);
+        }
+        // Try to load modules after server starts
+        loadModules().catch((err) => {
+            console.error("Module loading failed (non-critical for health check):", err?.message);
+        });
+    });
+    server.on('error', (error) => {
+        console.error('Server error:', error);
+        if (error.code === 'EADDRINUSE') {
+            console.error(`Port ${port} is already in use`);
+        }
+    });
+}
+catch (error) {
+    console.error("Failed to start server:", error);
+    process.exit(1);
+}
+// Handle uncaught errors
+process.on('uncaughtException', (error) => {
+    console.error('Uncaught Exception:', error);
+});
+process.on('unhandledRejection', (reason, promise) => {
+    console.error('Unhandled Rejection at:', promise, 'reason:', reason);
+});

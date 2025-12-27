@@ -8,24 +8,55 @@ function isNegationPair(a, b) {
     const notB = B.replace(/\bis not\b/g, "is").replace(/\bnot\b/g, "");
     return normalize(notA) === normalize(B) || normalize(notB) === normalize(A);
 }
+function hasContradictoryKeywords(a, b) {
+    const A = normalize(a);
+    const B = normalize(b);
+    // Check for contradictory patterns
+    const contradictions = [
+        ['should', 'should not'],
+        ['must', 'must not'],
+        ['always', 'never'],
+        ['all', 'none'],
+        ['every', 'no'],
+        ['remove', 'not censor'],
+        ['censor', 'not censor'],
+        ['violates', 'should'],
+        ['wrong', 'needed'],
+        ['harmful', 'neutral'],
+        ['responsibility', 'neutral']
+    ];
+    for (const [word1, word2] of contradictions) {
+        if ((A.includes(word1) && B.includes(word2)) || (A.includes(word2) && B.includes(word1))) {
+            return true;
+        }
+    }
+    return false;
+}
 export function findLogicViolations(claims) {
     const violations = [];
     const contradictions = [];
     let contradictionCount = 0;
     for (let i = 0; i < claims.length; i++) {
         for (let j = i + 1; j < claims.length; j++) {
-            if (isNegationPair(claims[i].text, claims[j].text)) {
+            const isNegation = isNegationPair(claims[i].text, claims[j].text);
+            const hasKeywords = hasContradictoryKeywords(claims[i].text, claims[j].text);
+            if (isNegation || hasKeywords) {
                 contradictionCount++;
+                const reason = isNegation
+                    ? "Negation-style contradiction detected."
+                    : "Contradictory keywords detected.";
                 contradictions.push({
                     claimA: claims[i].id,
                     claimB: claims[j].id,
-                    reason: "Negation-style contradiction detected."
+                    reason
                 });
                 violations.push({
                     type: "CONTRADICTION",
                     claimA: claims[i].id,
                     claimB: claims[j].id,
-                    detail: "Two claims appear to be logical negations."
+                    detail: isNegation
+                        ? "Two claims appear to be logical negations."
+                        : "Two claims contain contradictory keywords or concepts."
                 });
             }
         }

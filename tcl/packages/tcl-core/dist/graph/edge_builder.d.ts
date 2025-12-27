@@ -1,4 +1,4 @@
-import { Claim, Source } from "../types.js";
+import { Claim, Source, SupportEdge, ContradictionEdge, GroundingEdge } from "../types.js";
 import { EmbeddingProvider } from "./ann.js";
 /**
  * PRODUCTION EDGE BUILDER (ANN + CACHE)
@@ -10,22 +10,6 @@ import { EmbeddingProvider } from "./ann.js";
  *
  * This is the module you harden and protect. It is a major part of your moat.
  */
-export type SupportEdge = {
-    claimA: string;
-    claimB: string;
-    weight: number;
-};
-export type ContradictionEdge = {
-    claimA: string;
-    claimB: string;
-    weight: number;
-};
-export type GroundingEdge = {
-    claimId: string;
-    sourceId: string;
-    weight: number;
-    quote?: string;
-};
 export type ClaimGraph = {
     supports: SupportEdge[];
     contradictions: ContradictionEdge[];
@@ -107,6 +91,29 @@ export declare class HttpNliScorer implements SemanticScorer {
         modelId: string;
     });
     private post;
+    scoreBatch(pairs: BatchPair[]): Promise<BatchScore[]>;
+    entailment(premise: string, hypothesis: string): Promise<number>;
+    contradiction(a: string, b: string): Promise<number>;
+    grounding(claim: string, sourceText: string): Promise<{
+        score: number;
+        quote?: string;
+    }>;
+}
+/**
+ * Built-in Mistral API scorer. Auto-enabled if MISTRAL_API_KEY is set.
+ * No separate service deployment needed.
+ */
+export declare class MistralNliScorer implements SemanticScorer {
+    id: string;
+    private apiKey;
+    private model;
+    private endpoint;
+    constructor(cfg: {
+        apiKey: string;
+        model?: string;
+        endpoint?: string;
+    });
+    private callMistral;
     scoreBatch(pairs: BatchPair[]): Promise<BatchScore[]>;
     entailment(premise: string, hypothesis: string): Promise<number>;
     contradiction(a: string, b: string): Promise<number>;
