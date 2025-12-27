@@ -63,6 +63,7 @@ export type ValidateOutput = {
   answer: string;
   refusal: boolean;
   scores: { truth: number; consistency: number; coherence: number; overall: number };
+  scorerId?: string; // ID of the NLI scorer used (e.g., "transformers-deberta-v3-base", "token-heuristic-v1")
   report: {
     claims: Claim[];
     violations: Violation[];

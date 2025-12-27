@@ -112,7 +112,7 @@ async function validateOnce(input: ValidateInput, adapter?: LLMAdapter): Promise
       console.log("Building claim graph...");
       console.log(`Using scorer: ${scorer.id}, Claims: ${evidenceRes.claims.length}, Sources: ${sources?.length || 0}`);
       // Use lower thresholds for TokenHeuristicScorer to find more relationships
-      const isHeuristic = scorer.id === "token-heuristic";
+      const isHeuristic = scorer.id === "token-heuristic-v1" || scorer.id === "token-heuristic";
       graph = await buildClaimGraph(evidenceRes.claims, sources, {
         scorer,
         supportThreshold: isHeuristic ? 0.40 : 0.58, // Lower threshold for heuristic
@@ -152,7 +152,18 @@ async function validateOnce(input: ValidateInput, adapter?: LLMAdapter): Promise
     let coherenceScore = 50;
     const envSpectralUrl = process.env.TCL_SPECTRAL_URL || "";
     const urlToUse = spectralServiceUrl || envSpectralUrl;
-    console.log(`Spectral check: enabled=${spectralEnabled}, URL from options=${spectralServiceUrl ? 'SET' : 'NOT SET'}, URL from env=${envSpectralUrl ? 'SET' : 'NOT SET'}, final URL=${urlToUse ? 'SET' : 'NOT SET'}`);
+    
+    // Debug logging
+    console.log(`Spectral check: enabled=${spectralEnabled}`);
+    console.log(`  - URL from options: ${spectralServiceUrl || 'NOT SET'}`);
+    console.log(`  - URL from env (TCL_SPECTRAL_URL): ${envSpectralUrl || 'NOT SET'}`);
+    console.log(`  - Final URL to use: ${urlToUse || 'NOT SET'}`);
+    if (envSpectralUrl) {
+      console.log(`  - Environment variable TCL_SPECTRAL_URL is set to: ${envSpectralUrl.substring(0, 50)}...`);
+    } else {
+      console.log(`  - Environment variable TCL_SPECTRAL_URL is NOT set`);
+      console.log(`  - Available env vars: ${Object.keys(process.env).filter(k => k.includes('SPECTRAL') || k.includes('TCL')).join(', ') || 'none'}`);
+    }
     
     if (spectralEnabled) {
       if (!urlToUse) {
@@ -191,6 +202,7 @@ async function validateOnce(input: ValidateInput, adapter?: LLMAdapter): Promise
       answer,
       refusal,
       scores: { truth: truthScore, consistency: consistencyScore, coherence: coherenceScore, overall },
+      scorerId: scorer.id, // Include scorer ID so UI can display it
       report: {
         claims: evidenceRes.claims,
         violations: [...evidenceRes.violations, ...logicRes.violations],

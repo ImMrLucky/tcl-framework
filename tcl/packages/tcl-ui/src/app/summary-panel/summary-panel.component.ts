@@ -80,6 +80,14 @@ import { ValidateOutput } from '../types';
               <span class="score-value-small">{{ result.scores.overall }}</span>
             </div>
           </div>
+
+          <div class="nli-info" *ngIf="result.scorerId">
+            <h3>NLI Scorer</h3>
+            <div class="scorer-badge" [class]="getScorerClass(result.scorerId)">
+              <mat-icon class="scorer-icon">{{ getScorerIcon(result.scorerId) }}</mat-icon>
+              <span>{{ getScorerName(result.scorerId) }}</span>
+            </div>
+          </div>
         </div>
 
         <div *ngIf="!loading && !result" class="empty-state">
@@ -288,6 +296,55 @@ import { ValidateOutput } from '../types';
     .spectral-badge.active {
       background: #4caf50;
     }
+
+    .nli-info {
+      margin-top: 24px;
+      padding-top: 24px;
+      border-top: 1px solid #e0e0e0;
+    }
+
+    .nli-info h3 {
+      font-size: 0.875rem;
+      font-weight: 500;
+      margin-bottom: 12px;
+      color: #666;
+    }
+
+    .scorer-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 16px;
+      border-radius: 20px;
+      font-size: 0.875rem;
+      font-weight: 500;
+    }
+
+    .scorer-badge .scorer-icon {
+      font-size: 18px;
+      width: 18px;
+      height: 18px;
+    }
+
+    .scorer-local {
+      background: #e3f2fd;
+      color: #1976d2;
+    }
+
+    .scorer-cloud {
+      background: #f3e5f5;
+      color: #7b1fa2;
+    }
+
+    .scorer-basic {
+      background: #fff3e0;
+      color: #e65100;
+    }
+
+    .scorer-custom {
+      background: #e8f5e9;
+      color: #2e7d32;
+    }
   `]
 })
 export class SummaryPanelComponent {
@@ -326,6 +383,49 @@ export class SummaryPanelComponent {
     if (overall >= 70) return 'Pass';
     if (overall >= 50) return 'Warn';
     return 'Fail';
+  }
+
+  getScorerName(scorerId: string): string {
+    if (scorerId.startsWith('transformers-')) {
+      const model = scorerId.replace('transformers-', '');
+      return `Local NLI (${model})`;
+    }
+    if (scorerId.startsWith('mistral-')) {
+      return 'Mistral API';
+    }
+    if (scorerId.startsWith('token-heuristic')) {
+      return 'Token Heuristic (Basic)';
+    }
+    if (scorerId.includes('nli-')) {
+      return `Custom NLI (${scorerId})`;
+    }
+    return scorerId;
+  }
+
+  getScorerIcon(scorerId: string): string {
+    if (scorerId.startsWith('transformers-')) {
+      return 'psychology';
+    }
+    if (scorerId.startsWith('mistral-')) {
+      return 'cloud';
+    }
+    if (scorerId.startsWith('token-heuristic')) {
+      return 'speed';
+    }
+    return 'settings';
+  }
+
+  getScorerClass(scorerId: string): string {
+    if (scorerId.startsWith('transformers-')) {
+      return 'scorer-local';
+    }
+    if (scorerId.startsWith('mistral-')) {
+      return 'scorer-cloud';
+    }
+    if (scorerId.startsWith('token-heuristic')) {
+      return 'scorer-basic';
+    }
+    return 'scorer-custom';
   }
 }
 

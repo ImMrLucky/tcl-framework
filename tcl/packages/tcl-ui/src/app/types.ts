@@ -26,6 +26,7 @@ export type ValidateOutput = {
   answer: string;
   refusal: boolean;
   scores: { truth: number; consistency: number; coherence: number; overall: number };
+  scorerId?: string; // ID of the NLI scorer used
   report: {
     claims: Claim[];
     violations: any[];
