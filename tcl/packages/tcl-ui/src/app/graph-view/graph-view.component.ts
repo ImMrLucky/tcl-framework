@@ -372,11 +372,12 @@ export class GraphViewComponent implements AfterViewInit, OnChanges {
       .style('user-select', 'none');
     
     // Add background rectangles for better readability
-    labels.each(function(d: any) {
+    labels.each(function(this: SVGTextElement, d: any) {
       const text = d3.select(this);
-      const bbox = (this as SVGTextElement).getBBox();
+      const bbox = this.getBBox();
       const padding = 4;
-      d3.select(this.parentNode)
+      const parentNode = this.parentNode as SVGElement;
+      d3.select(parentNode)
         .insert('rect', 'text')
         .attr('x', bbox.x - padding)
         .attr('y', bbox.y - padding)
