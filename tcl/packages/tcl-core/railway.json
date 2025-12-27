@@ -2,10 +2,10 @@
   "$schema": "https://railway.app/railway.schema.json",
   "build": {
     "builder": "NIXPACKS",
-    "buildCommand": "npm install && npm run build"
+    "buildCommand": "cd packages/tcl-core && npm install && npm run build"
   },
   "deploy": {
-    "startCommand": "npm start",
+    "startCommand": "cd packages/tcl-core && npm start",
     "restartPolicyType": "ON_FAILURE",
     "restartPolicyMaxRetries": 10
   }
