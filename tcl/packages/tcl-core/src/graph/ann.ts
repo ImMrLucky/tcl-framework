@@ -117,6 +117,7 @@ export class HnswIndex implements CandidateIndex {
     let hnsw: any;
     try {
       // dynamic import so repo runs without dependency
+      // @ts-ignore - optional dependency, checked at runtime
       hnsw = await import("hnswlib-node");
     } catch {
       throw new Error("HnswIndex requires 'hnswlib-node' dependency installed.");

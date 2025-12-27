@@ -46,7 +46,11 @@ async function validateOnce(input: ValidateInput, adapter?: LLMAdapter): Promise
   // 4) production graph build
   const scorer =
     options?.nliEndpoint
-      ? new HttpNliScorer({ endpoint: options.nliEndpoint, apiKey: options.nliApiKey })
+      ? new HttpNliScorer({ 
+          endpoint: options.nliEndpoint, 
+          apiKey: options.nliApiKey,
+          modelId: options.nliModelId || "nli-default"
+        })
       : new TokenHeuristicScorer();
 
   const graph = await buildClaimGraph(evidenceRes.claims, sources, {

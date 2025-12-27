@@ -50,7 +50,7 @@ export type AnnConfig = {
   hnsw?: { M?: number; efConstruction?: number; efSearch?: number };
 };
 
-export type CacheConfig = {
+export type EdgeBuilderCacheConfig = {
   enabled?: boolean;
   ttlSeconds?: number;
   persistPath?: string;  // e.g. ".tcl_cache/semantic.jsonl"
@@ -78,7 +78,7 @@ export type EdgeBuilderOptions = {
   ann?: AnnConfig;
 
   // cache
-  cache?: CacheConfig;
+  cache?: EdgeBuilderCacheConfig;
 };
 
 function clamp01(x: number) {
