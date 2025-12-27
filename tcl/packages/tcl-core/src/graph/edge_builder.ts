@@ -37,6 +37,11 @@ export interface SemanticScorer {
   scoreBatch?(pairs: BatchPair[]): Promise<BatchScore[]>;
 }
 
+// Helper type for scorers that have scoreBatch
+export interface SemanticScorerWithBatch extends SemanticScorer {
+  scoreBatch: (pairs: BatchPair[]) => Promise<BatchScore[]>;
+}
+
 export type AnnConfig = {
   provider?: EmbeddingProvider;
   index?: "hnsw" | "bruteforce";
@@ -203,8 +208,8 @@ async function buildIndexForClaims(
 }
 
 // Type guard to check if scorer has scoreBatch method
-function hasScoreBatch(scorer: SemanticScorer): scorer is SemanticScorer & { scoreBatch: (pairs: BatchPair[]) => Promise<BatchScore[]> } {
-  return typeof (scorer as any).scoreBatch === 'function';
+function hasScoreBatch(scorer: SemanticScorer): scorer is SemanticScorerWithBatch {
+  return 'scoreBatch' in scorer && typeof (scorer as any).scoreBatch === 'function';
 }
 
 export async function buildClaimGraph(
@@ -243,6 +248,7 @@ export async function buildClaimGraph(
   if (sources?.length) {
     // batch score grounding where possible
     if (hasScoreBatch(scorer)) {
+      const batchScorer: SemanticScorerWithBatch = scorer; // Explicitly type the narrowed scorer
       const pairs: BatchPair[] = [];
       for (const c of claims) {
         for (const s of sources) {
@@ -251,7 +257,7 @@ export async function buildClaimGraph(
         }
       }
       await runBatches(pairs, batchSize, async (batch) => {
-        const out = await scorer.scoreBatch(batch);
+        const out = await batchScorer.scoreBatch(batch);
         for (const r of out) cache.set(r.key, r.score, r.quote);
       });
     }
@@ -321,8 +327,9 @@ export async function buildClaimGraph(
   }
 
   if (hasScoreBatch(scorer) && pairsToScore.length) {
+    const batchScorer: SemanticScorerWithBatch = scorer; // Explicitly type the narrowed scorer
     await runBatches(pairsToScore, batchSize, async (batch) => {
-      const out = await scorer.scoreBatch(batch);
+      const out = await batchScorer.scoreBatch(batch);
       for (const r of out) cache.set(r.key, r.score, r.quote);
     });
   }
