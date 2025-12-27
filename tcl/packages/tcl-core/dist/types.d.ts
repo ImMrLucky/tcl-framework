@@ -60,6 +60,7 @@ export type ValidationOptions = {
     maxPairwiseEdges?: number;
     neighborK?: number;
     batchSize?: number;
+    cache?: boolean;
     cachePersistPath?: string;
     annIndex?: 'hnsw' | 'bruteforce';
     annNeighborK?: number;

@@ -117,8 +117,8 @@ import { ValidationOptions, Source } from '../types';
                 <label>Support Threshold</label>
                 <div class="threshold-control">
                   <mat-slider
-                    [min]="0"
-                    [max]="1"
+                    [min]="0.20"
+                    [max]="0.80"
                     [step]="0.01"
                     [displayWith]="formatLabel"
                   >
@@ -128,8 +128,8 @@ import { ValidationOptions, Source } from '../types';
                     type="number"
                     [(ngModel)]="options.supportThreshold"
                     (ngModelChange)="onThresholdInputChange('supportThreshold', $event)"
-                    [min]="0"
-                    [max]="1"
+                    [min]="0.20"
+                    [max]="0.80"
                     [step]="0.01"
                     name="supportThresholdInput"
                     class="threshold-input"
@@ -141,8 +141,8 @@ import { ValidationOptions, Source } from '../types';
                 <label>Contradiction Threshold</label>
                 <div class="threshold-control">
                   <mat-slider
-                    [min]="0"
-                    [max]="1"
+                    [min]="0.30"
+                    [max]="0.90"
                     [step]="0.01"
                     [displayWith]="formatLabel"
                   >
@@ -152,8 +152,8 @@ import { ValidationOptions, Source } from '../types';
                     type="number"
                     [(ngModel)]="options.contradictionThreshold"
                     (ngModelChange)="onThresholdInputChange('contradictionThreshold', $event)"
-                    [min]="0"
-                    [max]="1"
+                    [min]="0.30"
+                    [max]="0.90"
                     [step]="0.01"
                     name="contradictionThresholdInput"
                     class="threshold-input"
@@ -165,8 +165,8 @@ import { ValidationOptions, Source } from '../types';
                 <label>Grounding Threshold</label>
                 <div class="threshold-control">
                   <mat-slider
-                    [min]="0"
-                    [max]="1"
+                    [min]="0.20"
+                    [max]="0.80"
                     [step]="0.01"
                     [displayWith]="formatLabel"
                   >
@@ -176,8 +176,8 @@ import { ValidationOptions, Source } from '../types';
                     type="number"
                     [(ngModel)]="options.groundingThreshold"
                     (ngModelChange)="onThresholdInputChange('groundingThreshold', $event)"
-                    [min]="0"
-                    [max]="1"
+                    [min]="0.20"
+                    [max]="0.80"
                     [step]="0.01"
                     name="groundingThresholdInput"
                     class="threshold-input"
@@ -199,8 +199,8 @@ import { ValidationOptions, Source } from '../types';
                 <label>Max Pairwise Edges</label>
                 <div class="threshold-control">
                   <mat-slider
-                    [min]="0"
-                    [max]="10000"
+                    [min]="50"
+                    [max]="2000"
                     [step]="10"
                     [displayWith]="formatInteger"
                   >
@@ -210,8 +210,8 @@ import { ValidationOptions, Source } from '../types';
                     type="number"
                     [(ngModel)]="options.maxPairwiseEdges"
                     (ngModelChange)="onThresholdInputChange('maxPairwiseEdges', $event)"
-                    [min]="0"
-                    [max]="10000"
+                    [min]="50"
+                    [max]="2000"
                     [step]="10"
                     name="maxPairwiseEdgesInput"
                     class="threshold-input"
@@ -224,7 +224,7 @@ import { ValidationOptions, Source } from '../types';
                 <div class="threshold-control">
                   <mat-slider
                     [min]="1"
-                    [max]="50"
+                    [max]="30"
                     [step]="1"
                     [displayWith]="formatInteger"
                   >
@@ -235,7 +235,7 @@ import { ValidationOptions, Source } from '../types';
                     [(ngModel)]="options.neighborK"
                     (ngModelChange)="onThresholdInputChange('neighborK', $event)"
                     [min]="1"
-                    [max]="50"
+                    [max]="30"
                     [step]="1"
                     name="neighborKInput"
                     class="threshold-input"
@@ -374,11 +374,11 @@ export class OriginalInputPanelComponent implements OnInit, OnChanges {
     spectral: false,
     ann: true,
     cache: true,
-    supportThreshold: 0.58,
-    contradictionThreshold: 0.70,
-    groundingThreshold: 0.60,
+    supportThreshold: 0.45, // Lower default for token heuristic scorer
+    contradictionThreshold: 0.55, // Lower default for token heuristic scorer
+    groundingThreshold: 0.45, // Lower default for token heuristic scorer
     maxPairwiseEdges: 200,
-    neighborK: 12,
+    neighborK: 10, // More practical default
   };
 
   ngOnInit() {
@@ -444,12 +444,15 @@ export class OriginalInputPanelComponent implements OnInit, OnChanges {
   }
 
   onThresholdInputChange(key: string, value: number) {
-    if (key === 'supportThreshold' || key === 'contradictionThreshold' || key === 'groundingThreshold') {
-      value = Math.max(0, Math.min(1, value));
+    // Clamp values to valid ranges
+    if (key === 'supportThreshold' || key === 'groundingThreshold') {
+      value = Math.max(0.20, Math.min(0.80, value));
+    } else if (key === 'contradictionThreshold') {
+      value = Math.max(0.30, Math.min(0.90, value));
     } else if (key === 'maxPairwiseEdges') {
-      value = Math.max(0, Math.min(10000, value));
+      value = Math.max(50, Math.min(2000, value));
     } else if (key === 'neighborK') {
-      value = Math.max(1, Math.min(50, Math.round(value)));
+      value = Math.max(1, Math.min(30, Math.round(value)));
     }
     (this.options as any)[key] = value;
   }

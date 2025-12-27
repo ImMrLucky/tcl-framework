@@ -107,6 +107,8 @@ async function validateOnce(input, adapter, startTime) {
             const defaultSupportThreshold = isHeuristic ? 0.40 : 0.58;
             const defaultContradictionThreshold = isHeuristic ? 0.50 : 0.70;
             const defaultGroundingThreshold = isHeuristic ? 0.40 : 0.60;
+            console.log(`Building graph with ${evidenceRes.claims.length} claims, scorer: ${scorer.id}`);
+            console.log(`Thresholds: support=${options?.supportThreshold ?? defaultSupportThreshold}, contradiction=${options?.contradictionThreshold ?? defaultContradictionThreshold}, grounding=${options?.groundingThreshold ?? defaultGroundingThreshold}`);
             graph = await buildClaimGraph(evidenceRes.claims, sources, {
                 scorer,
                 supportThreshold: options?.supportThreshold ?? defaultSupportThreshold,
@@ -119,12 +121,19 @@ async function validateOnce(input, adapter, startTime) {
                     neighborK: options?.annNeighborK ?? options?.neighborK ?? Math.min(12, evidenceRes.claims.length - 1) // Don't exceed claim count
                 },
                 cache: {
-                    enabled: false, // Disable cache for now to avoid file system issues
+                    enabled: options?.cache ?? false, // Use user's cache option
                     persistPath: options?.cachePersistPath
                 }
             });
             console.log("Claim graph built successfully");
             console.log(`Graph stats: ${graph.supports.length} supports, ${graph.contradictions.length} contradictions, ${graph.grounding.length} grounding edges`);
+            if (graph.supports.length === 0 && graph.contradictions.length === 0) {
+                console.warn("⚠️ No edges found in graph. This might indicate:");
+                console.warn("  - Thresholds are too high (try lowering support/contradiction thresholds)");
+                console.warn("  - Scorer is not finding relationships (check scorer logs)");
+                console.warn("  - Claims are too dissimilar");
+                console.warn(`  - Current thresholds: support=${options?.supportThreshold ?? defaultSupportThreshold}, contradiction=${options?.contradictionThreshold ?? defaultContradictionThreshold}`);
+            }
         }
         catch (error) {
             console.error("Error building claim graph:", error);
@@ -140,6 +149,24 @@ async function validateOnce(input, adapter, startTime) {
         // merge hard contradictions found by rule layer into graph contradictions (weight=1)
         const hardContradictions = logicRes.contradictions.map((x) => ({ claimA: x.claimA, claimB: x.claimB, weight: 1.0 }));
         const contradictions = [...graph.contradictions, ...hardContradictions];
+        // Calculate consistency score from ALL contradictions (both logic and graph-based)
+        // Dedupe contradictions to avoid double-counting
+        const contradictionSet = new Set();
+        let totalContradictions = 0;
+        // Count unique contradiction pairs
+        for (const cont of contradictions) {
+            const key1 = `${cont.claimA}::${cont.claimB}`;
+            const key2 = `${cont.claimB}::${cont.claimA}`;
+            if (!contradictionSet.has(key1) && !contradictionSet.has(key2)) {
+                contradictionSet.add(key1);
+                totalContradictions++;
+            }
+        }
+        // Calculate consistency score: 100 base, -25 per unique contradiction, min 0
+        const base = 100;
+        const penalty = Math.min(100, totalContradictions * 25);
+        const consistencyScore = Math.max(0, base - penalty);
+        console.log(`Consistency: ${totalContradictions} unique contradictions (${logicRes.contradictions.length} from logic, ${graph.contradictions.length} from graph), score: ${consistencyScore}`);
         // 5) spectral
         let spectral;
         let coherenceScore = 50;
@@ -180,11 +207,13 @@ async function validateOnce(input, adapter, startTime) {
         else {
             console.log("Spectral disabled in options");
         }
-        // 6) scores
-        const truthScore = evidenceRes.truthScore;
-        const consistencyScore = logicRes.consistencyScore;
-        const overall = blendScores(truthScore, consistencyScore, coherenceScore);
-        const refusal = shouldRefuse(overall, truthScore, consistencyScore, options?.thresholds);
+        // 6) scores - ensure all scores are valid numbers in 0-100 range
+        const truthScore = Math.max(0, Math.min(100, Math.round(evidenceRes.truthScore || 0)));
+        const finalConsistencyScore = Math.max(0, Math.min(100, Math.round(consistencyScore || 0)));
+        const finalCoherenceScore = Math.max(0, Math.min(100, Math.round(coherenceScore || 50)));
+        const overall = blendScores(truthScore, finalConsistencyScore, finalCoherenceScore);
+        const refusal = shouldRefuse(overall, truthScore, finalConsistencyScore, options?.thresholds);
+        console.log(`Final scores: truth=${truthScore}, consistency=${finalConsistencyScore}, coherence=${finalCoherenceScore}, overall=${overall}, refusal=${refusal}`);
         // Calculate latency
         const latency = Date.now() - validationStartTime;
         // Get cache hit rate from graph
@@ -194,7 +223,7 @@ async function validateOnce(input, adapter, startTime) {
         return {
             answer,
             refusal,
-            scores: { truth: truthScore, consistency: consistencyScore, coherence: coherenceScore, overall },
+            scores: { truth: truthScore, consistency: finalConsistencyScore, coherence: finalCoherenceScore, overall },
             scorerId: scorer.id, // Include scorer ID so UI can display it
             latency,
             cacheHitRate,

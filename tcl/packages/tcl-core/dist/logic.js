@@ -33,6 +33,10 @@ function hasContradictoryKeywords(a, b) {
     return false;
 }
 export function findLogicViolations(claims) {
+    // Defensive: handle empty claims
+    if (!claims || claims.length === 0) {
+        return { violations: [], contradictions: [], consistencyScore: 100 };
+    }
     const violations = [];
     const contradictions = [];
     let contradictionCount = 0;
@@ -61,8 +65,10 @@ export function findLogicViolations(claims) {
             }
         }
     }
+    // Calculate consistency score: 100 base, -25 per contradiction, min 0
+    // Penalty caps at 100 (4+ contradictions = 0 score)
     const base = 100;
     const penalty = Math.min(100, contradictionCount * 25);
-    const consistencyScore = Math.max(0, base - penalty);
+    const consistencyScore = Math.max(0, Math.min(100, base - penalty));
     return { violations, contradictions, consistencyScore };
 }

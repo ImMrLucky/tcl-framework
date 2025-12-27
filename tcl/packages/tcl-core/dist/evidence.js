@@ -17,6 +17,12 @@ function tokenOverlapScore(claim, source) {
  * Production: replace by NLI entailment (see graph/edge_builder.ts).
  */
 export function attachEvidenceAndFindViolations(claims, sources, minSupport = 0.35) {
+    // Defensive: handle empty claims
+    if (!claims || claims.length === 0) {
+        return { claims: [], violations: [], missing: [], truthScore: 0 };
+    }
+    // If no sources provided, can't verify truth - return neutral score
+    // (50 is neutral, not 0, because we can't prove it's false without sources)
     if (!sources || sources.length === 0) {
         return { claims, violations: [], missing: [], truthScore: 50 };
     }
@@ -43,6 +49,8 @@ export function attachEvidenceAndFindViolations(claims, sources, minSupport = 0.
             });
         }
     }
-    const truthScore = Math.round((supportedCount / Math.max(1, claims.length)) * 100);
+    // Calculate truth score: percentage of claims that are supported
+    // Ensure result is in 0-100 range
+    const truthScore = Math.max(0, Math.min(100, Math.round((supportedCount / Math.max(1, claims.length)) * 100)));
     return { claims, violations, missing, truthScore };
 }

@@ -47,6 +47,11 @@ export function findLogicViolations(claims: Claim[]): {
   contradictions: { claimA: string; claimB: string; reason: string }[];
   consistencyScore: number;
 } {
+  // Defensive: handle empty claims
+  if (!claims || claims.length === 0) {
+    return { violations: [], contradictions: [], consistencyScore: 100 };
+  }
+  
   const violations: Violation[] = [];
   const contradictions: { claimA: string; claimB: string; reason: string }[] = [];
 
@@ -79,9 +84,11 @@ export function findLogicViolations(claims: Claim[]): {
     }
   }
 
+  // Calculate consistency score: 100 base, -25 per contradiction, min 0
+  // Penalty caps at 100 (4+ contradictions = 0 score)
   const base = 100;
   const penalty = Math.min(100, contradictionCount * 25);
-  const consistencyScore = Math.max(0, base - penalty);
+  const consistencyScore = Math.max(0, Math.min(100, base - penalty));
 
   return { violations, contradictions, consistencyScore };
 }

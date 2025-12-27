@@ -45,6 +45,7 @@ export type ValidationOptions = {
   maxPairwiseEdges?: number; // cap O(n^2)
   neighborK?: number; // candidates per claim
   batchSize?: number; // NLI scoring batch size
+  cache?: boolean; // enable/disable semantic cache
   cachePersistPath?: string; // optional JSONL cache path
   annIndex?: 'hnsw' | 'bruteforce'; // ANN index choice
   annNeighborK?: number; // alias for neighborK
