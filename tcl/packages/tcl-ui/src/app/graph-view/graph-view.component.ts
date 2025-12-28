@@ -1,10 +1,14 @@
-import { Component, Input, OnInit, OnChanges, SimpleChanges, ViewChild, ElementRef, AfterViewInit } from '@angular/core';
+import { Component, Input, OnInit, OnChanges, SimpleChanges, ViewChild, ElementRef, AfterViewInit, OnDestroy } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { MatCardModule } from '@angular/material/card';
 import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
 import { MatIconModule } from '@angular/material/icon';
+import { MatButtonToggleModule } from '@angular/material/button-toggle';
+import { MatTooltipModule } from '@angular/material/tooltip';
 import * as d3 from 'd3';
 import { ClaimWithMetadata, GraphEdge } from '../types';
+
+type ViewType = 'force' | 'matrix';
 
 @Component({
   selector: 'app-graph-view',
@@ -13,12 +17,30 @@ import { ClaimWithMetadata, GraphEdge } from '../types';
     CommonModule,
     MatCardModule,
     MatProgressSpinnerModule,
-    MatIconModule
+    MatIconModule,
+    MatButtonToggleModule,
+    MatTooltipModule
   ],
   template: `
     <mat-card class="graph-card">
       <mat-card-header>
-        <mat-card-title>Graph View</mat-card-title>
+        <div class="header-content">
+          <mat-card-title>Graph View</mat-card-title>
+          <mat-button-toggle-group 
+            *ngIf="!loading && claims.length > 0 && edges.length > 0"
+            [(value)]="viewType" 
+            (change)="onViewChange()"
+            class="view-toggle">
+            <mat-button-toggle value="force" matTooltip="Force-directed graph (best for exploration)">
+              <mat-icon>account_tree</mat-icon>
+              <span>Force</span>
+            </mat-button-toggle>
+            <mat-button-toggle value="matrix" matTooltip="Matrix view (best for dense graphs and compliance)">
+              <mat-icon>grid_on</mat-icon>
+              <span>Matrix</span>
+            </mat-button-toggle>
+          </mat-button-toggle-group>
+        </div>
       </mat-card-header>
       <mat-card-content>
         <div *ngIf="loading" class="loading-container">
@@ -85,7 +107,10 @@ import { ClaimWithMetadata, GraphEdge } from '../types';
           </div>
         </div>
 
-        <div #graphContainer class="graph-container"></div>
+        <div *ngIf="viewType === 'force'" #graphContainer class="graph-container"></div>
+        <div *ngIf="viewType === 'matrix'" class="matrix-container">
+          <div class="matrix-wrapper" #matrixContainer></div>
+        </div>
       </mat-card-content>
     </mat-card>
   `,
@@ -168,25 +193,184 @@ import { ClaimWithMetadata, GraphEdge } from '../types';
     .legend-edge svg {
       display: block;
     }
+
+    .header-content {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      width: 100%;
+    }
+
+    .view-toggle {
+      margin-left: auto;
+    }
+
+    .view-toggle mat-button-toggle {
+      font-size: 12px;
+    }
+
+    .view-toggle mat-icon {
+      font-size: 18px;
+      width: 18px;
+      height: 18px;
+      margin-right: 4px;
+    }
+
+    .matrix-container {
+      width: 100%;
+      overflow: auto;
+      max-height: 600px;
+      border: 1px solid #e0e0e0;
+      border-radius: 4px;
+      background: #fff;
+    }
+
+    .matrix-wrapper {
+      display: inline-block;
+      min-width: 100%;
+    }
+
+    .matrix-table {
+      border-collapse: collapse;
+      font-size: 11px;
+      width: 100%;
+    }
+
+    .matrix-table th,
+    .matrix-table td {
+      border: 1px solid #e0e0e0;
+      padding: 4px 8px;
+      text-align: center;
+      position: relative;
+    }
+
+    .matrix-table th {
+      background: #f5f5f5;
+      font-weight: 600;
+      position: sticky;
+      z-index: 10;
+    }
+
+    .matrix-table th:first-child {
+      left: 0;
+      z-index: 20;
+      background: #f5f5f5;
+      min-width: 150px;
+      max-width: 150px;
+      text-align: left;
+    }
+
+    .matrix-table th:not(:first-child) {
+      top: 0;
+      writing-mode: vertical-rl;
+      text-orientation: mixed;
+      min-width: 40px;
+      max-width: 40px;
+      height: 150px;
+      padding: 8px 4px;
+    }
+
+    .matrix-table td:first-child {
+      position: sticky;
+      left: 0;
+      background: #fff;
+      z-index: 5;
+      text-align: left;
+      font-weight: 500;
+      min-width: 150px;
+      max-width: 150px;
+    }
+
+    .matrix-cell {
+      width: 40px;
+      height: 40px;
+      cursor: pointer;
+      transition: all 0.2s;
+      border-radius: 2px;
+      position: relative;
+    }
+
+    .matrix-cell:hover {
+      transform: scale(1.2);
+      z-index: 15;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+    }
+
+    .matrix-cell.support {
+      background-color: #4caf50;
+      opacity: 0.7;
+    }
+
+    .matrix-cell.contradiction {
+      background-color: #f44336;
+      opacity: 0.7;
+    }
+
+    .matrix-cell.grounding {
+      background-color: #2196f3;
+      opacity: 0.7;
+      background-image: repeating-linear-gradient(
+        45deg,
+        transparent,
+        transparent 2px,
+        rgba(255,255,255,0.3) 2px,
+        rgba(255,255,255,0.3) 4px
+      );
+    }
+
+    .matrix-cell.multiple {
+      background: linear-gradient(135deg, #4caf50 25%, #f44336 25%, #f44336 50%, #2196f3 50%, #2196f3 75%, #4caf50 75%);
+      opacity: 0.8;
+    }
+
+    .matrix-cell-weight {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      font-size: 9px;
+      font-weight: bold;
+      color: #fff;
+      text-shadow: 0 1px 2px rgba(0,0,0,0.5);
+    }
+
+    .matrix-tooltip {
+      position: absolute;
+      background: rgba(0,0,0,0.9);
+      color: #fff;
+      padding: 8px 12px;
+      border-radius: 4px;
+      font-size: 12px;
+      pointer-events: none;
+      z-index: 1000;
+      max-width: 300px;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+    }
   `]
 })
-export class GraphViewComponent implements AfterViewInit, OnChanges {
+export class GraphViewComponent implements AfterViewInit, OnChanges, OnDestroy {
   @ViewChild('graphContainer', { static: false }) graphContainer!: ElementRef;
+  @ViewChild('matrixContainer', { static: false }) matrixContainer!: ElementRef;
   @Input() claims: ClaimWithMetadata[] = [];
   @Input() edges: GraphEdge[] = [];
   @Input() loading = false;
+
+  viewType: ViewType = 'force';
 
   private svg: any;
   private simulation: any;
   private width = 800;
   private height = 600;
+  private matrixTooltip: HTMLElement | null = null;
 
   ngAfterViewInit() {
-    if (this.graphContainer) {
-      this.width = this.graphContainer.nativeElement.offsetWidth || 800;
-      this.height = this.graphContainer.nativeElement.offsetHeight || 600;
-      if (this.claims.length > 0 && this.edges.length > 0) {
+    if (this.claims.length > 0 && this.edges.length > 0) {
+      if (this.viewType === 'force' && this.graphContainer) {
+        this.width = this.graphContainer.nativeElement.offsetWidth || 800;
+        this.height = this.graphContainer.nativeElement.offsetHeight || 600;
         this.initGraph();
+      } else if (this.viewType === 'matrix' && this.matrixContainer) {
+        this.renderMatrix();
       }
     }
   }
@@ -196,19 +380,42 @@ export class GraphViewComponent implements AfterViewInit, OnChanges {
       // If edges become empty, clear the graph completely
       if (this.edges.length === 0 || this.claims.length === 0) {
         this.clearGraph();
+        this.clearMatrix();
         return;
       }
       
       // Only render graph if we have both claims and edges
       if (this.claims.length > 0 && this.edges.length > 0) {
-        if (this.svg) {
-          this.updateGraph();
-        } else if (this.graphContainer) {
-          this.width = this.graphContainer.nativeElement.offsetWidth || 800;
-          this.height = this.graphContainer.nativeElement.offsetHeight || 600;
-          this.initGraph();
+        if (this.viewType === 'force') {
+          if (this.svg) {
+            this.updateGraph();
+          } else if (this.graphContainer) {
+            this.width = this.graphContainer.nativeElement.offsetWidth || 800;
+            this.height = this.graphContainer.nativeElement.offsetHeight || 600;
+            this.initGraph();
+          }
+        } else if (this.viewType === 'matrix') {
+          this.renderMatrix();
         }
       }
+    }
+  }
+
+  onViewChange() {
+    if (this.claims.length === 0 || this.edges.length === 0) return;
+    
+    if (this.viewType === 'force') {
+      this.clearMatrix();
+      if (this.svg) {
+        this.updateGraph();
+      } else if (this.graphContainer) {
+        this.width = this.graphContainer.nativeElement.offsetWidth || 800;
+        this.height = this.graphContainer.nativeElement.offsetHeight || 600;
+        this.initGraph();
+      }
+    } else if (this.viewType === 'matrix') {
+      this.clearGraph();
+      this.renderMatrix();
     }
   }
 
@@ -452,6 +659,183 @@ export class GraphViewComponent implements AfterViewInit, OnChanges {
         d.fx = null;
         d.fy = null;
       });
+  }
+
+  private clearMatrix() {
+    if (this.matrixContainer) {
+      this.matrixContainer.nativeElement.innerHTML = '';
+    }
+    if (this.matrixTooltip) {
+      this.matrixTooltip.remove();
+      this.matrixTooltip = null;
+    }
+  }
+
+  private renderMatrix() {
+    if (!this.matrixContainer || this.claims.length === 0 || this.edges.length === 0) return;
+
+    // Clear existing matrix
+    this.clearMatrix();
+
+    // Create edge map for quick lookup
+    const edgeMap = new Map<string, { type: string; weight: number }[]>();
+    
+    this.edges.forEach(edge => {
+      const key = `${edge.from}::${edge.to}`;
+      if (!edgeMap.has(key)) {
+        edgeMap.set(key, []);
+      }
+      edgeMap.get(key)!.push({ type: edge.type, weight: edge.weight });
+    });
+
+    // Create table
+    const table = document.createElement('table');
+    table.className = 'matrix-table';
+
+    // Create header row
+    const headerRow = document.createElement('tr');
+    const emptyHeader = document.createElement('th');
+    headerRow.appendChild(emptyHeader);
+
+    this.claims.forEach(claim => {
+      const th = document.createElement('th');
+      th.textContent = claim.id;
+      th.title = claim.text.length > 100 ? claim.text.substring(0, 100) + '...' : claim.text;
+      headerRow.appendChild(th);
+    });
+    table.appendChild(headerRow);
+
+    // Create data rows
+    this.claims.forEach((claimRow, rowIndex) => {
+      const tr = document.createElement('tr');
+      
+      // Row header (claim ID)
+      const rowHeader = document.createElement('td');
+      rowHeader.textContent = claimRow.id;
+      rowHeader.title = claimRow.text.length > 100 ? claimRow.text.substring(0, 100) + '...' : claimRow.text;
+      tr.appendChild(rowHeader);
+
+      // Data cells
+      this.claims.forEach((claimCol, colIndex) => {
+        const td = document.createElement('td');
+        
+        if (rowIndex === colIndex) {
+          // Diagonal - show claim status
+          td.style.background = claimRow.grounded ? '#e8f5e9' : '#ffebee';
+          td.style.fontWeight = 'bold';
+          td.textContent = claimRow.grounded ? '✓' : '✗';
+          td.title = `Claim ${claimRow.id}: ${claimRow.grounded ? 'Grounded' : 'Ungrounded'}`;
+        } else {
+          // Check for edges
+          const key = `${claimRow.id}::${claimCol.id}`;
+          const reverseKey = `${claimCol.id}::${claimRow.id}`;
+          const edges = edgeMap.get(key) || edgeMap.get(reverseKey) || [];
+
+          if (edges.length > 0) {
+            const cell = document.createElement('div');
+            cell.className = 'matrix-cell';
+            
+            // Determine cell styling based on edge types
+            const hasSupport = edges.some(e => e.type === 'support');
+            const hasContradiction = edges.some(e => e.type === 'contradiction');
+            const hasGrounding = edges.some(e => e.type === 'grounding');
+            
+            if (edges.length > 1) {
+              cell.classList.add('multiple');
+            } else if (hasSupport) {
+              cell.classList.add('support');
+            } else if (hasContradiction) {
+              cell.classList.add('contradiction');
+            } else if (hasGrounding) {
+              cell.classList.add('grounding');
+            }
+
+            // Show weight if single edge
+            if (edges.length === 1) {
+              const weightSpan = document.createElement('span');
+              weightSpan.className = 'matrix-cell-weight';
+              weightSpan.textContent = edges[0].weight.toFixed(2);
+              cell.appendChild(weightSpan);
+            } else {
+              // Show count for multiple edges
+              const countSpan = document.createElement('span');
+              countSpan.className = 'matrix-cell-weight';
+              countSpan.textContent = edges.length.toString();
+              cell.appendChild(countSpan);
+            }
+
+            // Tooltip content
+            const tooltipText = edges.map(e => 
+              `${e.type} (${e.weight.toFixed(2)})`
+            ).join(', ');
+            
+            cell.title = `${claimRow.id} → ${claimCol.id}: ${tooltipText}`;
+            
+            // Add hover tooltip
+            cell.addEventListener('mouseenter', (e) => this.showMatrixTooltip(e, claimRow, claimCol, edges));
+            cell.addEventListener('mouseleave', () => this.hideMatrixTooltip());
+            cell.addEventListener('mousemove', (e) => this.updateMatrixTooltipPosition(e));
+
+            td.appendChild(cell);
+          }
+        }
+
+        tr.appendChild(td);
+      });
+
+      table.appendChild(tr);
+    });
+
+    this.matrixContainer.nativeElement.appendChild(table);
+  }
+
+  private showMatrixTooltip(event: MouseEvent, claimRow: ClaimWithMetadata, claimCol: ClaimWithMetadata, edges: { type: string; weight: number }[]) {
+    if (!this.matrixTooltip) {
+      this.matrixTooltip = document.createElement('div');
+      this.matrixTooltip.className = 'matrix-tooltip';
+      document.body.appendChild(this.matrixTooltip);
+    }
+
+    const edgeDetails = edges.map(e => 
+      `<strong>${e.type}</strong>: ${e.weight.toFixed(3)}`
+    ).join('<br>');
+
+    this.matrixTooltip.innerHTML = `
+      <div><strong>${claimRow.id}</strong> → <strong>${claimCol.id}</strong></div>
+      <div style="margin-top: 4px;">${edgeDetails}</div>
+      <div style="margin-top: 8px; font-size: 10px; opacity: 0.8;">
+        <div><strong>From:</strong> ${claimRow.text.substring(0, 80)}${claimRow.text.length > 80 ? '...' : ''}</div>
+        <div style="margin-top: 4px;"><strong>To:</strong> ${claimCol.text.substring(0, 80)}${claimCol.text.length > 80 ? '...' : ''}</div>
+      </div>
+    `;
+
+    this.updateMatrixTooltipPosition(event);
+    this.matrixTooltip.style.display = 'block';
+  }
+
+  private updateMatrixTooltipPosition(event: MouseEvent) {
+    if (!this.matrixTooltip) return;
+    
+    const x = event.clientX + 10;
+    const y = event.clientY + 10;
+    
+    this.matrixTooltip.style.left = `${x}px`;
+    this.matrixTooltip.style.top = `${y}px`;
+  }
+
+  private hideMatrixTooltip() {
+    if (this.matrixTooltip) {
+      this.matrixTooltip.style.display = 'none';
+    }
+  }
+
+  ngOnDestroy() {
+    this.clearGraph();
+    this.clearMatrix();
+    if (this.matrixTooltip) {
+      this.matrixTooltip.remove();
+      this.matrixTooltip = null;
+    }
   }
 }
 
