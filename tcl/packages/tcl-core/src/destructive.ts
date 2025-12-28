@@ -71,19 +71,22 @@ export function computeDestructiveClaims(args: {
   
   for (const claim of claims) {
     if (claim.confidenceMetrics) {
-      // Use actual confidence metrics from the claim
-      confidenceOverall.set(claim.id, claim.confidenceMetrics.overall ?? 0.5);
-      groundingScore.set(claim.id, claim.confidenceMetrics.groundingScore ?? 0.0);
+      // Use actual confidence metrics from the claim (only if computed)
+      if (claim.confidenceMetrics.overall !== undefined) {
+        confidenceOverall.set(claim.id, claim.confidenceMetrics.overall);
+      }
+      if (claim.confidenceMetrics.groundingScore !== undefined) {
+        groundingScore.set(claim.id, claim.confidenceMetrics.groundingScore);
+      }
     } else {
-      // Fallback: compute from grounding edges
+      // Compute from actual grounding edges (real data, not heuristic)
       const claimGrounding = grounding.filter(g => g.claimId === claim.id);
-      const maxGrounding = claimGrounding.length > 0
-        ? Math.max(...claimGrounding.map(g => g.weight))
-        : 0.0;
-      groundingScore.set(claim.id, maxGrounding);
-      // Use a more nuanced heuristic based on claim text length and content
-      const baseConfidence = Math.min(0.75, Math.max(0.25, claim.text.length / 200)); // Scale by length
-      confidenceOverall.set(claim.id, maxGrounding > 0 ? Math.max(maxGrounding * 0.7, baseConfidence) : baseConfidence);
+      if (claimGrounding.length > 0) {
+        const maxGrounding = Math.max(...claimGrounding.map(g => g.weight));
+        groundingScore.set(claim.id, maxGrounding);
+        // Only set confidence if we have grounding data
+        // Don't use text length heuristics - that's fake data
+      }
     }
   }
 

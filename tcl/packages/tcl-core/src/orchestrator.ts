@@ -343,26 +343,16 @@ async function validateOnce(input: ValidateInput, adapter?: LLMAdapter, startTim
         console.warn("⚠️ Spectral enabled but no spectralServiceUrl/TCL_SPECTRAL_URL configured. Skipping Spectral analysis.");
         console.warn("Please set TCL_SPECTRAL_URL environment variable in Railway.");
         spectral = {
-          coherenceScore: 50,
-          contradictionEnergy: 0,
-          supportEnergy: 0,
-          circularityScore: 0,
-          spectralGap: 0,
           spectralSkipped: true,
           debugReason: "no_spectral_url_configured"
-        };
+        } as any;
         coherenceScore = null;
       } else if (totalEdges === 0) {
         console.warn("⚠️ Spectral enabled but no edges available. Skipping Spectral analysis.");
         spectral = {
-          coherenceScore: 50,
-          contradictionEnergy: 0,
-          supportEnergy: 0,
-          circularityScore: 0,
-          spectralGap: 0,
           spectralSkipped: true,
           debugReason: "no_edges_for_spectral"
-        };
+        } as any;
         coherenceScore = null;
       } else {
         try {
@@ -418,14 +408,9 @@ async function validateOnce(input: ValidateInput, adapter?: LLMAdapter, startTim
           console.error("Error stack:", error?.stack);
           // Continue without Spectral - don't fail the entire validation
           spectral = {
-            coherenceScore: 50,
-            contradictionEnergy: 0,
-            supportEnergy: 0,
-            circularityScore: 0,
-            spectralGap: 0,
             spectralSkipped: true,
             debugReason: `spectral_service_error: ${error?.message || 'unknown'}`
-          };
+          } as any;
           coherenceScore = null;
         }
       }
@@ -434,17 +419,23 @@ async function validateOnce(input: ValidateInput, adapter?: LLMAdapter, startTim
     }
 
     // 6) scores - ensure all scores are valid numbers in 0-100 range
-    // Make scores honest: if no pairs were scored, consistency is unknown
-    const truthScore = Math.max(0, Math.min(100, Math.round(evidenceRes.truthScore || 0)));
+    // Only compute from real data - no fallbacks
+    const truthScore = evidenceRes.truthScore !== undefined 
+      ? Math.max(0, Math.min(100, Math.round(evidenceRes.truthScore)))
+      : null; // null if not computed
     const pairsScored = graph.debug?.pairsScored || 0;
-    const finalConsistencyScore = pairsScored > 0 
-      ? Math.max(0, Math.min(100, Math.round(consistencyScore || 0)))
-      : 50; // Default to 50 if no pairs scored (unknown)
+    const finalConsistencyScore = pairsScored > 0 && consistencyScore !== undefined
+      ? Math.max(0, Math.min(100, Math.round(consistencyScore)))
+      : null; // null if no pairs scored (unknown)
     const finalCoherenceScore = coherenceScore !== null 
       ? Math.max(0, Math.min(100, Math.round(coherenceScore)))
       : null; // null if Spectral skipped or failed
-    const overall = blendScores(truthScore, finalConsistencyScore, finalCoherenceScore ?? 50);
-    const refusal = shouldRefuse(overall, truthScore, finalConsistencyScore, options?.thresholds);
+    const overall = blendScores(
+      truthScore ?? null, 
+      finalConsistencyScore ?? null, 
+      finalCoherenceScore
+    );
+    const refusal = shouldRefuse(overall, truthScore ?? null, finalConsistencyScore ?? null, options?.thresholds);
     
     console.log(`Final scores: truth=${truthScore}, consistency=${finalConsistencyScore}, coherence=${finalCoherenceScore}, overall=${overall}, refusal=${refusal}`);
 
@@ -471,7 +462,7 @@ async function validateOnce(input: ValidateInput, adapter?: LLMAdapter, startTim
         const metrics = confidenceMetrics.get(claim.id);
         return {
           ...claim,
-          confidenceMetrics: metrics
+          confidenceMetrics: metrics || undefined // Only include if computed, no fallback
         };
       });
     }
@@ -583,7 +574,7 @@ export async function validate(input: ValidateInput): Promise<ValidateOutput> {
     const needsRepair =
       repairEnabled &&
       failingClaimIds.length > 0 &&
-      (first.refusal || first.scores.truth < (input.options?.thresholds?.truth ?? 60));
+      (first.refusal || (first.scores.truth !== null && first.scores.truth < (input.options?.thresholds?.truth ?? 60)));
 
     if (!needsRepair) return first;
 

@@ -111,10 +111,10 @@ export type TrajectorySegment = {
     endTurn: number;
     textPreview: string;
     scores: {
-        truth: number;
-        consistency: number;
+        truth: number | null;
+        consistency: number | null;
         coherence: number | null;
-        overall: number;
+        overall: number | null;
     };
     spectral?: {
         coherenceScore: number;
@@ -238,10 +238,10 @@ export type ValidateOutput = {
     answer: string;
     refusal: boolean;
     scores: {
-        truth: number;
-        consistency: number;
+        truth: number | null;
+        consistency: number | null;
         coherence: number | null;
-        overall: number;
+        overall: number | null;
     };
     scorerId?: string;
     latency?: number;

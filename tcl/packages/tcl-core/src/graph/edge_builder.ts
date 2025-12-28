@@ -477,6 +477,16 @@ export async function buildClaimGraph(
     }
   }
   const finalPairs = dedupedPairs.slice(0, maxPairs);
+  
+  console.log(`📊 Pair generation: ${candPairs.length} candidates → ${dedupedPairs.length} deduped → ${finalPairs.length} final pairs (maxPairs=${maxPairs})`);
+  
+  if (finalPairs.length === 0 && n > 1) {
+    console.error(`❌ ERROR: No pairs generated for ${n} claims! This will result in an empty graph.`);
+    console.error(`   - candPairs.length: ${candPairs.length}`);
+    console.error(`   - dedupedPairs.length: ${dedupedPairs.length}`);
+    console.error(`   - maxPairs: ${maxPairs}`);
+    console.error(`   - useANN: ${useANN}`);
+  }
 
   // -----------------------------
   // Step B: Always run claim↔claim NLI scoring (even without sources)

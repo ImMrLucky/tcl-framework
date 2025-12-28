@@ -112,7 +112,7 @@ export type TrajectorySegment = {
   startTurn: number;
   endTurn: number;
   textPreview: string;
-  scores: { truth: number; consistency: number; coherence: number | null; overall: number };
+  scores: { truth: number | null; consistency: number | null; coherence: number | null; overall: number | null };
   spectral?: {
     coherenceScore: number;
     contradictionEnergy: number;
@@ -230,7 +230,7 @@ export type GraphDebugInfo = {
 export type ValidateOutput = {
   answer: string;
   refusal: boolean;
-  scores: { truth: number; consistency: number; coherence: number | null; overall: number };
+  scores: { truth: number | null; consistency: number | null; coherence: number | null; overall: number | null };
   scorerId?: string; // ID of the NLI scorer used (e.g., "transformers-deberta-v3-base", "token-heuristic-v1")
   latency?: number; // Request latency in milliseconds
   cacheHitRate?: number; // Cache hit rate percentage (0-100)
