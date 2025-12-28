@@ -9,7 +9,9 @@ export class TransformersNliScorer {
     modelName;
     cacheDir;
     constructor(cfg) {
-        this.modelName = cfg.modelName || "Xenova/deberta-v3-base";
+        // Use a model specifically trained for NLI (Natural Language Inference)
+        // roberta-base-mnli is trained on MultiNLI dataset and works well for entailment/contradiction
+        this.modelName = cfg.modelName || "Xenova/roberta-base-mnli";
         this.cacheDir = cfg.cacheDir || ".tcl_models";
         this.id = `transformers-${this.modelName.split("/").pop()}`;
         // Bind methods to preserve 'this' context
@@ -62,13 +64,33 @@ export class TransformersNliScorer {
                 else {
                     return { key, score: 0.0 };
                 }
-                // Format input for NLI
-                const input = `${a} [SEP] ${b}`;
+                // Format input for NLI model
+                // For roberta-base-mnli and similar NLI models, use premise/hypothesis format
+                let input;
+                if (task === "entailment") {
+                    // Premise: a, Hypothesis: b
+                    input = `${a} ${b}`;
+                }
+                else if (task === "contradiction") {
+                    // Two statements to check for contradiction
+                    input = `${a} ${b}`;
+                }
+                else {
+                    // Grounding: claim and source
+                    input = `${a} ${b}`;
+                }
                 // Run inference using the loaded model
                 const result = await model(input, labels);
-                // Extract score for the relevant label
-                const labelIndex = result.labels.indexOf(labels[0]);
-                const score = result.scores[labelIndex] || 0.0;
+                // Extract score for the relevant label (first label in array)
+                // Result format: { labels: string[], scores: number[] }
+                const labelIndex = result.labels?.indexOf(labels[0]) ?? -1;
+                const score = labelIndex >= 0 && result.scores?.[labelIndex] !== undefined
+                    ? result.scores[labelIndex]
+                    : 0.0;
+                // Debug logging for troubleshooting (log first score of each batch)
+                if (pairs.indexOf(pair) === 0) {
+                    console.log(`[TransformersNliScorer] ${task} sample: "${a.substring(0, 50)}..." -> "${b.substring(0, 50)}..." | score=${score.toFixed(3)}`);
+                }
                 return { key, score: Math.max(0, Math.min(1, score)) };
             }
             catch (error) {
