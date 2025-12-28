@@ -118,6 +118,16 @@ async function validateOnce(input: ValidateInput, adapter?: LLMAdapter, startTim
     try {
       console.log("Building claim graph...");
       console.log(`Using scorer: ${scorer.id}, Claims: ${evidenceRes.claims.length}, Sources: ${sources?.length || 0}`);
+      
+      // Detect if this is a call transcript (conversational text)
+      // Call transcripts have multiple speakers, questions, and conversational patterns
+      const isCallTranscript = !answer || answer.trim().length === 0;
+      const hasConversationalPatterns = question.includes('Agent:') || question.includes('Customer:') || 
+                                       question.includes('Agent:') || question.includes('Customer:') ||
+                                       (question.split('?').length > 3); // Multiple questions suggest conversation
+      
+      console.log(`Text type: ${isCallTranscript ? 'Call transcript' : 'Answer text'}, Conversational patterns: ${hasConversationalPatterns}`);
+      
       // Use appropriate thresholds based on scorer type
       // TokenHeuristicScorer: lower thresholds (less accurate)
       // TransformersNliScorer: medium thresholds (local model, decent accuracy)
@@ -129,25 +139,33 @@ async function validateOnce(input: ValidateInput, adapter?: LLMAdapter, startTim
       let defaultContradictionThreshold: number;
       let defaultGroundingThreshold: number;
       
+      // For call transcripts, use lower thresholds because support relationships are more implicit
+      const transcriptMultiplier = (isCallTranscript || hasConversationalPatterns) ? 0.85 : 1.0;
+      
       if (isHeuristic) {
         // Token heuristic: very low thresholds
-        defaultSupportThreshold = 0.40;
-        defaultContradictionThreshold = 0.50;
-        defaultGroundingThreshold = 0.40;
+        defaultSupportThreshold = 0.40 * transcriptMultiplier;
+        defaultContradictionThreshold = 0.50 * transcriptMultiplier;
+        defaultGroundingThreshold = 0.40 * transcriptMultiplier;
       } else if (isLocalTransformers) {
         // Local Transformers model: medium thresholds (balance between accuracy and coverage)
-        defaultSupportThreshold = 0.45;
-        defaultContradictionThreshold = 0.55;
-        defaultGroundingThreshold = 0.45;
+        // Lower for transcripts because conversational support is harder to detect
+        defaultSupportThreshold = (isCallTranscript || hasConversationalPatterns) ? 0.35 : 0.45;
+        defaultContradictionThreshold = (isCallTranscript || hasConversationalPatterns) ? 0.45 : 0.55;
+        defaultGroundingThreshold = (isCallTranscript || hasConversationalPatterns) ? 0.35 : 0.45;
       } else {
         // HTTP NLI or Mistral API: higher thresholds (more accurate models)
-        defaultSupportThreshold = 0.58;
-        defaultContradictionThreshold = 0.70;
-        defaultGroundingThreshold = 0.60;
+        defaultSupportThreshold = 0.58 * transcriptMultiplier;
+        defaultContradictionThreshold = 0.70 * transcriptMultiplier;
+        defaultGroundingThreshold = 0.60 * transcriptMultiplier;
       }
       
       console.log(`Building graph with ${evidenceRes.claims.length} claims, scorer: ${scorer.id}`);
       console.log(`Thresholds: support=${options?.supportThreshold ?? defaultSupportThreshold}, contradiction=${options?.contradictionThreshold ?? defaultContradictionThreshold}, grounding=${options?.groundingThreshold ?? defaultGroundingThreshold}`);
+      if (isCallTranscript || hasConversationalPatterns) {
+        console.log(`📞 Call transcript detected - using lower thresholds for conversational text`);
+        console.log(`   Support threshold lowered to: ${options?.supportThreshold ?? defaultSupportThreshold} (from 0.45)`);
+      }
       
       graph = await buildClaimGraph(evidenceRes.claims, sources, {
         scorer,
@@ -173,6 +191,10 @@ async function validateOnce(input: ValidateInput, adapter?: LLMAdapter, startTim
         console.warn("  - Thresholds are too high (try lowering support/contradiction thresholds)");
         console.warn("  - Scorer is not finding relationships (check scorer logs above for actual scores)");
         console.warn("  - Claims are too dissimilar");
+        if (isCallTranscript || hasConversationalPatterns) {
+          console.warn("  - 📞 Call transcript detected - conversational text may have implicit support relationships");
+          console.warn("  - 💡 Try lowering support threshold to 0.30-0.35 for call transcripts");
+        }
         console.warn(`  - Current thresholds: support=${options?.supportThreshold ?? defaultSupportThreshold}, contradiction=${options?.contradictionThreshold ?? defaultContradictionThreshold}`);
         console.warn(`  - Scorer: ${scorer.id}`);
         console.warn("  - Check logs above for '[TransformersNliScorer]' to see actual scores being returned");
