@@ -14,10 +14,10 @@ export class TransformersNliScorer implements SemanticScorer {
   private cacheDir: string;
 
   constructor(cfg: { modelName?: string; cacheDir?: string }) {
-    // Default to deberta-v3-base (was working before)
+    // Default to roberta-large-mnli (best for NLI tasks, specifically trained for MNLI)
     // Can override with TCL_LOCAL_NLI_MODEL env var or pass modelName
-    // Note: roberta-base-mnli is NLI-specific but may need different pipeline/format
-    this.modelName = cfg.modelName || "Xenova/deberta-v3-base";
+    // roberta-large-mnli is trained on Multi-Genre Natural Language Inference dataset
+    this.modelName = cfg.modelName || process.env.TCL_LOCAL_NLI_MODEL || "Xenova/roberta-large-mnli";
     this.cacheDir = cfg.cacheDir || ".tcl_models";
     this.id = `transformers-${this.modelName.split("/").pop()}`;
     
@@ -38,11 +38,14 @@ export class TransformersNliScorer implements SemanticScorer {
       
       console.log(`Loading NLI model: ${this.modelName} (this may take a minute on first run)...`);
       
-      // For NLI models like roberta-base-mnli, we can use zero-shot-classification
-      // which works well for entailment/contradiction tasks
-      // Alternative: could use "text-classification" but zero-shot is more flexible
+      // For MNLI models (like roberta-large-mnli), use text-classification pipeline
+      // MNLI models are specifically trained for Natural Language Inference tasks
+      // They expect premise-hypothesis pairs and return entailment/contradiction/neutral
+      const isMnliModel = this.modelName.includes("mnli");
+      const pipelineType = isMnliModel ? "text-classification" : "zero-shot-classification";
+      
       this.model = await pipeline(
-        "zero-shot-classification",
+        pipelineType,
         this.modelName,
         {
           quantized: true, // Use quantized model (smaller, faster)
@@ -82,36 +85,64 @@ export class TransformersNliScorer implements SemanticScorer {
             return { key, score: 0.0 };
           }
 
-          // Format input for zero-shot-classification
-          // deberta-v3-base works well with simple concatenation
-          let input: string;
-          if (task === "entailment") {
-            // For entailment: premise and hypothesis
-            input = `${a} ${b}`;
-          } else if (task === "contradiction") {
-            // For contradiction: two statements
-            input = `${a} ${b}`;
+          // Format input based on model type
+          const isMnliModel = this.modelName.includes("mnli");
+          let result: any;
+          
+          if (isMnliModel) {
+            // For MNLI models, use premise-hypothesis format
+            // MNLI models with text-classification expect: [premise, hypothesis] as array
+            // The model will return ENTAILMENT, CONTRADICTION, or NEUTRAL
+            result = await model([a, b]);
           } else {
-            // For grounding: claim and source
-            input = `${a} ${b}`;
+            // For zero-shot models, use formatted text with labels
+            let input: string;
+            if (task === "entailment") {
+              input = `${a}. Therefore, ${b}`;
+            } else if (task === "contradiction") {
+              input = `${a}. However, ${b} contradicts this.`;
+            } else {
+              input = `${a}. This is supported by: ${b}`;
+            }
+            result = await model(input, labels);
           }
           
-          // Run inference using the loaded model
-          const result = await model(input, labels);
-          
-          // Extract score for the relevant label (first label in array)
-          // Result format: { labels: string[], scores: number[] }
-          const labelIndex = result.labels?.indexOf(labels[0]) ?? -1;
-          const score = labelIndex >= 0 && result.scores?.[labelIndex] !== undefined
-            ? result.scores[labelIndex]
-            : 0.0;
+          // Extract score based on result format
+          let score = 0.0;
+          if (isMnliModel) {
+            // MNLI text-classification returns: { label: "ENTAILMENT"|"CONTRADICTION"|"NEUTRAL", score: number }
+            // Map to our task
+            const label = result.label?.toUpperCase() || "";
+            if (task === "entailment" && label === "ENTAILMENT") {
+              score = result.score || 0.0;
+            } else if (task === "contradiction" && label === "CONTRADICTION") {
+              score = result.score || 0.0;
+            } else if (task === "grounding") {
+              // For grounding, entailment indicates strong support, neutral indicates weak support
+              if (label === "ENTAILMENT") {
+                score = result.score || 0.0;
+              } else if (label === "NEUTRAL") {
+                score = (result.score || 0.0) * 0.5; // Neutral is weaker support
+              }
+            }
+          } else {
+            // Zero-shot returns: { labels: string[], scores: number[] }
+            const labelIndex = result.labels?.indexOf(labels[0]) ?? -1;
+            score = labelIndex >= 0 && result.scores?.[labelIndex] !== undefined
+              ? result.scores[labelIndex]
+              : 0.0;
+          }
           
           // Enhanced debug logging - log more samples to see what's happening
           const pairIndex = pairs.indexOf(pair);
           if (pairIndex < 3) { // Log first 3 scores for debugging
-            console.log(`[TransformersNliScorer] ${task} #${pairIndex}: "${a.substring(0, 40)}..." -> "${b.substring(0, 40)}..." | score=${score.toFixed(3)} | label=${labels[0]}`);
-            if (result.labels && result.scores) {
-              console.log(`  All scores: ${result.labels.map((l: string, i: number) => `${l}=${result.scores[i].toFixed(3)}`).join(', ')}`);
+            if (isMnliModel) {
+              console.log(`[TransformersNliScorer] ${task} #${pairIndex}: "${a.substring(0, 40)}..." -> "${b.substring(0, 40)}..." | score=${score.toFixed(3)} | MNLI label=${result.label || 'N/A'}`);
+            } else {
+              console.log(`[TransformersNliScorer] ${task} #${pairIndex}: "${a.substring(0, 40)}..." -> "${b.substring(0, 40)}..." | score=${score.toFixed(3)} | label=${labels[0]}`);
+              if (result.labels && result.scores) {
+                console.log(`  All scores: ${result.labels.map((l: string, i: number) => `${l}=${result.scores[i].toFixed(3)}`).join(', ')}`);
+              }
             }
           }
 
