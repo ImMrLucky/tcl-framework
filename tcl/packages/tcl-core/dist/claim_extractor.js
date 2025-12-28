@@ -35,8 +35,11 @@ function isTranscript(text) {
 }
 export function extractClaims(text) {
     // Check if this is a transcript
-    if (isTranscript(text)) {
+    const isTrans = isTranscript(text);
+    console.log(`📝 Extracting claims: isTranscript=${isTrans}, text length=${text.length}`);
+    if (isTrans) {
         const turns = splitTurns(text);
+        console.log(`  Found ${turns.length} turns`);
         const claims = [];
         let claimIdx = 1;
         for (const turn of turns) {
@@ -61,6 +64,11 @@ export function extractClaims(text) {
                     }
                 });
             }
+        }
+        console.log(`  Extracted ${claims.length} claims from transcript`);
+        if (claims.length > 0) {
+            console.log(`  First claim: "${claims[0].text.substring(0, 60)}..." (speaker: ${claims[0].meta?.speaker})`);
+            console.log(`  Last claim: "${claims[claims.length - 1].text.substring(0, 60)}..." (speaker: ${claims[claims.length - 1].meta?.speaker})`);
         }
         return claims;
     }

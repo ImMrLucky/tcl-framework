@@ -204,6 +204,12 @@ export class TransformersNliScorer implements SemanticScorer {
               } else if (label === "NEUTRAL") {
                 score = prob * 0.5; // Neutral is weaker support
               }
+            } else {
+              // Label doesn't match task - score is 0.0 (correct behavior)
+              // But log it for debugging
+              if (pairs.indexOf(pair) < 3) {
+                console.log(`  [MNLI] Task=${task} but label=${label}, prob=${prob.toFixed(3)} → score=0.0`);
+              }
             }
           } else {
             // Zero-shot returns: { labels: string[], scores: number[] }
@@ -215,18 +221,25 @@ export class TransformersNliScorer implements SemanticScorer {
           
           // Enhanced debug logging - log more samples to see what's happening
           const pairIndex = pairs.indexOf(pair);
-          if (pairIndex < 3) { // Log first 3 scores for debugging
+          if (pairIndex < 5 || Math.random() < 0.1) { // Log first 5 or 10% randomly
             if (isMnliModel) {
-              console.log(`[TransformersNliScorer] ${task} #${pairIndex}: "${a.substring(0, 40)}..." -> "${b.substring(0, 40)}..." | score=${score.toFixed(3)} | MNLI label=${result.label || 'N/A'}`);
+              const logLabel = (result as any).label || 'N/A';
+              const logProb = (result as any).score || 0.0;
+              console.log(`[TransformersNliScorer] ${task} #${pairIndex}: "${a.substring(0, 40)}..." -> "${b.substring(0, 40)}..." | score=${score.toFixed(3)} | label=${logLabel} | prob=${logProb.toFixed(3)}`);
             } else {
-              console.log(`[TransformersNliScorer] ${task} #${pairIndex}: "${a.substring(0, 40)}..." -> "${b.substring(0, 40)}..." | score=${score.toFixed(3)} | label=${labels[0]}`);
+              console.log(`[TransformersNliScorer] ${task} #${pairIndex}: "${a.substring(0, 40)}..." -> "${b.substring(0, 40)}..." | score=${score.toFixed(3)}`);
               if (result.labels && result.scores) {
                 console.log(`  All scores: ${result.labels.map((l: string, i: number) => `${l}=${result.scores[i].toFixed(3)}`).join(', ')}`);
               }
             }
           }
 
-          return { key, score: Math.max(0, Math.min(1, score)) };
+          const finalScore = Math.max(0, Math.min(1, score));
+          if (pairIndex < 3 && finalScore === 0.0 && task !== "grounding") {
+            console.warn(`  ⚠️ Zero score for ${task} - this pair will not create an edge`);
+          }
+          
+          return { key, score: finalScore };
         } catch (error: any) {
           console.error(`Error scoring pair ${key}:`, error);
           return { key, score: 0.0 };

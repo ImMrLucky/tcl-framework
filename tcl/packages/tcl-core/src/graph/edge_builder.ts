@@ -504,24 +504,80 @@ export async function buildClaimGraph(
 
   // Batch score contradictions + entailments with cache
   const pairsToScore: BatchPair[] = [];
+  let cacheHits = 0;
   for (const { i, j } of finalPairs) {
     const A = claims[i].text;
     const B = claims[j].text;
 
     const kCon = cache.makeKey("con", A, B);
-    if (!cache.get(kCon)) pairsToScore.push({ task: "contradiction", a: A, b: B, key: kCon });
+    if (!cache.get(kCon)) {
+      pairsToScore.push({ task: "contradiction", a: A, b: B, key: kCon });
+    } else {
+      cacheHits++;
+    }
 
     const kEnt = cache.makeKey("ent", A, B);
-    if (!cache.get(kEnt)) pairsToScore.push({ task: "entailment", a: A, b: B, key: kEnt });
+    if (!cache.get(kEnt)) {
+      pairsToScore.push({ task: "entailment", a: A, b: B, key: kEnt });
+    } else {
+      cacheHits++;
+    }
   }
+  
+  console.log(`🎯 Pair scoring: ${finalPairs.length} pairs → ${pairsToScore.length} need scoring, ${cacheHits} cache hits`);
 
   // Check if scorer has scoreBatch method
   if (scorer && 'scoreBatch' in scorer && typeof (scorer as any).scoreBatch === 'function' && pairsToScore.length) {
+    console.log(`  Running batch scoring with ${scorer.id} (${pairsToScore.length} pairs, batch size: ${batchSize})...`);
     const scoreBatchFn = (scorer as any).scoreBatch as (pairs: BatchPair[]) => Promise<BatchScore[]>;
-    await runBatches(pairsToScore, batchSize, async (batch) => {
-      const out = await scoreBatchFn(batch);
-      for (const r of out) cache.set(r.key, r.score, r.quote);
-    });
+    const startTime = Date.now();
+    let batchScoresStored = 0;
+    let batchErrors = 0;
+    try {
+      await runBatches(pairsToScore, batchSize, async (batch) => {
+        try {
+          const out = await scoreBatchFn(batch);
+          if (!out || out.length === 0) {
+            console.error(`  ❌ Batch scoring returned empty results for batch of ${batch.length} pairs`);
+            return;
+          }
+          for (const r of out) {
+            if (!r || r.key === undefined || r.score === undefined) {
+              console.error(`  ❌ Invalid batch score result:`, r);
+              batchErrors++;
+              continue;
+            }
+            cache.set(r.key, r.score, r.quote);
+            batchScoresStored++;
+            // Verify cache storage worked
+            const verify = cache.get(r.key);
+            if (!verify) {
+              console.error(`  ❌ Cache storage failed for key ${r.key.substring(0, 20)}...`);
+            }
+            // Log first few scores to verify they're different
+            if (batchScoresStored <= 5) {
+              const pair = pairsToScore.find(p => p.key === r.key);
+              console.log(`    Batch scored [${pair?.task}]: score=${r.score.toFixed(3)}, key=${r.key.substring(0, 20)}...`);
+            }
+          }
+        } catch (batchError: any) {
+          console.error(`  ❌ Error in batch scoring:`, batchError);
+          batchErrors++;
+        }
+      });
+      const elapsed = Date.now() - startTime;
+      console.log(`  ✅ Batch scoring complete: ${batchScoresStored} scores stored, ${batchErrors} errors, ${elapsed}ms`);
+      if (batchScoresStored === 0 && pairsToScore.length > 0) {
+        console.error(`  ❌ CRITICAL: Batch scoring stored 0 scores but ${pairsToScore.length} pairs were sent!`);
+      }
+    } catch (error: any) {
+      console.error(`  ❌ Fatal error in batch scoring:`, error);
+      throw error;
+    }
+  } else if (pairsToScore.length === 0) {
+    console.log(`  ℹ️ All pairs already in cache (no new scoring needed)`);
+  } else {
+    console.warn(`  ⚠️ Scorer does not support batch scoring, will score individually (slow)`);
   }
 
   // Score all pairs and build edges
@@ -536,11 +592,11 @@ export async function buildClaimGraph(
     try {
       if (conHit) {
         con = conHit.v;
-        console.log(`  [CACHE HIT] Contradiction ${A.id} vs ${B.id}: ${con.toFixed(3)}`);
       } else {
+        // Cache miss - should have been scored in batch, but fallback to individual
+        console.warn(`  ⚠️ Cache miss for contradiction ${A.id} vs ${B.id} - scoring individually (key: ${kCon.substring(0, 20)}...)`);
         con = await scorer.contradiction(A.text, B.text);
         if (cacheEnabled) cache.set(kCon, con);
-        console.log(`  [SCORED] Contradiction ${A.id} vs ${B.id}: ${con.toFixed(3)} (threshold: ${tCon.toFixed(3)})`);
       }
     } catch (error: any) {
       console.error(`❌ Error scoring contradiction for ${A.id} vs ${B.id}:`, error);
@@ -551,9 +607,15 @@ export async function buildClaimGraph(
     if (con >= tCon) {
       contradictions.push({ claimA: A.id, claimB: B.id, weight: clamp01(con) });
       contradictionsAdded++;
-      console.log(`  ✅ Added contradiction edge: ${A.id} → ${B.id} (weight: ${con.toFixed(3)})`);
+      if (contradictionsAdded <= 5) {
+        console.log(`  ✅ Contradiction: ${A.id} → ${B.id} (${con.toFixed(3)} >= ${tCon.toFixed(3)})`);
+        console.log(`     "${A.text.substring(0, 60)}..." vs "${B.text.substring(0, 60)}..."`);
+      }
     } else {
       filteredBelowContradiction++;
+      if (pairsScored <= 3) {
+        console.log(`  ❌ Below threshold: ${A.id} vs ${B.id} contradiction = ${con.toFixed(3)} < ${tCon.toFixed(3)}`);
+      }
     }
 
     // Score entailment (support)
@@ -563,11 +625,11 @@ export async function buildClaimGraph(
     try {
       if (entHit) {
         ent = entHit.v;
-        console.log(`  [CACHE HIT] Entailment ${A.id} → ${B.id}: ${ent.toFixed(3)}`);
       } else {
+        // Cache miss - should have been scored in batch, but fallback to individual
+        console.warn(`  ⚠️ Cache miss for entailment ${A.id} → ${B.id} - scoring individually (key: ${kEnt.substring(0, 20)}...)`);
         ent = await scorer.entailment(A.text, B.text);
         if (cacheEnabled) cache.set(kEnt, ent);
-        console.log(`  [SCORED] Entailment ${A.id} → ${B.id}: ${ent.toFixed(3)} (threshold: ${tSup.toFixed(3)})`);
       }
     } catch (error: any) {
       console.error(`❌ Error scoring entailment for ${A.id} → ${B.id}:`, error);
@@ -577,9 +639,14 @@ export async function buildClaimGraph(
     if (ent >= tSup) {
       supports.push({ claimA: A.id, claimB: B.id, weight: clamp01(ent) });
       supportsAdded++;
-      console.log(`  ✅ Added support edge: ${A.id} → ${B.id} (weight: ${ent.toFixed(3)})`);
+      if (supportsAdded <= 5) {
+        console.log(`  ✅ Support: ${A.id} → ${B.id} (${ent.toFixed(3)} >= ${tSup.toFixed(3)})`);
+      }
     } else {
       filteredBelowSupport++;
+      if (pairsScored <= 3) {
+        console.log(`  ❌ Below threshold: ${A.id} → ${B.id} entailment = ${ent.toFixed(3)} < ${tSup.toFixed(3)}`);
+      }
     }
   }
   

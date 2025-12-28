@@ -77,12 +77,20 @@ async function validateOnce(input, adapter, startTime) {
         if (adapter) {
             const art = await adapter.extractArtifacts({ question, answer, sources });
             claims = art.claims;
+            console.log(`📋 Extracted ${claims.length} claims using adapter`);
         }
         else {
             // For call center QA: if answer is empty, extract claims from question (transcript)
             // For original QA: extract claims from answer
             const textToExtract = answer && answer.trim().length > 0 ? answer : question;
+            console.log(`📋 Extracting claims from ${answer && answer.trim().length > 0 ? 'answer' : 'question (transcript)'}, length=${textToExtract.length}`);
             claims = extractClaims(textToExtract);
+            console.log(`📋 Extracted ${claims.length} claims`);
+        }
+        if (claims.length === 0) {
+            console.error(`❌ ERROR: No claims extracted! This will cause an empty graph.`);
+            console.error(`  Question length: ${question.length}`);
+            console.error(`  Answer length: ${answer?.length || 0}`);
         }
         // 2) grounding (legacy MVP evidence check)
         const evidenceRes = attachEvidenceAndFindViolations(claims, sources);
