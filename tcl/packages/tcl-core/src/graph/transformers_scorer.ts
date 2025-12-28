@@ -14,9 +14,10 @@ export class TransformersNliScorer implements SemanticScorer {
   private cacheDir: string;
 
   constructor(cfg: { modelName?: string; cacheDir?: string }) {
-    // Use a model specifically trained for NLI (Natural Language Inference)
-    // roberta-base-mnli is trained on MultiNLI dataset and works well for entailment/contradiction
-    this.modelName = cfg.modelName || "Xenova/roberta-base-mnli";
+    // Default to deberta-v3-base (was working before)
+    // Can override with TCL_LOCAL_NLI_MODEL env var or pass modelName
+    // Note: roberta-base-mnli is NLI-specific but may need different pipeline/format
+    this.modelName = cfg.modelName || "Xenova/deberta-v3-base";
     this.cacheDir = cfg.cacheDir || ".tcl_models";
     this.id = `transformers-${this.modelName.split("/").pop()}`;
     
@@ -81,17 +82,17 @@ export class TransformersNliScorer implements SemanticScorer {
             return { key, score: 0.0 };
           }
 
-          // Format input for NLI model
-          // For roberta-base-mnli and similar NLI models, use premise/hypothesis format
+          // Format input for zero-shot-classification
+          // deberta-v3-base works well with simple concatenation
           let input: string;
           if (task === "entailment") {
-            // Premise: a, Hypothesis: b
+            // For entailment: premise and hypothesis
             input = `${a} ${b}`;
           } else if (task === "contradiction") {
-            // Two statements to check for contradiction
+            // For contradiction: two statements
             input = `${a} ${b}`;
           } else {
-            // Grounding: claim and source
+            // For grounding: claim and source
             input = `${a} ${b}`;
           }
           
@@ -105,9 +106,13 @@ export class TransformersNliScorer implements SemanticScorer {
             ? result.scores[labelIndex]
             : 0.0;
           
-          // Debug logging for troubleshooting (log first score of each batch)
-          if (pairs.indexOf(pair) === 0) {
-            console.log(`[TransformersNliScorer] ${task} sample: "${a.substring(0, 50)}..." -> "${b.substring(0, 50)}..." | score=${score.toFixed(3)}`);
+          // Enhanced debug logging - log more samples to see what's happening
+          const pairIndex = pairs.indexOf(pair);
+          if (pairIndex < 3) { // Log first 3 scores for debugging
+            console.log(`[TransformersNliScorer] ${task} #${pairIndex}: "${a.substring(0, 40)}..." -> "${b.substring(0, 40)}..." | score=${score.toFixed(3)} | label=${labels[0]}`);
+            if (result.labels && result.scores) {
+              console.log(`  All scores: ${result.labels.map((l: string, i: number) => `${l}=${result.scores[i].toFixed(3)}`).join(', ')}`);
+            }
           }
 
           return { key, score: Math.max(0, Math.min(1, score)) };

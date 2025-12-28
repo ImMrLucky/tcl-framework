@@ -329,6 +329,8 @@ export async function buildClaimGraph(claims, sources, opts = {}) {
                 cache.set(r.key, r.score, r.quote);
         });
     }
+    // Track score statistics for debugging
+    let scoreStats = { entailment: [], contradiction: [], total: 0 };
     for (const { i, j } of candPairs) {
         const A = claims[i];
         const B = claims[j];
@@ -337,6 +339,8 @@ export async function buildClaimGraph(claims, sources, opts = {}) {
         const con = conHit ? conHit.v : await scorer.contradiction(A.text, B.text);
         if (!conHit)
             cache.set(kCon, con);
+        scoreStats.contradiction.push(con);
+        scoreStats.total++;
         if (con >= tCon) {
             contradictions.push({ claimA: A.id, claimB: B.id, weight: clamp01(con) });
             continue;
@@ -346,8 +350,23 @@ export async function buildClaimGraph(claims, sources, opts = {}) {
         const ent = entHit ? entHit.v : await scorer.entailment(A.text, B.text);
         if (!entHit)
             cache.set(kEnt, ent);
+        scoreStats.entailment.push(ent);
         if (ent >= tSup)
             supports.push({ claimA: A.id, claimB: B.id, weight: clamp01(ent) });
+    }
+    // Log score statistics if no edges found
+    if (supports.length === 0 && contradictions.length === 0 && scoreStats.total > 0) {
+        const avgEnt = scoreStats.entailment.length > 0
+            ? scoreStats.entailment.reduce((a, b) => a + b, 0) / scoreStats.entailment.length
+            : 0;
+        const avgCon = scoreStats.contradiction.length > 0
+            ? scoreStats.contradiction.reduce((a, b) => a + b, 0) / scoreStats.contradiction.length
+            : 0;
+        const maxEnt = scoreStats.entailment.length > 0 ? Math.max(...scoreStats.entailment) : 0;
+        const maxCon = scoreStats.contradiction.length > 0 ? Math.max(...scoreStats.contradiction) : 0;
+        console.warn(`⚠️ Score statistics: avg_entailment=${avgEnt.toFixed(3)}, max_entailment=${maxEnt.toFixed(3)}, avg_contradiction=${avgCon.toFixed(3)}, max_contradiction=${maxCon.toFixed(3)}`);
+        console.warn(`   Thresholds: support=${tSup}, contradiction=${tCon}`);
+        console.warn(`   Max scores are ${maxEnt >= tSup ? 'above' : 'below'} support threshold, ${maxCon >= tCon ? 'above' : 'below'} contradiction threshold`);
     }
     // dedupe contradictions (ordered)
     const conMap = new Map();

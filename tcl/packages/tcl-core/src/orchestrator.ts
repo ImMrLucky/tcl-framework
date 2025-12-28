@@ -95,13 +95,13 @@ async function validateOnce(input: ValidateInput, adapter?: LLMAdapter, startTim
     } else if (useLocalNli) {
       // Priority 3: Local Transformers model (downloads on first run, no API keys)
       try {
-        // Use roberta-base-mnli by default (NLI-specific model, better accuracy)
+        // Use deberta-v3-base by default (was working before)
         // Can override with TCL_LOCAL_NLI_MODEL env var
         const localModelName = process.env.TCL_LOCAL_NLI_MODEL;
         scorer = new TransformersNliScorer(
-          localModelName ? { modelName: localModelName } : {} // If not set, TransformersNliScorer uses roberta-base-mnli default
+          localModelName ? { modelName: localModelName } : {} // If not set, TransformersNliScorer uses deberta-v3-base default
         );
-        console.log(`Using scorer: ${scorer.id} (local model - downloads ~500MB on first run)`);
+        console.log(`Using scorer: ${scorer.id} (local model - downloads ~200MB on first run)`);
       } catch (error: any) {
         console.warn(`Failed to load local NLI model, falling back to heuristic:`, error.message);
         scorer = new TokenHeuristicScorer();
@@ -171,9 +171,11 @@ async function validateOnce(input: ValidateInput, adapter?: LLMAdapter, startTim
       if (graph.supports.length === 0 && graph.contradictions.length === 0) {
         console.warn("⚠️ No edges found in graph. This might indicate:");
         console.warn("  - Thresholds are too high (try lowering support/contradiction thresholds)");
-        console.warn("  - Scorer is not finding relationships (check scorer logs)");
+        console.warn("  - Scorer is not finding relationships (check scorer logs above for actual scores)");
         console.warn("  - Claims are too dissimilar");
         console.warn(`  - Current thresholds: support=${options?.supportThreshold ?? defaultSupportThreshold}, contradiction=${options?.contradictionThreshold ?? defaultContradictionThreshold}`);
+        console.warn(`  - Scorer: ${scorer.id}`);
+        console.warn("  - Check logs above for '[TransformersNliScorer]' to see actual scores being returned");
       }
     } catch (error: any) {
       console.error("Error building claim graph:", error);
