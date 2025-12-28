@@ -3,16 +3,24 @@
  * Downloads model on first run, caches locally
  * No API keys needed, works out of box
  */
+// Softmax helper for logits
+function softmax(logits) {
+    const max = Math.max(...logits);
+    const exp = logits.map(x => Math.exp(x - max));
+    const sum = exp.reduce((a, b) => a + b, 0);
+    return exp.map(x => x / sum);
+}
 export class TransformersNliScorer {
     id;
     model = null;
     modelName;
     cacheDir;
+    labelMap = {}; // Expose label map for debug
     constructor(cfg) {
-        // Default to deberta-v3-base (was working before)
+        // Default to roberta-large-mnli (best for NLI tasks, specifically trained for MNLI)
         // Can override with TCL_LOCAL_NLI_MODEL env var or pass modelName
-        // Note: roberta-base-mnli is NLI-specific but may need different pipeline/format
-        this.modelName = cfg.modelName || "Xenova/deberta-v3-base";
+        // roberta-large-mnli is trained on Multi-Genre Natural Language Inference dataset
+        this.modelName = cfg.modelName || process.env.TCL_LOCAL_NLI_MODEL || "Xenova/roberta-large-mnli";
         this.cacheDir = cfg.cacheDir || ".tcl_models";
         this.id = `transformers-${this.modelName.split("/").pop()}`;
         // Bind methods to preserve 'this' context
@@ -26,16 +34,41 @@ export class TransformersNliScorer {
         if (this.model)
             return this.model;
         try {
+            // Set environment variable BEFORE import to force WASM-only mode
+            // This prevents onnxruntime-node from trying to load native bindings
+            if (typeof process !== 'undefined' && process.env) {
+                process.env.USE_WASM = '1';
+                // Prevent onnxruntime-node from being used
+                process.env.ONNXRUNTIME_EXECUTION_PROVIDERS = '';
+            }
             // Dynamic import to avoid bundling transformers.js if not used
-            const { pipeline } = await import("@xenova/transformers");
+            const { pipeline, env } = await import("@xenova/transformers");
+            // Force WASM backend to avoid native onnxruntime-node dependency
+            // This prevents errors in containers that don't have native libraries
+            if (env && env.backends && env.backends.onnx) {
+                // Disable proxy mode and use WASM directly
+                env.backends.onnx.wasm.proxy = false;
+                env.backends.onnx.wasm.numThreads = 1;
+            }
             console.log(`Loading NLI model: ${this.modelName} (this may take a minute on first run)...`);
-            // For NLI models like roberta-base-mnli, we can use zero-shot-classification
-            // which works well for entailment/contradiction tasks
-            // Alternative: could use "text-classification" but zero-shot is more flexible
-            this.model = await pipeline("zero-shot-classification", this.modelName, {
+            // For MNLI models (like roberta-large-mnli), use text-classification pipeline
+            // MNLI models are specifically trained for Natural Language Inference tasks
+            // They expect premise-hypothesis pairs and return entailment/contradiction/neutral
+            const isMnliModel = this.modelName.includes("mnli");
+            const pipelineType = isMnliModel ? "text-classification" : "zero-shot-classification";
+            this.model = await pipeline(pipelineType, this.modelName, {
                 quantized: true, // Use quantized model (smaller, faster)
                 cache_dir: this.cacheDir
             });
+            // Extract label map from model if available (for MNLI models)
+            if (this.model?.model?.config?.id2label) {
+                this.labelMap = this.model.model.config.id2label;
+                console.log(`✅ Label map extracted:`, this.labelMap);
+            }
+            else if (this.model?.processor?.tokenizer?.model?.config?.id2label) {
+                this.labelMap = this.model.processor.tokenizer.model.config.id2label;
+                console.log(`✅ Label map extracted from tokenizer:`, this.labelMap);
+            }
             console.log(`✅ NLI model loaded: ${this.modelName}`);
             return this.model;
         }
@@ -67,35 +100,113 @@ export class TransformersNliScorer {
                 else {
                     return { key, score: 0.0 };
                 }
-                // Format input for zero-shot-classification
-                // deberta-v3-base works well with simple concatenation
-                let input;
-                if (task === "entailment") {
-                    // For entailment: premise and hypothesis
-                    input = `${a} ${b}`;
-                }
-                else if (task === "contradiction") {
-                    // For contradiction: two statements
-                    input = `${a} ${b}`;
+                // Format input based on model type
+                const isMnliModel = this.modelName.includes("mnli");
+                let result;
+                if (isMnliModel) {
+                    // For MNLI models, use premise-hypothesis pair format
+                    // text-classification pipeline expects: { text: premise, text_pair: hypothesis }
+                    // This correctly represents a single pair, not a batch of two items
+                    result = await model({ text: a, text_pair: b });
                 }
                 else {
-                    // For grounding: claim and source
-                    input = `${a} ${b}`;
+                    // For zero-shot models, use formatted text with labels
+                    let input;
+                    if (task === "entailment") {
+                        input = `${a}. Therefore, ${b}`;
+                    }
+                    else if (task === "contradiction") {
+                        input = `${a}. However, ${b} contradicts this.`;
+                    }
+                    else {
+                        input = `${a}. This is supported by: ${b}`;
+                    }
+                    result = await model(input, labels);
                 }
-                // Run inference using the loaded model
-                const result = await model(input, labels);
-                // Extract score for the relevant label (first label in array)
-                // Result format: { labels: string[], scores: number[] }
-                const labelIndex = result.labels?.indexOf(labels[0]) ?? -1;
-                const score = labelIndex >= 0 && result.scores?.[labelIndex] !== undefined
-                    ? result.scores[labelIndex]
-                    : 0.0;
+                // Extract score based on result format
+                let score = 0.0;
+                if (isMnliModel) {
+                    // MNLI text-classification returns: { label: "ENTAILMENT"|"CONTRADICTION"|"NEUTRAL", score: number }
+                    // OR: { logits: number[], ... } - need to map using id2label
+                    let label = "";
+                    let prob = 0.0;
+                    // Handle different result formats from transformers.js
+                    if (Array.isArray(result)) {
+                        // Sometimes returns array of results
+                        result = result[0];
+                    }
+                    if (result.label) {
+                        // Direct label format
+                        label = result.label.toUpperCase();
+                        prob = result.score || 0.0;
+                    }
+                    else if (result.logits && this.labelMap) {
+                        // Logits format - map using id2label
+                        const logits = Array.isArray(result.logits) ? result.logits : Object.values(result.logits);
+                        const probs = softmax(logits);
+                        // Build label->prob map using id2label
+                        const labelProb = {};
+                        for (let i = 0; i < probs.length; i++) {
+                            const labelRaw = (this.labelMap[String(i)] || "").toLowerCase();
+                            labelProb[labelRaw] = probs[i];
+                        }
+                        // Normalize possible variants
+                        const entail = labelProb["entailment"] ?? labelProb["entails"] ?? 0;
+                        const contra = labelProb["contradiction"] ?? labelProb["contradicts"] ?? 0;
+                        const neutral = labelProb["neutral"] ?? 0;
+                        // Use the appropriate probability based on task
+                        if (task === "entailment") {
+                            prob = entail;
+                            label = "ENTAILMENT";
+                        }
+                        else if (task === "contradiction") {
+                            prob = contra;
+                            label = "CONTRADICTION";
+                        }
+                        else if (task === "grounding") {
+                            prob = entail + neutral * 0.5; // Entailment is strong, neutral is weak
+                            label = entail > neutral ? "ENTAILMENT" : "NEUTRAL";
+                        }
+                    }
+                    else {
+                        // Fallback: try to extract from result
+                        label = (result.label || "").toUpperCase();
+                        prob = result.score || 0.0;
+                    }
+                    // Map label to score based on task
+                    if (task === "entailment" && (label === "ENTAILMENT" || label.includes("ENTAIL"))) {
+                        score = prob;
+                    }
+                    else if (task === "contradiction" && (label === "CONTRADICTION" || label.includes("CONTRAD"))) {
+                        score = prob;
+                    }
+                    else if (task === "grounding") {
+                        if (label === "ENTAILMENT" || label.includes("ENTAIL")) {
+                            score = prob;
+                        }
+                        else if (label === "NEUTRAL") {
+                            score = prob * 0.5; // Neutral is weaker support
+                        }
+                    }
+                }
+                else {
+                    // Zero-shot returns: { labels: string[], scores: number[] }
+                    const labelIndex = result.labels?.indexOf(labels[0]) ?? -1;
+                    score = labelIndex >= 0 && result.scores?.[labelIndex] !== undefined
+                        ? result.scores[labelIndex]
+                        : 0.0;
+                }
                 // Enhanced debug logging - log more samples to see what's happening
                 const pairIndex = pairs.indexOf(pair);
                 if (pairIndex < 3) { // Log first 3 scores for debugging
-                    console.log(`[TransformersNliScorer] ${task} #${pairIndex}: "${a.substring(0, 40)}..." -> "${b.substring(0, 40)}..." | score=${score.toFixed(3)} | label=${labels[0]}`);
-                    if (result.labels && result.scores) {
-                        console.log(`  All scores: ${result.labels.map((l, i) => `${l}=${result.scores[i].toFixed(3)}`).join(', ')}`);
+                    if (isMnliModel) {
+                        console.log(`[TransformersNliScorer] ${task} #${pairIndex}: "${a.substring(0, 40)}..." -> "${b.substring(0, 40)}..." | score=${score.toFixed(3)} | MNLI label=${result.label || 'N/A'}`);
+                    }
+                    else {
+                        console.log(`[TransformersNliScorer] ${task} #${pairIndex}: "${a.substring(0, 40)}..." -> "${b.substring(0, 40)}..." | score=${score.toFixed(3)} | label=${labels[0]}`);
+                        if (result.labels && result.scores) {
+                            console.log(`  All scores: ${result.labels.map((l, i) => `${l}=${result.scores[i].toFixed(3)}`).join(', ')}`);
+                        }
                     }
                 }
                 return { key, score: Math.max(0, Math.min(1, score)) };

@@ -489,6 +489,8 @@ export async function buildClaimGraph(
   let filteredBelowSupport = 0;
   let filteredBelowContradiction = 0;
   let droppedByMaxEdges = 0;
+  let supportsAdded = 0;
+  let contradictionsAdded = 0;
 
   // Batch score contradictions + entailments with cache
   const pairsToScore: BatchPair[] = [];
@@ -520,12 +522,26 @@ export async function buildClaimGraph(
     // Score contradiction
     const kCon = cache.makeKey("con", A.text, B.text);
     const conHit = cache.get(kCon);
-    const con = conHit ? conHit.v : await scorer.contradiction(A.text, B.text);
-    if (!conHit) cache.set(kCon, con);
+    let con: number;
+    try {
+      if (conHit) {
+        con = conHit.v;
+        console.log(`  [CACHE HIT] Contradiction ${A.id} vs ${B.id}: ${con.toFixed(3)}`);
+      } else {
+        con = await scorer.contradiction(A.text, B.text);
+        if (cacheEnabled) cache.set(kCon, con);
+        console.log(`  [SCORED] Contradiction ${A.id} vs ${B.id}: ${con.toFixed(3)} (threshold: ${tCon.toFixed(3)})`);
+      }
+    } catch (error: any) {
+      console.error(`❌ Error scoring contradiction for ${A.id} vs ${B.id}:`, error);
+      con = 0.0;
+    }
     
     pairsScored++;
     if (con >= tCon) {
       contradictions.push({ claimA: A.id, claimB: B.id, weight: clamp01(con) });
+      contradictionsAdded++;
+      console.log(`  ✅ Added contradiction edge: ${A.id} → ${B.id} (weight: ${con.toFixed(3)})`);
     } else {
       filteredBelowContradiction++;
     }
@@ -533,11 +549,25 @@ export async function buildClaimGraph(
     // Score entailment (support)
     const kEnt = cache.makeKey("ent", A.text, B.text);
     const entHit = cache.get(kEnt);
-    const ent = entHit ? entHit.v : await scorer.entailment(A.text, B.text);
-    if (!entHit) cache.set(kEnt, ent);
+    let ent: number;
+    try {
+      if (entHit) {
+        ent = entHit.v;
+        console.log(`  [CACHE HIT] Entailment ${A.id} → ${B.id}: ${ent.toFixed(3)}`);
+      } else {
+        ent = await scorer.entailment(A.text, B.text);
+        if (cacheEnabled) cache.set(kEnt, ent);
+        console.log(`  [SCORED] Entailment ${A.id} → ${B.id}: ${ent.toFixed(3)} (threshold: ${tSup.toFixed(3)})`);
+      }
+    } catch (error: any) {
+      console.error(`❌ Error scoring entailment for ${A.id} → ${B.id}:`, error);
+      ent = 0.0;
+    }
     
     if (ent >= tSup) {
       supports.push({ claimA: A.id, claimB: B.id, weight: clamp01(ent) });
+      supportsAdded++;
+      console.log(`  ✅ Added support edge: ${A.id} → ${B.id} (weight: ${ent.toFixed(3)})`);
     } else {
       filteredBelowSupport++;
     }

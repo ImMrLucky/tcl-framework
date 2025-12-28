@@ -21,6 +21,34 @@ export type ClaimGraph = {
         total: number;
         hitRate: number;
     };
+    debug?: {
+        numClaims: number;
+        numSources: number;
+        annEnabled: boolean;
+        cacheEnabled: boolean;
+        neighborK: number;
+        supportThreshold: number;
+        contradictionThreshold: number;
+        groundingThreshold: number;
+        pairsGenerated: number;
+        pairsScored: number;
+        edges: {
+            supportsAdded: number;
+            contradictionsAdded: number;
+            groundingAdded: number;
+        };
+        filtered: {
+            belowSupportThreshold: number;
+            belowContradictionThreshold: number;
+            belowGroundingThreshold: number;
+            droppedByMaxEdges: number;
+        };
+        model: {
+            scorerId: string;
+            labelMap?: Record<string, string>;
+        };
+        reasonIfEmptyGraph: string | null;
+    };
 };
 export type ScoreTask = "entailment" | "contradiction" | "grounding";
 export type BatchPair = {

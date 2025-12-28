@@ -10,6 +10,7 @@ export declare class TransformersNliScorer implements SemanticScorer {
     private model;
     private modelName;
     private cacheDir;
+    labelMap: Record<string, string>;
     constructor(cfg: {
         modelName?: string;
         cacheDir?: string;

@@ -1,2 +1,2 @@
 import { Claim } from "./types.js";
-export declare function extractClaims(answer: string): Claim[];
+export declare function extractClaims(text: string): Claim[];

@@ -149,6 +149,12 @@ export class TransformersNliScorer implements SemanticScorer {
             let label = "";
             let prob = 0.0;
             
+            // Handle different result formats from transformers.js
+            if (Array.isArray(result)) {
+              // Sometimes returns array of results
+              result = result[0];
+            }
+            
             if (result.label) {
               // Direct label format
               label = result.label.toUpperCase();

@@ -5,8 +5,67 @@ function splitSentences(text) {
         .map((s) => s.trim())
         .filter((s) => s.length > 0);
 }
-export function extractClaims(answer) {
-    const sentences = splitSentences(answer);
+function splitTurns(text) {
+    const lines = text.split(/\n+/).map(l => l.trim()).filter(Boolean);
+    const turns = [];
+    let t = 0;
+    for (const ln of lines) {
+        let speaker = "Other";
+        let body = ln;
+        if (/^agent:/i.test(ln)) {
+            speaker = "Agent";
+            body = ln.replace(/^agent:\s*/i, "");
+        }
+        else if (/^customer:/i.test(ln)) {
+            speaker = "Customer";
+            body = ln.replace(/^customer:\s*/i, "");
+        }
+        else if (/^rep:/i.test(ln) || /^caller:/i.test(ln)) {
+            speaker = "Agent"; // Treat rep/caller as agent
+            body = ln.replace(/^(rep|caller):\s*/i, "");
+        }
+        if (body.length > 0) {
+            turns.push({ speaker, turnIndex: t++, text: body });
+        }
+    }
+    return turns;
+}
+function isTranscript(text) {
+    return /^(Agent|Customer|Rep|Caller):/im.test(text);
+}
+export function extractClaims(text) {
+    // Check if this is a transcript
+    if (isTranscript(text)) {
+        const turns = splitTurns(text);
+        const claims = [];
+        let claimIdx = 1;
+        for (const turn of turns) {
+            // Split turn text into sentences
+            const sentences = splitSentences(turn.text);
+            for (const sentence of sentences) {
+                // Skip very short sentences (greetings, filler)
+                if (sentence.length < 10)
+                    continue;
+                // Skip common filler phrases
+                const fillerPatterns = /^(thanks|thank you|okay|ok|yes|no|sure|alright|uh|um|hmm)/i;
+                if (fillerPatterns.test(sentence.trim()) && sentence.length < 30)
+                    continue;
+                claims.push({
+                    id: `c${claimIdx++}`,
+                    text: sentence,
+                    confidence: 0.75,
+                    evidence: [],
+                    meta: {
+                        speaker: turn.speaker,
+                        turnIndex: turn.turnIndex
+                    }
+                });
+            }
+        }
+        return claims;
+    }
+    // Regular text extraction (non-transcript)
+    const sentences = splitSentences(text);
     return sentences.map((text, idx) => ({
         id: `c${idx + 1}`,
         text,

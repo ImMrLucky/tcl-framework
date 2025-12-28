@@ -11,6 +11,16 @@
  */
 import { createHash } from "crypto";
 import { promises as fs } from "fs";
+// Type guard to check if cache implements CacheLike
+export function isCacheLike(cache) {
+    return cache &&
+        typeof cache.loadIfNeeded === 'function' &&
+        typeof cache.flush === 'function' &&
+        typeof cache.get === 'function' &&
+        typeof cache.set === 'function' &&
+        typeof cache.getStats === 'function' &&
+        typeof cache.makeKey === 'function';
+}
 export class SemanticCache {
     cfg;
     map = new Map();
@@ -106,4 +116,17 @@ export class SemanticCache {
         await fs.mkdir(require("path").dirname(this.cfg.persistPath), { recursive: true }).catch(() => { });
         await fs.appendFile(this.cfg.persistPath, lines, "utf-8");
     }
+}
+// No-op cache for when caching is disabled
+export class NoopCache {
+    makeKeyFn;
+    constructor(makeKeyFn) {
+        this.makeKeyFn = makeKeyFn;
+    }
+    loadIfNeeded = async () => { };
+    flush = async () => { };
+    get = (_) => undefined;
+    set = (_, __, ___) => { };
+    getStats = () => ({ hits: 0, misses: 0, total: 0, hitRate: 0 });
+    makeKey = (task, a, b) => this.makeKeyFn(task, a, b);
 }

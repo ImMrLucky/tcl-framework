@@ -26,7 +26,21 @@ export type CacheConfig = {
     persistPath?: string;
     maxEntries?: number;
 };
-export declare class SemanticCache {
+export interface CacheLike {
+    loadIfNeeded(): Promise<void>;
+    flush(): Promise<void>;
+    get(key: string): CacheEntry | undefined;
+    set(key: string, value: number, quote?: string): void;
+    getStats(): {
+        hits: number;
+        misses: number;
+        total: number;
+        hitRate: number;
+    };
+    makeKey(task: "ent" | "con" | "gnd", a: string, b: string): string;
+}
+export declare function isCacheLike(cache: any): cache is CacheLike;
+export declare class SemanticCache implements CacheLike {
     private cfg;
     private map;
     private dirty;
@@ -48,4 +62,19 @@ export declare class SemanticCache {
     get(key: string): CacheEntry | undefined;
     set(key: string, value: number, quote?: string): void;
     flush(): Promise<void>;
+}
+export declare class NoopCache implements CacheLike {
+    private makeKeyFn;
+    constructor(makeKeyFn: (task: "ent" | "con" | "gnd", a: string, b: string) => string);
+    loadIfNeeded: () => Promise<void>;
+    flush: () => Promise<void>;
+    get: (_: string) => undefined;
+    set: (_: string, __: number, ___?: string) => void;
+    getStats: () => {
+        hits: number;
+        misses: number;
+        total: number;
+        hitRate: number;
+    };
+    makeKey: (task: "ent" | "con" | "gnd", a: string, b: string) => string;
 }

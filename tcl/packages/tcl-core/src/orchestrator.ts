@@ -235,7 +235,7 @@ async function validateOnce(input: ValidateInput, adapter?: LLMAdapter, startTim
           neighborK: options?.annNeighborK ?? options?.neighborK ?? Math.min(12, evidenceRes.claims.length - 1) // Don't exceed claim count
         },
         cache: {
-          enabled: options?.cache ?? false, // Use user's cache option
+          enabled: options?.cache ?? false, // Default: disabled (enable in production for many calls)
           persistPath: options?.cachePersistPath
         }
       });
@@ -366,16 +366,52 @@ async function validateOnce(input: ValidateInput, adapter?: LLMAdapter, startTim
         coherenceScore = null;
       } else {
         try {
-          console.log(`📡 Calling Spectral service at: ${urlToUse}`);
-          spectral = await callSpectralService(
-            urlToUse,
-            evidenceRes.claims.map((c) => ({ id: c.id, text: c.text })),
-            graph.supports,
-            uniqueContradictions.map(c => ({ claimA: c.claimA, claimB: c.claimB, weight: c.weight })),
-            graph.groundedClaimIds
-          );
-          coherenceScore = spectral.coherenceScore;
-          console.log(`✅ Spectral analysis complete. Coherence score: ${coherenceScore}`);
+          const spectralMode = options?.spectralMode ?? "analyze"; // Default to "analyze" for new features
+          console.log(`📡 Calling Spectral service at: ${urlToUse} (mode: ${spectralMode})`);
+          
+          if (spectralMode === "analyze") {
+            // Use new /spectral/analyze endpoint for truthVector, nodeBlame, etc.
+            try {
+              spectral = await callSpectralAnalyzeService(
+                urlToUse,
+                evidenceRes.claims.map((c) => ({ id: c.id, text: c.text })),
+                graph.supports,
+                uniqueContradictions.map(c => ({ claimA: c.claimA, claimB: c.claimB, weight: c.weight })),
+                graph.groundedClaimIds,
+                {
+                  wSupport: undefined, // Use spectral service defaults
+                  wContradiction: undefined,
+                  wCircularity: undefined,
+                  cycleMaxLen: undefined
+                }
+              );
+              coherenceScore = spectral.coherenceScore;
+              console.log(`✅ Spectral ANALYZE complete. Coherence: ${coherenceScore}, truthVector: ${spectral.truthVector?.length || 0} values`);
+            } catch (analyzeError: any) {
+              console.warn(`⚠️ Spectral ANALYZE failed, falling back to SCORE: ${analyzeError?.message}`);
+              // Fallback to /spectral/score if /analyze fails
+              spectral = await callSpectralService(
+                urlToUse,
+                evidenceRes.claims.map((c) => ({ id: c.id, text: c.text })),
+                graph.supports,
+                uniqueContradictions.map(c => ({ claimA: c.claimA, claimB: c.claimB, weight: c.weight })),
+                graph.groundedClaimIds
+              );
+              coherenceScore = spectral.coherenceScore;
+              console.log(`✅ Spectral SCORE complete. Coherence: ${coherenceScore}`);
+            }
+          } else {
+            // Use legacy /spectral/score endpoint
+            spectral = await callSpectralService(
+              urlToUse,
+              evidenceRes.claims.map((c) => ({ id: c.id, text: c.text })),
+              graph.supports,
+              uniqueContradictions.map(c => ({ claimA: c.claimA, claimB: c.claimB, weight: c.weight })),
+              graph.groundedClaimIds
+            );
+            coherenceScore = spectral.coherenceScore;
+            console.log(`✅ Spectral SCORE complete. Coherence: ${coherenceScore}`);
+          }
         } catch (error: any) {
           console.error("❌ Spectral service error:", error);
           console.error("Error message:", error?.message);

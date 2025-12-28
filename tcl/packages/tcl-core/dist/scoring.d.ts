@@ -3,7 +3,7 @@
  * Weights: 50% truth, 30% consistency, 20% coherence.
  * Ensures result is in 0-100 range.
  */
-export declare function blendScores(truth: number, consistency: number, coherence: number): number;
+export declare function blendScores(truth: number, consistency: number, coherence: number | null): number;
 /**
  * Determines if an answer should be refused based on score thresholds.
  * Returns true if any score is below its threshold.

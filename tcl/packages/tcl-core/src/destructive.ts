@@ -71,8 +71,9 @@ export function computeDestructiveClaims(args: {
   
   for (const claim of claims) {
     if (claim.confidenceMetrics) {
-      confidenceOverall.set(claim.id, claim.confidenceMetrics.overall);
-      groundingScore.set(claim.id, claim.confidenceMetrics.groundingScore);
+      // Use actual confidence metrics from the claim
+      confidenceOverall.set(claim.id, claim.confidenceMetrics.overall ?? 0.5);
+      groundingScore.set(claim.id, claim.confidenceMetrics.groundingScore ?? 0.0);
     } else {
       // Fallback: compute from grounding edges
       const claimGrounding = grounding.filter(g => g.claimId === claim.id);
@@ -80,7 +81,9 @@ export function computeDestructiveClaims(args: {
         ? Math.max(...claimGrounding.map(g => g.weight))
         : 0.0;
       groundingScore.set(claim.id, maxGrounding);
-      confidenceOverall.set(claim.id, maxGrounding * 0.7); // Heuristic
+      // Use a more nuanced heuristic based on claim text length and content
+      const baseConfidence = Math.min(0.75, Math.max(0.25, claim.text.length / 200)); // Scale by length
+      confidenceOverall.set(claim.id, maxGrounding > 0 ? Math.max(maxGrounding * 0.7, baseConfidence) : baseConfidence);
     }
   }
 
