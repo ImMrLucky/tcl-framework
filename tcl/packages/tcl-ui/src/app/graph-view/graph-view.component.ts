@@ -1,4 +1,4 @@
-import { Component, Input, OnInit, OnChanges, SimpleChanges, ViewChild, ElementRef, AfterViewInit, OnDestroy } from '@angular/core';
+import { Component, Input, OnInit, OnChanges, SimpleChanges, ViewChild, ElementRef, AfterViewInit, OnDestroy, ChangeDetectorRef } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { MatCardModule } from '@angular/material/card';
 import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
@@ -107,8 +107,8 @@ type ViewType = 'force' | 'matrix';
           </div>
         </div>
 
-        <div *ngIf="viewType === 'force'" #graphContainer class="graph-container"></div>
-        <div *ngIf="viewType === 'matrix'" class="matrix-container">
+        <div #graphContainer class="graph-container" [style.display]="viewType === 'force' ? 'block' : 'none'"></div>
+        <div class="matrix-container" [style.display]="viewType === 'matrix' ? 'block' : 'none'">
           <div class="matrix-wrapper" #matrixContainer></div>
         </div>
       </mat-card-content>
@@ -363,6 +363,8 @@ export class GraphViewComponent implements AfterViewInit, OnChanges, OnDestroy {
   private height = 600;
   private matrixTooltip: HTMLElement | null = null;
 
+  constructor(private cdr: ChangeDetectorRef) {}
+
   ngAfterViewInit() {
     if (this.claims.length > 0 && this.edges.length > 0) {
       if (this.viewType === 'force' && this.graphContainer) {
@@ -404,19 +406,32 @@ export class GraphViewComponent implements AfterViewInit, OnChanges, OnDestroy {
   onViewChange() {
     if (this.claims.length === 0 || this.edges.length === 0) return;
     
-    if (this.viewType === 'force') {
-      this.clearMatrix();
-      if (this.svg) {
-        this.updateGraph();
-      } else if (this.graphContainer) {
-        this.width = this.graphContainer.nativeElement.offsetWidth || 800;
-        this.height = this.graphContainer.nativeElement.offsetHeight || 600;
-        this.initGraph();
+    // Use setTimeout to ensure DOM is updated after view change
+    setTimeout(() => {
+      if (this.viewType === 'force') {
+        this.clearMatrix();
+        if (this.svg) {
+          this.updateGraph();
+        } else if (this.graphContainer) {
+          this.width = this.graphContainer.nativeElement.offsetWidth || 800;
+          this.height = this.graphContainer.nativeElement.offsetHeight || 600;
+          this.initGraph();
+        }
+      } else if (this.viewType === 'matrix') {
+        this.clearGraph();
+        // Container should now always be available (using display instead of *ngIf)
+        if (this.matrixContainer && this.matrixContainer.nativeElement) {
+          this.renderMatrix();
+        } else {
+          // Fallback: wait a tick if container not ready
+          setTimeout(() => {
+            if (this.matrixContainer && this.matrixContainer.nativeElement) {
+              this.renderMatrix();
+            }
+          }, 0);
+        }
       }
-    } else if (this.viewType === 'matrix') {
-      this.clearGraph();
-      this.renderMatrix();
-    }
+    }, 0);
   }
 
   private initGraph() {
@@ -672,7 +687,15 @@ export class GraphViewComponent implements AfterViewInit, OnChanges, OnDestroy {
   }
 
   private renderMatrix() {
-    if (!this.matrixContainer || this.claims.length === 0 || this.edges.length === 0) return;
+    if (!this.matrixContainer || !this.matrixContainer.nativeElement || this.claims.length === 0 || this.edges.length === 0) {
+      console.warn('Matrix render skipped:', {
+        hasContainer: !!this.matrixContainer,
+        hasNativeElement: !!this.matrixContainer?.nativeElement,
+        claimsCount: this.claims.length,
+        edgesCount: this.edges.length
+      });
+      return;
+    }
 
     // Clear existing matrix
     this.clearMatrix();
