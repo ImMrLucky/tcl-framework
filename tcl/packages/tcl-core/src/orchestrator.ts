@@ -7,6 +7,9 @@ import { collectFailingClaimIds, repairOnce } from "./repair.js";
 import type { LLMAdapter } from "./adapters/llm_adapter.js";
 import { buildClaimGraph, HttpNliScorer, TokenHeuristicScorer } from "./graph/edge_builder.js";
 import { TransformersNliScorer } from "./graph/transformers_scorer.js";
+import { calculateAllClaimConfidences } from "./confidence.js";
+import { generateSuggestions } from "./suggestions.js";
+import { validateCustomRules } from "./custom_rules.js";
 
 async function callSpectralService(
   spectralServiceUrl: string,
@@ -211,6 +214,11 @@ async function validateOnce(input: ValidateInput, adapter?: LLMAdapter, startTim
       };
     }
 
+    // 4.5) Custom rule validation (domain-specific rules)
+    const customRuleViolations = options?.customRules 
+      ? validateCustomRules(evidenceRes.claims, input, options.customRules)
+      : [];
+    
     // merge hard contradictions found by rule layer into graph contradictions (weight=1)
     const hardContradictions = logicRes.contradictions.map((x) => ({ claimA: x.claimA, claimB: x.claimB, weight: 1.0 }));
     const contradictions = [...graph.contradictions, ...hardContradictions];
@@ -300,6 +308,43 @@ async function validateOnce(input: ValidateInput, adapter?: LLMAdapter, startTim
     // Get engine version (from package.json or git)
     const engineVersion = process.env.TCL_ENGINE_VERSION || process.env.GIT_COMMIT || 'v0.2.0';
 
+    // 7) Calculate confidence metrics for claims (if enabled)
+    let claimsWithConfidence = evidenceRes.claims;
+    if (options?.includeConfidenceMetrics !== false) { // Default: true
+      const confidenceMetrics = calculateAllClaimConfidences(
+        evidenceRes.claims,
+        graph.supports,
+        contradictions,
+        graph.grounding
+      );
+      
+      claimsWithConfidence = evidenceRes.claims.map(claim => {
+        const metrics = confidenceMetrics.get(claim.id);
+        return {
+          ...claim,
+          confidenceMetrics: metrics
+        };
+      });
+    }
+
+    // 8) Generate suggestions (if enabled)
+    // Convert all contradictions (graph + logic) to the format needed for suggestions
+    const allContradictionsForSuggestions = Array.from(contradictionSet).map(key => {
+      const [claimA, claimB] = key.split('::');
+      return { claimA, claimB, reason: "Contradiction detected" };
+    });
+    
+    const suggestions = (options?.includeSuggestions !== false) // Default: true
+      ? generateSuggestions(
+          claimsWithConfidence,
+          [...evidenceRes.violations, ...logicRes.violations, ...customRuleViolations],
+          allContradictionsForSuggestions,
+          evidenceRes.missing,
+          graph.supports,
+          options?.customRules
+        )
+      : undefined;
+
     return {
       answer,
       refusal,
@@ -309,16 +354,17 @@ async function validateOnce(input: ValidateInput, adapter?: LLMAdapter, startTim
       cacheHitRate,
       engineVersion,
       report: {
-        claims: evidenceRes.claims,
-        violations: [...evidenceRes.violations, ...logicRes.violations],
+        claims: claimsWithConfidence,
+        violations: [...evidenceRes.violations, ...logicRes.violations, ...customRuleViolations],
         missingEvidence: evidenceRes.missing,
-        contradictions: logicRes.contradictions.map((c) => ({ claimA: c.claimA, claimB: c.claimB, reason: c.reason })),
+        contradictions: allContradictionsForSuggestions,
         spectral,
         graph: {
           supports: graph.supports,
           contradictions: graph.contradictions,
           grounding: graph.grounding
-        }
+        },
+        suggestions
       }
     };
   } catch (error: any) {

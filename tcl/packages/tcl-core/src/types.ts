@@ -5,14 +5,44 @@ export type Source = { id: string; text: string };
 export type Claim = {
   id: string;
   text: string;
-  confidence: number; // 0..1
+  confidence: number; // 0..1 (calculated confidence score)
   evidence: { source_id: string; quote?: string; span?: string; weight?: number }[];
+  // Enhanced confidence metrics
+  confidenceMetrics?: {
+    groundingScore: number; // 0-1, based on evidence
+    supportScore: number; // 0-1, based on support from other claims
+    contradictionScore: number; // 0-1, inverse (higher = fewer contradictions)
+    overall: number; // 0-1, weighted average
+  };
 };
 
 export type Violation =
   | { type: "MISSING_EVIDENCE"; claimId: string; detail: string }
   | { type: "CONTRADICTION"; claimA: string; claimB: string; detail: string }
-  | { type: "LOW_CONFIDENCE"; claimId: string; detail: string };
+  | { type: "LOW_CONFIDENCE"; claimId: string; detail: string }
+  | { type: "CUSTOM_RULE"; claimId?: string; ruleId: string; detail: string };
+
+// Custom validation rule (domain-specific)
+export type CustomRule = {
+  id: string;
+  name: string;
+  description: string;
+  // Pattern-based rule: check if text matches pattern
+  pattern?: {
+    type: 'contains' | 'regex' | 'semantic';
+    value: string;
+    caseSensitive?: boolean;
+  };
+  // Semantic rule: use NLI to check relationship
+  semantic?: {
+    type: 'must_contain' | 'must_not_contain' | 'must_support' | 'must_not_contradict';
+    reference: string; // Reference text to check against
+  };
+  // Claim-level or document-level
+  scope: 'claim' | 'document';
+  severity: 'error' | 'warning' | 'info';
+  suggestion?: string; // Default suggestion if rule fails
+};
 
 export type SpectralReport = {
   coherenceScore: number;          // 0-100
@@ -50,6 +80,10 @@ export type ValidationOptions = {
   annIndex?: 'hnsw' | 'bruteforce'; // ANN index choice
   annNeighborK?: number; // alias for neighborK
 
+  // New features
+  customRules?: CustomRule[]; // Domain-specific validation rules
+  includeSuggestions?: boolean; // Generate suggested fixes (default: true)
+  includeConfidenceMetrics?: boolean; // Include detailed confidence scores (default: true)
 };
 
 export type ValidateInput = {
@@ -62,6 +96,17 @@ export type ValidateInput = {
 export type SupportEdge = { claimA: string; claimB: string; weight: number };
 export type ContradictionEdge = { claimA: string; claimB: string; weight: number };
 export type GroundingEdge = { claimId: string; sourceId: string; weight: number; quote?: string };
+
+export type Suggestion = {
+  type: 'fix_contradiction' | 'add_evidence' | 'improve_consistency' | 'resolve_circular' | 'custom_rule';
+  claimId?: string;
+  claimIds?: string[]; // For multi-claim suggestions
+  priority: 'high' | 'medium' | 'low';
+  title: string;
+  description: string;
+  suggestedAction: string; // What the user should do
+  example?: string; // Optional example of how to fix
+};
 
 export type ValidateOutput = {
   answer: string;
@@ -83,5 +128,24 @@ export type ValidateOutput = {
       contradictions: ContradictionEdge[];
       grounding: GroundingEdge[];
     };
+    // New features
+    suggestions?: Suggestion[]; // Actionable suggestions for fixing issues
+  };
+};
+
+// Batch validation types
+export type BatchValidateInput = {
+  items: ValidateInput[];
+  options?: ValidationOptions; // Shared options for all items
+};
+
+export type BatchValidateOutput = {
+  results: ValidateOutput[];
+  summary: {
+    total: number;
+    passed: number;
+    failed: number;
+    averageScore: number;
+    averageLatency: number;
   };
 };

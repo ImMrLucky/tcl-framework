@@ -1,5 +1,5 @@
 import express from "express";
-import type { ValidateInput } from "../types.js";
+import type { ValidateInput, BatchValidateInput, BatchValidateOutput } from "../types.js";
 
 const app = express();
 app.use(express.json({ limit: "4mb" }));
@@ -90,6 +90,144 @@ app.post("/validate", async (req, res) => {
   } catch (e: any) {
     clearTimeout(timeout);
     console.error("Validation error:", e);
+    console.error("Error stack:", e?.stack);
+    res.status(500).json({ 
+      error: e?.message ?? "unknown error",
+      stack: process.env.NODE_ENV === "development" ? e?.stack : undefined
+    });
+  }
+});
+
+// Batch validation endpoint
+app.post("/validate/batch", async (req, res) => {
+  const timeout = setTimeout(() => {
+    if (!res.headersSent) {
+      res.status(504).json({ error: "Request timeout" });
+    }
+  }, 600000); // 10 minute timeout for batch
+
+  try {
+    // Ensure modules are loaded
+    if (!validate) {
+      await loadModules();
+      if (!validate) {
+        clearTimeout(timeout);
+        return res.status(503).json({ error: "Service initializing, please try again" });
+      }
+    }
+
+    console.log("Received batch validate request");
+    const input = req.body as BatchValidateInput;
+
+    // Validate input
+    if (!input.items || !Array.isArray(input.items) || input.items.length === 0) {
+      clearTimeout(timeout);
+      return res.status(400).json({ error: "items is required and must be a non-empty array" });
+    }
+
+    if (input.items.length > 100) {
+      clearTimeout(timeout);
+      return res.status(400).json({ error: "Maximum 100 items per batch request" });
+    }
+
+    // Validate each item
+    for (let i = 0; i < input.items.length; i++) {
+      const item = input.items[i];
+      if (!item.question || typeof item.question !== 'string' || item.question.trim().length === 0) {
+        clearTimeout(timeout);
+        return res.status(400).json({ error: `Item ${i + 1}: question is required and must be a non-empty string` });
+      }
+      if (item.answer === undefined || item.answer === null) {
+        item.answer = "";
+      }
+      if (typeof item.answer !== 'string') {
+        item.answer = String(item.answer);
+      }
+    }
+
+    // Merge shared options with item-specific options
+    const apiKey = process.env.OPENAI_API_KEY;
+    const model = process.env.OPENAI_MODEL || "gpt-4.1-mini";
+    const sharedOptions = input.options || {};
+
+    // Process all items in parallel (with concurrency limit)
+    const concurrency = 10; // Process 10 at a time
+    const results: any[] = [];
+    const latencies: number[] = [];
+
+    for (let i = 0; i < input.items.length; i += concurrency) {
+      const batch = input.items.slice(i, i + concurrency);
+      const batchResults = await Promise.all(
+        batch.map(async (item) => {
+          const startTime = Date.now();
+          try {
+            // Merge shared options with item options
+            const itemOptions = {
+              ...sharedOptions,
+              ...item.options
+            };
+
+            // Add adapter if available
+            if (apiKey && !itemOptions.llmAdapter && OpenAIAdapter) {
+              itemOptions.llmAdapter = new OpenAIAdapter({ apiKey, model });
+            }
+
+            const result = await validate({
+              ...item,
+              options: itemOptions
+            });
+            const latency = Date.now() - startTime;
+            latencies.push(latency);
+            return result;
+          } catch (error: any) {
+            console.error(`Error validating item ${i + batch.indexOf(item) + 1}:`, error);
+            const latency = Date.now() - startTime;
+            latencies.push(latency);
+            // Return error result instead of failing entire batch
+            return {
+              answer: item.answer || "",
+              refusal: true,
+              scores: { truth: 0, consistency: 0, coherence: 0, overall: 0 },
+              error: error?.message || "Validation failed",
+              report: {
+                claims: [],
+                violations: [],
+                missingEvidence: [],
+                contradictions: []
+              }
+            };
+          }
+        })
+      );
+      results.push(...batchResults);
+    }
+
+    // Calculate summary
+    const passed = results.filter(r => !r.refusal && !r.error).length;
+    const failed = results.length - passed;
+    const averageScore = results
+      .filter(r => r.scores && !r.error)
+      .reduce((sum, r) => sum + (r.scores?.overall || 0), 0) / Math.max(1, results.filter(r => !r.error).length);
+    const averageLatency = latencies.length > 0
+      ? latencies.reduce((sum, l) => sum + l, 0) / latencies.length
+      : 0;
+
+    const output: BatchValidateOutput = {
+      results,
+      summary: {
+        total: results.length,
+        passed,
+        failed,
+        averageScore: Math.round(averageScore),
+        averageLatency: Math.round(averageLatency)
+      }
+    };
+
+    clearTimeout(timeout);
+    res.json(output);
+  } catch (e: any) {
+    clearTimeout(timeout);
+    console.error("Batch validation error:", e);
     console.error("Error stack:", e?.stack);
     res.status(500).json({ 
       error: e?.message ?? "unknown error",
