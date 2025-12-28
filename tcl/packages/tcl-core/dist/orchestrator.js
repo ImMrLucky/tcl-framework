@@ -80,10 +80,12 @@ async function validateOnce(input, adapter, startTime) {
         else if (useLocalNli) {
             // Priority 3: Local Transformers model (downloads on first run, no API keys)
             try {
-                scorer = new TransformersNliScorer({
-                    modelName: process.env.TCL_LOCAL_NLI_MODEL || "Xenova/deberta-v3-base"
-                });
-                console.log(`Using scorer: ${scorer.id} (local model - downloads ~200MB on first run)`);
+                // Use roberta-base-mnli by default (NLI-specific model, better accuracy)
+                // Can override with TCL_LOCAL_NLI_MODEL env var
+                const localModelName = process.env.TCL_LOCAL_NLI_MODEL;
+                scorer = new TransformersNliScorer(localModelName ? { modelName: localModelName } : {} // If not set, TransformersNliScorer uses roberta-base-mnli default
+                );
+                console.log(`Using scorer: ${scorer.id} (local model - downloads ~500MB on first run)`);
             }
             catch (error) {
                 console.warn(`Failed to load local NLI model, falling back to heuristic:`, error.message);

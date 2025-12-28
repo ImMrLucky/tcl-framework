@@ -37,7 +37,9 @@ export class TransformersNliScorer implements SemanticScorer {
       
       console.log(`Loading NLI model: ${this.modelName} (this may take a minute on first run)...`);
       
-      // Pipeline downloads model on first run, caches locally
+      // For NLI models like roberta-base-mnli, we can use zero-shot-classification
+      // which works well for entailment/contradiction tasks
+      // Alternative: could use "text-classification" but zero-shot is more flexible
       this.model = await pipeline(
         "zero-shot-classification",
         this.modelName,
