@@ -42,8 +42,24 @@ export class TransformersNliScorer implements SemanticScorer {
     if (this.model) return this.model;
 
     try {
+      // Set environment variable BEFORE import to force WASM-only mode
+      // This prevents onnxruntime-node from trying to load native bindings
+      if (typeof process !== 'undefined' && process.env) {
+        process.env.USE_WASM = '1';
+        // Prevent onnxruntime-node from being used
+        process.env.ONNXRUNTIME_EXECUTION_PROVIDERS = '';
+      }
+      
       // Dynamic import to avoid bundling transformers.js if not used
-      const { pipeline } = await import("@xenova/transformers");
+      const { pipeline, env } = await import("@xenova/transformers");
+      
+      // Force WASM backend to avoid native onnxruntime-node dependency
+      // This prevents errors in containers that don't have native libraries
+      if (env && env.backends && env.backends.onnx) {
+        // Disable proxy mode and use WASM directly
+        env.backends.onnx.wasm.proxy = false;
+        env.backends.onnx.wasm.numThreads = 1;
+      }
       
       console.log(`Loading NLI model: ${this.modelName} (this may take a minute on first run)...`);
       
