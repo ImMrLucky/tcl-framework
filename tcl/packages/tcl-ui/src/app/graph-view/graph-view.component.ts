@@ -8,7 +8,7 @@ import { MatTooltipModule } from '@angular/material/tooltip';
 import * as d3 from 'd3';
 import { ClaimWithMetadata, GraphEdge } from '../types';
 
-type ViewType = 'force' | 'matrix';
+type ViewType = 'force' | 'matrix' | 'circular' | 'hierarchical';
 
 @Component({
   selector: 'app-graph-view',
@@ -35,9 +35,13 @@ type ViewType = 'force' | 'matrix';
               <mat-icon>account_tree</mat-icon>
               <span>Force</span>
             </mat-button-toggle>
-            <mat-button-toggle value="matrix" matTooltip="Matrix view (best for dense graphs and compliance)">
-              <mat-icon>grid_on</mat-icon>
-              <span>Matrix</span>
+            <mat-button-toggle value="circular" matTooltip="Circular layout (clean, shows all relationships)">
+              <mat-icon>radio_button_unchecked</mat-icon>
+              <span>Circular</span>
+            </mat-button-toggle>
+            <mat-button-toggle value="hierarchical" matTooltip="Hierarchical view (sources → claims → supports)">
+              <mat-icon>vertical_align_center</mat-icon>
+              <span>Layered</span>
             </mat-button-toggle>
           </mat-button-toggle-group>
         </div>
@@ -107,7 +111,7 @@ type ViewType = 'force' | 'matrix';
           </div>
         </div>
 
-        <div #graphContainer class="graph-container" [style.display]="viewType === 'force' ? 'block' : 'none'"></div>
+        <div #graphContainer class="graph-container" [style.display]="viewType === 'force' || viewType === 'circular' || viewType === 'hierarchical' ? 'block' : 'none'"></div>
         <div class="matrix-container" [style.display]="viewType === 'matrix' ? 'block' : 'none'">
           <div class="matrix-wrapper" #matrixContainer></div>
         </div>
@@ -222,129 +226,162 @@ type ViewType = 'force' | 'matrix';
       max-height: 600px;
       border: 1px solid #e0e0e0;
       border-radius: 4px;
-      background: #fff;
+      background: #fafafa;
+      box-shadow: inset 0 2px 4px rgba(0,0,0,0.06);
     }
 
     .matrix-wrapper {
       display: inline-block;
-      min-width: 100%;
+      padding: 8px;
     }
 
     .matrix-table {
-      border-collapse: collapse;
-      font-size: 11px;
-      width: 100%;
+      border-collapse: separate;
+      border-spacing: 2px;
+      font-size: 12px;
+      background: #fff;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.1);
     }
 
     .matrix-table th,
     .matrix-table td {
-      border: 1px solid #e0e0e0;
-      padding: 4px 8px;
+      border: none;
+      padding: 6px 8px;
       text-align: center;
       position: relative;
+      background: #fff;
     }
 
     .matrix-table th {
-      background: #f5f5f5;
+      background: linear-gradient(to bottom, #f8f9fa, #e9ecef);
       font-weight: 600;
       position: sticky;
       z-index: 10;
+      color: #495057;
+      border-bottom: 2px solid #dee2e6;
     }
 
     .matrix-table th:first-child {
       left: 0;
       z-index: 20;
-      background: #f5f5f5;
-      min-width: 150px;
-      max-width: 150px;
+      background: linear-gradient(to right, #f8f9fa, #e9ecef);
+      min-width: 120px;
+      max-width: 120px;
       text-align: left;
+      font-size: 11px;
+      padding: 8px 10px;
     }
 
     .matrix-table th:not(:first-child) {
       top: 0;
       writing-mode: vertical-rl;
       text-orientation: mixed;
-      min-width: 40px;
-      max-width: 40px;
-      height: 150px;
-      padding: 8px 4px;
+      min-width: 35px;
+      max-width: 35px;
+      height: 120px;
+      padding: 8px 2px;
+      font-size: 10px;
+      white-space: nowrap;
     }
 
     .matrix-table td:first-child {
       position: sticky;
       left: 0;
-      background: #fff;
+      background: #f8f9fa;
       z-index: 5;
       text-align: left;
-      font-weight: 500;
-      min-width: 150px;
-      max-width: 150px;
+      font-weight: 600;
+      min-width: 120px;
+      max-width: 120px;
+      font-size: 11px;
+      padding: 8px 10px;
+      color: #495057;
+      border-right: 2px solid #dee2e6;
+    }
+
+    .matrix-table td {
+      padding: 2px;
+      vertical-align: middle;
     }
 
     .matrix-cell {
-      width: 40px;
-      height: 40px;
+      width: 32px;
+      height: 32px;
+      min-width: 32px;
+      min-height: 32px;
       cursor: pointer;
-      transition: all 0.2s;
-      border-radius: 2px;
+      transition: all 0.15s ease;
+      border-radius: 3px;
       position: relative;
+      margin: 0 auto;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      box-shadow: 0 1px 2px rgba(0,0,0,0.1);
     }
 
     .matrix-cell:hover {
-      transform: scale(1.2);
+      transform: scale(1.15);
       z-index: 15;
-      box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+      box-shadow: 0 3px 8px rgba(0,0,0,0.25);
     }
 
     .matrix-cell.support {
-      background-color: #4caf50;
-      opacity: 0.7;
+      background: linear-gradient(135deg, #4caf50, #45a049);
+      border: 1px solid #388e3c;
     }
 
     .matrix-cell.contradiction {
-      background-color: #f44336;
-      opacity: 0.7;
+      background: linear-gradient(135deg, #f44336, #e53935);
+      border: 1px solid #c62828;
     }
 
     .matrix-cell.grounding {
-      background-color: #2196f3;
-      opacity: 0.7;
+      background: linear-gradient(135deg, #2196f3, #1e88e5);
+      border: 1px solid #1565c0;
       background-image: repeating-linear-gradient(
         45deg,
         transparent,
-        transparent 2px,
-        rgba(255,255,255,0.3) 2px,
-        rgba(255,255,255,0.3) 4px
+        transparent 3px,
+        rgba(255,255,255,0.2) 3px,
+        rgba(255,255,255,0.2) 6px
       );
     }
 
     .matrix-cell.multiple {
-      background: linear-gradient(135deg, #4caf50 25%, #f44336 25%, #f44336 50%, #2196f3 50%, #2196f3 75%, #4caf50 75%);
-      opacity: 0.8;
+      background: linear-gradient(135deg, 
+        #4caf50 0%, #4caf50 33%, 
+        #f44336 33%, #f44336 66%, 
+        #2196f3 66%, #2196f3 100%);
+      border: 1px solid #666;
     }
 
     .matrix-cell-weight {
-      position: absolute;
-      top: 50%;
-      left: 50%;
-      transform: translate(-50%, -50%);
-      font-size: 9px;
-      font-weight: bold;
+      font-size: 10px;
+      font-weight: 700;
       color: #fff;
-      text-shadow: 0 1px 2px rgba(0,0,0,0.5);
+      text-shadow: 0 1px 3px rgba(0,0,0,0.6);
+      line-height: 1;
     }
 
     .matrix-tooltip {
-      position: absolute;
-      background: rgba(0,0,0,0.9);
+      position: fixed;
+      background: rgba(33, 33, 33, 0.95);
       color: #fff;
-      padding: 8px 12px;
-      border-radius: 4px;
+      padding: 10px 14px;
+      border-radius: 6px;
       font-size: 12px;
       pointer-events: none;
-      z-index: 1000;
-      max-width: 300px;
-      box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+      z-index: 10000;
+      max-width: 350px;
+      box-shadow: 0 4px 16px rgba(0,0,0,0.4);
+      border: 1px solid rgba(255,255,255,0.1);
+      line-height: 1.5;
+    }
+
+    .matrix-tooltip strong {
+      color: #64b5f6;
+      font-weight: 600;
     }
   `]
 })
@@ -367,7 +404,7 @@ export class GraphViewComponent implements AfterViewInit, OnChanges, OnDestroy {
 
   ngAfterViewInit() {
     if (this.claims.length > 0 && this.edges.length > 0) {
-      if (this.viewType === 'force' && this.graphContainer) {
+      if ((this.viewType === 'force' || this.viewType === 'circular' || this.viewType === 'hierarchical') && this.graphContainer) {
         this.width = this.graphContainer.nativeElement.offsetWidth || 800;
         this.height = this.graphContainer.nativeElement.offsetHeight || 600;
         this.initGraph();
@@ -388,7 +425,7 @@ export class GraphViewComponent implements AfterViewInit, OnChanges, OnDestroy {
       
       // Only render graph if we have both claims and edges
       if (this.claims.length > 0 && this.edges.length > 0) {
-        if (this.viewType === 'force') {
+        if (this.viewType === 'force' || this.viewType === 'circular' || this.viewType === 'hierarchical') {
           if (this.svg) {
             this.updateGraph();
           } else if (this.graphContainer) {
@@ -408,7 +445,7 @@ export class GraphViewComponent implements AfterViewInit, OnChanges, OnDestroy {
     
     // Use setTimeout to ensure DOM is updated after view change
     setTimeout(() => {
-      if (this.viewType === 'force') {
+      if (this.viewType === 'force' || this.viewType === 'circular' || this.viewType === 'hierarchical') {
         this.clearMatrix();
         if (this.svg) {
           this.updateGraph();
@@ -553,16 +590,72 @@ export class GraphViewComponent implements AfterViewInit, OnChanges, OnDestroy {
     g.selectAll('.link').remove();
     g.selectAll('.node').remove();
 
-    // Create force simulation with better spacing
-    this.simulation = d3.forceSimulation(nodes as any)
-      .force('link', d3.forceLink(links).id((d: any) => d.id).distance(200))
-      .force('charge', d3.forceManyBody().strength(-800))
-      .force('center', d3.forceCenter(this.width / 2, this.height / 2))
-      .force('collision', d3.forceCollide().radius((d: any) => {
-        // Larger radius for nodes with longer labels - increased base spacing
-        const labelLength = d.label ? d.label.length : 0;
-        return Math.max(70, 50 + labelLength * 3);
-      }));
+    // Initialize node positions based on view type
+    if (this.viewType === 'circular') {
+      // Arrange nodes in a circle
+      const radius = Math.min(this.width, this.height) / 3;
+      const angleStep = (2 * Math.PI) / nodes.length;
+      nodes.forEach((node: any, i: number) => {
+        node.x = this.width / 2 + radius * Math.cos(i * angleStep - Math.PI / 2);
+        node.y = this.height / 2 + radius * Math.sin(i * angleStep - Math.PI / 2);
+        node.fx = node.x;
+        node.fy = node.y;
+      });
+    } else if (this.viewType === 'hierarchical') {
+      // Arrange nodes in layers: grounded claims at bottom, ungrounded in middle, supports flow up
+      const grounded = nodes.filter((n: any) => n.grounded);
+      const ungrounded = nodes.filter((n: any) => !n.grounded);
+      const layerHeight = this.height / 3;
+      const spacing = this.width / (Math.max(grounded.length, ungrounded.length) + 1);
+      
+      grounded.forEach((node: any, i: number) => {
+        node.x = spacing * (i + 1);
+        node.y = this.height - 50;
+        node.fx = node.x;
+        node.fy = node.y;
+      });
+      
+      ungrounded.forEach((node: any, i: number) => {
+        node.x = spacing * (i + 1);
+        node.y = layerHeight;
+        node.fx = node.x;
+        node.fy = node.y;
+      });
+    }
+
+    // Create force simulation with layout-specific settings
+    let simulation: any;
+    
+    if (this.viewType === 'circular') {
+      // Circular layout: weak forces to maintain circle, but allow some movement
+      simulation = d3.forceSimulation(nodes as any)
+        .force('link', d3.forceLink(links).id((d: any) => d.id).distance(150))
+        .force('charge', d3.forceManyBody().strength(-300))
+        .force('center', d3.forceCenter(this.width / 2, this.height / 2))
+        .force('collision', d3.forceCollide().radius(60))
+        .alphaDecay(0.1); // Slower decay to maintain positions
+    } else if (this.viewType === 'hierarchical') {
+      // Hierarchical layout: strong vertical forces, weak horizontal
+      simulation = d3.forceSimulation(nodes as any)
+        .force('link', d3.forceLink(links).id((d: any) => d.id).distance(100))
+        .force('charge', d3.forceManyBody().strength(-500))
+        .force('center', d3.forceCenter(this.width / 2, this.height / 2))
+        .force('y', d3.forceY().strength(0.3).y((d: any) => d.fy || this.height / 2))
+        .force('collision', d3.forceCollide().radius(70))
+        .alphaDecay(0.15);
+    } else {
+      // Force-directed (default)
+      simulation = d3.forceSimulation(nodes as any)
+        .force('link', d3.forceLink(links).id((d: any) => d.id).distance(200))
+        .force('charge', d3.forceManyBody().strength(-800))
+        .force('center', d3.forceCenter(this.width / 2, this.height / 2))
+        .force('collision', d3.forceCollide().radius((d: any) => {
+          const labelLength = d.label ? d.label.length : 0;
+          return Math.max(70, 50 + labelLength * 3);
+        }));
+    }
+    
+    this.simulation = simulation;
 
     // Draw links
     const link = g.append('g')
@@ -662,17 +755,26 @@ export class GraphViewComponent implements AfterViewInit, OnChanges, OnDestroy {
     return d3.drag()
       .on('start', (event: any, d: any) => {
         if (!event.active) simulation.alphaTarget(0.3).restart();
-        d.fx = d.x;
-        d.fy = d.y;
+        // For circular and hierarchical, allow movement but don't lock position initially
+        if (this.viewType === 'force') {
+          d.fx = d.x;
+          d.fy = d.y;
+        }
       })
       .on('drag', (event: any, d: any) => {
         d.fx = event.x;
         d.fy = event.y;
+        // For circular/hierarchical, allow free movement when dragging
       })
       .on('end', (event: any, d: any) => {
         if (!event.active) simulation.alphaTarget(0);
-        d.fx = null;
-        d.fy = null;
+        // For force-directed, release the node
+        if (this.viewType === 'force') {
+          d.fx = null;
+          d.fy = null;
+        }
+        // For circular/hierarchical, keep the dragged position
+        // (user can double-click to reset if needed)
       });
   }
 
@@ -720,10 +822,12 @@ export class GraphViewComponent implements AfterViewInit, OnChanges, OnDestroy {
     const emptyHeader = document.createElement('th');
     headerRow.appendChild(emptyHeader);
 
-    this.claims.forEach(claim => {
+    this.claims.forEach((claim, index) => {
       const th = document.createElement('th');
-      th.textContent = claim.id;
-      th.title = claim.text.length > 100 ? claim.text.substring(0, 100) + '...' : claim.text;
+      // Show shortened claim ID or index
+      const displayText = claim.id.length > 8 ? `C${index + 1}` : claim.id;
+      th.textContent = displayText;
+      th.title = `${claim.id}\n${claim.text.length > 80 ? claim.text.substring(0, 80) + '...' : claim.text}`;
       headerRow.appendChild(th);
     });
     table.appendChild(headerRow);
@@ -732,10 +836,20 @@ export class GraphViewComponent implements AfterViewInit, OnChanges, OnDestroy {
     this.claims.forEach((claimRow, rowIndex) => {
       const tr = document.createElement('tr');
       
-      // Row header (claim ID)
+      // Row header (claim ID with truncated text)
       const rowHeader = document.createElement('td');
-      rowHeader.textContent = claimRow.id;
-      rowHeader.title = claimRow.text.length > 100 ? claimRow.text.substring(0, 100) + '...' : claimRow.text;
+      const rowText = document.createElement('div');
+      rowText.style.cssText = 'font-size: 10px; line-height: 1.3;';
+      const claimIdSpan = document.createElement('strong');
+      claimIdSpan.textContent = claimRow.id;
+      claimIdSpan.style.cssText = 'display: block; margin-bottom: 2px;';
+      const claimTextSpan = document.createElement('span');
+      claimTextSpan.textContent = claimRow.text.length > 50 ? claimRow.text.substring(0, 50) + '...' : claimRow.text;
+      claimTextSpan.style.cssText = 'color: #666; font-size: 9px;';
+      rowText.appendChild(claimIdSpan);
+      rowText.appendChild(claimTextSpan);
+      rowHeader.appendChild(rowText);
+      rowHeader.title = `${claimRow.id}\n${claimRow.text}`;
       tr.appendChild(rowHeader);
 
       // Data cells
@@ -743,11 +857,25 @@ export class GraphViewComponent implements AfterViewInit, OnChanges, OnDestroy {
         const td = document.createElement('td');
         
         if (rowIndex === colIndex) {
-          // Diagonal - show claim status
-          td.style.background = claimRow.grounded ? '#e8f5e9' : '#ffebee';
-          td.style.fontWeight = 'bold';
-          td.textContent = claimRow.grounded ? '✓' : '✗';
-          td.title = `Claim ${claimRow.id}: ${claimRow.grounded ? 'Grounded' : 'Ungrounded'}`;
+          // Diagonal - show claim status with better styling
+          const diagonalCell = document.createElement('div');
+          diagonalCell.style.cssText = `
+            width: 32px;
+            height: 32px;
+            border-radius: 3px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: bold;
+            font-size: 16px;
+            background: ${claimRow.grounded ? 'linear-gradient(135deg, #c8e6c9, #a5d6a7)' : 'linear-gradient(135deg, #ffcdd2, #ef9a9a)'};
+            color: ${claimRow.grounded ? '#2e7d32' : '#c62828'};
+            border: 2px solid ${claimRow.grounded ? '#4caf50' : '#f44336'};
+            box-shadow: 0 1px 2px rgba(0,0,0,0.1);
+          `;
+          diagonalCell.textContent = claimRow.grounded ? '✓' : '✗';
+          diagonalCell.title = `Claim ${claimRow.id}: ${claimRow.grounded ? 'Grounded' : 'Ungrounded'}\n${claimRow.text.substring(0, 100)}${claimRow.text.length > 100 ? '...' : ''}`;
+          td.appendChild(diagonalCell);
         } else {
           // Check for edges
           const key = `${claimRow.id}::${claimCol.id}`;
@@ -773,19 +901,15 @@ export class GraphViewComponent implements AfterViewInit, OnChanges, OnDestroy {
               cell.classList.add('grounding');
             }
 
-            // Show weight if single edge
+            // Show weight if single edge, or count if multiple
+            const weightSpan = document.createElement('span');
+            weightSpan.className = 'matrix-cell-weight';
             if (edges.length === 1) {
-              const weightSpan = document.createElement('span');
-              weightSpan.className = 'matrix-cell-weight';
-              weightSpan.textContent = edges[0].weight.toFixed(2);
-              cell.appendChild(weightSpan);
+              weightSpan.textContent = edges[0].weight.toFixed(1);
             } else {
-              // Show count for multiple edges
-              const countSpan = document.createElement('span');
-              countSpan.className = 'matrix-cell-weight';
-              countSpan.textContent = edges.length.toString();
-              cell.appendChild(countSpan);
+              weightSpan.textContent = `${edges.length}x`;
             }
+            cell.appendChild(weightSpan);
 
             // Tooltip content
             const tooltipText = edges.map(e => 
@@ -819,16 +943,19 @@ export class GraphViewComponent implements AfterViewInit, OnChanges, OnDestroy {
       document.body.appendChild(this.matrixTooltip);
     }
 
-    const edgeDetails = edges.map(e => 
-      `<strong>${e.type}</strong>: ${e.weight.toFixed(3)}`
-    ).join('<br>');
+    const edgeDetails = edges.map(e => {
+      const color = e.type === 'support' ? '#4caf50' : e.type === 'contradiction' ? '#f44336' : '#2196f3';
+      return `<span style="color: ${color}; font-weight: 600;">${e.type}</span>: ${e.weight.toFixed(2)}`;
+    }).join('<br>');
 
     this.matrixTooltip.innerHTML = `
-      <div><strong>${claimRow.id}</strong> → <strong>${claimCol.id}</strong></div>
-      <div style="margin-top: 4px;">${edgeDetails}</div>
-      <div style="margin-top: 8px; font-size: 10px; opacity: 0.8;">
-        <div><strong>From:</strong> ${claimRow.text.substring(0, 80)}${claimRow.text.length > 80 ? '...' : ''}</div>
-        <div style="margin-top: 4px;"><strong>To:</strong> ${claimCol.text.substring(0, 80)}${claimCol.text.length > 80 ? '...' : ''}</div>
+      <div style="font-size: 13px; font-weight: 600; margin-bottom: 6px; border-bottom: 1px solid rgba(255,255,255,0.2); padding-bottom: 4px;">
+        ${claimRow.id} → ${claimCol.id}
+      </div>
+      <div style="margin-bottom: 8px;">${edgeDetails}</div>
+      <div style="font-size: 11px; opacity: 0.9; border-top: 1px solid rgba(255,255,255,0.1); padding-top: 6px;">
+        <div style="margin-bottom: 4px;"><strong style="color: #90caf9;">From:</strong> ${claimRow.text.substring(0, 70)}${claimRow.text.length > 70 ? '...' : ''}</div>
+        <div><strong style="color: #90caf9;">To:</strong> ${claimCol.text.substring(0, 70)}${claimCol.text.length > 70 ? '...' : ''}</div>
       </div>
     `;
 
