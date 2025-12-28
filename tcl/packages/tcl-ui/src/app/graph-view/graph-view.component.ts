@@ -193,6 +193,13 @@ export class GraphViewComponent implements AfterViewInit, OnChanges {
 
   ngOnChanges(changes: SimpleChanges) {
     if (changes['claims'] || changes['edges']) {
+      // If edges become empty, clear the graph completely
+      if (this.edges.length === 0 || this.claims.length === 0) {
+        this.clearGraph();
+        return;
+      }
+      
+      // Only render graph if we have both claims and edges
       if (this.claims.length > 0 && this.edges.length > 0) {
         if (this.svg) {
           this.updateGraph();
@@ -274,8 +281,30 @@ export class GraphViewComponent implements AfterViewInit, OnChanges {
     this.updateGraph();
   }
 
+  private clearGraph() {
+    // Stop simulation if running
+    if (this.simulation) {
+      this.simulation.stop();
+      this.simulation = null;
+    }
+    
+    // Clear SVG content
+    if (this.svg) {
+      this.svg.selectAll('*').remove();
+      this.svg = null;
+    }
+    
+    // Also clear the container directly
+    if (this.graphContainer) {
+      d3.select(this.graphContainer.nativeElement).selectAll('*').remove();
+    }
+  }
+
   private updateGraph() {
-    if (!this.svg || this.claims.length === 0 || this.edges.length === 0) return;
+    if (!this.svg || this.claims.length === 0 || this.edges.length === 0) {
+      this.clearGraph();
+      return;
+    }
 
     const g = this.svg.select('g');
     if (g.empty()) return;
