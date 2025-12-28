@@ -11,6 +11,7 @@ export type ConfidenceMetrics = {
   supportScore: number; // 0-1, based on support from other claims
   contradictionScore: number; // 0-1, inverse (higher = fewer contradictions)
   overall: number; // 0-1, weighted average
+  risk?: number; // 1 - overall, for easy consumption
 };
 
 /**
