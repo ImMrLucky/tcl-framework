@@ -4,17 +4,44 @@
  * Ensures result is in 0-100 range.
  */
 export function blendScores(truth: number | null, consistency: number | null, coherence: number | null): number | null {
-  // Only compute if we have real data - no fallbacks
-  if (truth === null || consistency === null || coherence === null) {
-    return null; // Cannot compute overall without all components
+  // Compute overall score with available components
+  // If a component is null, we still compute with available data, but adjust weights
+  const safeTruth = truth !== null ? Math.max(0, Math.min(100, Number(truth))) : null;
+  const safeConsistency = consistency !== null ? Math.max(0, Math.min(100, Number(consistency))) : null;
+  const safeCoherence = coherence !== null ? Math.max(0, Math.min(100, Number(coherence))) : null;
+  
+  // Count available components
+  const available = [safeTruth, safeConsistency, safeCoherence].filter(s => s !== null).length;
+  
+  if (available === 0) {
+    return null; // No data available at all
   }
   
-  // Ensure inputs are valid numbers, clamp to 0-100
-  const safeTruth = Math.max(0, Math.min(100, Number(truth)));
-  const safeConsistency = Math.max(0, Math.min(100, Number(consistency)));
-  const safeCoherence = Math.max(0, Math.min(100, Number(coherence)));
+  // Compute weighted average with available components
+  // Normalize weights based on what's available
+  let totalWeight = 0;
+  let weightedSum = 0;
   
-  const overall = 0.5 * safeTruth + 0.3 * safeConsistency + 0.2 * safeCoherence;
+  if (safeTruth !== null) {
+    const weight = available === 3 ? 0.5 : (available === 2 ? 0.6 : 1.0); // Adjust weight if components missing
+    weightedSum += safeTruth * weight;
+    totalWeight += weight;
+  }
+  
+  if (safeConsistency !== null) {
+    const weight = available === 3 ? 0.3 : (available === 2 ? 0.4 : 1.0);
+    weightedSum += safeConsistency * weight;
+    totalWeight += weight;
+  }
+  
+  if (safeCoherence !== null) {
+    const weight = available === 3 ? 0.2 : (available === 2 ? 0.4 : 1.0);
+    weightedSum += safeCoherence * weight;
+    totalWeight += weight;
+  }
+  
+  // Normalize by total weight to get average
+  const overall = totalWeight > 0 ? weightedSum / totalWeight : 0;
   return Math.max(0, Math.min(100, Math.round(overall)));
 }
 

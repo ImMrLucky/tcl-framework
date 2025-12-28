@@ -29,11 +29,11 @@ import { ValidateOutput } from '../types';
 
         <div *ngIf="!loading && result" class="summary-content">
           <div class="compliance-score">
-            <div class="score-circle" [class]="getComplianceScoreClass(result.scores.overall)">
-              <span class="score-value">{{ result.scores.overall }}</span>
+            <div class="score-circle" [class]="getComplianceScoreClass(result.scores.overall ?? 0)">
+              <span class="score-value">{{ result.scores.overall ?? 'N/A' }}</span>
               <span class="score-label">Compliance</span>
-              <span class="risk-badge" [class]="getRiskLevelClass(result.scores.overall)">
-                {{ getRiskLevel(result.scores.overall) }}
+              <span class="risk-badge" [class]="getRiskLevelClass(result.scores.overall ?? 0)" *ngIf="result.scores.overall !== null">
+                {{ getRiskLevel(result.scores.overall ?? 0) }}
               </span>
             </div>
           </div>
@@ -66,19 +66,19 @@ import { ValidateOutput } from '../types';
             <h3>Score Breakdown</h3>
             <div class="score-item">
               <span class="score-name">Truth (Evidence):</span>
-              <span class="score-value-small">{{ result.scores.truth }}</span>
+              <span class="score-value-small">{{ result.scores.truth ?? 'N/A' }}</span>
             </div>
             <div class="score-item">
               <span class="score-name">Consistency:</span>
-              <span class="score-value-small">{{ result.scores.consistency }}</span>
+              <span class="score-value-small">{{ result.scores.consistency ?? 'N/A' }}</span>
             </div>
             <div class="score-item">
               <span class="score-name">Coherence:</span>
-              <span class="score-value-small">{{ result.scores.coherence }}</span>
+              <span class="score-value-small">{{ result.scores.coherence ?? 'N/A' }}</span>
             </div>
             <div class="score-item overall">
               <span class="score-name">Compliance Score:</span>
-              <span class="score-value-small">{{ result.scores.overall }}</span>
+              <span class="score-value-small">{{ result.scores.overall ?? 'N/A' }}</span>
             </div>
           </div>
 

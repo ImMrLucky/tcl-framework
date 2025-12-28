@@ -1,5 +1,14 @@
 import express from "express";
 import type { ValidateInput, BatchValidateInput, BatchValidateOutput } from "../types.js";
+import { 
+  supabaseAdmin, 
+  verifyApiKey, 
+  provisionUser, 
+  getUserOrgs,
+  generateApiKey,
+  hashApiKey,
+  logAudit 
+} from "./supabase.js";
 
 const app = express();
 app.use(express.json({ limit: "4mb" }));
@@ -37,6 +46,23 @@ async function loadModules() {
 
 // Don't load modules on startup - let server start first, then load modules
 // This ensures health check works even if modules fail to load
+
+// Extract org_id from request (API key or user session)
+async function getOrgId(req: express.Request): Promise<string | null> {
+  // Check for API key in Authorization header
+  const authHeader = req.headers.authorization;
+  if (authHeader?.startsWith('Bearer ')) {
+    const key = authHeader.substring(7);
+    const verified = await verifyApiKey(key);
+    if (verified) {
+      return verified.orgId;
+    }
+  }
+  
+  // TODO: Check for user session JWT from Supabase auth
+  // For now, return null (anonymous validation)
+  return null;
+}
 
 app.post("/validate", async (req, res) => {
   const timeout = setTimeout(() => {
@@ -83,8 +109,46 @@ app.post("/validate", async (req, res) => {
     }
 
     console.log("Starting validation...");
+    const startTime = Date.now();
     const out = await validate(input);
+    const latency = Date.now() - startTime;
     console.log("Validation complete");
+
+    // Store validation in Supabase if configured
+    const orgId = await getOrgId(req);
+    if (orgId && supabaseAdmin) {
+      try {
+        const { error: dbError } = await supabaseAdmin
+          .from('validations')
+          .insert({
+            org_id: orgId,
+            question: input.question,
+            answer: input.answer || null,
+            options: input.options || {},
+            scores: out.scores || {},
+            refusal: out.refusal || false,
+            scorer_id: out.scorerId || null,
+            engine_version: process.env.ENGINE_VERSION || '0.2.0',
+            latency_ms: latency,
+            report: out.report || {}
+          });
+        
+        if (dbError) {
+          console.error('Failed to store validation:', dbError);
+        } else {
+          // Log audit event
+          await logAudit({
+            orgId,
+            action: 'validation.create',
+            targetType: 'validation',
+            meta: { question: input.question.substring(0, 100), latency }
+          });
+        }
+      } catch (dbErr: any) {
+        console.error('Database error (non-fatal):', dbErr);
+      }
+    }
+
     clearTimeout(timeout);
     res.json(out);
   } catch (e: any) {
@@ -237,6 +301,182 @@ app.post("/validate/batch", async (req, res) => {
     res.status(500).json({ 
       error: e?.message ?? "unknown error",
       stack: process.env.NODE_ENV === "development" ? e?.stack : undefined
+    });
+  }
+});
+
+// Auth provision endpoint (called after user signs up/logs in)
+app.post("/auth/provision", async (req, res) => {
+  try {
+    const { userId, email } = req.body;
+    
+    if (!userId || !email) {
+      return res.status(400).json({ error: "userId and email are required" });
+    }
+    
+    if (!supabaseAdmin) {
+      return res.status(503).json({ error: "Supabase not configured" });
+    }
+    
+    const result = await provisionUser(userId, email);
+    
+    if (!result) {
+      return res.status(500).json({ error: "Failed to provision user" });
+    }
+    
+    res.json({ orgId: result.orgId });
+  } catch (e: any) {
+    console.error("Provision error:", e);
+    res.status(500).json({ 
+      error: e?.message ?? "unknown error"
+    });
+  }
+});
+
+// Get user's organizations
+app.get("/me/orgs", async (req, res) => {
+  try {
+    // TODO: Verify Supabase JWT and extract userId
+    const userId = req.body.userId || req.query.userId as string;
+    
+    if (!userId) {
+      return res.status(400).json({ error: "userId required" });
+    }
+    
+    if (!supabaseAdmin) {
+      return res.status(503).json({ error: "Supabase not configured" });
+    }
+    
+    const orgs = await getUserOrgs(userId);
+    res.json({ orgs });
+  } catch (e: any) {
+    console.error("Get orgs error:", e);
+    res.status(500).json({ 
+      error: e?.message ?? "unknown error"
+    });
+  }
+});
+
+// API Key management endpoints
+app.post("/orgs/:orgId/api-keys", async (req, res) => {
+  try {
+    const { orgId } = req.params;
+    const { name } = req.body;
+    
+    if (!name) {
+      return res.status(400).json({ error: "name is required" });
+    }
+    
+    if (!supabaseAdmin) {
+      return res.status(503).json({ error: "Supabase not configured" });
+    }
+    
+    // TODO: Verify user has admin/owner role for orgId
+    
+    const { key, prefix, hash } = generateApiKey();
+    
+    const { data, error } = await supabaseAdmin
+      .from('api_keys')
+      .insert({
+        org_id: orgId,
+        name,
+        key_hash: hash,
+        prefix,
+        scopes: ['validate:write', 'validate:read']
+      })
+      .select('id, name, prefix, created_at')
+      .single();
+    
+    if (error) {
+      return res.status(500).json({ error: error.message });
+    }
+    
+    // Return key only once (never again)
+    res.json({
+      id: data.id,
+      name: data.name,
+      prefix: data.prefix,
+      key, // Only returned on creation
+      createdAt: data.created_at
+    });
+    
+    // Log audit
+    await logAudit({
+      orgId,
+      action: 'apikey.create',
+      targetType: 'api_key',
+      targetId: data.id,
+      meta: { name }
+    });
+  } catch (e: any) {
+    console.error("Create API key error:", e);
+    res.status(500).json({ 
+      error: e?.message ?? "unknown error"
+    });
+  }
+});
+
+app.get("/orgs/:orgId/api-keys", async (req, res) => {
+  try {
+    const { orgId } = req.params;
+    
+    if (!supabaseAdmin) {
+      return res.status(503).json({ error: "Supabase not configured" });
+    }
+    
+    // TODO: Verify user has admin/owner role for orgId
+    
+    const { data, error } = await supabaseAdmin
+      .from('api_keys')
+      .select('id, name, prefix, scopes, is_active, created_at, revoked_at')
+      .eq('org_id', orgId)
+      .order('created_at', { ascending: false });
+    
+    if (error) {
+      return res.status(500).json({ error: error.message });
+    }
+    
+    res.json({ keys: data || [] });
+  } catch (e: any) {
+    console.error("Get API keys error:", e);
+    res.status(500).json({ 
+      error: e?.message ?? "unknown error"
+    });
+  }
+});
+
+// Get validations for an org
+app.get("/validations", async (req, res) => {
+  try {
+    const orgId = await getOrgId(req);
+    
+    if (!orgId) {
+      return res.status(401).json({ error: "Authorization required" });
+    }
+    
+    if (!supabaseAdmin) {
+      return res.status(503).json({ error: "Supabase not configured" });
+    }
+    
+    const limit = Math.min(parseInt(req.query.limit as string) || 50, 100);
+    const offset = parseInt(req.query.offset as string) || 0;
+    
+    const { data, error } = await supabaseAdmin
+      .from('validations')
+      .select('*')
+      .eq('org_id', orgId)
+      .order('created_at', { ascending: false })
+      .range(offset, offset + limit - 1);
+    
+    if (error) {
+      return res.status(500).json({ error: error.message });
+    }
+    
+    res.json({ validations: data || [] });
+  } catch (e: any) {
+    console.error("Get validations error:", e);
+    res.status(500).json({ 
+      error: e?.message ?? "unknown error"
     });
   }
 });
