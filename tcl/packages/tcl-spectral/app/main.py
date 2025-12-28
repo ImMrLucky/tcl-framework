@@ -57,13 +57,17 @@ def analyze(req: SpectralRequest):
     Returns all existing metrics from /spectral/score plus:
     - truthVector: per-claim truth values
     - truthStates: per-claim state labels
-    - topBadContradictions: problematic contradiction edges
-    - topBadSupports: problematic support edges
+    - topBadContradictions: problematic contradiction edges (with claim IDs)
+    - topBadSupports: problematic support edges (with claim IDs)
     - nodeBlame: blame scores per node
+    - nodeBlameNorm: normalized node blame (0..1)
     - fingerprint: monitoring fingerprint
     """
     ids = [c.id for c in req.claims]
     idx = build_index(ids)
+    
+    # Build reverse index: index -> claim ID
+    idx_to_id = {i: ids[i] for i in range(len(ids))}
 
     supports = []
     for e in req.supports:
@@ -112,7 +116,25 @@ def analyze(req: SpectralRequest):
         top_k=10
     )
     
-    # 4. Generate fingerprint (new)
+    # 4. Normalize node blame (0..1)
+    node_blame = attribution_result["nodeBlame"]
+    max_blame = max(node_blame) if node_blame and max(node_blame) > 0 else 1.0
+    node_blame_norm = [float(x) / float(max_blame) for x in node_blame]
+    
+    # 5. Add claim IDs to edge attribution
+    def with_ids(edge):
+        """Add claimAId and claimBId to edge attribution"""
+        e = dict(edge)
+        a_idx = int(e.get("claimAIndex", -1))
+        b_idx = int(e.get("claimBIndex", -1))
+        e["claimAId"] = idx_to_id.get(a_idx)
+        e["claimBId"] = idx_to_id.get(b_idx)
+        return e
+    
+    top_bad_contradictions_with_ids = [with_ids(e) for e in attribution_result["topBadContradictions"]]
+    top_bad_supports_with_ids = [with_ids(e) for e in attribution_result["topBadSupports"]]
+    
+    # 6. Generate fingerprint (new)
     fingerprint = spectral_fingerprint(
         coherence_score=m["coherenceScore"],
         spectral_gap=m["spectralGap"],
@@ -121,7 +143,7 @@ def analyze(req: SpectralRequest):
         heat_trace=m["heatTrace"]
     )
     
-    # 5. Build response with all fields
+    # 7. Build response with all fields
     return SpectralAnalyzeResponse(
         # Existing fields (same as SpectralResponse)
         coherenceScore=m["coherenceScore"],
@@ -134,8 +156,9 @@ def analyze(req: SpectralRequest):
         # New fields
         truthVector=truth_result["truthVector"],
         truthStates=truth_result["truthStates"],
-        topBadContradictions=[EdgeAttribution(**e) for e in attribution_result["topBadContradictions"]],
-        topBadSupports=[EdgeAttribution(**e) for e in attribution_result["topBadSupports"]],
+        topBadContradictions=[EdgeAttribution(**e) for e in top_bad_contradictions_with_ids],
+        topBadSupports=[EdgeAttribution(**e) for e in top_bad_supports_with_ids],
         nodeBlame=attribution_result["nodeBlame"],
+        nodeBlameNorm=node_blame_norm,  # Added normalized blame
         fingerprint=fingerprint
     )

@@ -10,6 +10,8 @@ import { TransformersNliScorer } from "./graph/transformers_scorer.js";
 import { calculateAllClaimConfidences } from "./confidence.js";
 import { generateSuggestions } from "./suggestions.js";
 import { validateCustomRules } from "./custom_rules.js";
+import { computeDestructiveClaims } from "./destructive.js";
+import { computeTrajectory } from "./trajectory.js";
 
 async function callSpectralService(
   spectralServiceUrl: string,
@@ -41,6 +43,57 @@ async function callSpectralService(
   
   const result = await res.json() as SpectralReport;
   console.log(`Spectral response:`, result);
+  return result;
+}
+
+async function callSpectralAnalyzeService(
+  spectralServiceUrl: string,
+  claims: { id: string; text: string }[],
+  supports: { claimA: string; claimB: string; weight?: number }[],
+  contradictions: { claimA: string; claimB: string; weight?: number }[],
+  groundedClaimIds: string[],
+  options?: {
+    wSupport?: number;
+    wContradiction?: number;
+    wCircularity?: number;
+    cycleMaxLen?: number;
+  }
+): Promise<SpectralReport> {
+  const url = `${spectralServiceUrl.replace(/\/$/, "")}/spectral/analyze`;
+  console.log(`Spectral analyze request URL: ${url}`);
+  
+  const payload = {
+    claims,
+    supports,
+    contradictions,
+    grounded: groundedClaimIds,
+    w_support: options?.wSupport,
+    w_contradiction: options?.wContradiction,
+    w_circularity: options?.wCircularity,
+    cycle_max_len: options?.cycleMaxLen
+  };
+  
+  console.log(`Spectral analyze request payload:`, {
+    claimsCount: claims.length,
+    supportsCount: supports.length,
+    contradictionsCount: contradictions.length,
+    groundedCount: groundedClaimIds.length
+  });
+  
+  const res = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload)
+  });
+  
+  if (!res.ok) {
+    const errorText = await res.text().catch(() => '');
+    console.error(`Spectral analyze service HTTP error ${res.status}: ${errorText}`);
+    throw new Error(`Spectral analyze service error: ${res.status} - ${errorText}`);
+  }
+  
+  const result = await res.json() as SpectralReport;
+  console.log(`Spectral analyze response received`);
   return result;
 }
 
@@ -219,31 +272,52 @@ async function validateOnce(input: ValidateInput, adapter?: LLMAdapter, startTim
       ? validateCustomRules(evidenceRes.claims, input, options.customRules)
       : [];
     
-    // merge hard contradictions found by rule layer into graph contradictions (weight=1)
-    const hardContradictions = logicRes.contradictions.map((x) => ({ claimA: x.claimA, claimB: x.claimB, weight: 1.0 }));
-    const contradictions = [...graph.contradictions, ...hardContradictions];
-
-    // Calculate consistency score from ALL contradictions (both logic and graph-based)
-    // Dedupe contradictions to avoid double-counting
-    const contradictionSet = new Set<string>();
-    let totalContradictions = 0;
+    // Create canonical contradiction list (unified representation)
+    // Merge graph contradictions (NLI-based, weighted) and logic contradictions (rule-based, weight=1.0)
+    const canonicalContradictions: Array<{ claimA: string; claimB: string; weight: number; source: 'nli' | 'rule' | 'heuristic' }> = [];
     
-    // Count unique contradiction pairs
-    for (const cont of contradictions) {
+    // Add graph contradictions (NLI-based)
+    for (const cont of graph.contradictions) {
+      canonicalContradictions.push({
+        claimA: cont.claimA,
+        claimB: cont.claimB,
+        weight: cont.weight,
+        source: 'nli'
+      });
+    }
+    
+    // Add logic contradictions (rule-based, weight=1.0)
+    for (const cont of logicRes.contradictions) {
+      canonicalContradictions.push({
+        claimA: cont.claimA,
+        claimB: cont.claimB,
+        weight: 1.0,
+        source: 'rule'
+      });
+    }
+    
+    // Dedupe contradictions (keep highest weight)
+    const contradictionMap = new Map<string, { claimA: string; claimB: string; weight: number; source: string }>();
+    for (const cont of canonicalContradictions) {
       const key1 = `${cont.claimA}::${cont.claimB}`;
       const key2 = `${cont.claimB}::${cont.claimA}`;
-      if (!contradictionSet.has(key1) && !contradictionSet.has(key2)) {
-        contradictionSet.add(key1);
-        totalContradictions++;
+      const existing = contradictionMap.get(key1) || contradictionMap.get(key2);
+      if (!existing || cont.weight > existing.weight) {
+        contradictionMap.delete(key1);
+        contradictionMap.delete(key2);
+        contradictionMap.set(key1, cont);
       }
     }
     
-    // Calculate consistency score: 100 base, -25 per unique contradiction, min 0
+    const uniqueContradictions = Array.from(contradictionMap.values());
+    
+    // Calculate consistency score using weighted sum (not just count)
+    const contradictionWeight = uniqueContradictions.reduce((sum, c) => sum + c.weight, 0);
     const base = 100;
-    const penalty = Math.min(100, totalContradictions * 25);
+    const penalty = Math.min(100, contradictionWeight * 20); // 20 points per unit weight (was 25 per count)
     const consistencyScore = Math.max(0, base - penalty);
     
-    console.log(`Consistency: ${totalContradictions} unique contradictions (${logicRes.contradictions.length} from logic, ${graph.contradictions.length} from graph), score: ${consistencyScore}`);
+    console.log(`Consistency: ${uniqueContradictions.length} unique contradictions (weight=${contradictionWeight.toFixed(2)}, ${logicRes.contradictions.length} from logic, ${graph.contradictions.length} from graph), score: ${consistencyScore}`);
 
     // 5) spectral
     let spectral: (SpectralReport & { spectralSkipped?: boolean; debugReason?: string }) | undefined;
@@ -251,15 +325,18 @@ async function validateOnce(input: ValidateInput, adapter?: LLMAdapter, startTim
     const envSpectralUrl = process.env.TCL_SPECTRAL_URL || "";
     const urlToUse = spectralServiceUrl || envSpectralUrl;
     
-    // Check if we have edges for Spectral
-    const totalEdges = graph.supports.length + contradictions.length + graph.grounding.length;
+    // Check if we have edges for Spectral (use uniqueContradictions after it's created)
+    // Note: This will be updated after uniqueContradictions is computed
+    let totalEdges = graph.supports.length + graph.contradictions.length + graph.grounding.length;
     
     // Debug logging
     console.log(`Spectral check: enabled=${spectralEnabled}`);
     console.log(`  - URL from options: ${spectralServiceUrl || 'NOT SET'}`);
     console.log(`  - URL from env (TCL_SPECTRAL_URL): ${envSpectralUrl || 'NOT SET'}`);
     console.log(`  - Final URL to use: ${urlToUse || 'NOT SET'}`);
-    console.log(`  - Total edges for Spectral: ${totalEdges} (supports: ${graph.supports.length}, contradictions: ${contradictions.length}, grounding: ${graph.grounding.length})`);
+    // Calculate total edges after uniqueContradictions is computed
+    totalEdges = graph.supports.length + uniqueContradictions.length + graph.grounding.length;
+    console.log(`  - Total edges for Spectral: ${totalEdges} (supports: ${graph.supports.length}, contradictions: ${uniqueContradictions.length}, grounding: ${graph.grounding.length})`);
     
     if (spectralEnabled) {
       if (!urlToUse) {
@@ -294,7 +371,7 @@ async function validateOnce(input: ValidateInput, adapter?: LLMAdapter, startTim
             urlToUse,
             evidenceRes.claims.map((c) => ({ id: c.id, text: c.text })),
             graph.supports,
-            contradictions,
+            uniqueContradictions.map(c => ({ claimA: c.claimA, claimB: c.claimB, weight: c.weight })),
             graph.groundedClaimIds
           );
           coherenceScore = spectral.coherenceScore;
@@ -350,7 +427,7 @@ async function validateOnce(input: ValidateInput, adapter?: LLMAdapter, startTim
       const confidenceMetrics = calculateAllClaimConfidences(
         evidenceRes.claims,
         graph.supports,
-        contradictions,
+        uniqueContradictions.map(c => ({ claimA: c.claimA, claimB: c.claimB, weight: c.weight })),
         graph.grounding
       );
       
@@ -363,12 +440,34 @@ async function validateOnce(input: ValidateInput, adapter?: LLMAdapter, startTim
       });
     }
 
-    // 8) Generate suggestions (if enabled)
-    // Convert all contradictions (graph + logic) to the format needed for suggestions
-    const allContradictionsForSuggestions = Array.from(contradictionSet).map(key => {
-      const [claimA, claimB] = key.split('::');
-      return { claimA, claimB, reason: "Contradiction detected" };
+    // 8) Compute destructive claims (ranked by importance)
+    const destructiveClaims = computeDestructiveClaims({
+      claims: claimsWithConfidence,
+      contradictions: uniqueContradictions.map(c => ({ claimA: c.claimA, claimB: c.claimB, weight: c.weight })),
+      grounding: graph.grounding,
+      customRuleViolations: [...evidenceRes.violations, ...logicRes.violations, ...customRuleViolations].filter(
+        v => v.type === "CUSTOM_RULE"
+      ),
+      spectral: spectral ? {
+        truthVector: spectral.truthVector,
+        truthStates: spectral.truthStates,
+        nodeBlameNorm: spectral.nodeBlameNorm
+      } : undefined
     });
+
+    // Build importance map for suggestions
+    const importanceByClaimId = new Map<string, number>();
+    destructiveClaims.forEach(dc => {
+      importanceByClaimId.set(dc.claimId, dc.importance);
+    });
+
+    // 9) Generate suggestions (if enabled)
+    // Use canonical contradictions for suggestions
+    const allContradictionsForSuggestions = uniqueContradictions.map(c => ({
+      claimA: c.claimA,
+      claimB: c.claimB,
+      reason: `Contradiction detected (${c.source}, weight=${c.weight.toFixed(2)})`
+    }));
     
     const suggestions = (options?.includeSuggestions !== false) // Default: true
       ? generateSuggestions(
@@ -377,7 +476,23 @@ async function validateOnce(input: ValidateInput, adapter?: LLMAdapter, startTim
           allContradictionsForSuggestions,
           evidenceRes.missing,
           graph.supports,
-          options?.customRules
+          options?.customRules,
+          importanceByClaimId,
+          graph.grounding
+        )
+      : undefined;
+
+    // 10) Compute trajectory (if enabled and transcript detected)
+    const trajectory = options?.trajectory && (!answer || answer.trim().length === 0) && 
+                       (question.includes("Agent:") || question.includes("Customer:"))
+      ? await computeTrajectory(
+          input,
+          validateOnce, // Pass the function itself
+          adapter,
+          {
+            windowTurns: options?.trajectoryWindowTurns ?? 3,
+            maxSegments: options?.maxTrajectorySegments ?? 20
+          }
         )
       : undefined;
 
@@ -399,9 +514,15 @@ async function validateOnce(input: ValidateInput, adapter?: LLMAdapter, startTim
           supports: graph.supports,
           contradictions: graph.contradictions,
           grounding: graph.grounding,
-          debug: graph.debug ? { ...graph.debug, spectralEnabled: spectralEnabled } : undefined // Include debug info with spectral flag
+          debug: graph.debug ? { 
+            ...graph.debug, 
+            spectralEnabled: spectralEnabled,
+            numSources: graph.debug.numSources // Ensure numSources is included (renamed from numSourceClaims)
+          } : undefined // Include debug info with spectral flag
         },
-        suggestions
+        suggestions,
+        destructiveClaims: destructiveClaims.length > 0 ? destructiveClaims : undefined,
+        trajectory
       }
     };
   } catch (error: any) {

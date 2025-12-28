@@ -13,6 +13,12 @@ export type Claim = {
     supportScore: number; // 0-1, based on support from other claims
     contradictionScore: number; // 0-1, inverse (higher = fewer contradictions)
     overall: number; // 0-1, weighted average
+    risk?: number; // 1 - overall, for easy consumption
+  };
+  // Metadata for transcript-aware extraction
+  meta?: {
+    speaker?: string; // "Agent" | "Customer" | "Other"
+    turnIndex?: number;
   };
 };
 
@@ -32,6 +38,7 @@ export type CustomRule = {
     type: 'contains' | 'regex' | 'semantic';
     value: string;
     caseSensitive?: boolean;
+    mode?: 'must_contain' | 'must_not_contain'; // Default: must_contain
   };
   // Semantic rule: use NLI to check relationship
   semantic?: {
@@ -52,6 +59,82 @@ export type SpectralReport = {
   spectralGap: number;             // >=0
   cycleMass?: number;              // >=0
   heatTrace?: number[];
+  // Enhanced from /spectral/analyze
+  truthVector?: number[];          // Per-claim truth values
+  truthStates?: string[];          // Per-claim states: "Supported" | "Contradicted" | "Ungrounded" | "Inconclusive"
+  topBadContradictions?: EdgeAttributionExpanded[];
+  topBadSupports?: EdgeAttributionExpanded[];
+  nodeBlame?: number[];            // Per-claim blame scores
+  nodeBlameNorm?: number[];         // Normalized node blame (0..1)
+  fingerprint?: any;                // Monitoring fingerprint
+};
+
+export type DestructiveReason =
+  | "node_blame"
+  | "contradiction_pressure"
+  | "low_confidence"
+  | "policy_violation"
+  | "ungrounded"
+  | "contradicted";
+
+export type DestructiveClaim = {
+  claimId: string;
+  text: string;
+  // 0..1
+  importance: number;
+  // spectral
+  truthState?: "Supported" | "Contradicted" | "Ungrounded" | "Inconclusive";
+  truthValue?: number; // from truthVector
+  // metrics 0..1
+  nodeBlameNorm?: number;
+  contradictionIncident?: number; // normalized
+  confidenceOverall?: number;      // from confidenceMetrics.overall
+  groundingScore?: number;         // from confidenceMetrics.groundingScore
+  // policy
+  policySeverity?: "none" | "warning" | "error";
+  policyRuleIds?: string[];
+  // Explainability
+  reasons: Array<{ kind: DestructiveReason; weight: number; detail?: string }>;
+};
+
+export type EdgeAttributionExpanded = {
+  claimAIndex: number;
+  claimBIndex: number;
+  weight: number;
+  badness: number;
+  // add these (server OR client can map)
+  claimAId?: string;
+  claimBId?: string;
+};
+
+export type TrajectorySegment = {
+  segmentIndex: number;
+  startTurn: number;
+  endTurn: number;
+  textPreview: string;
+  scores: { truth: number; consistency: number; coherence: number | null; overall: number };
+  spectral?: {
+    coherenceScore: number;
+    contradictionEnergy: number;
+    supportEnergy: number;
+    circularityScore: number;
+    spectralGap: number;
+    cycleMass: number;
+    heatTrace: number[];
+    fingerprint?: any;
+  };
+  destructiveClaimsTop?: DestructiveClaim[]; // top 5 for that segment
+};
+
+export type TrajectoryReport = {
+  enabled: boolean;
+  segments: TrajectorySegment[];
+  summary: {
+    worstSegmentIndex: number | null;
+    worstOverallScore: number | null;
+    instability: number;  // variance/STD of overall
+    peakRiskImportanceSum: number; // max sum of destructive importance in any segment
+  };
 };
 
 export type ValidationOptions = {
@@ -84,6 +167,12 @@ export type ValidationOptions = {
   customRules?: CustomRule[]; // Domain-specific validation rules
   includeSuggestions?: boolean; // Generate suggested fixes (default: true)
   includeConfidenceMetrics?: boolean; // Include detailed confidence scores (default: true)
+  
+  // Upgrade features
+  spectralMode?: "score" | "analyze"; // default "analyze" (use /spectral/analyze endpoint)
+  trajectory?: boolean;               // enable trajectory scoring for transcripts
+  trajectoryWindowTurns?: number;     // default 3
+  maxTrajectorySegments?: number;      // default 20 (guard for large transcripts)
 };
 
 export type ValidateInput = {
@@ -110,7 +199,7 @@ export type Suggestion = {
 
 export type GraphDebugInfo = {
   numClaims: number;
-  numSourceClaims: number;
+  numSources: number; // Renamed from numSourceClaims for clarity
   annEnabled: boolean;
   cacheEnabled: boolean;
   spectralEnabled: boolean;
@@ -161,6 +250,8 @@ export type ValidateOutput = {
     };
     // New features
     suggestions?: Suggestion[]; // Actionable suggestions for fixing issues
+    destructiveClaims?: DestructiveClaim[]; // All destructive claims ranked by importance
+    trajectory?: TrajectoryReport; // Trajectory scoring for transcripts
   };
 };
 

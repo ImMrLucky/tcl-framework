@@ -40,6 +40,8 @@ class EdgeAttribution(BaseModel):
     claimBIndex: int
     weight: float
     badness: float
+    claimAId: Optional[str] = None  # Added: claim ID for claimA
+    claimBId: Optional[str] = None  # Added: claim ID for claimB
 
 class SpectralAnalyzeResponse(BaseModel):
     # Required existing fields (same as SpectralResponse)
@@ -57,4 +59,5 @@ class SpectralAnalyzeResponse(BaseModel):
     topBadContradictions: List[EdgeAttribution]
     topBadSupports: List[EdgeAttribution]
     nodeBlame: Optional[List[float]] = None
+    nodeBlameNorm: List[float]  # Added: normalized node blame (0..1)
     fingerprint: Optional[Dict[str, object]] = None

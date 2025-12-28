@@ -25,7 +25,27 @@ export type CacheConfig = {
   maxEntries?: number;   // simple in-memory cap
 };
 
-export class SemanticCache {
+export interface CacheLike {
+  loadIfNeeded(): Promise<void>;
+  flush(): Promise<void>;
+  get(key: string): CacheEntry | undefined;
+  set(key: string, value: number, quote?: string): void;
+  getStats(): { hits: number; misses: number; total: number; hitRate: number };
+  makeKey(task: "ent"|"con"|"gnd", a: string, b: string): string;
+}
+
+// Type guard to check if cache implements CacheLike
+export function isCacheLike(cache: any): cache is CacheLike {
+  return cache && 
+    typeof cache.loadIfNeeded === 'function' &&
+    typeof cache.flush === 'function' &&
+    typeof cache.get === 'function' &&
+    typeof cache.set === 'function' &&
+    typeof cache.getStats === 'function' &&
+    typeof cache.makeKey === 'function';
+}
+
+export class SemanticCache implements CacheLike {
   private map = new Map<string, CacheEntry>();
   private dirty: CacheRecord[] = [];
   private loaded = false;
@@ -120,4 +140,16 @@ export class SemanticCache {
     await fs.mkdir(require("path").dirname(this.cfg.persistPath), { recursive: true }).catch(() => {});
     await fs.appendFile(this.cfg.persistPath, lines, "utf-8");
   }
+}
+
+// No-op cache for when caching is disabled
+export class NoopCache implements CacheLike {
+  constructor(private makeKeyFn: (task: "ent"|"con"|"gnd", a: string, b: string) => string) {}
+  
+  loadIfNeeded = async () => {};
+  flush = async () => {};
+  get = (_: string) => undefined;
+  set = (_: string, __: number, ___?: string) => {};
+  getStats = () => ({ hits: 0, misses: 0, total: 0, hitRate: 0 });
+  makeKey = this.makeKeyFn as any;
 }

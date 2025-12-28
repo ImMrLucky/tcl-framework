@@ -3,18 +3,29 @@
  * Decoupled from specific use cases - works for any domain
  */
 
-import type { Claim, Violation, ContradictionEdge, Suggestion, CustomRule } from "./types.js";
+import type { Claim, Violation, SupportEdge, ContradictionEdge, Suggestion, CustomRule, GroundingEdge } from "./types.js";
 
 export function generateSuggestions(
   claims: Claim[],
   violations: Violation[],
   contradictions: { claimA: string; claimB: string; reason: string }[],
   missingEvidence: { claimId: string; reason: string }[],
-  supports: ContradictionEdge[],
-  customRules?: CustomRule[]
+  supports: SupportEdge[],
+  customRules?: CustomRule[],
+  importanceByClaimId?: Map<string, number>,
+  grounding?: Array<{ claimId: string; sourceId: string; weight: number; quote?: string }>
 ): Suggestion[] {
   const suggestions: Suggestion[] = [];
   const claimMap = new Map(claims.map(c => [c.id, c]));
+
+  // Helper to determine priority based on importance
+  const getPriority = (claimId: string): 'high' | 'medium' | 'low' => {
+    if (!importanceByClaimId) return 'high';
+    const importance = importanceByClaimId.get(claimId) ?? 0;
+    if (importance > 0.75) return 'high';
+    if (importance > 0.4) return 'medium';
+    return 'low';
+  };
 
   // 1. Fix contradictions
   contradictions.forEach(cont => {
@@ -22,10 +33,15 @@ export function generateSuggestions(
     const claimB = claimMap.get(cont.claimB);
     
     if (claimA && claimB) {
+      const priorityA = getPriority(cont.claimA);
+      const priorityB = getPriority(cont.claimB);
+      const priority = priorityA === 'high' || priorityB === 'high' ? 'high' : 
+                       priorityA === 'medium' || priorityB === 'medium' ? 'medium' : 'low';
+      
       suggestions.push({
         type: 'fix_contradiction',
         claimIds: [cont.claimA, cont.claimB],
-        priority: 'high',
+        priority,
         title: 'Resolve Contradiction',
         description: `These claims contradict each other: "${claimA.text.substring(0, 60)}..." and "${claimB.text.substring(0, 60)}..."`,
         suggestedAction: `Review and reconcile these statements. One may need to be corrected or clarified.`,
@@ -38,14 +54,31 @@ export function generateSuggestions(
   missingEvidence.forEach(missing => {
     const claim = claimMap.get(missing.claimId);
     if (claim) {
+      // Find best grounding quote if available
+      let bestQuote: string | undefined;
+      if (grounding) {
+        const claimGrounding = grounding.filter(g => g.claimId === missing.claimId);
+        if (claimGrounding.length > 0) {
+          const best = claimGrounding.reduce((max, g) => g.weight > max.weight ? g : max);
+          bestQuote = best.quote;
+        }
+      }
+
+      const priority = getPriority(missing.claimId);
+      const description = bestQuote
+        ? `Claim "${claim.text.substring(0, 60)}..." lacks supporting evidence. Related quote: "${bestQuote.substring(0, 80)}..."`
+        : `Claim "${claim.text.substring(0, 60)}..." lacks supporting evidence.`;
+
       suggestions.push({
         type: 'add_evidence',
         claimId: missing.claimId,
-        priority: claim.confidence < 0.5 ? 'high' : 'medium',
+        priority,
         title: 'Add Supporting Evidence',
-        description: `Claim "${claim.text.substring(0, 60)}..." lacks supporting evidence.`,
+        description,
         suggestedAction: `Provide a source, citation, or reference that supports this claim.`,
-        example: `Add a source like: "According to [source], [claim]"`
+        example: bestQuote 
+          ? `Use evidence like: "${bestQuote.substring(0, 100)}..."`
+          : `Add a source like: "According to [source], [claim]"`
       });
     }
   });

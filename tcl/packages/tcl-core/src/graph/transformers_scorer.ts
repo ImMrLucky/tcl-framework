@@ -108,10 +108,10 @@ export class TransformersNliScorer implements SemanticScorer {
           let result: any;
           
           if (isMnliModel) {
-            // For MNLI models, use premise-hypothesis format
-            // MNLI models with text-classification expect: [premise, hypothesis] as array
-            // The model will return ENTAILMENT, CONTRADICTION, or NEUTRAL
-            result = await model([a, b]);
+            // For MNLI models, use premise-hypothesis pair format
+            // text-classification pipeline expects: { text: premise, text_pair: hypothesis }
+            // This correctly represents a single pair, not a batch of two items
+            result = await model({ text: a, text_pair: b });
           } else {
             // For zero-shot models, use formatted text with labels
             let input: string;

@@ -51,12 +51,14 @@ export function calculateClaimConfidence(
     supportScore * 0.25
   );
 
-  return {
-    groundingScore: Math.max(0, Math.min(1, groundingScore)),
-    supportScore: Math.max(0, Math.min(1, supportScore)),
-    contradictionScore: Math.max(0, Math.min(1, contradictionScore)),
-    overall: Math.max(0, Math.min(1, overall))
-  };
+        const overallClamped = Math.max(0, Math.min(1, overall));
+        return {
+          groundingScore: Math.max(0, Math.min(1, groundingScore)),
+          supportScore: Math.max(0, Math.min(1, supportScore)),
+          contradictionScore: Math.max(0, Math.min(1, contradictionScore)),
+          overall: overallClamped,
+          risk: 1 - overallClamped // Add risk metric
+        };
 }
 
 /**

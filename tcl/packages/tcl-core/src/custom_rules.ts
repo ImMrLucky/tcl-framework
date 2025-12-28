@@ -65,8 +65,12 @@ function validateClaimAgainstRule(
     }
 
     // Check if this is a "must contain" or "must not contain" rule
-    // For now, we'll assume pattern rules are "must contain" - can be extended
-    if (!matches && rule.severity === 'error') {
+    const mode = rule.pattern.mode || 'must_contain';
+    const isViolation = mode === 'must_contain' 
+      ? !matches  // must_contain: violation if pattern NOT found
+      : matches;  // must_not_contain: violation if pattern IS found
+    
+    if (isViolation && rule.severity === 'error') {
       return {
         type: 'CUSTOM_RULE',
         claimId: claim.id,
@@ -104,7 +108,12 @@ function validateDocumentAgainstRule(
       }
     }
 
-    if (!matches && rule.severity === 'error') {
+    const mode = rule.pattern.mode || 'must_contain';
+    const isViolation = mode === 'must_contain' 
+      ? !matches  // must_contain: violation if pattern NOT found
+      : matches;  // must_not_contain: violation if pattern IS found
+
+    if (isViolation && rule.severity === 'error') {
       return {
         type: 'CUSTOM_RULE',
         ruleId: rule.id,

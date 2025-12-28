@@ -1,6 +1,6 @@
 import { Claim, Source, SupportEdge, ContradictionEdge, GroundingEdge } from "../types.js";
 import { EmbeddingProvider, SparseHashEmbeddingProvider, CandidateIndex, BruteForceIndex, HnswIndex } from "./ann.js";
-import { SemanticCache } from "./cache.js";
+import { SemanticCache, NoopCache, type CacheLike } from "./cache.js";
 
 /**
  * PRODUCTION EDGE BUILDER (ANN + CACHE)
@@ -21,7 +21,7 @@ export type ClaimGraph = {
   cacheStats?: { hits: number; misses: number; total: number; hitRate: number };
   debug?: {
     numClaims: number;
-    numSourceClaims: number;
+    numSources: number;
     annEnabled: boolean;
     cacheEnabled: boolean;
     neighborK: number;
@@ -338,6 +338,7 @@ export async function buildClaimGraph(
   sources: Source[] | undefined,
   opts: EdgeBuilderOptions = {}
 ): Promise<ClaimGraph> {
+  const n = claims.length; // Declare n early for use throughout function
   const scorer: SemanticScorer = opts.scorer ?? new TokenHeuristicScorer();
   const tSup = opts.supportThreshold ?? 0.58;
   const tCon = opts.contradictionThreshold ?? 0.70;
@@ -347,18 +348,30 @@ export async function buildClaimGraph(
   const neighborK = opts.ann?.neighborK ?? 12;
   const maxPairs = opts.maxPairwiseEdges ?? 6000;
   const batchSize = opts.batchSize ?? 256;
+  const potentialPairs = n > 1 ? n * (n - 1) : 0; // All possible directed pairs
 
-  // Cache: versioned, model-aware
+  // Cache: versioned, model-aware (or no-op if disabled)
   const cacheEnabled = opts.cache?.enabled ?? true;
-  const cache = new SemanticCache({
-    namespace: "tcl",
-    version: "v1",
-    model: scorer.id,
-    ttlSeconds: opts.cache?.ttlSeconds ?? 60 * 60 * 24 * 7, // 7 days default
-    persistPath: opts.cache?.persistPath,
-    maxEntries: opts.cache?.maxEntries ?? 250000
-  });
-  await cache.loadIfNeeded();
+  const makeKeyFn = (task: "ent"|"con"|"gnd", a: string, b: string) => {
+    const payload = `tcl|v1|${scorer.id}|${task}|${a.toLowerCase().replace(/\s+/g, " ").trim()}|${b.toLowerCase().replace(/\s+/g, " ").trim()}`;
+    const { createHash } = require("crypto");
+    return createHash("sha256").update(payload).digest("hex");
+  };
+  
+  const cache: CacheLike = cacheEnabled
+    ? (new SemanticCache({
+        namespace: "tcl",
+        version: "v1",
+        model: scorer.id,
+        ttlSeconds: opts.cache?.ttlSeconds ?? 60 * 60 * 24 * 7, // 7 days default
+        persistPath: opts.cache?.persistPath,
+        maxEntries: opts.cache?.maxEntries ?? 250000
+      }) as unknown as CacheLike)
+    : new NoopCache(makeKeyFn);
+  
+  if (cacheEnabled) {
+    await cache.loadIfNeeded();
+  }
 
   const grounding: GroundingEdge[] = [];
   const groundedClaimIds: string[] = [];
@@ -417,9 +430,8 @@ export async function buildClaimGraph(
   // Pair generation: brute force for small n, ANN for large n
   // CRITICAL: Always generate pairs when n > 1, even without sources
   // -----------------------------
-  const n = claims.length;
   const SMALL_N = 50;
-  const useANN = opts.ann?.index !== undefined && n > SMALL_N;
+  const useANN = opts.ann?.index !== undefined && opts.ann.index !== "bruteforce" && n > SMALL_N;
   
   const candPairs: Array<{ i: number; j: number }> = [];
   const idToIdx = new Map<string, number>();
@@ -531,10 +543,12 @@ export async function buildClaimGraph(
     }
   }
   
-  // Track dropped edges if we hit maxPairs limit
-  if (finalPairs.length >= maxPairs && candPairs.length > maxPairs) {
-    droppedByMaxEdges = candPairs.length - maxPairs;
-  }
+  // Track dropped edges: potential pairs minus actual pairs generated
+  // For brute force: potentialPairs = n*(n-1)
+  // For ANN: potentialPairs = n*K (where K is neighborK)
+  const annPotentialPairs = useANN ? n * Math.min(neighborK, n - 1) : potentialPairs;
+  const actualPotentialPairs = useANN ? annPotentialPairs : potentialPairs;
+  droppedByMaxEdges = Math.max(0, actualPotentialPairs - finalPairs.length);
 
   // dedupe contradictions (ordered)
   const conMap = new Map<string, number>();
@@ -544,7 +558,9 @@ export async function buildClaimGraph(
     return { claimA, claimB, weight: w };
   });
 
-  await cache.flush();
+  if (cacheEnabled) {
+    await cache.flush();
+  }
   const cacheStats = cacheEnabled ? cache.getStats() : undefined;
   
   // Determine reason if empty graph
@@ -568,7 +584,7 @@ export async function buildClaimGraph(
   
   const debug = {
     numClaims: n,
-    numSourceClaims: sources?.length || 0,
+    numSources: sources?.length || 0, // Renamed from numSourceClaims
     annEnabled: useANN,
     cacheEnabled: cacheEnabled,
     spectralEnabled: false, // Will be set by orchestrator
