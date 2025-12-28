@@ -101,24 +101,28 @@ Automatically generates suggestions for:
 ## 3. Batch Validation API
 
 ### What It Does
-Validates multiple items in a single API call for efficiency.
+Validates multiple items in a single API call for efficiency. **Supports both batch QA and batch call transcripts.**
 
 ### How It Works
-New `/validate/batch` endpoint accepts an array of validation requests and processes them in parallel (with concurrency limit).
+New `/validate/batch` endpoint accepts an array of validation requests and processes them in parallel (with concurrency limit). Each item can be:
+- **QA mode**: `question` + `answer` (general QA validation)
+- **Call transcript mode**: `question` only (empty or omitted `answer`)
 
 ### Usage
+
+#### Batch QA (Question + Answer)
 ```typescript
 POST /validate/batch
 {
   "items": [
     {
-      "question": "Question 1",
-      "answer": "Answer 1",
+      "question": "What is AI?",
+      "answer": "AI is artificial intelligence...",
       "options": { ... }
     },
     {
-      "question": "Question 2",
-      "answer": "Answer 2"
+      "question": "How does ML work?",
+      "answer": "Machine learning uses algorithms..."
     }
   ],
   "options": {
@@ -126,6 +130,44 @@ POST /validate/batch
     "spectral": true,
     "supportThreshold": 0.45
   }
+}
+```
+
+#### Batch Call Transcripts (Transcripts Only)
+```typescript
+POST /validate/batch
+{
+  "items": [
+    {
+      "question": "Agent: Thank you for calling...\nCustomer: Hi, I need help...",
+      "answer": "" // Empty or omitted = call transcript mode
+    },
+    {
+      "question": "Agent: How can I assist you?\nCustomer: I have a billing question...",
+      // answer can be omitted entirely
+    }
+  ],
+  "options": {
+    "customRules": ExampleRuleSets.callCenter,
+    "supportThreshold": 0.35 // Lower threshold for conversational data
+  }
+}
+```
+
+#### Mixed Batch (QA + Transcripts)
+```typescript
+POST /validate/batch
+{
+  "items": [
+    {
+      "question": "What is AI?",
+      "answer": "AI is artificial intelligence..." // QA mode
+    },
+    {
+      "question": "Agent: Thank you for calling...",
+      "answer": "" // Call transcript mode
+    }
+  ]
 }
 
 // Response:
@@ -145,8 +187,9 @@ POST /validate/batch
 ```
 
 ### Use Cases
-- **Call Center QA**: Validate 100 calls at once for batch review
-- **General QA**: Validate multiple LLM outputs in parallel
+- **Call Center QA**: Validate 100 call transcripts at once for batch review
+- **General QA**: Validate multiple LLM outputs (Q+A pairs) in parallel
+- **Mixed Workflows**: Process both QA and call transcripts in the same batch
 - **Enterprise**: Process large volumes efficiently
 
 ### Limits

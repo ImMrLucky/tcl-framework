@@ -19,6 +19,34 @@ export type ClaimGraph = {
   grounding: GroundingEdge[];
   groundedClaimIds: string[];
   cacheStats?: { hits: number; misses: number; total: number; hitRate: number };
+  debug?: {
+    numClaims: number;
+    numSourceClaims: number;
+    annEnabled: boolean;
+    cacheEnabled: boolean;
+    neighborK: number;
+    supportThreshold: number;
+    contradictionThreshold: number;
+    groundingThreshold: number;
+    pairsGenerated: number;
+    pairsScored: number;
+    edges: {
+      supportsAdded: number;
+      contradictionsAdded: number;
+      groundingAdded: number;
+    };
+    filtered: {
+      belowSupportThreshold: number;
+      belowContradictionThreshold: number;
+      belowGroundingThreshold: number;
+      droppedByMaxEdges: number;
+    };
+    model: {
+      scorerId: string;
+      labelMap?: Record<string, string>;
+    };
+    reasonIfEmptyGraph: string | null;
+  };
 };
 
 export type ScoreTask = "entailment" | "contradiction" | "grounding";
@@ -334,6 +362,9 @@ export async function buildClaimGraph(
 
   const grounding: GroundingEdge[] = [];
   const groundedClaimIds: string[] = [];
+  
+  // Debug tracking (declare early)
+  let filteredBelowGrounding = 0;
 
   // -----------------------------
   // Grounding (claim -> sources)
@@ -371,45 +402,85 @@ export async function buildClaimGraph(
       }
       scored.sort((a, b) => b.sc - a.sc);
       const top = scored.slice(0, Math.max(1, topGroundingK));
-      for (const t of top) grounding.push({ claimId: c.id, sourceId: t.sid, weight: clamp01(t.sc), quote: t.quote });
-      if (top[0] && top[0].sc >= tGnd) groundedClaimIds.push(c.id);
+      for (const t of top) {
+        if (t.sc >= tGnd) {
+          grounding.push({ claimId: c.id, sourceId: t.sid, weight: clamp01(t.sc), quote: t.quote });
+          groundedClaimIds.push(c.id);
+        } else {
+          filteredBelowGrounding++;
+        }
+      }
     }
   }
 
   // -----------------------------
-  // ANN candidate retrieval for claim-claim edges
+  // Pair generation: brute force for small n, ANN for large n
+  // CRITICAL: Always generate pairs when n > 1, even without sources
   // -----------------------------
-  const { index, vectors } = await buildIndexForClaims(claims, opts.ann);
+  const n = claims.length;
+  const SMALL_N = 50;
+  const useANN = opts.ann?.index !== undefined && n > SMALL_N;
+  
+  const candPairs: Array<{ i: number; j: number }> = [];
   const idToIdx = new Map<string, number>();
   claims.forEach((c, i) => idToIdx.set(c.id, i));
 
-  // collect candidate directed pairs from ANN neighbors
-  const candPairs: Array<{ i: number; j: number }> = [];
-  const seen = new Set<string>();
-
-  for (let i = 0; i < claims.length; i++) {
-    const neighIds = await index.query(vectors[i], neighborK + 2); // +2 buffer
-    for (const nid of neighIds) {
-      if (nid === claims[i].id) continue;
-      const j = idToIdx.get(nid);
-      if (j === undefined || j === i) continue;
-      const k = `${i}->${j}`;
-      if (seen.has(k)) continue;
-      seen.add(k);
-      candPairs.push({ i, j });
+  // Step A: Generate pairs - brute force for small n, ANN for large n
+  if (n <= SMALL_N || !useANN) {
+    // Brute force: generate all directed pairs (i, j) where i != j
+    for (let i = 0; i < n; i++) {
+      for (let j = 0; j < n; j++) {
+        if (i !== j) {
+          candPairs.push({ i, j });
+          if (candPairs.length >= maxPairs) break;
+        }
+      }
       if (candPairs.length >= maxPairs) break;
     }
-    if (candPairs.length >= maxPairs) break;
+  } else {
+    // ANN path for large n
+    const { index, vectors } = await buildIndexForClaims(claims, opts.ann);
+    const K = Math.min(neighborK, n - 1); // Clamp K to n-1
+    
+    for (let i = 0; i < n; i++) {
+      const neighIds = await index.query(vectors[i], K);
+      for (const nid of neighIds) {
+        const j = idToIdx.get(nid);
+        if (j === undefined || j === i) continue; // Remove self AFTER getting candidates
+        candPairs.push({ i, j });
+        if (candPairs.length >= maxPairs) break;
+      }
+      if (candPairs.length >= maxPairs) break;
+    }
   }
 
+  // Dedupe pairs
+  const seen = new Set<string>();
+  const dedupedPairs: Array<{ i: number; j: number }> = [];
+  for (const { i, j } of candPairs) {
+    const k = `${i}->${j}`;
+    if (!seen.has(k)) {
+      seen.add(k);
+      dedupedPairs.push({ i, j });
+    }
+  }
+  const finalPairs = dedupedPairs.slice(0, maxPairs);
+
   // -----------------------------
-  // Batch score contradictions + entailments with cache
+  // Step B: Always run claim↔claim NLI scoring (even without sources)
   // -----------------------------
   const supports: SupportEdge[] = [];
   const contradictions: ContradictionEdge[] = [];
+  
+  // Debug tracking (continued)
+  let pairsScored = 0;
+  let filteredBelowSupport = 0;
+  let filteredBelowContradiction = 0;
+  let droppedByMaxEdges = 0;
 
+  // Batch score contradictions + entailments with cache
   const pairsToScore: BatchPair[] = [];
-  for (const { i, j } of candPairs) {
+  for (const { i, j } of finalPairs) {
     const A = claims[i].text;
     const B = claims[j].text;
 
@@ -429,50 +500,40 @@ export async function buildClaimGraph(
     });
   }
 
-  // Track score statistics for debugging
-  let scoreStats = { entailment: [] as number[], contradiction: [] as number[], total: 0 };
-  
-  for (const { i, j } of candPairs) {
+  // Score all pairs and build edges
+  for (const { i, j } of finalPairs) {
     const A = claims[i];
     const B = claims[j];
 
+    // Score contradiction
     const kCon = cache.makeKey("con", A.text, B.text);
     const conHit = cache.get(kCon);
     const con = conHit ? conHit.v : await scorer.contradiction(A.text, B.text);
     if (!conHit) cache.set(kCon, con);
     
-    scoreStats.contradiction.push(con);
-    scoreStats.total++;
-
+    pairsScored++;
     if (con >= tCon) {
       contradictions.push({ claimA: A.id, claimB: B.id, weight: clamp01(con) });
-      continue;
+    } else {
+      filteredBelowContradiction++;
     }
 
+    // Score entailment (support)
     const kEnt = cache.makeKey("ent", A.text, B.text);
     const entHit = cache.get(kEnt);
     const ent = entHit ? entHit.v : await scorer.entailment(A.text, B.text);
     if (!entHit) cache.set(kEnt, ent);
     
-    scoreStats.entailment.push(ent);
-
-    if (ent >= tSup) supports.push({ claimA: A.id, claimB: B.id, weight: clamp01(ent) });
+    if (ent >= tSup) {
+      supports.push({ claimA: A.id, claimB: B.id, weight: clamp01(ent) });
+    } else {
+      filteredBelowSupport++;
+    }
   }
   
-  // Log score statistics if no edges found
-  if (supports.length === 0 && contradictions.length === 0 && scoreStats.total > 0) {
-    const avgEnt = scoreStats.entailment.length > 0 
-      ? scoreStats.entailment.reduce((a, b) => a + b, 0) / scoreStats.entailment.length 
-      : 0;
-    const avgCon = scoreStats.contradiction.length > 0
-      ? scoreStats.contradiction.reduce((a, b) => a + b, 0) / scoreStats.contradiction.length
-      : 0;
-    const maxEnt = scoreStats.entailment.length > 0 ? Math.max(...scoreStats.entailment) : 0;
-    const maxCon = scoreStats.contradiction.length > 0 ? Math.max(...scoreStats.contradiction) : 0;
-    
-    console.warn(`⚠️ Score statistics: avg_entailment=${avgEnt.toFixed(3)}, max_entailment=${maxEnt.toFixed(3)}, avg_contradiction=${avgCon.toFixed(3)}, max_contradiction=${maxCon.toFixed(3)}`);
-    console.warn(`   Thresholds: support=${tSup}, contradiction=${tCon}`);
-    console.warn(`   Max scores are ${maxEnt >= tSup ? 'above' : 'below'} support threshold, ${maxCon >= tCon ? 'above' : 'below'} contradiction threshold`);
+  // Track dropped edges if we hit maxPairs limit
+  if (finalPairs.length >= maxPairs && candPairs.length > maxPairs) {
+    droppedByMaxEdges = candPairs.length - maxPairs;
   }
 
   // dedupe contradictions (ordered)
@@ -485,11 +546,62 @@ export async function buildClaimGraph(
 
   await cache.flush();
   const cacheStats = cacheEnabled ? cache.getStats() : undefined;
+  
+  // Determine reason if empty graph
+  let reasonIfEmptyGraph: string | null = null;
+  if (supports.length === 0 && contradictions.length === 0 && grounding.length === 0) {
+    if (finalPairs.length === 0) {
+      reasonIfEmptyGraph = n <= 1 ? "only_one_claim" : "no_candidates_generated";
+    } else if (pairsScored === 0) {
+      reasonIfEmptyGraph = "pairwise_scoring_disabled";
+    } else if (filteredBelowSupport + filteredBelowContradiction === pairsScored * 2) {
+      reasonIfEmptyGraph = "all_probs_below_threshold";
+    } else if (droppedByMaxEdges > 0) {
+      reasonIfEmptyGraph = "edges_dropped_by_cap";
+    } else {
+      reasonIfEmptyGraph = "unknown_reason";
+    }
+  }
+  
+  // Get label map from scorer if available
+  const labelMap = (scorer as any).labelMap as Record<string, string> | undefined;
+  
+  const debug = {
+    numClaims: n,
+    numSourceClaims: sources?.length || 0,
+    annEnabled: useANN,
+    cacheEnabled: cacheEnabled,
+    spectralEnabled: false, // Will be set by orchestrator
+    neighborK: neighborK,
+    supportThreshold: tSup,
+    contradictionThreshold: tCon,
+    groundingThreshold: tGnd,
+    pairsGenerated: finalPairs.length,
+    pairsScored: pairsScored,
+    edges: {
+      supportsAdded: supports.length,
+      contradictionsAdded: contradictionsDedup.length,
+      groundingAdded: grounding.length
+    },
+    filtered: {
+      belowSupportThreshold: filteredBelowSupport,
+      belowContradictionThreshold: filteredBelowContradiction,
+      belowGroundingThreshold: filteredBelowGrounding,
+      droppedByMaxEdges: droppedByMaxEdges
+    },
+    model: {
+      scorerId: scorer.id,
+      labelMap: labelMap
+    },
+    reasonIfEmptyGraph: reasonIfEmptyGraph
+  };
+  
   return { 
     supports, 
     contradictions: contradictionsDedup, 
     grounding, 
     groundedClaimIds,
-    cacheStats
+    cacheStats,
+    debug
   };
 }

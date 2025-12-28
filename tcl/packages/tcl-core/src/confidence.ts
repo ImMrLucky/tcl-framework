@@ -22,24 +22,26 @@ export function calculateClaimConfidence(
   contradictions: ContradictionEdge[],
   grounding: GroundingEdge[]
 ): ConfidenceMetrics {
-  // 1. Grounding score: based on evidence
+  // 1. Grounding score: based on evidence (max weight of grounding edges)
   const groundingEdges = grounding.filter(e => e.claimId === claim.id);
   const groundingScore = groundingEdges.length > 0
-    ? Math.min(1.0, groundingEdges.reduce((sum, e) => sum + e.weight, 0) / groundingEdges.length)
-    : 0.0;
+    ? Math.max(...groundingEdges.map(e => e.weight)) // Use max, not average
+    : 0.0; // 0 if no grounding edges
 
-  // 2. Support score: how well supported by other claims
+  // 2. Support score: normalized sum of incoming support weights
   const supportEdges = supports.filter(e => e.claimB === claim.id);
   const supportScore = supportEdges.length > 0
-    ? Math.min(1.0, supportEdges.reduce((sum, e) => sum + e.weight, 0) / supportEdges.length)
-    : 0.5; // Neutral if no support (not necessarily bad)
+    ? Math.min(1.0, supportEdges.reduce((sum, e) => sum + e.weight, 0) / Math.max(1, supportEdges.length))
+    : 0.0; // 0 if no support (not 0.5 - be honest)
 
   // 3. Contradiction score: inverse of contradictions (higher = fewer contradictions)
   const contradictionEdges = contradictions.filter(
     e => e.claimA === claim.id || e.claimB === claim.id
   );
   const contradictionCount = contradictionEdges.length;
-  const contradictionScore = Math.max(0.0, 1.0 - (contradictionCount * 0.3)); // Each contradiction reduces by 0.3
+  const contradictionWeight = contradictionEdges.reduce((sum, e) => sum + e.weight, 0);
+  // Higher contradiction weight = lower score
+  const contradictionScore = Math.max(0.0, 1.0 - Math.min(1.0, contradictionWeight));
 
   // 4. Overall: weighted average
   // Grounding is most important (40%), then contradiction (35%), then support (25%)

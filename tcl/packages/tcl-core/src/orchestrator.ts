@@ -246,27 +246,47 @@ async function validateOnce(input: ValidateInput, adapter?: LLMAdapter, startTim
     console.log(`Consistency: ${totalContradictions} unique contradictions (${logicRes.contradictions.length} from logic, ${graph.contradictions.length} from graph), score: ${consistencyScore}`);
 
     // 5) spectral
-    let spectral: SpectralReport | undefined;
-    let coherenceScore = 50;
+    let spectral: (SpectralReport & { spectralSkipped?: boolean; debugReason?: string }) | undefined;
+    let coherenceScore: number | null = null;
     const envSpectralUrl = process.env.TCL_SPECTRAL_URL || "";
     const urlToUse = spectralServiceUrl || envSpectralUrl;
+    
+    // Check if we have edges for Spectral
+    const totalEdges = graph.supports.length + contradictions.length + graph.grounding.length;
     
     // Debug logging
     console.log(`Spectral check: enabled=${spectralEnabled}`);
     console.log(`  - URL from options: ${spectralServiceUrl || 'NOT SET'}`);
     console.log(`  - URL from env (TCL_SPECTRAL_URL): ${envSpectralUrl || 'NOT SET'}`);
     console.log(`  - Final URL to use: ${urlToUse || 'NOT SET'}`);
-    if (envSpectralUrl) {
-      console.log(`  - Environment variable TCL_SPECTRAL_URL is set to: ${envSpectralUrl.substring(0, 50)}...`);
-    } else {
-      console.log(`  - Environment variable TCL_SPECTRAL_URL is NOT set`);
-      console.log(`  - Available env vars: ${Object.keys(process.env).filter(k => k.includes('SPECTRAL') || k.includes('TCL')).join(', ') || 'none'}`);
-    }
+    console.log(`  - Total edges for Spectral: ${totalEdges} (supports: ${graph.supports.length}, contradictions: ${contradictions.length}, grounding: ${graph.grounding.length})`);
     
     if (spectralEnabled) {
       if (!urlToUse) {
         console.warn("⚠️ Spectral enabled but no spectralServiceUrl/TCL_SPECTRAL_URL configured. Skipping Spectral analysis.");
         console.warn("Please set TCL_SPECTRAL_URL environment variable in Railway.");
+        spectral = {
+          coherenceScore: 50,
+          contradictionEnergy: 0,
+          supportEnergy: 0,
+          circularityScore: 0,
+          spectralGap: 0,
+          spectralSkipped: true,
+          debugReason: "no_spectral_url_configured"
+        };
+        coherenceScore = null;
+      } else if (totalEdges === 0) {
+        console.warn("⚠️ Spectral enabled but no edges available. Skipping Spectral analysis.");
+        spectral = {
+          coherenceScore: 50,
+          contradictionEnergy: 0,
+          supportEnergy: 0,
+          circularityScore: 0,
+          spectralGap: 0,
+          spectralSkipped: true,
+          debugReason: "no_edges_for_spectral"
+        };
+        coherenceScore = null;
       } else {
         try {
           console.log(`📡 Calling Spectral service at: ${urlToUse}`);
@@ -284,6 +304,16 @@ async function validateOnce(input: ValidateInput, adapter?: LLMAdapter, startTim
           console.error("Error message:", error?.message);
           console.error("Error stack:", error?.stack);
           // Continue without Spectral - don't fail the entire validation
+          spectral = {
+            coherenceScore: 50,
+            contradictionEnergy: 0,
+            supportEnergy: 0,
+            circularityScore: 0,
+            spectralGap: 0,
+            spectralSkipped: true,
+            debugReason: `spectral_service_error: ${error?.message || 'unknown'}`
+          };
+          coherenceScore = null;
         }
       }
     } else {
@@ -291,10 +321,16 @@ async function validateOnce(input: ValidateInput, adapter?: LLMAdapter, startTim
     }
 
     // 6) scores - ensure all scores are valid numbers in 0-100 range
+    // Make scores honest: if no pairs were scored, consistency is unknown
     const truthScore = Math.max(0, Math.min(100, Math.round(evidenceRes.truthScore || 0)));
-    const finalConsistencyScore = Math.max(0, Math.min(100, Math.round(consistencyScore || 0)));
-    const finalCoherenceScore = Math.max(0, Math.min(100, Math.round(coherenceScore || 50)));
-    const overall = blendScores(truthScore, finalConsistencyScore, finalCoherenceScore);
+    const pairsScored = graph.debug?.pairsScored || 0;
+    const finalConsistencyScore = pairsScored > 0 
+      ? Math.max(0, Math.min(100, Math.round(consistencyScore || 0)))
+      : 50; // Default to 50 if no pairs scored (unknown)
+    const finalCoherenceScore = coherenceScore !== null 
+      ? Math.max(0, Math.min(100, Math.round(coherenceScore)))
+      : null; // null if Spectral skipped or failed
+    const overall = blendScores(truthScore, finalConsistencyScore, finalCoherenceScore ?? 50);
     const refusal = shouldRefuse(overall, truthScore, finalConsistencyScore, options?.thresholds);
     
     console.log(`Final scores: truth=${truthScore}, consistency=${finalConsistencyScore}, coherence=${finalCoherenceScore}, overall=${overall}, refusal=${refusal}`);
@@ -362,7 +398,8 @@ async function validateOnce(input: ValidateInput, adapter?: LLMAdapter, startTim
         graph: {
           supports: graph.supports,
           contradictions: graph.contradictions,
-          grounding: graph.grounding
+          grounding: graph.grounding,
+          debug: graph.debug ? { ...graph.debug, spectralEnabled: spectralEnabled } : undefined // Include debug info with spectral flag
         },
         suggestions
       }

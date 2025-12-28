@@ -7,11 +7,20 @@
 import type { SemanticScorer } from "./edge_builder.js";
 import type { BatchPair, BatchScore } from "./edge_builder.js";
 
+// Softmax helper for logits
+function softmax(logits: number[]): number[] {
+  const max = Math.max(...logits);
+  const exp = logits.map(x => Math.exp(x - max));
+  const sum = exp.reduce((a, b) => a + b, 0);
+  return exp.map(x => x / sum);
+}
+
 export class TransformersNliScorer implements SemanticScorer {
   id: string;
   private model: any = null;
   private modelName: string;
   private cacheDir: string;
+  public labelMap: Record<string, string> = {}; // Expose label map for debug
 
   constructor(cfg: { modelName?: string; cacheDir?: string }) {
     // Default to roberta-large-mnli (best for NLI tasks, specifically trained for MNLI)
@@ -52,6 +61,15 @@ export class TransformersNliScorer implements SemanticScorer {
           cache_dir: this.cacheDir
         }
       );
+
+      // Extract label map from model if available (for MNLI models)
+      if (this.model?.model?.config?.id2label) {
+        this.labelMap = this.model.model.config.id2label;
+        console.log(`✅ Label map extracted:`, this.labelMap);
+      } else if (this.model?.processor?.tokenizer?.model?.config?.id2label) {
+        this.labelMap = this.model.processor.tokenizer.model.config.id2label;
+        console.log(`✅ Label map extracted from tokenizer:`, this.labelMap);
+      }
 
       console.log(`✅ NLI model loaded: ${this.modelName}`);
       return this.model;
@@ -111,18 +129,58 @@ export class TransformersNliScorer implements SemanticScorer {
           let score = 0.0;
           if (isMnliModel) {
             // MNLI text-classification returns: { label: "ENTAILMENT"|"CONTRADICTION"|"NEUTRAL", score: number }
-            // Map to our task
-            const label = result.label?.toUpperCase() || "";
-            if (task === "entailment" && label === "ENTAILMENT") {
-              score = result.score || 0.0;
-            } else if (task === "contradiction" && label === "CONTRADICTION") {
-              score = result.score || 0.0;
+            // OR: { logits: number[], ... } - need to map using id2label
+            let label = "";
+            let prob = 0.0;
+            
+            if (result.label) {
+              // Direct label format
+              label = result.label.toUpperCase();
+              prob = result.score || 0.0;
+            } else if (result.logits && this.labelMap) {
+              // Logits format - map using id2label
+              const logits = Array.isArray(result.logits) ? result.logits : Object.values(result.logits);
+              const probs = softmax(logits);
+              
+              // Build label->prob map using id2label
+              const labelProb: Record<string, number> = {};
+              for (let i = 0; i < probs.length; i++) {
+                const labelRaw = (this.labelMap[String(i)] || "").toLowerCase();
+                labelProb[labelRaw] = probs[i];
+              }
+              
+              // Normalize possible variants
+              const entail = labelProb["entailment"] ?? labelProb["entails"] ?? 0;
+              const contra = labelProb["contradiction"] ?? labelProb["contradicts"] ?? 0;
+              const neutral = labelProb["neutral"] ?? 0;
+              
+              // Use the appropriate probability based on task
+              if (task === "entailment") {
+                prob = entail;
+                label = "ENTAILMENT";
+              } else if (task === "contradiction") {
+                prob = contra;
+                label = "CONTRADICTION";
+              } else if (task === "grounding") {
+                prob = entail + neutral * 0.5; // Entailment is strong, neutral is weak
+                label = entail > neutral ? "ENTAILMENT" : "NEUTRAL";
+              }
+            } else {
+              // Fallback: try to extract from result
+              label = (result.label || "").toUpperCase();
+              prob = result.score || 0.0;
+            }
+            
+            // Map label to score based on task
+            if (task === "entailment" && (label === "ENTAILMENT" || label.includes("ENTAIL"))) {
+              score = prob;
+            } else if (task === "contradiction" && (label === "CONTRADICTION" || label.includes("CONTRAD"))) {
+              score = prob;
             } else if (task === "grounding") {
-              // For grounding, entailment indicates strong support, neutral indicates weak support
-              if (label === "ENTAILMENT") {
-                score = result.score || 0.0;
+              if (label === "ENTAILMENT" || label.includes("ENTAIL")) {
+                score = prob;
               } else if (label === "NEUTRAL") {
-                score = (result.score || 0.0) * 0.5; // Neutral is weaker support
+                score = prob * 0.5; // Neutral is weaker support
               }
             }
           } else {

@@ -99,6 +99,9 @@ app.post("/validate", async (req, res) => {
 });
 
 // Batch validation endpoint
+// Supports both use cases:
+// 1. Batch QA: question + answer pairs (general QA validation)
+// 2. Batch Call Transcripts: question only (call center QA - answer can be empty or omitted)
 app.post("/validate/batch", async (req, res) => {
   const timeout = setTimeout(() => {
     if (!res.headersSent) {
@@ -131,12 +134,14 @@ app.post("/validate/batch", async (req, res) => {
     }
 
     // Validate each item
+    // Note: answer is optional - empty answer means call transcript mode
     for (let i = 0; i < input.items.length; i++) {
       const item = input.items[i];
       if (!item.question || typeof item.question !== 'string' || item.question.trim().length === 0) {
         clearTimeout(timeout);
         return res.status(400).json({ error: `Item ${i + 1}: question is required and must be a non-empty string` });
       }
+      // answer is optional - if missing/empty, will be treated as call transcript
       if (item.answer === undefined || item.answer === null) {
         item.answer = "";
       }

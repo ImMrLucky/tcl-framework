@@ -94,13 +94,16 @@ import { ValidationOptions, Source } from '../types';
             <h3>Engine Settings</h3>
             <div class="options-grid">
               <mat-checkbox [(ngModel)]="options.spectral" name="spectral">
-                Spectral
+                Spectral ⭐
+                <span class="option-hint">(Core Feature - Coherence Analysis)</span>
               </mat-checkbox>
               <mat-checkbox [(ngModel)]="options.ann" name="ann">
                 ANN
+                <span class="option-hint">(Performance Optimization)</span>
               </mat-checkbox>
               <mat-checkbox [(ngModel)]="options.cache" name="cache">
                 Cache
+                <span class="option-hint">(Speed & Cost Savings)</span>
               </mat-checkbox>
             </div>
           </div>
@@ -303,6 +306,13 @@ import { ValidationOptions, Source } from '../types';
       gap: 12px;
     }
 
+    .option-hint {
+      font-size: 0.75rem;
+      color: #666;
+      font-weight: normal;
+      margin-left: 4px;
+    }
+
     .submit-button {
       width: 100%;
       margin-top: 16px;
@@ -371,7 +381,7 @@ export class OriginalInputPanelComponent implements OnInit, OnChanges {
   answer = '';
   sources: Source[] = [{ id: 's1', text: '' }];
   options: ValidationOptions = {
-    spectral: false,
+    spectral: true, // Enabled by default - this is TCL's core value proposition
     ann: true,
     cache: true,
     supportThreshold: 0.45, // Lower default for token heuristic scorer

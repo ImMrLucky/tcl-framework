@@ -3,11 +3,11 @@
  * Weights: 50% truth, 30% consistency, 20% coherence.
  * Ensures result is in 0-100 range.
  */
-export function blendScores(truth: number, consistency: number, coherence: number): number {
+export function blendScores(truth: number, consistency: number, coherence: number | null): number {
   // Defensive: ensure inputs are valid numbers, clamp to 0-100
   const safeTruth = Math.max(0, Math.min(100, Number(truth) || 0));
   const safeConsistency = Math.max(0, Math.min(100, Number(consistency) || 0));
-  const safeCoherence = Math.max(0, Math.min(100, Number(coherence) || 50));
+  const safeCoherence = coherence !== null ? Math.max(0, Math.min(100, Number(coherence))) : 50; // Default to 50 if null
   
   const overall = 0.5 * safeTruth + 0.3 * safeConsistency + 0.2 * safeCoherence;
   return Math.max(0, Math.min(100, Math.round(overall)));

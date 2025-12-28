@@ -108,10 +108,40 @@ export type Suggestion = {
   example?: string; // Optional example of how to fix
 };
 
+export type GraphDebugInfo = {
+  numClaims: number;
+  numSourceClaims: number;
+  annEnabled: boolean;
+  cacheEnabled: boolean;
+  spectralEnabled: boolean;
+  neighborK: number;
+  supportThreshold: number;
+  contradictionThreshold: number;
+  groundingThreshold: number;
+  pairsGenerated: number;
+  pairsScored: number;
+  edges: {
+    supportsAdded: number;
+    contradictionsAdded: number;
+    groundingAdded: number;
+  };
+  filtered: {
+    belowSupportThreshold: number;
+    belowContradictionThreshold: number;
+    belowGroundingThreshold: number;
+    droppedByMaxEdges: number;
+  };
+  model: {
+    scorerId: string;
+    labelMap?: Record<string, string>;
+  };
+  reasonIfEmptyGraph: string | null;
+};
+
 export type ValidateOutput = {
   answer: string;
   refusal: boolean;
-  scores: { truth: number; consistency: number; coherence: number; overall: number };
+  scores: { truth: number; consistency: number; coherence: number | null; overall: number };
   scorerId?: string; // ID of the NLI scorer used (e.g., "transformers-deberta-v3-base", "token-heuristic-v1")
   latency?: number; // Request latency in milliseconds
   cacheHitRate?: number; // Cache hit rate percentage (0-100)
@@ -121,12 +151,13 @@ export type ValidateOutput = {
     violations: Violation[];
     missingEvidence: { claimId: string; reason: string }[];
     contradictions: { claimA: string; claimB: string; reason: string }[];
-    spectral?: SpectralReport;
+    spectral?: SpectralReport & { spectralSkipped?: boolean; debugReason?: string };
     // Graph edges from buildClaimGraph
     graph?: {
       supports: SupportEdge[];
       contradictions: ContradictionEdge[];
       grounding: GroundingEdge[];
+      debug?: GraphDebugInfo;
     };
     // New features
     suggestions?: Suggestion[]; // Actionable suggestions for fixing issues
