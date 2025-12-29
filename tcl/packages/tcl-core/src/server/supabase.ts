@@ -43,15 +43,27 @@ export function generateApiKey(): { key: string; prefix: string; hash: string } 
 }
 
 /**
- * Verify an API key and return org_id + scopes
+ * Verify an API key and return org_id + scopes (legacy - use verifyApiKeyExtended)
  */
 export async function verifyApiKey(key: string): Promise<{ orgId: string; scopes: string[] } | null> {
+  const result = await verifyApiKeyExtended(key);
+  if (!result) return null;
+  return {
+    orgId: result.orgId,
+    scopes: result.scopes
+  };
+}
+
+/**
+ * Verify API key and return org/project/env info (extended)
+ */
+export async function verifyApiKeyExtended(key: string): Promise<{ orgId: string; projectId: string; env: string; scopes: string[] } | null> {
   if (!supabaseAdmin) return null;
   
   const hash = hashApiKey(key);
   const { data, error } = await supabaseAdmin
     .from('api_keys')
-    .select('org_id, scopes')
+    .select('org_id, project_id, env, scopes')
     .eq('key_hash', hash)
     .eq('is_active', true)
     .is('revoked_at', null)
@@ -61,6 +73,8 @@ export async function verifyApiKey(key: string): Promise<{ orgId: string; scopes
   
   return {
     orgId: data.org_id,
+    projectId: data.project_id || '',
+    env: (data.env as string) || 'sandbox',
     scopes: data.scopes || []
   };
 }
@@ -87,9 +101,9 @@ export async function ensureProfile(userId: string, email?: string): Promise<voi
 }
 
 /**
- * Provision user: create profile + default org if needed
+ * Provision user: create profile + default org + default project if needed
  */
-export async function provisionUser(userId: string, email: string): Promise<{ orgId: string } | null> {
+export async function provisionUser(userId: string, email: string): Promise<{ orgId: string; projectId: string } | null> {
   if (!supabaseAdmin) return null;
   
   // Ensure profile exists
@@ -107,45 +121,74 @@ export async function provisionUser(userId: string, email: string): Promise<{ or
     return null;
   }
   
-  // If user has orgs, return the first one
+  let orgId: string;
+  
+  // If user has orgs, use the first one
   if (memberships && memberships.length > 0) {
-    return { orgId: memberships[0].org_id };
+    orgId = memberships[0].org_id;
+  } else {
+    // Create default org
+    const orgName = `${email} org`;
+    const orgSlug = `${email.split('@')[0]}-${crypto.randomBytes(4).toString('hex')}`;
+    
+    const { data: org, error: orgError } = await supabaseAdmin
+      .from('organizations')
+      .insert({
+        name: orgName,
+        slug: orgSlug,
+        plan: 'trial'
+      })
+      .select('id')
+      .single();
+    
+    if (orgError || !org) {
+      console.error('Failed to create org:', orgError);
+      return null;
+    }
+    
+    orgId = org.id;
+    
+    // Add user as owner
+    const { error: memberError } = await supabaseAdmin
+      .from('org_members')
+      .insert({
+        org_id: orgId,
+        user_id: userId,
+        role: 'owner'
+      });
+    
+    if (memberError) {
+      console.error('Failed to add user as owner:', memberError);
+      return null;
+    }
   }
   
-  // Create default org
-  const orgName = `${email} org`;
-  const orgSlug = `${email.split('@')[0]}-${crypto.randomBytes(4).toString('hex')}`;
-  
-  const { data: org, error: orgError } = await supabaseAdmin
-    .from('organizations')
-    .insert({
-      name: orgName,
-      slug: orgSlug,
-      plan: 'trial'
+  // Ensure default project exists
+  const { data: project, error: projectError } = await supabaseAdmin
+    .rpc('ensure_default_project', {
+      p_org_id: orgId,
+      p_user_id: userId
     })
-    .select('id')
     .single();
   
-  if (orgError || !org) {
-    console.error('Failed to create org:', orgError);
-    return null;
+  if (projectError) {
+    console.error('Failed to ensure default project:', projectError);
+    // Try to get existing default project
+    const { data: existingProject } = await supabaseAdmin
+      .from('projects')
+      .select('id')
+      .eq('org_id', orgId)
+      .eq('is_default', true)
+      .single();
+    
+    if (existingProject) {
+      return { orgId, projectId: existingProject.id };
+    }
+    return { orgId, projectId: '' }; // Return orgId even if project creation fails
   }
   
-  // Add user as owner
-  const { error: memberError } = await supabaseAdmin
-    .from('org_members')
-    .insert({
-      org_id: org.id,
-      user_id: userId,
-      role: 'owner'
-    });
-  
-  if (memberError) {
-    console.error('Failed to add user as owner:', memberError);
-    return null;
-  }
-  
-  return { orgId: org.id };
+  const projectId = typeof project === 'string' ? project : '';
+  return { orgId, projectId };
 }
 
 /**
@@ -175,6 +218,88 @@ export async function getUserOrgs(userId: string): Promise<Array<{ id: string; n
     slug: m.organizations.slug,
     role: m.role
   }));
+}
+
+/**
+ * Get projects for an org
+ */
+export async function getOrgProjects(orgId: string): Promise<Array<{ id: string; name: string; slug: string; isDefault: boolean }>> {
+  if (!supabaseAdmin) return [];
+  
+  const { data, error } = await supabaseAdmin
+    .from('projects')
+    .select('id, name, slug, is_default')
+    .eq('org_id', orgId)
+    .order('is_default', { ascending: false })
+    .order('created_at', { ascending: true });
+  
+  if (error || !data) return [];
+  
+  return data.map((p: any) => ({
+    id: p.id,
+    name: p.name,
+    slug: p.slug,
+    isDefault: p.is_default
+  }));
+}
+
+/**
+ * Get project environments
+ */
+export async function getProjectEnvs(projectId: string): Promise<Array<{ id: string; env: string; limits: any }>> {
+  if (!supabaseAdmin) return [];
+  
+  const { data, error } = await supabaseAdmin
+    .from('project_envs')
+    .select('id, env, limits')
+    .eq('project_id', projectId);
+  
+  if (error || !data) return [];
+  
+  return data.map((e: any) => ({
+    id: e.id,
+    env: e.env,
+    limits: e.limits
+  }));
+}
+
+/**
+ * Track usage for an evaluation or conversation
+ */
+export async function trackUsage(orgId: string, projectId: string, env: string, type: 'evaluation' | 'conversation'): Promise<void> {
+  if (!supabaseAdmin) return;
+  
+  const today = new Date().toISOString().split('T')[0];
+  
+  // Try upsert first
+  const { error: upsertError } = await supabaseAdmin
+    .from('usage_daily')
+    .upsert({
+      org_id: orgId,
+      project_id: projectId,
+      env: env,
+      date: today,
+      evaluations_count: type === 'evaluation' ? 1 : 0,
+      conversations_count: type === 'conversation' ? 1 : 0
+    }, {
+      onConflict: 'org_id,project_id,env,date',
+      ignoreDuplicates: false
+    });
+  
+  // If upsert failed, try using RPC function to increment
+  if (upsertError) {
+    const { error: rpcError } = await supabaseAdmin.rpc('increment_usage', {
+      p_org_id: orgId,
+      p_project_id: projectId,
+      p_env: env,
+      p_date: today,
+      p_type: type
+    });
+    
+    if (rpcError) {
+      console.error('Failed to track usage:', rpcError);
+    }
+  }
 }
 
 /**

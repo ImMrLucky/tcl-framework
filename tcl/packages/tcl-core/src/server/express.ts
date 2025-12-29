@@ -2,12 +2,16 @@ import express from "express";
 import type { ValidateInput, BatchValidateInput, BatchValidateOutput } from "../types.js";
 import { 
   supabaseAdmin, 
-  verifyApiKey, 
+  verifyApiKey,
+  verifyApiKeyExtended,
   provisionUser, 
   getUserOrgs,
+  getOrgProjects,
+  getProjectEnvs,
   generateApiKey,
   hashApiKey,
-  logAudit 
+  logAudit,
+  trackUsage
 } from "./supabase.js";
 
 const app = express();
@@ -47,15 +51,19 @@ async function loadModules() {
 // Don't load modules on startup - let server start first, then load modules
 // This ensures health check works even if modules fail to load
 
-// Extract org_id from request (API key or user session)
-async function getOrgId(req: express.Request): Promise<string | null> {
+// Extract org/project/env from request (API key or user session)
+async function getOrgContext(req: express.Request): Promise<{ orgId: string; projectId: string; env: string } | null> {
   // Check for API key in Authorization header
   const authHeader = req.headers.authorization;
   if (authHeader?.startsWith('Bearer ')) {
     const key = authHeader.substring(7);
-    const verified = await verifyApiKey(key);
+    const verified = await verifyApiKeyExtended(key);
     if (verified) {
-      return verified.orgId;
+      return {
+        orgId: verified.orgId,
+        projectId: verified.projectId,
+        env: verified.env
+      };
     }
   }
   
@@ -115,16 +123,15 @@ app.post("/validate", async (req, res) => {
     console.log("Validation complete");
 
     // Store validation in Supabase if configured
-    const orgId = await getOrgId(req);
-    if (orgId && supabaseAdmin) {
+    const context = await getOrgContext(req);
+    if (context && supabaseAdmin) {
       try {
         const { error: dbError } = await supabaseAdmin
-          .from('validations')
+          .from('evaluations')
           .insert({
-            org_id: orgId,
-            question: input.question,
-            answer: input.answer || null,
-            options: input.options || {},
+            org_id: context.orgId,
+            project_id: context.projectId || null,
+            env: context.env,
             scores: out.scores || {},
             refusal: out.refusal || false,
             scorer_id: out.scorerId || null,
@@ -134,14 +141,17 @@ app.post("/validate", async (req, res) => {
           });
         
         if (dbError) {
-          console.error('Failed to store validation:', dbError);
+          console.error('Failed to store evaluation:', dbError);
         } else {
+          // Track usage
+          await trackUsage(context.orgId, context.projectId, context.env, 'evaluation');
+          
           // Log audit event
           await logAudit({
-            orgId,
-            action: 'validation.create',
-            targetType: 'validation',
-            meta: { question: input.question.substring(0, 100), latency }
+            orgId: context.orgId,
+            action: 'evaluation.create',
+            targetType: 'evaluation',
+            meta: { question: input.question.substring(0, 100), latency, env: context.env }
           });
         }
       } catch (dbErr: any) {
@@ -416,9 +426,9 @@ app.post("/orgs/:orgId/api-keys", async (req, res) => {
   }
 });
 
-app.get("/orgs/:orgId/api-keys", async (req, res) => {
+app.get("/orgs/:orgId/projects/:projectId/api-keys", async (req, res) => {
   try {
-    const { orgId } = req.params;
+    const { orgId, projectId } = req.params;
     
     if (!supabaseAdmin) {
       return res.status(503).json({ error: "Supabase not configured" });
@@ -428,8 +438,9 @@ app.get("/orgs/:orgId/api-keys", async (req, res) => {
     
     const { data, error } = await supabaseAdmin
       .from('api_keys')
-      .select('id, name, prefix, scopes, is_active, created_at, revoked_at')
+      .select('id, name, prefix, env, scopes, is_active, created_at, revoked_at')
       .eq('org_id', orgId)
+      .eq('project_id', projectId)
       .order('created_at', { ascending: false });
     
     if (error) {
@@ -445,12 +456,252 @@ app.get("/orgs/:orgId/api-keys", async (req, res) => {
   }
 });
 
-// Get validations for an org
-app.get("/validations", async (req, res) => {
+// Get evaluations for an org/project
+app.get("/evaluations", async (req, res) => {
   try {
-    const orgId = await getOrgId(req);
+    const context = await getOrgContext(req);
     
-    if (!orgId) {
+    if (!context) {
+      return res.status(401).json({ error: "Authorization required" });
+    }
+    
+    if (!supabaseAdmin) {
+      return res.status(503).json({ error: "Supabase not configured" });
+    }
+    
+    const limit = Math.min(parseInt(req.query.limit as string) || 50, 100);
+    const offset = parseInt(req.query.offset as string) || 0;
+    const projectId = req.query.projectId as string || context.projectId;
+    const env = req.query.env as string || context.env;
+    
+    let query = supabaseAdmin
+      .from('evaluations')
+      .select('*')
+      .eq('org_id', context.orgId)
+      .order('created_at', { ascending: false })
+      .range(offset, offset + limit - 1);
+    
+    if (projectId) {
+      query = query.eq('project_id', projectId);
+    }
+    if (env) {
+      query = query.eq('env', env);
+    }
+    
+    const { data, error } = await query;
+    
+    if (error) {
+      return res.status(500).json({ error: error.message });
+    }
+    
+    res.json({ evaluations: data || [] });
+  } catch (e: any) {
+    console.error("Get evaluations error:", e);
+    res.status(500).json({ 
+      error: e?.message ?? "unknown error"
+    });
+  }
+});
+
+// Get projects for an org
+app.get("/orgs/:orgId/projects", async (req, res) => {
+  try {
+    const { orgId } = req.params;
+    
+    if (!supabaseAdmin) {
+      return res.status(503).json({ error: "Supabase not configured" });
+    }
+    
+    // TODO: Verify user has access to this org
+    
+    const projects = await getOrgProjects(orgId);
+    res.json({ projects });
+  } catch (e: any) {
+    console.error("Get projects error:", e);
+    res.status(500).json({ 
+      error: e?.message ?? "unknown error"
+    });
+  }
+});
+
+// Get project environments
+app.get("/projects/:projectId/envs", async (req, res) => {
+  try {
+    const { projectId } = req.params;
+    
+    if (!supabaseAdmin) {
+      return res.status(503).json({ error: "Supabase not configured" });
+    }
+    
+    // TODO: Verify user has access to this project
+    
+    const envs = await getProjectEnvs(projectId);
+    res.json({ envs });
+  } catch (e: any) {
+    console.error("Get project envs error:", e);
+    res.status(500).json({ 
+      error: e?.message ?? "unknown error"
+    });
+  }
+});
+
+// Revoke API key
+app.post("/orgs/:orgId/projects/:projectId/api-keys/:keyId/revoke", async (req, res) => {
+  try {
+    const { orgId, projectId, keyId } = req.params;
+    
+    if (!supabaseAdmin) {
+      return res.status(503).json({ error: "Supabase not configured" });
+    }
+    
+    // TODO: Verify user has admin/owner role for orgId
+    
+    const { error } = await supabaseAdmin
+      .from('api_keys')
+      .update({ 
+        is_active: false,
+        revoked_at: new Date().toISOString()
+      })
+      .eq('id', keyId)
+      .eq('org_id', orgId)
+      .eq('project_id', projectId);
+    
+    if (error) {
+      return res.status(500).json({ error: error.message });
+    }
+    
+    res.json({ success: true });
+    
+    // Log audit
+    await logAudit({
+      orgId,
+      action: 'apikey.revoke',
+      targetType: 'api_key',
+      targetId: keyId,
+      meta: { projectId }
+    });
+  } catch (e: any) {
+    console.error("Revoke API key error:", e);
+    res.status(500).json({ 
+      error: e?.message ?? "unknown error"
+    });
+  }
+});
+
+// Create conversation (ingest transcript)
+app.post("/conversations", async (req, res) => {
+  try {
+    const context = await getOrgContext(req);
+    
+    if (!context) {
+      return res.status(401).json({ error: "Authorization required" });
+    }
+    
+    if (!supabaseAdmin) {
+      return res.status(503).json({ error: "Supabase not configured" });
+    }
+    
+    const { title, content, externalId, metadata = {} } = req.body;
+    
+    if (!content || typeof content !== 'string') {
+      return res.status(400).json({ error: "content is required and must be a string" });
+    }
+    
+    // TODO: Extract userId from JWT if user session
+    
+    const { data, error } = await supabaseAdmin
+      .from('conversations')
+      .insert({
+        org_id: context.orgId,
+        project_id: context.projectId || null,
+        env: context.env,
+        external_id: externalId || null,
+        title: title || null,
+        content: content,
+        metadata: metadata
+      })
+      .select('id, org_id, project_id, env, title, created_at')
+      .single();
+    
+    if (error) {
+      return res.status(500).json({ error: error.message });
+    }
+    
+    // Track usage
+    await trackUsage(context.orgId, context.projectId, context.env, 'conversation');
+    
+    // Log audit
+    await logAudit({
+      orgId: context.orgId,
+      action: 'conversation.create',
+      targetType: 'conversation',
+      targetId: data.id,
+      meta: { projectId: context.projectId, env: context.env }
+    });
+    
+    res.json({ conversation: data });
+  } catch (e: any) {
+    console.error("Create conversation error:", e);
+    res.status(500).json({ 
+      error: e?.message ?? "unknown error"
+    });
+  }
+});
+
+// Get conversations
+app.get("/conversations", async (req, res) => {
+  try {
+    const context = await getOrgContext(req);
+    
+    if (!context) {
+      return res.status(401).json({ error: "Authorization required" });
+    }
+    
+    if (!supabaseAdmin) {
+      return res.status(503).json({ error: "Supabase not configured" });
+    }
+    
+    const limit = Math.min(parseInt(req.query.limit as string) || 50, 100);
+    const offset = parseInt(req.query.offset as string) || 0;
+    const projectId = req.query.projectId as string || context.projectId;
+    const env = req.query.env as string || context.env;
+    
+    let query = supabaseAdmin
+      .from('conversations')
+      .select('id, org_id, project_id, env, external_id, title, created_at')
+      .eq('org_id', context.orgId)
+      .order('created_at', { ascending: false })
+      .range(offset, offset + limit - 1);
+    
+    if (projectId) {
+      query = query.eq('project_id', projectId);
+    }
+    if (env) {
+      query = query.eq('env', env);
+    }
+    
+    const { data, error } = await query;
+    
+    if (error) {
+      return res.status(500).json({ error: error.message });
+    }
+    
+    res.json({ conversations: data || [] });
+  } catch (e: any) {
+    console.error("Get conversations error:", e);
+    res.status(500).json({ 
+      error: e?.message ?? "unknown error"
+    });
+  }
+});
+
+// Get evaluations for a conversation
+app.get("/conversations/:conversationId/evaluations", async (req, res) => {
+  try {
+    const context = await getOrgContext(req);
+    const { conversationId } = req.params;
+    
+    if (!context) {
       return res.status(401).json({ error: "Authorization required" });
     }
     
@@ -462,9 +713,10 @@ app.get("/validations", async (req, res) => {
     const offset = parseInt(req.query.offset as string) || 0;
     
     const { data, error } = await supabaseAdmin
-      .from('validations')
+      .from('evaluations')
       .select('*')
-      .eq('org_id', orgId)
+      .eq('org_id', context.orgId)
+      .eq('conversation_id', conversationId)
       .order('created_at', { ascending: false })
       .range(offset, offset + limit - 1);
     
@@ -472,9 +724,9 @@ app.get("/validations", async (req, res) => {
       return res.status(500).json({ error: error.message });
     }
     
-    res.json({ validations: data || [] });
+    res.json({ evaluations: data || [] });
   } catch (e: any) {
-    console.error("Get validations error:", e);
+    console.error("Get conversation evaluations error:", e);
     res.status(500).json({ 
       error: e?.message ?? "unknown error"
     });

@@ -14,10 +14,19 @@ export declare function generateApiKey(): {
     hash: string;
 };
 /**
- * Verify an API key and return org_id + scopes
+ * Verify an API key and return org_id + scopes (legacy - use verifyApiKeyExtended)
  */
 export declare function verifyApiKey(key: string): Promise<{
     orgId: string;
+    scopes: string[];
+} | null>;
+/**
+ * Verify API key and return org/project/env info (extended)
+ */
+export declare function verifyApiKeyExtended(key: string): Promise<{
+    orgId: string;
+    projectId: string;
+    env: string;
     scopes: string[];
 } | null>;
 /**
@@ -25,10 +34,11 @@ export declare function verifyApiKey(key: string): Promise<{
  */
 export declare function ensureProfile(userId: string, email?: string): Promise<void>;
 /**
- * Provision user: create profile + default org if needed
+ * Provision user: create profile + default org + default project if needed
  */
 export declare function provisionUser(userId: string, email: string): Promise<{
     orgId: string;
+    projectId: string;
 } | null>;
 /**
  * Get user's organizations
@@ -39,6 +49,27 @@ export declare function getUserOrgs(userId: string): Promise<Array<{
     slug: string;
     role: string;
 }>>;
+/**
+ * Get projects for an org
+ */
+export declare function getOrgProjects(orgId: string): Promise<Array<{
+    id: string;
+    name: string;
+    slug: string;
+    isDefault: boolean;
+}>>;
+/**
+ * Get project environments
+ */
+export declare function getProjectEnvs(projectId: string): Promise<Array<{
+    id: string;
+    env: string;
+    limits: any;
+}>>;
+/**
+ * Track usage for an evaluation or conversation
+ */
+export declare function trackUsage(orgId: string, projectId: string, env: string, type: 'evaluation' | 'conversation'): Promise<void>;
 /**
  * Log audit event
  */
