@@ -85,27 +85,56 @@ export async function verifyApiKeyExtended(key: string): Promise<{ orgId: string
 export async function ensureProfile(userId: string, email?: string): Promise<void> {
   if (!supabaseAdmin) return;
   
-  // Try to upsert profile
-  // Note: If the trigger is set up, the profile might already exist
-  const { error } = await supabaseAdmin
-    .from('profiles')
-    .upsert({
-      id: userId,
-      email: email || null,
-      updated_at: new Date().toISOString()
-    }, {
-      onConflict: 'id'
-    });
+  // First, verify the user exists in auth.users
+  // We'll use a small delay and retry if needed
+  let retries = 3;
+  let lastError: any = null;
   
-  if (error) {
-    // If it's a foreign key error, the user might not be in auth.users yet
-    // This can happen due to timing, but the trigger should handle it
-    if (error.code === '23503') {
-      console.warn('Profile creation failed - user may not be in auth.users yet:', error.message);
-      console.warn('This should be handled by the database trigger. If it persists, check trigger setup.');
-    } else {
-      console.error('Failed to ensure profile:', error);
+  while (retries > 0) {
+    // Check if user exists in auth.users (via a query that won't fail)
+    const { data: userCheck } = await supabaseAdmin.auth.admin.getUserById(userId);
+    
+    if (!userCheck?.user) {
+      console.warn(`User ${userId} not found in auth.users, waiting 500ms before retry... (${retries} retries left)`);
+      await new Promise(resolve => setTimeout(resolve, 500));
+      retries--;
+      continue;
     }
+    
+    // User exists, try to upsert profile
+    const { error } = await supabaseAdmin
+      .from('profiles')
+      .upsert({
+        id: userId,
+        email: email || userCheck.user.email || null,
+        updated_at: new Date().toISOString()
+      }, {
+        onConflict: 'id'
+      });
+    
+    if (error) {
+      // If it's a foreign key error, wait and retry
+      if (error.code === '23503') {
+        console.warn('Profile creation failed - foreign key constraint, waiting 500ms before retry... (${retries} retries left)');
+        lastError = error;
+        await new Promise(resolve => setTimeout(resolve, 500));
+        retries--;
+        continue;
+      } else {
+        console.error('Failed to ensure profile:', error);
+        return;
+      }
+    } else {
+      // Success!
+      return;
+    }
+  }
+  
+  // If we get here, all retries failed
+  if (lastError) {
+    console.error('Failed to ensure profile after retries:', lastError);
+  } else {
+    console.error(`Failed to ensure profile: User ${userId} not found in auth.users after retries`);
   }
 }
 
