@@ -188,9 +188,10 @@ export class OnboardingComponent implements OnInit {
     });
   }
 
-  ngOnInit() {
+  async ngOnInit() {
     // Check if user is authenticated
-    if (!this.authService.isAuthenticated()) {
+    const isAuth = await this.authService.isAuthenticated();
+    if (!isAuth) {
       this.router.navigate(['/login']);
       return;
     }

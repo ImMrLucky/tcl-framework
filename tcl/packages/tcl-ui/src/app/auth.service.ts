@@ -50,18 +50,22 @@ export class AuthService {
     }
     
     // Listen for auth changes
-    this.supabase.auth.onAuthStateChange((event, session) => {
+    this.supabase.auth.onAuthStateChange(async (event, session) => {
+      console.log('Auth state changed:', event, session?.user?.email);
       if (session?.user) {
-        this.loadUserProfile(session.user.id);
+        await this.loadUserProfile(session.user.id);
       } else {
         this.currentUserSubject.next(null);
       }
     });
 
     // Load initial session
-    this.supabase.auth.getSession().then(({ data: { session } }) => {
+    this.supabase.auth.getSession().then(async ({ data: { session } }) => {
       if (session?.user) {
-        this.loadUserProfile(session.user.id);
+        console.log('Loading initial session for user:', session.user.email);
+        await this.loadUserProfile(session.user.id);
+      } else {
+        console.log('No active session found');
       }
     });
   }
@@ -75,25 +79,44 @@ export class AuthService {
     if (!error && data.user) {
       // Provision user (create profile + org)
       try {
-        const response = await fetch('http://localhost:8787/auth/provision', {
+        // Use same API URL pattern as TclService
+        const apiUrl = this.getApiBaseUrl();
+        const response = await fetch(`${apiUrl}/auth/provision`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ userId: data.user.id, email })
         });
+        
         if (!response.ok) {
-          console.error('Failed to provision user:', await response.text());
+          const errorText = await response.text();
+          console.error('Failed to provision user:', errorText);
+          // Don't fail signup if provision fails - user can still log in
+        } else {
+          console.log('User provisioned successfully');
         }
       } catch (err) {
         console.error('Error provisioning user:', err);
+        // Don't fail signup if provision fails
       }
 
-      // Load profile after signup
+      // Load profile after signup (will create basic profile if provision succeeded)
       if (data.user) {
         await this.loadUserProfile(data.user.id);
       }
     }
 
     return { error };
+  }
+
+  private getApiBaseUrl(): string {
+    if (typeof window !== 'undefined') {
+      const apiUrl = (window as any).__TCL_API_URL;
+      if (apiUrl) {
+        return apiUrl;
+      }
+    }
+    // Fallback to relative path (will use proxy in dev, or direct in production)
+    return '/api';
   }
 
   async signIn(email: string, password: string): Promise<{ error: AuthError | null }> {
@@ -142,6 +165,20 @@ export class AuthService {
   }
 
   private async loadUserProfile(userId: string): Promise<void> {
+    console.log('Loading profile for user:', userId);
+    
+    // First, get the auth user to ensure we have email
+    const { data: { user }, error: authError } = await this.supabase.auth.getUser();
+    
+    if (authError || !user) {
+      console.error('Error getting auth user:', authError);
+      this.currentUserSubject.next(null);
+      return;
+    }
+
+    console.log('Auth user found:', user.email, 'Email confirmed:', user.email_confirmed_at ? 'yes' : 'no');
+
+    // Try to load profile from database
     const { data, error } = await this.supabase
       .from('profiles')
       .select('*')
@@ -149,15 +186,30 @@ export class AuthService {
       .single();
 
     if (error) {
-      console.error('Error loading profile:', error);
+      // Profile might not exist yet (provision might have failed)
+      // Still set user with basic info from auth so they can use the app
+      console.warn('Profile not found in database (this is OK if user just signed up):', error.code, error.message);
+      
+      const basicUser: User = {
+        id: userId,
+        email: user.email || undefined,
+        fullName: user.user_metadata?.full_name,
+        companyRole: undefined,
+        companyIndustry: undefined,
+        callOperation: undefined,
+        primaryUseCase: undefined
+      };
+      
+      this.currentUserSubject.next(basicUser);
+      console.log('Set basic user info from auth:', basicUser);
       return;
     }
 
-    const { data: { user } } = await this.supabase.auth.getUser();
-    
+    // Profile exists, use it
+    console.log('Profile loaded from database:', data);
     this.currentUserSubject.next({
       id: userId,
-      email: user?.email,
+      email: user.email || data.email || undefined,
       fullName: data?.full_name,
       companyRole: data?.company_role,
       companyIndustry: data?.company_industry,
@@ -170,7 +222,14 @@ export class AuthService {
     return this.currentUserSubject.value;
   }
 
-  isAuthenticated(): boolean {
+  async isAuthenticated(): Promise<boolean> {
+    // Check both: current user subject AND Supabase session
+    const { data: { session } } = await this.supabase.auth.getSession();
+    return session !== null && this.currentUserSubject.value !== null;
+  }
+
+  // Synchronous check (for quick UI checks)
+  isAuthenticatedSync(): boolean {
     return this.currentUserSubject.value !== null;
   }
 }

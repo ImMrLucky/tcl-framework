@@ -190,6 +190,9 @@ export class LoginComponent {
       if (result.error) {
         this.errorMessage = result.error.message || 'Authentication failed';
       } else {
+        // Wait a moment for profile to load
+        await new Promise(resolve => setTimeout(resolve, 500));
+        
         // Check if user needs onboarding
         const user = this.authService.getCurrentUser();
         if (user && !user.companyRole) {

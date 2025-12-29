@@ -30,12 +30,21 @@ export class DashboardComponent implements OnInit {
 
   constructor(private authService: AuthService) {}
 
-  ngOnInit() {
+  async ngOnInit() {
+    // Check authentication first
+    const isAuth = await this.authService.isAuthenticated();
+    if (!isAuth) {
+      console.log('Not authenticated, redirecting to home');
+      // Will be handled by router guard if we add one
+      return;
+    }
+
+    // Subscribe to user changes
     this.authService.currentUser$.subscribe(user => {
+      console.log('Dashboard: User changed:', user?.email);
       this.currentUser = user;
       if (!user) {
-        // Redirect to home if not authenticated
-        // This will be handled by auth guard if we add one
+        console.log('Dashboard: User is null, but session exists - this might be a profile loading issue');
       }
     });
   }
