@@ -329,13 +329,19 @@ app.post("/auth/provision", async (req, res) => {
       return res.status(503).json({ error: "Supabase not configured" });
     }
     
+    console.log(`Provision request for user: ${userId} (${email})`);
     const result = await provisionUser(userId, email);
     
     if (!result) {
-      return res.status(500).json({ error: "Failed to provision user" });
+      console.error(`Provision failed for user: ${userId}`);
+      return res.status(500).json({ 
+        error: "Failed to provision user",
+        details: "Check server logs for details"
+      });
     }
     
-    res.json({ orgId: result.orgId });
+    console.log(`Provision successful: orgId=${result.orgId}, projectId=${result.projectId}`);
+    res.json({ orgId: result.orgId, projectId: result.projectId });
   } catch (e: any) {
     console.error("Provision error:", e);
     res.status(500).json({ 
