@@ -20,6 +20,7 @@
     "@angular/platform-browser": "^17.0.0",
     "@angular/platform-browser-dynamic": "^17.0.0",
     "@angular/router": "^17.0.0",
+    "@supabase/supabase-js": "^2.89.0",
     "d3": "^7.8.5",
     "rxjs": "~7.8.0",
     "tslib": "^2.3.0",
@@ -34,4 +35,3 @@
     "typescript": "~5.2.2"
   }
 }
-

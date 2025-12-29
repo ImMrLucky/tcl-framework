@@ -9,7 +9,9 @@ import { ValidateOutput, ClaimWithMetadata, GraphEdge, CallMetadata } from '../t
 import { MatButtonModule } from '@angular/material/button';
 import { MatIconModule } from '@angular/material/icon';
 import { MatTooltipModule } from '@angular/material/tooltip';
+import { MatMenuModule } from '@angular/material/menu';
 import { RouterModule } from '@angular/router';
+import { AuthService } from '../auth.service';
 
 @Component({
   selector: 'app-call-center-qa',
@@ -23,7 +25,9 @@ import { RouterModule } from '@angular/router';
     GraphViewComponent,
     MatButtonModule,
     MatIconModule,
-    MatTooltipModule
+    MatTooltipModule,
+    MatMenuModule,
+    MatDividerModule
   ],
   template: `
     <div class="app-container">
@@ -38,6 +42,28 @@ import { RouterModule } from '@angular/router';
               <mat-icon>swap_horiz</mat-icon>
               Switch to Original QA
             </a>
+            <button *ngIf="!isAuthenticated" mat-button routerLink="/login">
+              <mat-icon>login</mat-icon>
+              Sign In
+            </button>
+            <button *ngIf="isAuthenticated" mat-icon-button [matMenuTriggerFor]="userMenu">
+              <mat-icon>account_circle</mat-icon>
+            </button>
+            <mat-menu #userMenu="matMenu">
+              <div class="user-menu-header">
+                <div class="user-email">{{ currentUser?.email }}</div>
+                <div class="user-role" *ngIf="currentUser?.companyRole">{{ currentUser.companyRole }}</div>
+              </div>
+              <mat-divider></mat-divider>
+              <button mat-menu-item routerLink="/onboarding">
+                <mat-icon>settings</mat-icon>
+                <span>Profile Settings</span>
+              </button>
+              <button mat-menu-item (click)="signOut()">
+                <mat-icon>logout</mat-icon>
+                <span>Sign Out</span>
+              </button>
+            </mat-menu>
             <button
               *ngIf="result"
               mat-icon-button
@@ -181,6 +207,21 @@ import { RouterModule } from '@angular/router';
       color: white;
     }
 
+    .user-menu-header {
+      padding: 16px;
+      min-width: 200px;
+    }
+
+    .user-email {
+      font-weight: 500;
+      margin-bottom: 4px;
+    }
+
+    .user-role {
+      font-size: 0.875rem;
+      color: #666;
+    }
+
     .app-footer {
       margin-top: 40px;
       padding-top: 20px;
@@ -221,11 +262,28 @@ export class CallCenterQaComponent implements OnInit {
   currentCallMetadata: CallMetadata | undefined = undefined;
   currentOptions: any = {};
 
-  constructor(private tclService: TclService) {}
+  // Auth properties
+  isAuthenticated = false;
+  currentUser: User | null = null;
+
+  constructor(
+    private tclService: TclService,
+    private authService: AuthService
+  ) {}
 
   ngOnInit() {
     this.readUrlParameters();
     this.getEngineVersion();
+    
+    // Subscribe to auth state
+    this.authService.currentUser$.subscribe(user => {
+      this.currentUser = user;
+      this.isAuthenticated = user !== null;
+    });
+  }
+
+  signOut() {
+    this.authService.signOut();
   }
 
   private readUrlParameters() {

@@ -39,6 +39,10 @@ create table if not exists public.profiles (
   id uuid primary key references auth.users(id) on delete cascade,
   email text,
   full_name text,
+  company_role text,
+  company_industry text,
+  call_operation text,
+  primary_use_case text,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
