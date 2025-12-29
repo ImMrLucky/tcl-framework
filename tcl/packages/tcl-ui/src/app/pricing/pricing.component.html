@@ -1,0 +1,162 @@
+<header>
+  <div class="container">
+    <div class="header-content">
+      <app-logo></app-logo>
+      <div class="header-actions">
+        <a routerLink="/home" class="header-link">Back to Home</a>
+        <a routerLink="/login" class="header-link">Login</a>
+      </div>
+    </div>
+  </div>
+</header>
+
+<section class="pricing-hero">
+  <div class="container">
+    <h1>Choose Your Plan</h1>
+    <p class="subheadline">Start with Sandbox for free, or upgrade when you're ready to scale</p>
+  </div>
+</section>
+
+<section class="pricing-section">
+  <div class="container">
+    <div class="pricing-grid">
+      <div *ngFor="let plan of plans" class="pricing-card" [class.highlight]="plan.highlight">
+        <div class="plan-header">
+          <h2>{{ plan.name }}</h2>
+          <div class="price">
+            <span class="price-amount">{{ plan.price }}</span>
+            <span class="price-period" *ngIf="plan.period">{{ plan.period }}</span>
+          </div>
+          <p class="plan-description">{{ plan.description }}</p>
+        </div>
+        <div class="plan-features">
+          <ul>
+            <li *ngFor="let feature of plan.features">
+              <span class="check-icon">✓</span>
+              {{ feature }}
+            </li>
+          </ul>
+        </div>
+        <div class="plan-cta">
+          <a *ngIf="plan.name !== 'Enterprise'" [routerLink]="plan.ctaLink" class="btn-plan" [class.btn-primary]="plan.highlight" [class.btn-secondary]="!plan.highlight">
+            {{ plan.cta }}
+          </a>
+          <a *ngIf="plan.name === 'Enterprise'" href="mailto:sales@protectqa.com?subject=Enterprise Plan Inquiry" class="btn-plan" [class.btn-primary]="plan.highlight" [class.btn-secondary]="!plan.highlight">
+            {{ plan.cta }}
+          </a>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="comparison-section">
+  <div class="container">
+    <h2>Plan Comparison</h2>
+    <div class="comparison-table">
+      <table>
+        <thead>
+          <tr>
+            <th>Feature</th>
+            <th>Sandbox</th>
+            <th>Team / Developer</th>
+            <th>Enterprise</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><strong>UI Access</strong></td>
+            <td>✓</td>
+            <td>✓</td>
+            <td>✓</td>
+          </tr>
+          <tr>
+            <td><strong>REST API</strong></td>
+            <td>✓</td>
+            <td>✓</td>
+            <td>✓</td>
+          </tr>
+          <tr>
+            <td><strong>Evaluations/Day</strong></td>
+            <td>Limited</td>
+            <td>Higher limits</td>
+            <td>Custom limits</td>
+          </tr>
+          <tr>
+            <td><strong>Data Retention</strong></td>
+            <td>Short</td>
+            <td>Extended</td>
+            <td>Custom</td>
+          </tr>
+          <tr>
+            <td><strong>Exports</strong></td>
+            <td>—</td>
+            <td>Basic</td>
+            <td>Audit log exports</td>
+          </tr>
+          <tr>
+            <td><strong>Webhooks</strong></td>
+            <td>—</td>
+            <td>✓</td>
+            <td>✓</td>
+          </tr>
+          <tr>
+            <td><strong>SLA</strong></td>
+            <td>—</td>
+            <td>—</td>
+            <td>✓</td>
+          </tr>
+          <tr>
+            <td><strong>SSO</strong></td>
+            <td>—</td>
+            <td>—</td>
+            <td>✓</td>
+          </tr>
+          <tr>
+            <td><strong>Support</strong></td>
+            <td>Community</td>
+            <td>Email</td>
+            <td>Dedicated</td>
+          </tr>
+          <tr>
+            <td><strong>Dedicated Tenant</strong></td>
+            <td>—</td>
+            <td>—</td>
+            <td>✓</td>
+          </tr>
+          <tr>
+            <td><strong>Security Reviews</strong></td>
+            <td>—</td>
+            <td>—</td>
+            <td>✓</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</section>
+
+<section class="faq-section">
+  <div class="container">
+    <h2>Frequently Asked Questions</h2>
+    <div class="faq-grid">
+      <div class="faq-item">
+        <h3>Can I upgrade or downgrade later?</h3>
+        <p>Yes, you can change your plan at any time. Upgrades take effect immediately, and downgrades take effect at the end of your billing cycle.</p>
+      </div>
+      <div class="faq-item">
+        <h3>What happens to my data if I cancel?</h3>
+        <p>Your data is retained according to your plan's retention policy. You can export your data before canceling on Team/Developer and Enterprise plans.</p>
+      </div>
+      <div class="faq-item">
+        <h3>Do you offer refunds?</h3>
+        <p>We offer a 30-day money-back guarantee on Team/Developer plans. Enterprise plans are custom and include specific terms.</p>
+      </div>
+      <div class="faq-item">
+        <h3>Is there a free trial for paid plans?</h3>
+        <p>Yes, Team/Developer plans include a 14-day free trial. No credit card required to start.</p>
+      </div>
+    </div>
+  </div>
+</section>
+

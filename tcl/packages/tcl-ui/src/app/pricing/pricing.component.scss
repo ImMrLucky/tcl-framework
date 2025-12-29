@@ -1,0 +1,315 @@
+@use '../../styles/variables' as *;
+
+header {
+  background: $bg-white;
+  border-bottom: 1px solid $border-light;
+  padding: $spacing-lg 0;
+  margin-bottom: 0;
+
+  .header-content {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+
+  .header-actions {
+    display: flex;
+    gap: $spacing-md;
+    align-items: center;
+  }
+
+  .header-link {
+    color: $color-text-primary;
+    text-decoration: none;
+    font-weight: $font-weight-medium;
+    padding: $spacing-sm $spacing-md;
+    transition: color 0.2s;
+
+    &:hover {
+      color: $color-primary;
+    }
+  }
+}
+
+.pricing-hero {
+  padding: $spacing-5xl 0 $spacing-4xl;
+  background: $gradient-hero;
+  color: $color-text-white;
+  text-align: center;
+
+  h1 {
+    font-size: $font-size-5xl;
+    font-weight: $font-weight-bold;
+    margin-bottom: $spacing-lg;
+  }
+
+  .subheadline {
+    font-size: $font-size-xl;
+    color: $color-text-light;
+    max-width: 600px;
+    margin: 0 auto;
+  }
+}
+
+.pricing-section {
+  padding: $spacing-6xl 0;
+  background: $bg-light;
+}
+
+.pricing-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: $spacing-2xl;
+  max-width: 1200px;
+  margin: 0 auto;
+}
+
+.pricing-card {
+  background: $bg-white;
+  border-radius: $radius-lg;
+  padding: $spacing-3xl;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  transition: transform 0.2s, box-shadow 0.2s;
+  display: flex;
+  flex-direction: column;
+
+  &:hover {
+    transform: translateY(-4px);
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.15);
+  }
+
+  &.highlight {
+    border: 2px solid $color-primary;
+    transform: scale(1.05);
+
+    @media (max-width: $breakpoint-md) {
+      transform: scale(1);
+    }
+  }
+
+  .plan-header {
+    text-align: center;
+    margin-bottom: $spacing-2xl;
+
+    h2 {
+      font-size: $font-size-3xl;
+      font-weight: $font-weight-bold;
+      margin-bottom: $spacing-md;
+      color: $color-text-primary;
+    }
+
+    .price {
+      margin-bottom: $spacing-md;
+
+      .price-amount {
+        font-size: $font-size-5xl;
+        font-weight: $font-weight-bold;
+        color: $color-primary;
+      }
+
+      .price-period {
+        font-size: $font-size-lg;
+        color: $color-text-secondary;
+      }
+    }
+
+    .plan-description {
+      color: $color-text-secondary;
+      font-size: $font-size-base;
+      line-height: $line-height-relaxed;
+    }
+  }
+
+  .plan-features {
+    flex: 1;
+    margin-bottom: $spacing-2xl;
+
+    ul {
+      list-style: none;
+      padding: 0;
+      margin: 0;
+
+      li {
+        padding: $spacing-sm 0;
+        display: flex;
+        align-items: flex-start;
+        gap: $spacing-sm;
+        color: $color-text-primary;
+
+        .check-icon {
+          color: $color-primary;
+          font-weight: $font-weight-bold;
+          flex-shrink: 0;
+        }
+      }
+    }
+  }
+
+  .plan-cta {
+    .btn-plan {
+      display: block;
+      width: 100%;
+      padding: $spacing-md $spacing-xl;
+      text-align: center;
+      text-decoration: none;
+      border-radius: $radius-md;
+      font-weight: $font-weight-semibold;
+      transition: all 0.2s;
+      border: 2px solid transparent;
+
+      &.btn-primary {
+        background: $color-primary;
+        color: $color-text-white;
+
+        &:hover {
+          background: $color-primary-hover;
+        }
+      }
+
+      &.btn-secondary {
+        background: transparent;
+        color: $color-primary;
+        border-color: $color-primary;
+
+        &:hover {
+          background: $color-primary;
+          color: $color-text-white;
+        }
+      }
+    }
+  }
+}
+
+.comparison-section {
+  padding: $spacing-6xl 0;
+  background: $bg-white;
+
+  h2 {
+    text-align: center;
+    margin-bottom: $spacing-4xl;
+    font-size: $font-size-4xl;
+    font-weight: $font-weight-bold;
+  }
+}
+
+.comparison-table {
+  overflow-x: auto;
+  max-width: 100%;
+
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    background: $bg-white;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+    border-radius: $radius-lg;
+    overflow: hidden;
+
+    thead {
+      background: $bg-dark;
+      color: $color-text-white;
+
+      th {
+        padding: $spacing-lg;
+        text-align: left;
+        font-weight: $font-weight-semibold;
+        font-size: $font-size-lg;
+
+        &:first-child {
+          width: 30%;
+        }
+      }
+    }
+
+    tbody {
+      tr {
+        border-bottom: 1px solid $border-light;
+
+        &:last-child {
+          border-bottom: none;
+        }
+
+        &:nth-child(even) {
+          background: $bg-light;
+        }
+
+        td {
+          padding: $spacing-md $spacing-lg;
+          color: $color-text-primary;
+
+          &:first-child {
+            font-weight: $font-weight-medium;
+          }
+
+          &:not(:first-child) {
+            text-align: center;
+          }
+
+          strong {
+            color: $color-text-primary;
+          }
+        }
+      }
+    }
+  }
+}
+
+.faq-section {
+  padding: $spacing-6xl 0;
+  background: $bg-light;
+
+  h2 {
+    text-align: center;
+    margin-bottom: $spacing-4xl;
+    font-size: $font-size-4xl;
+    font-weight: $font-weight-bold;
+  }
+}
+
+.faq-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: $spacing-2xl;
+  max-width: 1000px;
+  margin: 0 auto;
+
+  .faq-item {
+    background: $bg-white;
+    padding: $spacing-xl;
+    border-radius: $radius-md;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+
+    h3 {
+      font-size: $font-size-xl;
+      font-weight: $font-weight-semibold;
+      margin-bottom: $spacing-sm;
+      color: $color-text-primary;
+    }
+
+    p {
+      color: $color-text-secondary;
+      line-height: $line-height-relaxed;
+    }
+  }
+}
+
+@media (max-width: $breakpoint-md) {
+  .pricing-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .pricing-card.highlight {
+    transform: scale(1);
+  }
+
+  .comparison-table {
+    font-size: $font-size-sm;
+
+    table {
+      thead th,
+      tbody td {
+        padding: $spacing-sm;
+      }
+    }
+  }
+}
+
