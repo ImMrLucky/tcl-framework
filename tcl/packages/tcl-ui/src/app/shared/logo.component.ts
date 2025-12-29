@@ -9,6 +9,7 @@ import { RouterModule } from '@angular/router';
   template: `
     <a routerLink="/home" class="logo-link">
       <div class="logo-container">
+        <span class="logo-left">Protect</span>
         <span class="logo-text">QA</span>
       </div>
     </a>
@@ -20,7 +21,6 @@ import { RouterModule } from '@angular/router';
     }
 
     .logo-container {
-      background-color: #000000;
       padding: 12px 24px;
       display: inline-flex;
       align-items: center;
@@ -32,10 +32,15 @@ import { RouterModule } from '@angular/router';
     .logo-container:hover {
       transform: scale(1.05);
     }
+    
+    .logo-left {
+      color: #1e293b;
+      font-size: 18px;
+    }
 
     .logo-text {
-      color: #00D4FF;
-      font-size: 32px;
+      color: #3b82f6;
+      font-size: 18px;
       font-weight: bold;
       font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
       letter-spacing: -1px;
