@@ -1,0 +1,88 @@
+.claim-table-card {
+  min-height: 400px;
+}
+
+.loading-container {
+  display: flex;
+  justify-content: center;
+  padding: 40px;
+}
+
+.empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 40px;
+  color: #666;
+  gap: 16px;
+}
+
+.empty-state mat-icon {
+  font-size: 48px;
+  width: 48px;
+  height: 48px;
+  color: #ccc;
+}
+
+.table-container {
+  overflow-x: auto;
+}
+
+.claims-table {
+  width: 100%;
+}
+
+.claim-text {
+  max-width: 400px;
+  word-wrap: break-word;
+  line-height: 1.5;
+}
+
+.count-badge {
+  display: inline-block;
+  padding: 4px 8px;
+  border-radius: 12px;
+  background: #e0e0e0;
+  color: #666;
+  font-size: 0.875rem;
+  font-weight: 500;
+  min-width: 32px;
+  text-align: center;
+}
+
+.count-badge.support {
+  background: #e8f5e9;
+  color: #2e7d32;
+}
+
+.count-badge.contradiction {
+  background: #ffebee;
+  color: #c62828;
+}
+
+.icon-success {
+  color: #4caf50;
+}
+
+.icon-error {
+  color: #f44336;
+}
+
+.icon-warning {
+  color: #ff9800;
+}
+
+.icon-neutral {
+  color: #9e9e9e;
+}
+
+th {
+  font-weight: 500;
+  color: #666;
+}
+
+td, th {
+  padding: 12px 16px;
+}
+

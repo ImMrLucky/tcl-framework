@@ -1,0 +1,96 @@
+<mat-card class="graph-card">
+  <mat-card-header>
+    <div class="header-content">
+      <mat-card-title>Graph View</mat-card-title>
+      <mat-button-toggle-group 
+        *ngIf="!loading && claims.length > 0 && edges.length > 0"
+        [(value)]="viewType" 
+        (change)="onViewChange()"
+        class="view-toggle">
+        <mat-button-toggle value="force" matTooltip="Force-directed graph (best for exploration)">
+          <mat-icon>account_tree</mat-icon>
+          <span>Force</span>
+        </mat-button-toggle>
+        <mat-button-toggle value="circular" matTooltip="Circular layout (clean, shows all relationships)">
+          <mat-icon>radio_button_unchecked</mat-icon>
+          <span>Circular</span>
+        </mat-button-toggle>
+        <mat-button-toggle value="hierarchical" matTooltip="Hierarchical view (sources → claims → supports)">
+          <mat-icon>vertical_align_center</mat-icon>
+          <span>Layered</span>
+        </mat-button-toggle>
+      </mat-button-toggle-group>
+    </div>
+  </mat-card-header>
+  <mat-card-content>
+    <div *ngIf="loading" class="loading-container">
+      <mat-spinner diameter="40"></mat-spinner>
+    </div>
+
+    <div *ngIf="!loading && (claims.length === 0 || edges.length === 0)" class="empty-state">
+      <mat-icon>account_tree</mat-icon>
+      <p *ngIf="claims.length === 0">No claims to display</p>
+      <p *ngIf="claims.length > 0 && edges.length === 0">Graph not available from engine<br><small>No edges above threshold</small></p>
+    </div>
+
+    <div *ngIf="!loading && claims.length > 0 && edges.length > 0" class="graph-legend">
+      <div class="legend-item">
+        <div class="legend-color" style="background-color: #4caf50;"></div>
+        <span>Grounded & Valid</span>
+      </div>
+      <div class="legend-item">
+        <div class="legend-color" style="background-color: #ff9800;"></div>
+        <span>Has Contradictions</span>
+      </div>
+      <div class="legend-item">
+        <div class="legend-color" style="background-color: #f44336;"></div>
+        <span>Ungrounded</span>
+      </div>
+      <div class="legend-item">
+        <div class="legend-color" style="background-color: #ffc107;"></div>
+        <span>In Cycles</span>
+      </div>
+      <div class="legend-edges">
+        <div class="legend-edge">
+          <svg width="40" height="20">
+            <line x1="0" y1="10" x2="40" y2="10" stroke="#4caf50" stroke-width="2" marker-end="url(#arrow-green)"/>
+            <defs>
+              <marker id="arrow-green" viewBox="0 -5 10 10" refX="35" refY="0" markerWidth="6" markerHeight="6" orient="auto">
+                <path d="M0,-5L10,0L0,5" fill="#4caf50"/>
+              </marker>
+            </defs>
+          </svg>
+          <span>Support</span>
+        </div>
+        <div class="legend-edge">
+          <svg width="40" height="20">
+            <line x1="0" y1="10" x2="40" y2="10" stroke="#f44336" stroke-width="2" marker-end="url(#arrow-red)"/>
+            <defs>
+              <marker id="arrow-red" viewBox="0 -5 10 10" refX="35" refY="0" markerWidth="6" markerHeight="6" orient="auto">
+                <path d="M0,-5L10,0L0,5" fill="#f44336"/>
+              </marker>
+            </defs>
+          </svg>
+          <span>Contradiction</span>
+        </div>
+        <div class="legend-edge">
+          <svg width="40" height="20">
+            <line x1="0" y1="10" x2="40" y2="10" stroke="#2196f3" stroke-width="2" stroke-dasharray="5,5" marker-end="url(#arrow-blue)"/>
+            <defs>
+              <marker id="arrow-blue" viewBox="0 -5 10 10" refX="35" refY="0" markerWidth="6" markerHeight="6" orient="auto">
+                <path d="M0,-5L10,0L0,5" fill="#2196f3"/>
+              </marker>
+            </defs>
+          </svg>
+          <span>Grounding</span>
+        </div>
+      </div>
+    </div>
+
+    <div #graphContainer class="graph-container" [style.display]="viewType === 'force' || viewType === 'circular' || viewType === 'hierarchical' ? 'block' : 'none'"></div>
+    <div class="matrix-container" [style.display]="viewType === 'matrix' ? 'block' : 'none'">
+      <div class="matrix-wrapper" #matrixContainer></div>
+    </div>
+  </mat-card-content>
+</mat-card>
+

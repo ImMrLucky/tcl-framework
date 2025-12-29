@@ -1,0 +1,67 @@
+<mat-card class="claim-table-card">
+  <mat-card-header>
+    <mat-card-title>Claim Table</mat-card-title>
+  </mat-card-header>
+  <mat-card-content>
+    <div *ngIf="loading" class="loading-container">
+      <mat-spinner diameter="40"></mat-spinner>
+    </div>
+
+    <div *ngIf="!loading && claims.length === 0" class="empty-state">
+      <mat-icon>table_chart</mat-icon>
+      <p>No claims to display</p>
+    </div>
+
+    <div *ngIf="!loading && claims.length > 0" class="table-container">
+      <table mat-table [dataSource]="claims" class="claims-table">
+        <ng-container matColumnDef="claim">
+          <th mat-header-cell *matHeaderCellDef>Claim</th>
+          <td mat-cell *matCellDef="let claim" class="claim-text">{{ claim.text }}</td>
+        </ng-container>
+
+        <ng-container matColumnDef="grounded">
+          <th mat-header-cell *matHeaderCellDef>Grounded</th>
+          <td mat-cell *matCellDef="let claim">
+            <mat-icon [class]="claim.grounded ? 'icon-success' : 'icon-error'">
+              {{ claim.grounded ? 'check_circle' : 'cancel' }}
+            </mat-icon>
+          </td>
+        </ng-container>
+
+        <ng-container matColumnDef="support">
+          <th mat-header-cell *matHeaderCellDef>Support</th>
+          <td mat-cell *matCellDef="let claim">
+            <span [class]="claim.supportCount > 0 ? 'count-badge support' : 'count-badge'">
+              {{ claim.supportCount }}
+            </span>
+          </td>
+        </ng-container>
+
+        <ng-container matColumnDef="contradiction">
+          <th mat-header-cell *matHeaderCellDef>Contradiction</th>
+          <td mat-cell *matCellDef="let claim">
+            <span [class]="claim.contradictionCount > 0 ? 'count-badge contradiction' : 'count-badge'">
+              {{ claim.contradictionCount }}
+            </span>
+          </td>
+        </ng-container>
+
+        <ng-container matColumnDef="inCycles">
+          <th mat-header-cell *matHeaderCellDef>In Cycles</th>
+          <td mat-cell *matCellDef="let claim">
+            <mat-icon
+              [class]="claim.inCycles ? 'icon-warning' : 'icon-neutral'"
+              [matTooltip]="claim.inCycles ? 'This claim is part of a circular reasoning pattern' : 'No cycles detected'"
+            >
+              {{ claim.inCycles ? 'refresh' : 'check' }}
+            </mat-icon>
+          </td>
+        </ng-container>
+
+        <tr mat-header-row *matHeaderRowDef="displayedColumns"></tr>
+        <tr mat-row *matRowDef="let row; columns: displayedColumns"></tr>
+      </table>
+    </div>
+  </mat-card-content>
+</mat-card>
+

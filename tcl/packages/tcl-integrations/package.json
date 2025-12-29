@@ -1,22 +1,24 @@
 {
-  "name": "tcl-core",
-  "version": "0.2.0",
+  "name": "tcl-integrations",
+  "version": "0.1.0",
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "start": "node dist/server/express.js",
-    "dev": "node --loader ts-node/esm src/server/express.ts"
+    "dev": "node --loader ts-node/esm src/server/express.ts",
+    "railway:build": "npm install && npm run build",
+    "railway:start": "npm start"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.89.0",
-    "@xenova/transformers": "^2.17.2",
-    "crypto": "^1.0.1",
     "express": "^4.19.2",
+    "crypto": "^1.0.1",
     "aws-sdk": "^2.1691.0",
     "form-data": "^4.0.0",
-    "node-fetch": "^3.3.2"
+    "node-fetch": "^3.3.2",
+    "dotenv": "^16.4.5"
   },
   "devDependencies": {
     "@types/express": "^4.17.21",
@@ -25,3 +27,4 @@
     "typescript": "^5.6.3"
   }
 }
+

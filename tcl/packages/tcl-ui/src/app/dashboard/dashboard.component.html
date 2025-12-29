@@ -1,0 +1,73 @@
+<header>
+  <div class="container">
+    <div class="header-content">
+      <app-logo></app-logo>
+      <div class="header-actions">
+        <button mat-button routerLink="/call-center-qa">
+          <mat-icon>phone</mat-icon>
+          Call Center QA
+        </button>
+        <button mat-button routerLink="/original-qa">
+          <mat-icon>description</mat-icon>
+          Original QA
+        </button>
+        <button mat-icon-button [matMenuTriggerFor]="userMenu">
+          <mat-icon>account_circle</mat-icon>
+        </button>
+        <mat-menu #userMenu="matMenu">
+          <div class="user-menu-header">
+            <div class="user-email">{{ currentUser?.email }}</div>
+            <div class="user-role" *ngIf="currentUser?.companyRole">{{ currentUser?.companyRole }}</div>
+          </div>
+          <mat-divider></mat-divider>
+          <button mat-menu-item routerLink="/onboarding">
+            <mat-icon>settings</mat-icon>
+            <span>Profile Settings</span>
+          </button>
+          <button mat-menu-item (click)="signOut()">
+            <mat-icon>logout</mat-icon>
+            <span>Sign Out</span>
+          </button>
+        </mat-menu>
+      </div>
+    </div>
+  </div>
+</header>
+
+<div class="dashboard-container">
+  <div class="container">
+    <div class="welcome-section">
+      <h1>Welcome to ProtectQA</h1>
+      <p class="welcome-subtitle">Choose how you'd like to get started</p>
+    </div>
+
+    <div class="dashboard-grid">
+      <mat-card class="dashboard-card" routerLink="/call-center-qa">
+        <mat-card-header>
+          <mat-icon class="card-icon">phone</mat-icon>
+          <mat-card-title>Call Center QA</mat-card-title>
+        </mat-card-header>
+        <mat-card-content>
+          <p>Analyze call transcripts for compliance, risk detection, and policy adherence.</p>
+        </mat-card-content>
+        <mat-card-actions>
+          <button mat-button color="primary">Get Started</button>
+        </mat-card-actions>
+      </mat-card>
+
+      <mat-card class="dashboard-card" routerLink="/original-qa">
+        <mat-card-header>
+          <mat-icon class="card-icon">description</mat-icon>
+          <mat-card-title>Original QA</mat-card-title>
+        </mat-card-header>
+        <mat-card-content>
+          <p>Validate question-answer pairs with evidence sources and custom rules.</p>
+        </mat-card-content>
+        <mat-card-actions>
+          <button mat-button color="primary">Get Started</button>
+        </mat-card-actions>
+      </mat-card>
+    </div>
+  </div>
+</div>
+

@@ -1,0 +1,108 @@
+.app-container {
+  min-height: 100vh;
+  padding: 20px;
+  max-width: 1800px;
+  margin: 0 auto;
+}
+
+.app-header {
+  margin-bottom: 30px;
+  text-align: center;
+}
+
+.app-header h1 {
+  font-size: 2.5rem;
+  color: #1a1a1a;
+  margin-bottom: 8px;
+}
+
+.subtitle {
+  color: #666;
+  font-size: 1.1rem;
+}
+
+.main-layout {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 20px;
+}
+
+.left-column,
+.right-column {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+@media (max-width: 1400px) {
+  .main-layout {
+    grid-template-columns: 1fr;
+  }
+}
+
+.header-content {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 16px;
+}
+
+.header-left {
+  display: flex;
+  align-items: center;
+}
+
+.header-title {
+  flex: 1;
+  text-align: center;
+}
+
+.header-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.header-actions a.active {
+  background-color: #1976d2;
+  color: white;
+}
+
+.user-menu-header {
+  padding: 16px;
+  min-width: 200px;
+}
+
+.user-email {
+  font-weight: 500;
+  margin-bottom: 4px;
+}
+
+.user-role {
+  font-size: 0.875rem;
+  color: #666;
+}
+
+.app-footer {
+  margin-top: 40px;
+  padding-top: 20px;
+  border-top: 1px solid #e0e0e0;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 0.75rem;
+  color: #666;
+}
+
+.footer-right {
+  display: flex;
+  gap: 16px;
+  align-items: center;
+}
+
+.version-info,
+.metrics-info {
+  font-family: monospace;
+}
+

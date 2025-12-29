@@ -1,0 +1,81 @@
+<mat-card class="summary-panel">
+  <mat-card-header>
+    <mat-card-title>Compliance Score</mat-card-title>
+  </mat-card-header>
+  <mat-card-content>
+    <div *ngIf="loading" class="loading-container">
+      <mat-spinner diameter="40"></mat-spinner>
+      <p>Analyzing call...</p>
+    </div>
+
+    <div *ngIf="!loading && result" class="summary-content">
+      <div class="compliance-score">
+        <div class="score-circle" [class]="getComplianceScoreClass(result.scores.overall ?? 0)">
+          <span class="score-value">{{ result.scores.overall ?? 'N/A' }}</span>
+          <span class="score-label">Compliance</span>
+          <span class="risk-badge" [class]="getRiskLevelClass(result.scores.overall ?? 0)" *ngIf="result.scores.overall !== null">
+            {{ getRiskLevel(result.scores.overall ?? 0) }}
+          </span>
+        </div>
+      </div>
+
+      <div class="flags-section">
+        <h3>Compliance Flags</h3>
+        <div class="flags-grid">
+          <div class="flag-item" *ngIf="hasContradictions()">
+            <mat-icon class="flag-icon error">gavel</mat-icon>
+            <span>Policy Violations ({{ result.report.contradictions.length }})</span>
+          </div>
+          <div class="flag-item" *ngIf="hasUngroundedClaims()">
+            <mat-icon class="flag-icon warning">warning</mat-icon>
+            <span>Risky Statements ({{ result.report.missingEvidence.length }})</span>
+          </div>
+          <div class="flag-item" *ngIf="hasCircularReasoning()">
+            <mat-icon class="flag-icon circular">refresh</mat-icon>
+            <span>Circular Reasoning</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="status-section">
+        <mat-chip [class]="getStatusClass()">
+          {{ getStatusText() }}
+        </mat-chip>
+      </div>
+
+      <div class="scores-breakdown">
+        <h3>Score Breakdown</h3>
+        <div class="score-item">
+          <span class="score-name">Truth (Evidence):</span>
+          <span class="score-value-small">{{ result.scores.truth ?? 'N/A' }}</span>
+        </div>
+        <div class="score-item">
+          <span class="score-name">Consistency:</span>
+          <span class="score-value-small">{{ result.scores.consistency ?? 'N/A' }}</span>
+        </div>
+        <div class="score-item">
+          <span class="score-name">Coherence:</span>
+          <span class="score-value-small">{{ result.scores.coherence ?? 'N/A' }}</span>
+        </div>
+        <div class="score-item overall">
+          <span class="score-name">Compliance Score:</span>
+          <span class="score-value-small">{{ result.scores.overall ?? 'N/A' }}</span>
+        </div>
+      </div>
+
+      <div class="nli-info" *ngIf="result.scorerId">
+        <h3>NLI Scorer</h3>
+        <div class="scorer-badge" [class]="getScorerClass(result.scorerId)">
+          <mat-icon class="scorer-icon">{{ getScorerIcon(result.scorerId) }}</mat-icon>
+          <span>{{ getScorerName(result.scorerId) }}</span>
+        </div>
+      </div>
+    </div>
+
+    <div *ngIf="!loading && !result" class="empty-state">
+      <mat-icon>phone</mat-icon>
+      <p>Upload a call transcript to see compliance analysis</p>
+    </div>
+  </mat-card-content>
+</mat-card>
+

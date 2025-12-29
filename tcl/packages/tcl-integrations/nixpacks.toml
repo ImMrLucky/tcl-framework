@@ -1,0 +1,21 @@
+# Nixpacks configuration for Railway
+# Railway uses Nixpacks to detect and build Node.js projects
+
+[phases.setup]
+nixPkgs = ["nodejs-18_x"]
+
+[phases.install]
+cmds = [
+  "cd packages/tcl-integrations",
+  "npm install"
+]
+
+[phases.build]
+cmds = [
+  "cd packages/tcl-integrations",
+  "npm run build"
+]
+
+[start]
+cmd = "cd packages/tcl-integrations && npm start"
+

@@ -1,7 +1,8 @@
 import express from "express";
 import { supabaseAdmin, verifyApiKeyExtended, provisionUser, getUserOrgs, getOrgProjects, getProjectEnvs, generateApiKey, logAudit, trackUsage } from "./supabase.js";
 const app = express();
-app.use(express.json({ limit: "4mb" }));
+app.use(express.json({ limit: "10mb" }));
+app.use(express.raw({ type: 'application/json', limit: '10mb' })); // For HMAC webhook verification
 // Health check endpoint - must work even if other imports fail
 app.get("/health", (req, res) => {
     res.json({ status: "ok", service: "tcl-core" });

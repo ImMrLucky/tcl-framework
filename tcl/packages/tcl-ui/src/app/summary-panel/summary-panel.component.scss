@@ -1,0 +1,248 @@
+.summary-panel {
+  min-height: 400px;
+}
+
+.loading-container {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 40px;
+  gap: 16px;
+}
+
+.empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 40px;
+  color: #666;
+  gap: 16px;
+}
+
+.empty-state mat-icon {
+  font-size: 48px;
+  width: 48px;
+  height: 48px;
+  color: #ccc;
+}
+
+.summary-content {
+  padding: 8px 0;
+}
+
+.compliance-score {
+  display: flex;
+  justify-content: center;
+  margin-bottom: 32px;
+}
+
+.score-circle {
+  width: 120px;
+  height: 120px;
+  border-radius: 50%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  border: 4px solid;
+  transition: all 0.3s;
+}
+
+.score-circle.pass {
+  border-color: #4caf50;
+  background: #e8f5e9;
+}
+
+.score-circle.warn {
+  border-color: #ff9800;
+  background: #fff3e0;
+}
+
+.score-circle.fail {
+  border-color: #f44336;
+  background: #ffebee;
+}
+
+.score-value {
+  font-size: 2.5rem;
+  font-weight: bold;
+  line-height: 1;
+}
+
+.score-label {
+  font-size: 0.875rem;
+  margin-top: 4px;
+  opacity: 0.8;
+}
+
+.flags-section {
+  margin-bottom: 24px;
+}
+
+.flags-section h3 {
+  font-size: 0.875rem;
+  font-weight: 500;
+  margin-bottom: 12px;
+  color: #666;
+}
+
+.flags-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.flag-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  background: #f5f5f5;
+  border-radius: 4px;
+}
+
+.flag-icon {
+  font-size: 20px;
+  width: 20px;
+  height: 20px;
+}
+
+.flag-icon.error {
+  color: #f44336;
+}
+
+.flag-icon.warning {
+  color: #ff9800;
+}
+
+.flag-icon.circular {
+  color: #2196f3;
+}
+
+.status-section {
+  margin-bottom: 24px;
+  display: flex;
+  justify-content: center;
+}
+
+.status-section mat-chip {
+  font-size: 1rem;
+  font-weight: 500;
+  padding: 8px 24px;
+}
+
+.status-pass {
+  background-color: #4caf50;
+  color: white;
+}
+
+.status-warn {
+  background-color: #ff9800;
+  color: white;
+}
+
+.status-fail {
+  background-color: #f44336;
+  color: white;
+}
+
+.scores-breakdown {
+  padding-top: 24px;
+  border-top: 1px solid #e0e0e0;
+}
+
+.scores-breakdown h3 {
+  font-size: 0.875rem;
+  font-weight: 500;
+  margin-bottom: 12px;
+  color: #666;
+}
+
+.score-item {
+  display: flex;
+  justify-content: space-between;
+  padding: 8px 0;
+}
+
+.score-item.overall {
+  border-top: 1px solid #e0e0e0;
+  margin-top: 8px;
+  padding-top: 16px;
+  font-weight: 500;
+}
+
+.score-name {
+  color: #666;
+}
+
+.score-value-small {
+  font-weight: 500;
+}
+
+.spectral-badge {
+  position: absolute;
+  top: -8px;
+  right: -8px;
+  background: #ccc;
+  color: white;
+  font-size: 0.65rem;
+  padding: 2px 6px;
+  border-radius: 10px;
+  font-weight: 500;
+}
+
+.spectral-badge.active {
+  background: #4caf50;
+}
+
+.nli-info {
+  margin-top: 24px;
+  padding-top: 24px;
+  border-top: 1px solid #e0e0e0;
+}
+
+.nli-info h3 {
+  font-size: 0.875rem;
+  font-weight: 500;
+  margin-bottom: 12px;
+  color: #666;
+}
+
+.scorer-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 16px;
+  border-radius: 20px;
+  font-size: 0.875rem;
+  font-weight: 500;
+}
+
+.scorer-badge .scorer-icon {
+  font-size: 18px;
+  width: 18px;
+  height: 18px;
+}
+
+.scorer-local {
+  background: #e3f2fd;
+  color: #1976d2;
+}
+
+.scorer-cloud {
+  background: #f3e5f5;
+  color: #7b1fa2;
+}
+
+.scorer-basic {
+  background: #fff3e0;
+  color: #e65100;
+}
+
+.scorer-custom {
+  background: #e8f5e9;
+  color: #2e7d32;
+}
+
