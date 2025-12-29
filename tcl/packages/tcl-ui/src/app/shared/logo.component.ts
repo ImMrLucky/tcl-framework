@@ -7,7 +7,7 @@ import { RouterModule } from '@angular/router';
   standalone: true,
   imports: [CommonModule, RouterModule],
   template: `
-    <a routerLink="/call-center-qa" class="logo-link">
+    <a routerLink="/home" class="logo-link">
       <div class="logo-container">
         <span class="logo-text">QA</span>
       </div>

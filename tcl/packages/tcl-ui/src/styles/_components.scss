@@ -1,0 +1,326 @@
+@use 'variables' as *;
+@use 'mixins' as *;
+
+// Container (used across the site)
+.container {
+  @include container;
+}
+
+// Header
+header {
+  background: $bg-white;
+  border-bottom: 1px solid $border-light;
+  padding: $spacing-lg 0;
+}
+
+// Hero Section
+.hero {
+  padding: $spacing-6xl 0 $spacing-7xl;
+  background: $gradient-hero;
+  color: $color-text-white;
+
+  h1 {
+    font-size: $font-size-5xl;
+    font-weight: $font-weight-bold;
+    line-height: $line-height-tight;
+    margin-bottom: $spacing-lg;
+    letter-spacing: -0.02em;
+  }
+
+  .subheadline {
+    font-size: $font-size-xl;
+    color: $color-text-light;
+    margin-bottom: $spacing-3xl;
+    max-width: 700px;
+    line-height: $line-height-relaxed;
+  }
+
+  @include responsive {
+    h1 {
+      font-size: $font-size-4xl;
+    }
+
+    .subheadline {
+      font-size: $font-size-lg;
+    }
+  }
+}
+
+// CTA Group
+.cta-group {
+  display: flex;
+  gap: $spacing-md;
+  flex-wrap: wrap;
+
+  @include responsive {
+    flex-direction: column;
+
+    .btn-primary,
+    .btn-secondary {
+      width: 100%;
+      text-align: center;
+    }
+  }
+}
+
+// Buttons
+.btn-primary {
+  @include button-primary;
+}
+
+.btn-secondary {
+  @include button-secondary;
+}
+
+// Sections
+section {
+  padding: $spacing-6xl 0;
+
+  h2 {
+    @include section-title;
+  }
+
+  h3 {
+    font-size: $font-size-2xl;
+    font-weight: $font-weight-semibold;
+    margin-bottom: $spacing-sm;
+  }
+
+  @include responsive {
+    padding: $spacing-5xl 0;
+
+    h2 {
+      font-size: $font-size-3xl;
+    }
+  }
+}
+
+.section-intro {
+  @include section-intro;
+}
+
+// Problem Section
+.problem-section {
+  background: $bg-light;
+}
+
+.problem-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: $spacing-xl;
+  margin-top: $spacing-3xl;
+}
+
+.problem-card {
+  @include card;
+
+  h3 {
+    color: $color-error;
+    font-size: $font-size-xl;
+    margin-bottom: $spacing-sm;
+  }
+
+  p {
+    color: $color-text-secondary;
+    line-height: $line-height-base;
+  }
+}
+
+// Workflow Steps
+.workflow-steps {
+  display: flex;
+  flex-direction: column;
+  gap: $spacing-2xl;
+  margin-top: $spacing-3xl;
+}
+
+.step {
+  display: flex;
+  gap: $spacing-xl;
+  align-items: flex-start;
+}
+
+.step-number {
+  flex-shrink: 0;
+  width: 48px;
+  height: 48px;
+  background: $color-primary;
+  color: $color-text-white;
+  border-radius: $radius-full;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: $font-size-xl;
+  font-weight: $font-weight-bold;
+}
+
+.step-content {
+  h3 {
+    margin-bottom: $spacing-xs;
+  }
+
+  p {
+    color: $color-text-secondary;
+    line-height: $line-height-base;
+  }
+}
+
+// Comparison Section
+.comparison-section {
+  background: $bg-light;
+}
+
+.comparison-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: $spacing-2xl;
+  margin-top: $spacing-3xl;
+}
+
+.comparison-card {
+  @include card;
+  border: 2px solid $color-primary;
+
+  h3 {
+    color: $color-primary;
+    margin-bottom: $spacing-sm;
+  }
+
+  p {
+    color: $color-text-secondary;
+    line-height: $line-height-base;
+  }
+}
+
+// Benefits List
+.benefits-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: $spacing-xl;
+  margin-top: $spacing-3xl;
+}
+
+.benefit-item {
+  display: flex;
+  gap: $spacing-md;
+  align-items: flex-start;
+}
+
+.benefit-icon {
+  flex-shrink: 0;
+  width: $spacing-xl;
+  height: $spacing-xl;
+  background: $color-primary;
+  border-radius: $radius-sm;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: $color-text-white;
+  font-weight: $font-weight-bold;
+  font-size: $font-size-base;
+}
+
+.benefit-text {
+  color: $color-text-primary;
+  font-size: $font-size-lg;
+  font-weight: $font-weight-medium;
+  line-height: $line-height-relaxed;
+}
+
+// Audience Section
+.audience-section {
+  background: $bg-light;
+}
+
+.audience-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: $spacing-2xl;
+  margin-top: $spacing-3xl;
+}
+
+.audience-card {
+  @include card;
+
+  h3 {
+    color: $bg-dark;
+    margin-bottom: $spacing-sm;
+  }
+
+  p {
+    color: $color-text-secondary;
+    line-height: $line-height-base;
+  }
+}
+
+// Try Section
+.try-section {
+  background: $gradient-try;
+  color: $color-text-white;
+
+  h2 {
+    color: $color-text-white;
+  }
+
+  .section-intro {
+    color: $color-text-light;
+  }
+}
+
+.try-steps {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: $spacing-2xl;
+  margin-top: $spacing-3xl;
+  margin-bottom: $spacing-4xl;
+}
+
+.try-step {
+  text-align: center;
+}
+
+.try-step-number {
+  width: 56px;
+  height: 56px;
+  background: $color-primary;
+  color: $color-text-white;
+  border-radius: $radius-full;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: $font-size-2xl;
+  font-weight: $font-weight-bold;
+  margin: 0 auto $spacing-md;
+}
+
+.try-step {
+  h3 {
+    color: $color-text-white;
+    margin-bottom: $spacing-sm;
+  }
+
+  p {
+    color: $color-text-light;
+    line-height: $line-height-base;
+  }
+}
+
+// Final CTA
+.final-cta {
+  text-align: center;
+  padding: $spacing-6xl 0;
+
+  h2 {
+    margin-bottom: $spacing-md;
+  }
+
+  p {
+    font-size: $font-size-xl;
+    color: $color-text-secondary;
+    margin-bottom: $spacing-3xl;
+    max-width: 700px;
+    margin-left: auto;
+    margin-right: auto;
+  }
+}
+

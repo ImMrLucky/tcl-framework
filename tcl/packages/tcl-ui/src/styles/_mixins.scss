@@ -1,0 +1,71 @@
+@use 'variables' as *;
+
+@mixin container {
+  max-width: $container-max-width;
+  margin: 0 auto;
+  padding: 0 $container-padding;
+}
+
+@mixin button-primary {
+  background: $color-primary;
+  color: $color-text-white;
+  padding: $spacing-md $spacing-2xl;
+  font-size: $font-size-base;
+  font-weight: $font-weight-semibold;
+  border: none;
+  border-radius: $radius-md;
+  cursor: pointer;
+  text-decoration: none;
+  display: inline-block;
+  transition: background 0.2s;
+
+  &:hover {
+    background: $color-primary-hover;
+  }
+}
+
+@mixin button-secondary {
+  background: transparent;
+  color: $color-text-white;
+  padding: $spacing-md $spacing-2xl;
+  font-size: $font-size-base;
+  font-weight: $font-weight-semibold;
+  border: 2px solid $color-text-white;
+  border-radius: $radius-md;
+  cursor: pointer;
+  text-decoration: none;
+  display: inline-block;
+  transition: all 0.2s;
+
+  &:hover {
+    background: rgba(255, 255, 255, 0.1);
+  }
+}
+
+@mixin section-title {
+  font-size: $font-size-4xl;
+  font-weight: $font-weight-bold;
+  margin-bottom: $spacing-md;
+  letter-spacing: -0.01em;
+}
+
+@mixin section-intro {
+  font-size: $font-size-lg;
+  color: $color-text-secondary;
+  margin-bottom: $spacing-4xl;
+  max-width: 800px;
+}
+
+@mixin card {
+  background: $bg-white;
+  padding: $spacing-2xl;
+  border-radius: $radius-lg;
+  border: 1px solid $border-light;
+}
+
+@mixin responsive {
+  @media (max-width: $breakpoint-md) {
+    @content;
+  }
+}
+

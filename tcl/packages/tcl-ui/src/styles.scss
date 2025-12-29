@@ -1,0 +1,7 @@
+@use 'styles/variables' as *;
+@use 'styles/base';
+@use 'styles/mixins';
+@use 'styles/components';
+
+@import '@angular/material/prebuilt-themes/indigo-pink.css';
+
