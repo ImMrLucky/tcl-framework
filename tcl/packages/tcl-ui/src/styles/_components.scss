@@ -77,6 +77,15 @@ header {
     line-height: $line-height-relaxed;
   }
 
+  .micro-credibility {
+    font-size: $font-size-sm;
+    color: $color-text-light;
+    margin-top: $spacing-xl;
+    text-align: center;
+    opacity: 0.9;
+    font-weight: $font-weight-medium;
+  }
+
   @include responsive {
     h1 {
       font-size: $font-size-4xl;
@@ -84,6 +93,35 @@ header {
 
     .subheadline {
       font-size: $font-size-lg;
+    }
+
+    .micro-credibility {
+      font-size: $font-size-xs;
+    }
+  }
+}
+
+// Explanation Section (after hero)
+.explanation-section {
+  padding: $spacing-4xl 0;
+  background: $bg-white;
+  border-bottom: 1px solid $border-light;
+
+  .explanation-text {
+    font-size: $font-size-lg;
+    color: $color-text-secondary;
+    text-align: center;
+    max-width: 900px;
+    margin: 0 auto;
+    line-height: $line-height-relaxed;
+    font-weight: $font-weight-medium;
+  }
+
+  @include responsive {
+    padding: $spacing-3xl 0;
+
+    .explanation-text {
+      font-size: $font-size-base;
     }
   }
 }
@@ -212,6 +250,16 @@ section {
   background: $bg-light;
 }
 
+.comparison-framing {
+  font-size: $font-size-xl;
+  color: $color-text-primary;
+  font-weight: $font-weight-semibold;
+  text-align: center;
+  max-width: 800px;
+  margin: 0 auto $spacing-lg;
+  line-height: $line-height-relaxed;
+}
+
 .comparison-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
@@ -306,6 +354,15 @@ section {
 
   .section-intro {
     color: $color-text-light;
+  }
+
+  .trial-reassurance {
+    font-size: $font-size-sm;
+    color: $color-text-light;
+    text-align: center;
+    margin-top: $spacing-lg;
+    opacity: 0.9;
+    font-weight: $font-weight-medium;
   }
 }
 

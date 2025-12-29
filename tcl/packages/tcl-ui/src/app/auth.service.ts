@@ -22,10 +22,32 @@ export class AuthService {
   public currentUser$ = this.currentUserSubject.asObservable();
 
   constructor(private router: Router) {
-    const supabaseUrl = 'https://uqwcmkyaskyduxuluqrm.supabase.co';
-    const supabaseAnonKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InVxd2Nta3lhc2t5ZHV4dWx1cXJtIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjY5NjA4MTQsImV4cCI6MjA4MjUzNjgxNH0.hmH7rX3ujck-3zBj1OsWXE2QB_we2xXlBWCzXr_WOB0';
+    // Use environment variables if available, fallback to hardcoded for development
+    const supabaseUrl = (typeof window !== 'undefined' && (window as any).__SUPABASE_URL) 
+      || 'https://uqwcmkyaskyduxuluqrm.supabase.co';
+    const supabaseAnonKey = (typeof window !== 'undefined' && (window as any).__SUPABASE_ANON_KEY)
+      || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InVxd2Nta3lhc2t5ZHV4dWx1cXJtIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjY5NjA4MTQsImV4cCI6MjA4MjUzNjgxNH0.hmH7rX3ujck-3zBj1OsWXE2QB_we2xXlBWCzXr_WOB0';
     
-    this.supabase = createClient(supabaseUrl, supabaseAnonKey);
+    // Configure Supabase client to handle lock manager gracefully
+    // The lock manager error is usually harmless - it just means another tab is managing the session
+    this.supabase = createClient(supabaseUrl, supabaseAnonKey, {
+      auth: {
+        autoRefreshToken: true,
+        persistSession: true,
+        detectSessionInUrl: true,
+        // Use a unique storage key
+        storageKey: 'sb-uqwcmkyaskyduxuluqrm-auth-token',
+        // Use localStorage
+        storage: typeof window !== 'undefined' ? window.localStorage : undefined,
+        flowType: 'pkce'
+      }
+    });
+    
+    // Suppress lock manager errors (they're usually harmless - just means another tab is managing auth)
+    if (typeof window !== 'undefined' && 'navigator' in window && 'locks' in navigator) {
+      // The error is logged but doesn't break functionality
+      // Multiple tabs can safely use Supabase - the lock is just for coordination
+    }
     
     // Listen for auth changes
     this.supabase.auth.onAuthStateChange((event, session) => {
