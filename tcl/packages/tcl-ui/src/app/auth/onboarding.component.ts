@@ -219,7 +219,7 @@ export class OnboardingComponent implements OnInit {
       if (result.error) {
         this.errorMessage = result.error.message || 'Failed to update profile';
       } else {
-        this.router.navigate(['/call-center-qa']);
+        this.router.navigate(['/dashboard']);
       }
     } catch (error: any) {
       this.errorMessage = error.message || 'An unexpected error occurred';

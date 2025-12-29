@@ -195,7 +195,7 @@ export class LoginComponent {
         if (user && !user.companyRole) {
           this.router.navigate(['/onboarding']);
         } else {
-          this.router.navigate(['/call-center-qa']);
+          this.router.navigate(['/dashboard']);
         }
       }
     } catch (error: any) {

@@ -11,6 +11,48 @@ header {
   background: $bg-white;
   border-bottom: 1px solid $border-light;
   padding: $spacing-lg 0;
+
+  .header-content {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+
+  .header-actions {
+    display: flex;
+    gap: $spacing-md;
+    align-items: center;
+  }
+
+  .header-link {
+    color: $color-text-primary;
+    text-decoration: none;
+    font-weight: $font-weight-medium;
+    padding: $spacing-sm $spacing-md;
+    transition: color 0.2s;
+
+    &:hover {
+      color: $color-primary;
+    }
+  }
+
+  .btn-get-started {
+    background: #ff6b35;
+    color: $color-text-white;
+    padding: $spacing-sm $spacing-xl;
+    font-size: $font-size-base;
+    font-weight: $font-weight-semibold;
+    border: none;
+    border-radius: $radius-md;
+    cursor: pointer;
+    text-decoration: none;
+    display: inline-block;
+    transition: background 0.2s;
+
+    &:hover {
+      background: #e55a2b;
+    }
+  }
 }
 
 // Hero Section

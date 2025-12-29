@@ -1,0 +1,220 @@
+<header>
+  <div class="container">
+    <div class="header-content">
+      <app-logo></app-logo>
+      <div class="header-actions">
+        <a *ngIf="!isAuthenticated" routerLink="/login" class="header-link">Login / Sign Up</a>
+        <a *ngIf="!isAuthenticated" routerLink="/login" class="btn-get-started">Get Started Free</a>
+      </div>
+    </div>
+  </div>
+</header>
+
+<section class="hero">
+  <div class="container">
+    <h1>Verify every claim in every customer conversation against evidence</h1>
+    <p class="subheadline">ProtectQA is an enterprise Truth & Consistency Layer that evaluates calls, chats, and emails for accuracy, compliance, and policy adherence with evidence-backed, explainable results.</p>
+    <div class="cta-group">
+      <a routerLink="/login" class="btn-primary">Get Started Free (Try ProtectQA)</a>
+      <a href="#how-it-works" class="btn-secondary">See How It Works</a>
+    </div>
+  </div>
+</section>
+
+<section class="problem-section">
+  <div class="container">
+    <h2>Traditional QA isn't built for truth or scale</h2>
+    <p class="section-intro">Manual sampling, subjective scoring, and black-box AI evaluations leave enterprises exposed to compliance risk, inconsistent feedback, and decisions they can't defend.</p>
+    
+    <div class="problem-list">
+      <div class="problem-card">
+        <h3>Manual sampling misses most conversations</h3>
+        <p>Reviewing 1-3% of interactions means critical errors, policy violations, and training gaps go undetected until they become costly problems.</p>
+      </div>
+      <div class="problem-card">
+        <h3>Subjective scoring lacks defensibility</h3>
+        <p>When evaluations depend on individual interpretation, results vary by reviewer, making it impossible to produce consistent, audit-ready documentation.</p>
+      </div>
+      <div class="problem-card">
+        <h3>Black-box AI offers no explanation</h3>
+        <p>Opaque sentiment scores and AI-generated ratings provide no insight into what was said, what was wrong, or how to prove it to regulators or leadership.</p>
+      </div>
+      <div class="problem-card">
+        <h3>No traceability to evidence</h3>
+        <p>Without clear links between QA findings and actual conversation content, teams can't verify claims, investigate disputes, or demonstrate compliance during audits.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="how-it-works">
+  <div class="container">
+    <h2>What ProtectQA does</h2>
+    <p class="section-intro">ProtectQA automatically extracts factual and policy claims from customer conversations, checks them against your evidence sources, and produces explainable QA results with full traceability.</p>
+    
+    <div class="workflow-steps">
+      <div class="step">
+        <div class="step-number">1</div>
+        <div class="step-content">
+          <h3>Ingest conversations</h3>
+          <p>Connect call transcripts, chat logs, emails, or support tickets from your existing systems. ProtectQA processes structured and unstructured conversation data at enterprise scale.</p>
+        </div>
+      </div>
+      <div class="step">
+        <div class="step-number">2</div>
+        <div class="step-content">
+          <h3>Extract factual and policy claims</h3>
+          <p>ProtectQA identifies specific statements made by agents: product details, pricing, coverage terms, compliance disclosures, policy adherence, and operational commitments.</p>
+        </div>
+      </div>
+      <div class="step">
+        <div class="step-number">3</div>
+        <div class="step-content">
+          <h3>Check claims against evidence</h3>
+          <p>Every claim is evaluated against your knowledge base, policies, scripts, product documentation, and regulatory requirements. Evidence is retrieved and matched automatically.</p>
+        </div>
+      </div>
+      <div class="step">
+        <div class="step-number">4</div>
+        <div class="step-content">
+          <h3>Detect contradictions and unsupported statements</h3>
+          <p>ProtectQA surfaces claims that contradict documented policies, lack supporting evidence, or present compliance risk. Each finding is categorized and prioritized.</p>
+        </div>
+      </div>
+      <div class="step">
+        <div class="step-number">5</div>
+        <div class="step-content">
+          <h3>Produce explainable QA results</h3>
+          <p>Every evaluation includes claim-level analysis, support vs. contradiction graphs, evidence references, and a defensible audit trail. Results are reproducible and transparent.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="comparison-section">
+  <div class="container">
+    <h2>How ProtectQA is different</h2>
+    <p class="section-intro">ProtectQA doesn't rely on sentiment analysis, keyword matching, or opaque AI scoring. It provides claim-level verification with evidence-backed decisions.</p>
+    
+    <div class="comparison-grid">
+      <div class="comparison-card">
+        <h3>Claim-level analysis</h3>
+        <p>Instead of overall sentiment or vague quality scores, ProtectQA evaluates specific factual statements and policy adherence at the granular level where risk actually lives.</p>
+      </div>
+      <div class="comparison-card">
+        <h3>Evidence-backed decisions</h3>
+        <p>Every evaluation is tied to source documents: policies, scripts, knowledge bases, and regulatory text. You see exactly what supports or contradicts each claim.</p>
+      </div>
+      <div class="comparison-card">
+        <h3>Support vs. contradiction graphs</h3>
+        <p>Visual traceability shows which claims are supported, which are contradicted, and which lack evidence. Teams can investigate root causes and prioritize remediation.</p>
+      </div>
+      <div class="comparison-card">
+        <h3>Traceable and reproducible</h3>
+        <p>ProtectQA produces audit-ready documentation that links findings to conversation timestamps and evidence sources. Results are consistent, repeatable, and defensible.</p>
+      </div>
+      <div class="comparison-card">
+        <h3>Enterprise-grade architecture</h3>
+        <p>Built for scale, security, and compliance. Process 100% of conversations with role-based access control, data sovereignty options, and integration with existing QA workflows.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="container">
+    <h2>Key benefits</h2>
+    <p class="section-intro">ProtectQA delivers measurable improvements in compliance risk management, QA coverage, and operational transparency.</p>
+    
+    <div class="benefits-list">
+      <div class="benefit-item">
+        <div class="benefit-icon">✓</div>
+        <div class="benefit-text">Audit-ready QA with evidence-backed findings and full traceability to source conversations</div>
+      </div>
+      <div class="benefit-item">
+        <div class="benefit-icon">✓</div>
+        <div class="benefit-text">Reduced compliance risk through automated detection of policy violations and unsupported claims</div>
+      </div>
+      <div class="benefit-item">
+        <div class="benefit-icon">✓</div>
+        <div class="benefit-text">Scalable evaluation across 100% of customer conversations, eliminating sampling gaps</div>
+      </div>
+      <div class="benefit-item">
+        <div class="benefit-icon">✓</div>
+        <div class="benefit-text">Clear explanation for every QA score, showing exactly which claims were supported or contradicted</div>
+      </div>
+      <div class="benefit-item">
+        <div class="benefit-icon">✓</div>
+        <div class="benefit-text">Faster detection of script drift, policy misalignment, and training gaps before they escalate</div>
+      </div>
+      <div class="benefit-item">
+        <div class="benefit-icon">✓</div>
+        <div class="benefit-text">Consistent, reproducible QA results that eliminate subjective scoring and reviewer variance</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="audience-section">
+  <div class="container">
+    <h2>Who ProtectQA is for</h2>
+    
+    <div class="audience-grid">
+      <div class="audience-card">
+        <h3>Call Centers & Contact Centers</h3>
+        <p>Evaluate every customer interaction for accuracy and policy compliance. Identify coaching opportunities based on factual errors, not subjective impressions.</p>
+      </div>
+      <div class="audience-card">
+        <h3>Compliance & Risk Teams</h3>
+        <p>Produce defensible audit trails that demonstrate regulatory adherence. Surface violations early with evidence-backed findings you can investigate and remediate.</p>
+      </div>
+      <div class="audience-card">
+        <h3>QA & Operations</h3>
+        <p>Scale quality evaluation to 100% of conversations without adding headcount. Focus manual review on high-risk findings instead of random sampling.</p>
+      </div>
+      <div class="audience-card">
+        <h3>Support & Sales Organizations</h3>
+        <p>Verify that agents follow approved messaging, product positioning, and pricing guidance. Detect inconsistencies across teams and channels.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="try-section">
+  <div class="container">
+    <h2>Try ProtectQA with your own data</h2>
+    <p class="section-intro">Experience claim-level verification on real conversations. No demo data, no canned examples. See how ProtectQA evaluates your actual content.</p>
+    
+    <div class="try-steps">
+      <div class="try-step">
+        <div class="try-step-number">1</div>
+        <h3>Upload a conversation</h3>
+        <p>Provide a transcript, call recording, chat log, or email. ProtectQA accepts multiple formats and processes real data.</p>
+      </div>
+      <div class="try-step">
+        <div class="try-step-number">2</div>
+        <h3>Run an evaluation</h3>
+        <p>ProtectQA extracts claims, checks them against evidence you provide or we help configure, and produces results in minutes.</p>
+      </div>
+      <div class="try-step">
+        <div class="try-step-number">3</div>
+        <h3>Review claims and evidence</h3>
+        <p>See which statements are supported, contradicted, or lack evidence. Explore traceability graphs and audit-ready documentation.</p>
+      </div>
+    </div>
+    
+    <div class="cta-group" style="justify-content: center;">
+      <a routerLink="/login" class="btn-primary">Get Started Free (Try ProtectQA)</a>
+    </div>
+  </div>
+</section>
+
+<section class="final-cta">
+  <div class="container">
+    <h2>QA you can verify. Results you can defend.</h2>
+    <p>ProtectQA brings transparency and evidence to customer conversation evaluation. Start with a real evaluation on your data today.</p>
+    <a routerLink="/login" class="btn-primary">Get Started Free (Try ProtectQA)</a>
+  </div>
+</section>
+

@@ -93,7 +93,7 @@ export class AuthService {
   async signOut(): Promise<void> {
     await this.supabase.auth.signOut();
     this.currentUserSubject.next(null);
-    this.router.navigate(['/login']);
+    this.router.navigate(['/home']);
   }
 
   async updateProfile(updates: {
