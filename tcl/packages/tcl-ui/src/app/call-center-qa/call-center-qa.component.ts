@@ -10,8 +10,9 @@ import { MatButtonModule } from '@angular/material/button';
 import { MatIconModule } from '@angular/material/icon';
 import { MatTooltipModule } from '@angular/material/tooltip';
 import { MatMenuModule } from '@angular/material/menu';
+import { MatDividerModule } from '@angular/material/divider';
 import { RouterModule } from '@angular/router';
-import { AuthService } from '../auth.service';
+import { AuthService, User } from '../auth.service';
 
 @Component({
   selector: 'app-call-center-qa',
@@ -52,7 +53,7 @@ import { AuthService } from '../auth.service';
             <mat-menu #userMenu="matMenu">
               <div class="user-menu-header">
                 <div class="user-email">{{ currentUser?.email }}</div>
-                <div class="user-role" *ngIf="currentUser?.companyRole">{{ currentUser.companyRole }}</div>
+                <div class="user-role" *ngIf="currentUser?.companyRole">{{ currentUser?.companyRole }}</div>
               </div>
               <mat-divider></mat-divider>
               <button mat-menu-item routerLink="/onboarding">
