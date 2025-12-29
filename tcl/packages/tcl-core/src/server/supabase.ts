@@ -201,40 +201,86 @@ export async function provisionUser(userId: string, email: string): Promise<{ or
       
       // Add user as owner
       console.log('Step 4: Adding user as org owner...');
-      const { error: memberError } = await supabaseAdmin
-        .from('org_members')
-        .insert({
-          org_id: orgId,
-          user_id: userId,
-          role: 'owner'
-        });
       
-      if (memberError) {
-        // If it's a foreign key error, the user might not be in auth.users yet
-        // This should be handled by the database trigger, but we'll retry once
-        if (memberError.code === '23503') {
-          console.warn('Step 4: Foreign key error - user may not be in auth.users yet, waiting 1 second and retrying...');
-          await new Promise(resolve => setTimeout(resolve, 1000));
+      // Verify user exists in auth.users using admin API
+      let userExists = false;
+      let retries = 10;
+      let retryDelay = 300;
+      
+      while (retries > 0 && !userExists) {
+        try {
+          const { data: userData, error: userError } = await supabaseAdmin.auth.admin.getUserById(userId);
           
-          const { error: retryError } = await supabaseAdmin
-            .from('org_members')
-            .insert({
-              org_id: orgId,
-              user_id: userId,
-              role: 'owner'
-            });
-          
-          if (retryError) {
-            console.error('Step 4 FAILED: Retry also failed:', retryError);
+          if (userData?.user && !userError) {
+            userExists = true;
+            console.log('Step 4: Verified user exists in auth.users');
+            break;
+          } else {
+            console.warn(`Step 4: User not found in auth.users yet (${userError?.message || 'not found'}), waiting ${retryDelay}ms... (${retries} retries left)`);
+            await new Promise(resolve => setTimeout(resolve, retryDelay));
+            retryDelay = Math.min(retryDelay * 1.3, 2000);
+            retries--;
+          }
+        } catch (err: any) {
+          console.warn('Step 4: Error checking user existence:', err?.message);
+          await new Promise(resolve => setTimeout(resolve, retryDelay));
+          retryDelay = Math.min(retryDelay * 1.3, 2000);
+          retries--;
+        }
+      }
+      
+      if (!userExists) {
+        console.error('Step 4 FAILED: User does not exist in auth.users after all retries');
+        console.error('User ID:', userId);
+        return null;
+      }
+      
+      // Wait a bit more to ensure user is fully committed
+      console.log('Step 4: Waiting additional 500ms to ensure user is fully committed...');
+      await new Promise(resolve => setTimeout(resolve, 500));
+      
+      // Try to insert org_members with retry logic
+      let memberInserted = false;
+      retries = 5;
+      retryDelay = 300;
+      
+      while (retries > 0 && !memberInserted) {
+        const { error: memberError } = await supabaseAdmin
+          .from('org_members')
+          .insert({
+            org_id: orgId,
+            user_id: userId,
+            role: 'owner'
+          });
+        
+        if (memberError) {
+          if (memberError.code === '23503') {
+            console.warn(`Step 4: Foreign key error (constraint may not be deferrable), waiting ${retryDelay}ms... (${retries} retries left)`);
+            await new Promise(resolve => setTimeout(resolve, retryDelay));
+            retryDelay = Math.min(retryDelay * 1.5, 1500);
+            retries--;
+            continue;
+          } else if (memberError.code === '23505') {
+            // Unique constraint - user already member (OK)
+            console.log('Step 4: User is already a member (this is OK)');
+            memberInserted = true;
+            break;
+          } else {
+            console.error('Step 4 FAILED: Failed to add user as owner:', memberError);
             return null;
           }
-          console.log('Step 4: Retry succeeded');
         } else {
-          console.error('Step 4 FAILED: Failed to add user as owner:', memberError);
-          return null;
+          memberInserted = true;
+          console.log('Step 4: User added as owner');
+          break;
         }
-      } else {
-        console.log('Step 4: User added as owner');
+      }
+      
+      if (!memberInserted) {
+        console.error('Step 4 FAILED: Could not add user as owner after all retries');
+        console.error('SOLUTION: Run supabase/sql/005_fix_provision_issues.sql to make foreign keys deferrable');
+        console.error('Or run supabase/sql/006_verify_and_fix_foreign_keys.sql to verify and fix');
+        return null;
       }
     }
     
