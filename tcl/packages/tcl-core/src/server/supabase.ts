@@ -274,7 +274,38 @@ export async function provisionUser(userId: string, email: string): Promise<{ or
       return { orgId, projectId: '' };
     }
     
-    const projectId = typeof project === 'string' ? project : (project?.id || '');
+    // Handle RPC return value - it returns a UUID (string)
+    // The RPC function returns uuid directly, so project should be a string
+    let projectId = '';
+    if (project) {
+      if (typeof project === 'string') {
+        projectId = project;
+      } else if (typeof project === 'object' && project !== null) {
+        // Sometimes Supabase wraps it in an object
+        const projectObj = project as any;
+        if (typeof projectObj.id === 'string') {
+          projectId = projectObj.id;
+        } else if (typeof projectObj === 'string') {
+          projectId = projectObj;
+        }
+      }
+    }
+    
+    if (!projectId) {
+      console.warn('Step 5: Project RPC returned but projectId is empty, trying fallback...');
+      // Fallback: query for the project
+      const { data: fallbackProject } = await supabaseAdmin
+        .from('projects')
+        .select('id')
+        .eq('org_id', orgId)
+        .eq('is_default', true)
+        .maybeSingle();
+      
+      if (fallbackProject) {
+        projectId = fallbackProject.id;
+      }
+    }
+    
     console.log(`Step 5: Project ensured: ${projectId}`);
     console.log(`Provisioning complete: orgId=${orgId}, projectId=${projectId}`);
     
