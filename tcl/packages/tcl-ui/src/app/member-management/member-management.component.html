@@ -1,0 +1,193 @@
+<div class="member-management-container">
+  <header class="header">
+    <div class="header-content">
+      <app-logo></app-logo>
+      <div class="header-actions">
+        <a routerLink="/dashboard" class="header-link">
+          <mat-icon>dashboard</mat-icon>
+          Dashboard
+        </a>
+        <button mat-icon-button [matMenuTriggerFor]="userMenu">
+          <mat-icon>account_circle</mat-icon>
+        </button>
+        <mat-menu #userMenu="matMenu">
+          <div class="user-menu-header">
+            <div class="user-info">
+              <div class="user-email">{{ currentUser?.email || 'User' }}</div>
+              <div class="user-role" *ngIf="currentUserRole">
+                {{ getRoleLabel(currentUserRole) }}
+              </div>
+            </div>
+          </div>
+          <mat-divider></mat-divider>
+          <button mat-menu-item (click)="signOut()">
+            <mat-icon>logout</mat-icon>
+            <span>Sign Out</span>
+          </button>
+        </mat-menu>
+      </div>
+    </div>
+  </header>
+
+  <div class="content">
+    <div class="page-header">
+      <h1>Team Members</h1>
+      <p class="subtitle">Manage who has access to your organization</p>
+    </div>
+
+    <mat-card class="members-card">
+      <mat-card-header>
+        <mat-card-title>Members</mat-card-title>
+        <div class="card-actions">
+          <button 
+            *ngIf="canManageMembers()" 
+            mat-raised-button 
+            color="primary" 
+            (click)="toggleInviteForm()"
+            [disabled]="loading">
+            <mat-icon>{{ showInviteForm ? 'close' : 'person_add' }}</mat-icon>
+            {{ showInviteForm ? 'Cancel' : 'Invite Member' }}
+          </button>
+        </div>
+      </mat-card-header>
+
+      <mat-card-content>
+        <!-- Invite Form -->
+        <div *ngIf="showInviteForm && canManageMembers()" class="invite-form-section">
+          <form [formGroup]="inviteForm" (ngSubmit)="onSubmitInvite()">
+            <div class="form-row">
+              <mat-form-field appearance="outline" class="email-field">
+                <mat-label>Email</mat-label>
+                <input matInput type="email" formControlName="email" required>
+                <mat-icon matPrefix>email</mat-icon>
+                <mat-error *ngIf="inviteForm.get('email')?.hasError('required')">
+                  Email is required
+                </mat-error>
+                <mat-error *ngIf="inviteForm.get('email')?.hasError('email')">
+                  Invalid email format
+                </mat-error>
+              </mat-form-field>
+
+              <mat-form-field appearance="outline" class="role-field">
+                <mat-label>Role</mat-label>
+                <mat-select formControlName="role" required>
+                  <mat-option *ngFor="let role of roles" [value]="role">
+                    {{ getRoleLabel(role) }}
+                  </mat-option>
+                </mat-select>
+                <mat-icon matPrefix>badge</mat-icon>
+              </mat-form-field>
+
+              <button 
+                mat-raised-button 
+                color="primary" 
+                type="submit"
+                [disabled]="inviteForm.invalid || loading">
+                <mat-icon>send</mat-icon>
+                Send Invitation
+              </button>
+            </div>
+          </form>
+        </div>
+
+        <!-- Members Table -->
+        <div class="table-container" *ngIf="!loading && members.length > 0">
+          <table mat-table [dataSource]="members" class="members-table">
+            <!-- Email Column -->
+            <ng-container matColumnDef="email">
+              <th mat-header-cell *matHeaderCellDef>Email</th>
+              <td mat-cell *matCellDef="let member">
+                <div class="member-email">
+                  <mat-icon>email</mat-icon>
+                  {{ member.email }}
+                </div>
+              </td>
+            </ng-container>
+
+            <!-- Full Name Column -->
+            <ng-container matColumnDef="fullName">
+              <th mat-header-cell *matHeaderCellDef>Name</th>
+              <td mat-cell *matCellDef="let member">
+                {{ member.fullName || '—' }}
+              </td>
+            </ng-container>
+
+            <!-- Role Column -->
+            <ng-container matColumnDef="role">
+              <th mat-header-cell *matHeaderCellDef>Role</th>
+              <td mat-cell *matCellDef="let member">
+                <div class="role-cell">
+                  <span class="role-badge" [class]="'role-' + member.role">
+                    {{ getRoleLabel(member.role) }}
+                  </span>
+                  <mat-select 
+                    *ngIf="canManageMembers() && member.userId !== currentUserId"
+                    [value]="member.role"
+                    (selectionChange)="updateRole(member, $event.value)"
+                    class="role-select">
+                    <mat-option *ngFor="let role of roles" [value]="role">
+                      {{ roleLabels[role] }}
+                    </mat-option>
+                  </mat-select>
+                </div>
+              </td>
+            </ng-container>
+
+            <!-- Created At Column -->
+            <ng-container matColumnDef="createdAt">
+              <th mat-header-cell *matHeaderCellDef>Joined</th>
+              <td mat-cell *matCellDef="let member">
+                {{ formatDate(member.createdAt) }}
+              </td>
+            </ng-container>
+
+            <!-- Actions Column -->
+            <ng-container matColumnDef="actions">
+              <th mat-header-cell *matHeaderCellDef>Actions</th>
+              <td mat-cell *matCellDef="let member">
+                <div class="actions-cell">
+                  <button 
+                    *ngIf="canManageMembers() && member.userId !== currentUserId"
+                    mat-icon-button 
+                    color="warn"
+                    (click)="removeMember(member)"
+                    [disabled]="loading"
+                    matTooltip="Remove member">
+                    <mat-icon>delete</mat-icon>
+                  </button>
+                  <span *ngIf="member.userId === currentUserId" class="current-user-badge">
+                    You
+                  </span>
+                </div>
+              </td>
+            </ng-container>
+
+            <tr mat-header-row *matHeaderRowDef="displayedColumns"></tr>
+            <tr mat-row *matRowDef="let row; columns: displayedColumns;"></tr>
+          </table>
+        </div>
+
+        <!-- Empty State -->
+        <div *ngIf="!loading && members.length === 0" class="empty-state">
+          <mat-icon>people</mat-icon>
+          <p>No members found</p>
+          <button 
+            *ngIf="canManageMembers()" 
+            mat-raised-button 
+            color="primary" 
+            (click)="toggleInviteForm()">
+            <mat-icon>person_add</mat-icon>
+            Invite Your First Member
+          </button>
+        </div>
+
+        <!-- Loading State -->
+        <div *ngIf="loading" class="loading-state">
+          <mat-spinner diameter="40"></mat-spinner>
+          <p>Loading members...</p>
+        </div>
+      </mat-card-content>
+    </mat-card>
+  </div>
+</div>
+

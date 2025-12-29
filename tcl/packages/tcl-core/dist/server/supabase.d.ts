@@ -41,6 +41,14 @@ export declare function provisionUser(userId: string, email: string): Promise<{
     projectId: string;
 } | null>;
 /**
+ * Get user's role in an organization
+ */
+export declare function getUserRole(userId: string, orgId: string): Promise<string | null>;
+/**
+ * Check if user has a specific permission in an org
+ */
+export declare function checkUserPermission(userId: string, orgId: string, permission: 'view' | 'review' | 'configure' | 'export' | 'billing' | 'manage_members' | 'manage_integrations'): Promise<boolean>;
+/**
  * Get user's organizations
  */
 export declare function getUserOrgs(userId: string): Promise<Array<{

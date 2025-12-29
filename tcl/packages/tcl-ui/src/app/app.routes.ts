@@ -30,6 +30,10 @@ export const routes: Routes = [
     loadComponent: () => import('./original-qa/original-qa.component').then(m => m.OriginalQaComponent)
   },
   {
+    path: 'orgs/:orgId/members',
+    loadComponent: () => import('./member-management/member-management.component').then(m => m.MemberManagementComponent)
+  },
+  {
     path: '',
     redirectTo: '/home',
     pathMatch: 'full'

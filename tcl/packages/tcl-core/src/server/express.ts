@@ -6,6 +6,8 @@ import {
   verifyApiKeyExtended,
   provisionUser, 
   getUserOrgs,
+  getUserRole,
+  checkUserPermission,
   getOrgProjects,
   getProjectEnvs,
   generateApiKey,
@@ -13,6 +15,12 @@ import {
   logAudit,
   trackUsage
 } from "./supabase.js";
+import {
+  inviteMember,
+  updateMemberRole,
+  removeMember,
+  listMembers
+} from "./member-management.js";
 
 const app = express();
 app.use(express.json({ limit: "10mb" }));
@@ -53,7 +61,7 @@ async function loadModules() {
 // This ensures health check works even if modules fail to load
 
 // Extract org/project/env from request (API key or user session)
-async function getOrgContext(req: express.Request): Promise<{ orgId: string; projectId: string; env: string } | null> {
+async function getOrgContext(req: express.Request): Promise<{ orgId: string; projectId: string; env: string; userId?: string; role?: string } | null> {
   // Check for API key in Authorization header
   const authHeader = req.headers.authorization;
   if (authHeader?.startsWith('Bearer ')) {
@@ -71,6 +79,22 @@ async function getOrgContext(req: express.Request): Promise<{ orgId: string; pro
   // TODO: Check for user session JWT from Supabase auth
   // For now, return null (anonymous validation)
   return null;
+}
+
+/**
+ * Check if user has permission for an org
+ * Returns { hasPermission: boolean, role: string | null }
+ */
+async function checkPermission(userId: string, orgId: string, permission: 'view' | 'review' | 'configure' | 'export' | 'billing' | 'manage_members' | 'manage_integrations'): Promise<{ hasPermission: boolean; role: string | null }> {
+  if (!supabaseAdmin) return { hasPermission: false, role: null };
+  
+  const hasPerm = await checkUserPermission(userId, orgId, permission);
+  const role = await getUserRole(userId, orgId);
+  
+  return {
+    hasPermission: hasPerm,
+    role
+  };
 }
 
 app.post("/validate", async (req, res) => {
@@ -337,6 +361,7 @@ app.post("/auth/provision", async (req, res) => {
       
       // Check if user has an org anyway (partial success)
       if (supabaseAdmin) {
+        // First check org_members
         const { data: existingOrgs } = await supabaseAdmin
           .from('org_members')
           .select('org_id')
@@ -350,6 +375,24 @@ app.post("/auth/provision", async (req, res) => {
             orgId: existingOrgs.org_id, 
             projectId: '',
             warning: 'Provision partially completed - some steps may have failed'
+          });
+        }
+        
+        // If no org_members, check if org was created but member wasn't added
+        // Find orgs where user's email matches (since org name = email)
+        const { data: orgsByEmail } = await supabaseAdmin
+          .from('organizations')
+          .select('id, name')
+          .eq('name', email)
+          .limit(1)
+          .maybeSingle();
+        
+        if (orgsByEmail?.id) {
+          console.log(`Partial success: Found org ${orgsByEmail.id} by email, returning it`);
+          return res.json({ 
+            orgId: orgsByEmail.id, 
+            projectId: '',
+            warning: 'Provision partially completed - org exists but member not added'
           });
         }
       }
@@ -391,6 +434,158 @@ app.get("/me/orgs", async (req, res) => {
     res.status(500).json({ 
       error: e?.message ?? "unknown error"
     });
+  }
+});
+
+// ============================================
+// Member Management Endpoints
+// ============================================
+
+// List members of an organization
+app.get("/orgs/:orgId/members", async (req, res) => {
+  try {
+    const { orgId } = req.params;
+    const userId = req.body.userId || req.query.userId as string;
+    
+    if (!userId) {
+      return res.status(400).json({ error: "userId required" });
+    }
+    
+    if (!supabaseAdmin) {
+      return res.status(503).json({ error: "Supabase not configured" });
+    }
+    
+    // Check if user has view permission (all members can view)
+    const canView = await checkUserPermission(userId, orgId, 'view');
+    if (!canView) {
+      return res.status(403).json({ error: "Insufficient permissions" });
+    }
+    
+    const members = await listMembers(orgId);
+    res.json({ members });
+  } catch (e: any) {
+    console.error("List members error:", e);
+    res.status(500).json({ error: e?.message ?? "unknown error" });
+  }
+});
+
+// Invite a member to an organization
+app.post("/orgs/:orgId/members/invite", async (req, res) => {
+  try {
+    const { orgId } = req.params;
+    const { email, role } = req.body;
+    const userId = req.body.userId || req.query.userId as string;
+    
+    if (!userId) {
+      return res.status(400).json({ error: "userId required" });
+    }
+    
+    if (!email || !role) {
+      return res.status(400).json({ error: "email and role are required" });
+    }
+    
+    if (!supabaseAdmin) {
+      return res.status(503).json({ error: "Supabase not configured" });
+    }
+    
+    const result = await inviteMember(userId, orgId, email, role);
+    
+    if (!result.success) {
+      return res.status(400).json({ error: result.message });
+    }
+    
+    // Log audit event
+    await logAudit({
+      orgId,
+      actorUserId: userId,
+      action: 'member.invite',
+      targetType: 'org_member',
+      targetId: result.userId,
+      meta: { email, role }
+    });
+    
+    res.json(result);
+  } catch (e: any) {
+    console.error("Invite member error:", e);
+    res.status(500).json({ error: e?.message ?? "unknown error" });
+  }
+});
+
+// Update a member's role
+app.patch("/orgs/:orgId/members/:memberUserId", async (req, res) => {
+  try {
+    const { orgId, memberUserId } = req.params;
+    const { role } = req.body;
+    const userId = req.body.userId || req.query.userId as string;
+    
+    if (!userId) {
+      return res.status(400).json({ error: "userId required" });
+    }
+    
+    if (!role) {
+      return res.status(400).json({ error: "role is required" });
+    }
+    
+    if (!supabaseAdmin) {
+      return res.status(503).json({ error: "Supabase not configured" });
+    }
+    
+    const result = await updateMemberRole(userId, orgId, memberUserId, role);
+    
+    if (!result.success) {
+      return res.status(400).json({ error: result.message });
+    }
+    
+    // Log audit event
+    await logAudit({
+      orgId,
+      actorUserId: userId,
+      action: 'member.update_role',
+      targetType: 'org_member',
+      targetId: memberUserId,
+      meta: { newRole: role }
+    });
+    
+    res.json(result);
+  } catch (e: any) {
+    console.error("Update member role error:", e);
+    res.status(500).json({ error: e?.message ?? "unknown error" });
+  }
+});
+
+// Remove a member from an organization
+app.delete("/orgs/:orgId/members/:memberUserId", async (req, res) => {
+  try {
+    const { orgId, memberUserId } = req.params;
+    const userId = req.body.userId || req.query.userId as string;
+    
+    if (!userId) {
+      return res.status(400).json({ error: "userId required" });
+    }
+    
+    if (!supabaseAdmin) {
+      return res.status(503).json({ error: "Supabase not configured" });
+    }
+    
+    const result = await removeMember(userId, orgId, memberUserId);
+    
+    if (!result.success) {
+      return res.status(400).json({ error: result.message });
+    }
+    
+    // Log audit event
+    await logAudit({
+      orgId,
+      actorUserId: userId,
+      action: 'member.remove',
+      targetType: 'org_member',
+      targetId: memberUserId
+    });
+    
+    res.json(result);
+  } catch (e: any) {
+    console.error("Remove member error:", e);
+    res.status(500).json({ error: e?.message ?? "unknown error" });
   }
 });
 

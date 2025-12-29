@@ -8,6 +8,7 @@ import { MatMenuModule } from '@angular/material/menu';
 import { MatDividerModule } from '@angular/material/divider';
 import { LogoComponent } from '../shared/logo.component';
 import { AuthService, User } from '../auth.service';
+import { MemberService } from '../member.service';
 
 @Component({
   selector: 'app-dashboard',
@@ -27,8 +28,12 @@ import { AuthService, User } from '../auth.service';
 })
 export class DashboardComponent implements OnInit {
   currentUser: User | null = null;
+  userOrgs: Array<{ id: string; name: string; slug: string; role: string }> = [];
 
-  constructor(private authService: AuthService) {}
+  constructor(
+    private authService: AuthService,
+    private memberService: MemberService
+  ) {}
 
   async ngOnInit() {
     // Check authentication first
@@ -45,8 +50,25 @@ export class DashboardComponent implements OnInit {
       this.currentUser = user;
       if (!user) {
         console.log('Dashboard: User is null, but session exists - this might be a profile loading issue');
+      } else if (user.id) {
+        this.loadUserOrgs(user.id);
       }
     });
+  }
+
+  loadUserOrgs(userId: string) {
+    this.memberService.getUserOrgs(userId).subscribe({
+      next: (response) => {
+        this.userOrgs = response.orgs || [];
+      },
+      error: (err: any) => {
+        console.error('Failed to load user orgs:', err);
+      }
+    });
+  }
+
+  getFirstOrgId(): string {
+    return this.userOrgs.length > 0 ? this.userOrgs[0].id : '';
   }
 
   signOut() {

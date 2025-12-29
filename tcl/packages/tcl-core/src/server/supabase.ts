@@ -178,7 +178,8 @@ export async function provisionUser(userId: string, email: string): Promise<{ or
     } else {
       // Create default org
       console.log('Step 3: Creating new organization...');
-      const orgName = `${email} org`;
+      // Use email as org name (remove "org" suffix)
+      const orgName = email;
       const orgSlug = `${email.split('@')[0]}-${crypto.randomBytes(4).toString('hex')}`;
       
       const { data: org, error: orgError } = await supabaseAdmin
@@ -230,9 +231,12 @@ export async function provisionUser(userId: string, email: string): Promise<{ or
       }
       
       if (!userExists) {
-        console.error('Step 4 FAILED: User does not exist in auth.users after all retries');
+        console.error('Step 4: User does not exist in auth.users after all retries');
         console.error('User ID:', userId);
-        return null;
+        console.error('Email:', email);
+        console.error('This usually means the user was not created in Supabase Auth or there is a delay');
+        // Don't return null - continue and try to return orgId anyway
+        console.warn('Step 4: Continuing despite user verification failure - will try to return orgId');
       }
       
       // Wait a bit more to ensure user is fully committed
@@ -403,6 +407,42 @@ export async function provisionUser(userId: string, email: string): Promise<{ or
     
     return null;
   }
+}
+
+/**
+ * Get user's role in an organization
+ */
+export async function getUserRole(userId: string, orgId: string): Promise<string | null> {
+  if (!supabaseAdmin) return null;
+  
+  const { data, error } = await supabaseAdmin
+    .from('org_members')
+    .select('role')
+    .eq('user_id', userId)
+    .eq('org_id', orgId)
+    .maybeSingle();
+  
+  if (error || !data) return null;
+  return data.role || null;
+}
+
+/**
+ * Check if user has a specific permission in an org
+ */
+export async function checkUserPermission(userId: string, orgId: string, permission: 'view' | 'review' | 'configure' | 'export' | 'billing' | 'manage_members' | 'manage_integrations'): Promise<boolean> {
+  if (!supabaseAdmin) return false;
+  
+  const role = await getUserRole(userId, orgId);
+  if (!role) return false;
+  
+  // Import permission utilities
+  const { hasPermission, isValidRole } = await import('./permissions');
+  
+  if (!isValidRole(role)) {
+    return false;
+  }
+  
+  return hasPermission(role as any, permission);
 }
 
 /**

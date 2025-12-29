@@ -1,0 +1,283 @@
+.member-management-container {
+  min-height: 100vh;
+  background: #f5f5f5;
+}
+
+.header {
+  background: white;
+  border-bottom: 1px solid #e0e0e0;
+  padding: 16px 24px;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+
+  .header-content {
+    max-width: 1200px;
+    margin: 0 auto;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+
+  .header-actions {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+
+    .header-link {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      color: #1976d2;
+      text-decoration: none;
+      padding: 8px 16px;
+      border-radius: 4px;
+      transition: background-color 0.2s;
+
+      &:hover {
+        background-color: #f5f5f5;
+      }
+    }
+  }
+
+  .user-menu-header {
+    padding: 16px;
+    min-width: 200px;
+
+    .user-info {
+      .user-email {
+        font-weight: 500;
+        color: #333;
+      }
+
+      .user-role {
+        font-size: 0.875rem;
+        color: #666;
+        margin-top: 4px;
+      }
+    }
+  }
+}
+
+.content {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 24px;
+
+  .page-header {
+    margin-bottom: 24px;
+
+    h1 {
+      font-size: 2rem;
+      font-weight: 600;
+      color: #1a1a1a;
+      margin: 0 0 8px 0;
+    }
+
+    .subtitle {
+      color: #666;
+      font-size: 1rem;
+      margin: 0;
+    }
+  }
+}
+
+.members-card {
+  mat-card-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 16px;
+
+    mat-card-title {
+      font-size: 1.5rem;
+      font-weight: 600;
+    }
+
+    .card-actions {
+      display: flex;
+      gap: 8px;
+    }
+  }
+
+  mat-card-content {
+    padding-top: 0;
+  }
+}
+
+.invite-form-section {
+  background: #f9f9f9;
+  border: 1px solid #e0e0e0;
+  border-radius: 8px;
+  padding: 24px;
+  margin-bottom: 24px;
+
+  .form-row {
+    display: flex;
+    gap: 16px;
+    align-items: flex-start;
+
+    .email-field {
+      flex: 1;
+    }
+
+    .role-field {
+      width: 200px;
+    }
+
+    button {
+      margin-top: 8px;
+      height: 56px;
+    }
+  }
+}
+
+.table-container {
+  overflow-x: auto;
+}
+
+.members-table {
+  width: 100%;
+
+  th {
+    font-weight: 600;
+    color: #333;
+  }
+
+  td {
+    padding: 16px;
+  }
+
+  .member-email {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+
+    mat-icon {
+      color: #666;
+      font-size: 20px;
+      width: 20px;
+      height: 20px;
+    }
+  }
+
+  .role-cell {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+
+    .role-badge {
+      padding: 4px 12px;
+      border-radius: 12px;
+      font-size: 0.875rem;
+      font-weight: 500;
+      display: inline-block;
+
+      &.role-owner {
+        background: #ff6b35;
+        color: white;
+      }
+
+      &.role-admin {
+        background: #1976d2;
+        color: white;
+      }
+
+      &.role-qa_reviewer {
+        background: #4caf50;
+        color: white;
+      }
+
+      &.role-compliance {
+        background: #9c27b0;
+        color: white;
+      }
+
+      &.role-engineer {
+        background: #ff9800;
+        color: white;
+      }
+
+      &.role-viewer {
+        background: #757575;
+        color: white;
+      }
+    }
+
+    .role-select {
+      width: 150px;
+    }
+  }
+
+  .actions-cell {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+
+    .current-user-badge {
+      color: #666;
+      font-size: 0.875rem;
+      font-style: italic;
+    }
+  }
+}
+
+.empty-state {
+  text-align: center;
+  padding: 64px 24px;
+  color: #666;
+
+  mat-icon {
+    font-size: 64px;
+    width: 64px;
+    height: 64px;
+    color: #ccc;
+    margin-bottom: 16px;
+  }
+
+  p {
+    font-size: 1.125rem;
+    margin-bottom: 24px;
+  }
+}
+
+.loading-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 64px 24px;
+  gap: 16px;
+
+  p {
+    color: #666;
+  }
+}
+
+// Responsive design
+@media (max-width: 768px) {
+  .content {
+    padding: 16px;
+  }
+
+  .invite-form-section {
+    .form-row {
+      flex-direction: column;
+
+      .role-field {
+        width: 100%;
+      }
+
+      button {
+        width: 100%;
+      }
+    }
+  }
+
+  .members-table {
+    font-size: 0.875rem;
+
+    th, td {
+      padding: 12px 8px;
+    }
+  }
+}
+
