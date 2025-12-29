@@ -179,16 +179,34 @@ export class AuthService {
     console.log('Auth user found:', user.email, 'Email confirmed:', user.email_confirmed_at ? 'yes' : 'no');
 
     // Try to load profile from database
+    // Use .maybeSingle() instead of .single() to handle missing profiles gracefully
     const { data, error } = await this.supabase
       .from('profiles')
       .select('*')
       .eq('id', userId)
-      .single();
+      .maybeSingle();
 
     if (error) {
-      // Profile might not exist yet (provision might have failed)
+      // Database error (not just missing profile)
+      console.error('Error loading profile from database:', error);
       // Still set user with basic info from auth so they can use the app
-      console.warn('Profile not found in database (this is OK if user just signed up):', error.code, error.message);
+      const basicUser: User = {
+        id: userId,
+        email: user.email || undefined,
+        fullName: user.user_metadata?.full_name,
+        companyRole: undefined,
+        companyIndustry: undefined,
+        callOperation: undefined,
+        primaryUseCase: undefined
+      };
+      this.currentUserSubject.next(basicUser);
+      return;
+    }
+
+    if (!data) {
+      // Profile doesn't exist yet (provision might have failed or is in progress)
+      // Still set user with basic info from auth so they can use the app
+      console.warn('Profile not found in database (this is OK if user just signed up)');
       
       const basicUser: User = {
         id: userId,

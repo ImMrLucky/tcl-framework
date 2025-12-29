@@ -169,7 +169,7 @@ export async function provisionUser(userId: string, email: string): Promise<{ or
       p_org_id: orgId,
       p_user_id: userId
     })
-    .single();
+    .maybeSingle();
   
   if (projectError) {
     console.error('Failed to ensure default project:', projectError);
@@ -179,7 +179,7 @@ export async function provisionUser(userId: string, email: string): Promise<{ or
       .select('id')
       .eq('org_id', orgId)
       .eq('is_default', true)
-      .single();
+      .maybeSingle();
     
     if (existingProject) {
       return { orgId, projectId: existingProject.id };
