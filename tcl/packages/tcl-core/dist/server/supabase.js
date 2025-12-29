@@ -76,96 +76,296 @@ export async function verifyApiKeyExtended(key) {
 export async function ensureProfile(userId, email) {
     if (!supabaseAdmin)
         return;
-    const { error } = await supabaseAdmin
-        .from('profiles')
-        .upsert({
-        id: userId,
-        email: email || null,
-        updated_at: new Date().toISOString()
-    }, {
-        onConflict: 'id'
-    });
-    if (error) {
-        console.error('Failed to ensure profile:', error);
+    // First, verify the user exists in auth.users
+    // We'll use a small delay and retry if needed
+    let retries = 3;
+    let lastError = null;
+    while (retries > 0) {
+        // Check if user exists in auth.users (via a query that won't fail)
+        const { data: userCheck } = await supabaseAdmin.auth.admin.getUserById(userId);
+        if (!userCheck?.user) {
+            console.warn(`User ${userId} not found in auth.users, waiting 500ms before retry... (${retries} retries left)`);
+            await new Promise(resolve => setTimeout(resolve, 500));
+            retries--;
+            continue;
+        }
+        // User exists, try to upsert profile
+        const { error } = await supabaseAdmin
+            .from('profiles')
+            .upsert({
+            id: userId,
+            email: email || userCheck.user.email || null,
+            updated_at: new Date().toISOString()
+        }, {
+            onConflict: 'id'
+        });
+        if (error) {
+            // If it's a foreign key error, wait and retry
+            if (error.code === '23503') {
+                console.warn('Profile creation failed - foreign key constraint, waiting 500ms before retry... (${retries} retries left)');
+                lastError = error;
+                await new Promise(resolve => setTimeout(resolve, 500));
+                retries--;
+                continue;
+            }
+            else {
+                console.error('Failed to ensure profile:', error);
+                return;
+            }
+        }
+        else {
+            // Success!
+            return;
+        }
+    }
+    // If we get here, all retries failed
+    if (lastError) {
+        console.error('Failed to ensure profile after retries:', lastError);
+    }
+    else {
+        console.error(`Failed to ensure profile: User ${userId} not found in auth.users after retries`);
     }
 }
 /**
  * Provision user: create profile + default org + default project if needed
  */
 export async function provisionUser(userId, email) {
-    if (!supabaseAdmin)
-        return null;
-    // Ensure profile exists
-    await ensureProfile(userId, email);
-    // Check if user has any orgs
-    const { data: memberships, error: checkError } = await supabaseAdmin
-        .from('org_members')
-        .select('org_id')
-        .eq('user_id', userId)
-        .limit(1);
-    if (checkError) {
-        console.error('Failed to check memberships:', checkError);
+    if (!supabaseAdmin) {
+        console.error('provisionUser: supabaseAdmin is null');
         return null;
     }
-    let orgId;
-    // If user has orgs, use the first one
-    if (memberships && memberships.length > 0) {
-        orgId = memberships[0].org_id;
-    }
-    else {
-        // Create default org
-        const orgName = `${email} org`;
-        const orgSlug = `${email.split('@')[0]}-${crypto.randomBytes(4).toString('hex')}`;
-        const { data: org, error: orgError } = await supabaseAdmin
-            .from('organizations')
-            .insert({
-            name: orgName,
-            slug: orgSlug,
-            plan: 'trial'
-        })
-            .select('id')
-            .single();
-        if (orgError || !org) {
-            console.error('Failed to create org:', orgError);
-            return null;
-        }
-        orgId = org.id;
-        // Add user as owner
-        const { error: memberError } = await supabaseAdmin
+    try {
+        console.log(`Provisioning user: ${userId} (${email})`);
+        // Ensure profile exists
+        console.log('Step 1: Ensuring profile exists...');
+        await ensureProfile(userId, email);
+        console.log('Step 1: Profile ensured');
+        // Check if user has any orgs
+        console.log('Step 2: Checking existing org memberships...');
+        const { data: memberships, error: checkError } = await supabaseAdmin
             .from('org_members')
-            .insert({
-            org_id: orgId,
-            user_id: userId,
-            role: 'owner'
-        });
-        if (memberError) {
-            console.error('Failed to add user as owner:', memberError);
+            .select('org_id')
+            .eq('user_id', userId)
+            .limit(1);
+        if (checkError) {
+            console.error('Step 2 FAILED: Failed to check memberships:', checkError);
             return null;
         }
-    }
-    // Ensure default project exists
-    const { data: project, error: projectError } = await supabaseAdmin
-        .rpc('ensure_default_project', {
-        p_org_id: orgId,
-        p_user_id: userId
-    })
-        .single();
-    if (projectError) {
-        console.error('Failed to ensure default project:', projectError);
-        // Try to get existing default project
-        const { data: existingProject } = await supabaseAdmin
-            .from('projects')
-            .select('id')
-            .eq('org_id', orgId)
-            .eq('is_default', true)
-            .single();
-        if (existingProject) {
-            return { orgId, projectId: existingProject.id };
+        console.log(`Step 2: Found ${memberships?.length || 0} existing memberships`);
+        let orgId;
+        // If user has orgs, use the first one
+        if (memberships && memberships.length > 0) {
+            orgId = memberships[0].org_id;
+            console.log(`Step 3: Using existing org: ${orgId}`);
         }
-        return { orgId, projectId: '' }; // Return orgId even if project creation fails
+        else {
+            // Create default org
+            console.log('Step 3: Creating new organization...');
+            const orgName = `${email} org`;
+            const orgSlug = `${email.split('@')[0]}-${crypto.randomBytes(4).toString('hex')}`;
+            const { data: org, error: orgError } = await supabaseAdmin
+                .from('organizations')
+                .insert({
+                name: orgName,
+                slug: orgSlug,
+                plan: 'trial'
+            })
+                .select('id')
+                .single();
+            if (orgError || !org) {
+                console.error('Step 3 FAILED: Failed to create org:', orgError);
+                return null;
+            }
+            orgId = org.id;
+            console.log(`Step 3: Created org: ${orgId}`);
+            // Add user as owner
+            console.log('Step 4: Adding user as org owner...');
+            // Verify user exists in auth.users using admin API
+            let userExists = false;
+            let retries = 10;
+            let retryDelay = 300;
+            while (retries > 0 && !userExists) {
+                try {
+                    const { data: userData, error: userError } = await supabaseAdmin.auth.admin.getUserById(userId);
+                    if (userData?.user && !userError) {
+                        userExists = true;
+                        console.log('Step 4: Verified user exists in auth.users');
+                        break;
+                    }
+                    else {
+                        console.warn(`Step 4: User not found in auth.users yet (${userError?.message || 'not found'}), waiting ${retryDelay}ms... (${retries} retries left)`);
+                        await new Promise(resolve => setTimeout(resolve, retryDelay));
+                        retryDelay = Math.min(retryDelay * 1.3, 2000);
+                        retries--;
+                    }
+                }
+                catch (err) {
+                    console.warn('Step 4: Error checking user existence:', err?.message);
+                    await new Promise(resolve => setTimeout(resolve, retryDelay));
+                    retryDelay = Math.min(retryDelay * 1.3, 2000);
+                    retries--;
+                }
+            }
+            if (!userExists) {
+                console.error('Step 4 FAILED: User does not exist in auth.users after all retries');
+                console.error('User ID:', userId);
+                return null;
+            }
+            // Wait a bit more to ensure user is fully committed
+            console.log('Step 4: Waiting additional 500ms to ensure user is fully committed...');
+            await new Promise(resolve => setTimeout(resolve, 500));
+            // Try to insert org_members with retry logic
+            let memberInserted = false;
+            retries = 5;
+            retryDelay = 300;
+            while (retries > 0 && !memberInserted) {
+                const { error: memberError } = await supabaseAdmin
+                    .from('org_members')
+                    .insert({
+                    org_id: orgId,
+                    user_id: userId,
+                    role: 'owner'
+                });
+                if (memberError) {
+                    if (memberError.code === '23503') {
+                        console.warn(`Step 4: Foreign key error (constraint may not be deferrable), waiting ${retryDelay}ms... (${retries} retries left)`);
+                        await new Promise(resolve => setTimeout(resolve, retryDelay));
+                        retryDelay = Math.min(retryDelay * 1.5, 1500);
+                        retries--;
+                        continue;
+                    }
+                    else if (memberError.code === '23505') {
+                        // Unique constraint - user already member (OK)
+                        console.log('Step 4: User is already a member (this is OK)');
+                        memberInserted = true;
+                        break;
+                    }
+                    else {
+                        console.error('Step 4: Failed to add user as owner:', memberError);
+                        // Don't return null - continue to Step 5, we'll return orgId anyway
+                        console.warn('Step 4: Continuing despite error - org exists, user can still use the app');
+                    }
+                }
+                else {
+                    memberInserted = true;
+                    console.log('Step 4: User added as owner');
+                    break;
+                }
+            }
+            if (!memberInserted) {
+                console.error('Step 4: Could not add user as owner after all retries');
+                console.error('SOLUTION: Run supabase/sql/005_fix_provision_issues.sql to make foreign keys deferrable');
+                // Check if user is already a member (maybe from a previous attempt)
+                const { data: existingMember } = await supabaseAdmin
+                    .from('org_members')
+                    .select('*')
+                    .eq('org_id', orgId)
+                    .eq('user_id', userId)
+                    .maybeSingle();
+                if (existingMember) {
+                    console.log('Step 4: User is already a member (from previous attempt), continuing...');
+                    memberInserted = true;
+                }
+                else {
+                    // Continue anyway - org exists, user can still use the app
+                    // We'll try to add them to org_members later or manually
+                    console.warn('Step 4: User not added to org_members, but org exists - continuing with provision');
+                    console.warn('User may need to be added to org_members manually or on next login');
+                    // Don't return null - continue to Step 5
+                }
+            }
+        }
+        // Ensure default project exists
+        console.log('Step 5: Ensuring default project exists...');
+        const { data: project, error: projectError } = await supabaseAdmin
+            .rpc('ensure_default_project', {
+            p_org_id: orgId,
+            p_user_id: userId
+        })
+            .maybeSingle();
+        if (projectError) {
+            console.error('Step 5 FAILED: RPC call failed:', projectError);
+            console.error('Error details:', JSON.stringify(projectError, null, 2));
+            // Try to get existing default project
+            console.log('Step 5 fallback: Checking for existing default project...');
+            const { data: existingProject, error: existingError } = await supabaseAdmin
+                .from('projects')
+                .select('id')
+                .eq('org_id', orgId)
+                .eq('is_default', true)
+                .maybeSingle();
+            if (existingError) {
+                console.error('Step 5 fallback FAILED:', existingError);
+            }
+            if (existingProject) {
+                console.log(`Step 5 fallback: Found existing project: ${existingProject.id}`);
+                return { orgId, projectId: existingProject.id };
+            }
+            // Return orgId even if project creation fails (user can still use the app)
+            console.warn('Step 5: No project found, but returning orgId anyway');
+            return { orgId, projectId: '' };
+        }
+        // Handle RPC return value - it returns a UUID (string)
+        // The RPC function returns uuid directly, so project should be a string
+        let projectId = '';
+        if (project) {
+            if (typeof project === 'string') {
+                projectId = project;
+            }
+            else if (typeof project === 'object' && project !== null) {
+                // Sometimes Supabase wraps it in an object
+                const projectObj = project;
+                if (typeof projectObj.id === 'string') {
+                    projectId = projectObj.id;
+                }
+                else if (typeof projectObj === 'string') {
+                    projectId = projectObj;
+                }
+            }
+        }
+        if (!projectId) {
+            console.warn('Step 5: Project RPC returned but projectId is empty, trying fallback...');
+            // Fallback: query for the project
+            const { data: fallbackProject } = await supabaseAdmin
+                .from('projects')
+                .select('id')
+                .eq('org_id', orgId)
+                .eq('is_default', true)
+                .maybeSingle();
+            if (fallbackProject) {
+                projectId = fallbackProject.id;
+            }
+        }
+        console.log(`Step 5: Project ensured: ${projectId}`);
+        console.log(`✅ Provisioning complete: orgId=${orgId}, projectId=${projectId}`);
+        return { orgId, projectId };
     }
-    const projectId = typeof project === 'string' ? project : '';
-    return { orgId, projectId };
+    catch (error) {
+        console.error('provisionUser: Unexpected error:', error);
+        console.error('Error stack:', error?.stack);
+        // Try to return partial success if we have an orgId
+        // This allows the user to still use the app even if provisioning partially failed
+        try {
+            // Check if user has an org (from org_members or by checking organizations)
+            const { data: userOrgs } = await supabaseAdmin
+                .from('org_members')
+                .select('org_id')
+                .eq('user_id', userId)
+                .limit(1)
+                .maybeSingle();
+            if (userOrgs?.org_id) {
+                console.warn('Returning partial success - org exists, project may need to be created manually');
+                return { orgId: userOrgs.org_id, projectId: '' };
+            }
+            // If no org_members, check if org was created but member wasn't added
+            // We can't easily query this, so we'll return null
+            // But the express endpoint will check for existing orgs
+        }
+        catch (fallbackError) {
+            console.error('Could not get fallback orgId:', fallbackError);
+        }
+        return null;
+    }
 }
 /**
  * Get user's organizations

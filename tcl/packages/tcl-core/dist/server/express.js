@@ -281,11 +281,34 @@ app.post("/auth/provision", async (req, res) => {
         if (!supabaseAdmin) {
             return res.status(503).json({ error: "Supabase not configured" });
         }
+        console.log(`Provision request for user: ${userId} (${email})`);
         const result = await provisionUser(userId, email);
         if (!result) {
-            return res.status(500).json({ error: "Failed to provision user" });
+            console.error(`Provision failed for user: ${userId}`);
+            // Check if user has an org anyway (partial success)
+            if (supabaseAdmin) {
+                const { data: existingOrgs } = await supabaseAdmin
+                    .from('org_members')
+                    .select('org_id')
+                    .eq('user_id', userId)
+                    .limit(1)
+                    .maybeSingle();
+                if (existingOrgs?.org_id) {
+                    console.log(`Partial success: User has org ${existingOrgs.org_id}, returning it`);
+                    return res.json({
+                        orgId: existingOrgs.org_id,
+                        projectId: '',
+                        warning: 'Provision partially completed - some steps may have failed'
+                    });
+                }
+            }
+            return res.status(500).json({
+                error: "Failed to provision user",
+                details: "Check server logs for details. User may still be able to use the app if profile and org exist."
+            });
         }
-        res.json({ orgId: result.orgId });
+        console.log(`✅ Provision successful: orgId=${result.orgId}, projectId=${result.projectId}`);
+        res.json({ orgId: result.orgId, projectId: result.projectId });
     }
     catch (e) {
         console.error("Provision error:", e);
