@@ -193,7 +193,7 @@ export class AuthService {
       const basicUser: User = {
         id: userId,
         email: user.email || undefined,
-        fullName: user.user_metadata?.full_name,
+        fullName: user.user_metadata?.['full_name'] as string | undefined,
         companyRole: undefined,
         companyIndustry: undefined,
         callOperation: undefined,
@@ -211,7 +211,7 @@ export class AuthService {
       const basicUser: User = {
         id: userId,
         email: user.email || undefined,
-        fullName: user.user_metadata?.full_name,
+        fullName: user.user_metadata?.['full_name'] as string | undefined,
         companyRole: undefined,
         companyIndustry: undefined,
         callOperation: undefined,
