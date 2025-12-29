@@ -51,7 +51,10 @@ export class AuthService {
     
     // Listen for auth changes
     this.supabase.auth.onAuthStateChange(async (event, session) => {
-      console.log('Auth state changed:', event, session?.user?.email);
+      // Only log non-INITIAL_SESSION events to reduce noise
+      if (event !== 'INITIAL_SESSION') {
+        console.log('Auth state changed:', event, session?.user?.email);
+      }
       if (session?.user) {
         await this.loadUserProfile(session.user.id);
       } else {
@@ -65,7 +68,10 @@ export class AuthService {
         console.log('Loading initial session for user:', session.user.email);
         await this.loadUserProfile(session.user.id);
       } else {
-        console.log('No active session found');
+        // Only log if we're in development mode to reduce noise
+        if (process.env['NODE_ENV'] === 'development') {
+          console.log('No active session found');
+        }
       }
     });
   }

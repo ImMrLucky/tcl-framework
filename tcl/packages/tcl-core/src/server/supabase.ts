@@ -81,61 +81,100 @@ export async function verifyApiKeyExtended(key: string): Promise<{ orgId: string
 
 /**
  * Get or create user profile
+ * Returns true if profile exists or was created, false otherwise
  */
-export async function ensureProfile(userId: string, email?: string): Promise<void> {
-  if (!supabaseAdmin) return;
+export async function ensureProfile(userId: string, email?: string): Promise<boolean> {
+  if (!supabaseAdmin) {
+    console.error('ensureProfile: supabaseAdmin is null');
+    return false;
+  }
   
   // First, verify the user exists in auth.users
   // We'll use a small delay and retry if needed
-  let retries = 3;
+  let retries = 5;
   let lastError: any = null;
   
   while (retries > 0) {
     // Check if user exists in auth.users (via a query that won't fail)
-    const { data: userCheck } = await supabaseAdmin.auth.admin.getUserById(userId);
+    const { data: userCheck, error: userCheckError } = await supabaseAdmin.auth.admin.getUserById(userId);
     
-    if (!userCheck?.user) {
+    if (!userCheck?.user || userCheckError) {
       console.warn(`User ${userId} not found in auth.users, waiting 500ms before retry... (${retries} retries left)`);
       await new Promise(resolve => setTimeout(resolve, 500));
       retries--;
       continue;
     }
     
+    const userEmail = email || userCheck.user.email || null;
+    console.log(`ensureProfile: Attempting to upsert profile for user ${userId} (${userEmail})`);
+    
     // User exists, try to upsert profile
-    const { error } = await supabaseAdmin
+    const { error: upsertError } = await supabaseAdmin
       .from('profiles')
       .upsert({
         id: userId,
-        email: email || userCheck.user.email || null,
+        email: userEmail,
         updated_at: new Date().toISOString()
       }, {
         onConflict: 'id'
       });
     
-    if (error) {
+    if (upsertError) {
       // If it's a foreign key error, wait and retry
-      if (error.code === '23503') {
-        console.warn('Profile creation failed - foreign key constraint, waiting 500ms before retry... (${retries} retries left)');
-        lastError = error;
-        await new Promise(resolve => setTimeout(resolve, 500));
+      if (upsertError.code === '23503') {
+        console.warn(`Profile creation failed - foreign key constraint (user may not be committed yet), waiting 1000ms before retry... (${retries} retries left)`);
+        lastError = upsertError;
+        await new Promise(resolve => setTimeout(resolve, 1000));
         retries--;
         continue;
       } else {
-        console.error('Failed to ensure profile:', error);
-        return;
+        console.error('Failed to ensure profile:', upsertError);
+        lastError = upsertError;
+        retries--;
+        continue;
       }
-    } else {
-      // Success!
-      return;
     }
+    
+    // Verify the profile was actually created/updated
+    const { data: profileCheck, error: verifyError } = await supabaseAdmin
+      .from('profiles')
+      .select('id, email')
+      .eq('id', userId)
+      .maybeSingle();
+    
+    if (verifyError) {
+      console.error('Failed to verify profile creation:', verifyError);
+      lastError = verifyError;
+      retries--;
+      continue;
+    }
+    
+    if (!profileCheck) {
+      console.error('Profile upsert succeeded but profile not found in database');
+      lastError = new Error('Profile not found after upsert');
+      retries--;
+      continue;
+    }
+    
+    // Success! Profile exists
+    console.log(`✅ Profile ensured: id=${profileCheck.id}, email=${profileCheck.email}`);
+    return true;
   }
   
   // If we get here, all retries failed
   if (lastError) {
-    console.error('Failed to ensure profile after retries:', lastError);
+    console.error('❌ Failed to ensure profile after all retries:', lastError);
+    console.error('Error details:', {
+      code: lastError.code,
+      message: lastError.message,
+      details: lastError.details,
+      hint: lastError.hint
+    });
   } else {
-    console.error(`Failed to ensure profile: User ${userId} not found in auth.users after retries`);
+    console.error(`❌ Failed to ensure profile: User ${userId} not found in auth.users after all retries`);
   }
+  
+  return false;
 }
 
 /**
@@ -152,8 +191,30 @@ export async function provisionUser(userId: string, email: string): Promise<{ or
     
     // Ensure profile exists
     console.log('Step 1: Ensuring profile exists...');
-    await ensureProfile(userId, email);
-    console.log('Step 1: Profile ensured');
+    const profileEnsured = await ensureProfile(userId, email);
+    
+    if (!profileEnsured) {
+      console.error('Step 1 FAILED: Could not ensure profile exists');
+      console.error('This is critical - profile is required for user to function');
+      console.error('Attempting to continue, but user may experience issues');
+      // Don't return null immediately - try to continue and see if trigger created it
+      // Wait a bit and check again
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      const { data: profileCheck } = await supabaseAdmin
+        .from('profiles')
+        .select('id')
+        .eq('id', userId)
+        .maybeSingle();
+      
+      if (!profileCheck) {
+        console.error('Step 1: Profile still does not exist after wait. Provisioning may fail.');
+        // Continue anyway - maybe trigger will create it
+      } else {
+        console.log('Step 1: Profile found after wait (likely created by trigger)');
+      }
+    } else {
+      console.log('Step 1: ✅ Profile ensured successfully');
+    }
     
     // Check if user has any orgs
     console.log('Step 2: Checking existing org memberships...');

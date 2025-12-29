@@ -31,8 +31,9 @@ export declare function verifyApiKeyExtended(key: string): Promise<{
 } | null>;
 /**
  * Get or create user profile
+ * Returns true if profile exists or was created, false otherwise
  */
-export declare function ensureProfile(userId: string, email?: string): Promise<void>;
+export declare function ensureProfile(userId: string, email?: string): Promise<boolean>;
 /**
  * Provision user: create profile + default org + default project if needed
  */
