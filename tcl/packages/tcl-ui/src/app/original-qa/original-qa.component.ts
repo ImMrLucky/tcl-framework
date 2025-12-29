@@ -10,6 +10,7 @@ import { MatButtonModule } from '@angular/material/button';
 import { MatIconModule } from '@angular/material/icon';
 import { MatTooltipModule } from '@angular/material/tooltip';
 import { RouterModule } from '@angular/router';
+import { LogoComponent } from '../shared/logo.component';
 
 @Component({
   selector: 'app-original-qa',
@@ -23,12 +24,16 @@ import { RouterModule } from '@angular/router';
     GraphViewComponent,
     MatButtonModule,
     MatIconModule,
-    MatTooltipModule
+    MatTooltipModule,
+    LogoComponent
   ],
   template: `
     <div class="app-container">
       <header class="app-header">
         <div class="header-content">
+          <div class="header-left">
+            <app-logo></app-logo>
+          </div>
           <div class="header-title">
             <h1>TCL Framework</h1>
             <p class="subtitle">Truth & Consistency Layer for LLM Validation</p>
@@ -156,8 +161,14 @@ import { RouterModule } from '@angular/router';
       gap: 16px;
     }
 
+    .header-left {
+      display: flex;
+      align-items: center;
+    }
+
     .header-title {
       flex: 1;
+      text-align: center;
     }
 
     .header-actions {

@@ -10,6 +10,7 @@ import { MatButtonModule } from '@angular/material/button';
 import { MatIconModule } from '@angular/material/icon';
 import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
 import { AuthService } from '../auth.service';
+import { LogoComponent } from '../shared/logo.component';
 
 @Component({
   selector: 'app-onboarding',
@@ -23,7 +24,8 @@ import { AuthService } from '../auth.service';
     MatSelectModule,
     MatButtonModule,
     MatIconModule,
-    MatProgressSpinnerModule
+    MatProgressSpinnerModule,
+    LogoComponent
   ],
   template: `
     <div class="onboarding-container">
@@ -111,11 +113,16 @@ import { AuthService } from '../auth.service';
   styles: [`
     .onboarding-container {
       display: flex;
+      flex-direction: column;
       justify-content: center;
       align-items: center;
       min-height: 100vh;
       background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
       padding: 20px;
+    }
+
+    .logo-wrapper {
+      margin-bottom: 40px;
     }
 
     .onboarding-card {

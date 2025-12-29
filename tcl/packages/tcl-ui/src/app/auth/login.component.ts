@@ -9,6 +9,7 @@ import { MatButtonModule } from '@angular/material/button';
 import { MatIconModule } from '@angular/material/icon';
 import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
 import { AuthService } from '../auth.service';
+import { LogoComponent } from '../shared/logo.component';
 
 @Component({
   selector: 'app-login',
@@ -22,7 +23,8 @@ import { AuthService } from '../auth.service';
     MatInputModule,
     MatButtonModule,
     MatIconModule,
-    MatProgressSpinnerModule
+    MatProgressSpinnerModule,
+    LogoComponent
   ],
   template: `
     <div class="login-container">

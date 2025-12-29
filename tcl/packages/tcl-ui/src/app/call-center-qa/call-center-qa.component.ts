@@ -13,6 +13,7 @@ import { MatMenuModule } from '@angular/material/menu';
 import { MatDividerModule } from '@angular/material/divider';
 import { RouterModule } from '@angular/router';
 import { AuthService, User } from '../auth.service';
+import { LogoComponent } from '../shared/logo.component';
 
 @Component({
   selector: 'app-call-center-qa',
@@ -28,12 +29,16 @@ import { AuthService, User } from '../auth.service';
     MatIconModule,
     MatTooltipModule,
     MatMenuModule,
-    MatDividerModule
+    MatDividerModule,
+    LogoComponent
   ],
   template: `
     <div class="app-container">
       <header class="app-header">
         <div class="header-content">
+          <div class="header-left">
+            <app-logo></app-logo>
+          </div>
           <div class="header-title">
             <h1>Call Center QA</h1>
             <p class="subtitle">Compliance & Risk Analysis for Call Transcripts</p>
@@ -193,8 +198,14 @@ import { AuthService, User } from '../auth.service';
       gap: 16px;
     }
 
+    .header-left {
+      display: flex;
+      align-items: center;
+    }
+
     .header-title {
       flex: 1;
+      text-align: center;
     }
 
     .header-actions {
