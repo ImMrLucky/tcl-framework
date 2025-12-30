@@ -416,8 +416,8 @@ app.post("/auth/provision", async (req, res) => {
 // Get user's organizations
 app.get("/me/orgs", async (req, res) => {
   try {
-    // TODO: Verify Supabase JWT and extract userId
-    const userId = req.body.userId || req.query.userId as string;
+    // Get userId from query parameter (GET requests don't have body)
+    const userId = req.query.userId as string;
     
     if (!userId) {
       return res.status(400).json({ error: "userId required" });
