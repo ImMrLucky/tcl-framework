@@ -190,16 +190,9 @@ export class LoginComponent {
       if (result.error) {
         this.errorMessage = result.error.message || 'Authentication failed';
       } else {
-        // Wait a moment for profile to load
+        // Always redirect to dashboard - onboarding modal will show if needed
         await new Promise(resolve => setTimeout(resolve, 500));
-        
-        // Check if user needs onboarding
-        const user = this.authService.getCurrentUser();
-        if (user && !user.companyRole) {
-          this.router.navigate(['/onboarding']);
-        } else {
-          this.router.navigate(['/dashboard']);
-        }
+        this.router.navigate(['/dashboard']);
       }
     } catch (error: any) {
       this.errorMessage = error.message || 'An unexpected error occurred';

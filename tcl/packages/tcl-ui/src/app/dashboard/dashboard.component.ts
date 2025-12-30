@@ -6,9 +6,11 @@ import { MatButtonModule } from '@angular/material/button';
 import { MatIconModule } from '@angular/material/icon';
 import { MatMenuModule } from '@angular/material/menu';
 import { MatDividerModule } from '@angular/material/divider';
+import { MatDialog, MatDialogModule } from '@angular/material/dialog';
 import { LogoComponent } from '../shared/logo.component';
 import { AuthService, User } from '../auth.service';
 import { MemberService } from '../member.service';
+import { OnboardingModalComponent } from '../onboarding-modal/onboarding-modal.component';
 
 @Component({
   selector: 'app-dashboard',
@@ -21,6 +23,7 @@ import { MemberService } from '../member.service';
     MatIconModule,
     MatMenuModule,
     MatDividerModule,
+    MatDialogModule,
     LogoComponent
   ],
   templateUrl: './dashboard.component.html',
@@ -32,7 +35,8 @@ export class DashboardComponent implements OnInit {
 
   constructor(
     private authService: AuthService,
-    private memberService: MemberService
+    private memberService: MemberService,
+    private dialog: MatDialog
   ) {}
 
   async ngOnInit() {
@@ -52,8 +56,39 @@ export class DashboardComponent implements OnInit {
         console.log('Dashboard: User is null, but session exists - this might be a profile loading issue');
       } else if (user.id) {
         this.loadUserOrgs(user.id);
+        // Check if user needs onboarding (show modal if onboarding not completed)
+        this.checkAndShowOnboarding(user);
       }
     });
+  }
+
+  checkAndShowOnboarding(user: User) {
+    // Show onboarding modal if user hasn't completed onboarding
+    // We check if any of the required fields are missing
+    const needsOnboarding = !user.companyIndustry || !user.callOperation || !user.primaryUseCase;
+    
+    if (needsOnboarding) {
+      // Small delay to ensure dashboard is rendered first
+      setTimeout(() => {
+        const dialogRef = this.dialog.open(OnboardingModalComponent, {
+          width: '600px',
+          disableClose: false, // Allow closing by clicking outside or ESC
+          autoFocus: true
+        });
+
+        dialogRef.afterClosed().subscribe((result: boolean) => {
+          if (result) {
+            // User completed onboarding, refresh user data
+            const currentUser = this.authService.getCurrentUser();
+            if (currentUser) {
+              this.currentUser = currentUser;
+            }
+          }
+          // If result is false or undefined, user dismissed the modal
+          // We don't force them to complete it
+        });
+      }, 500);
+    }
   }
 
   loadUserOrgs(userId: string) {
@@ -73,6 +108,24 @@ export class DashboardComponent implements OnInit {
 
   signOut() {
     this.authService.signOut();
+  }
+
+  openOnboardingModal() {
+    const dialogRef = this.dialog.open(OnboardingModalComponent, {
+      width: '600px',
+      disableClose: false,
+      autoFocus: true
+    });
+
+    dialogRef.afterClosed().subscribe((result: boolean) => {
+      if (result) {
+        // User completed onboarding, refresh user data
+        const currentUser = this.authService.getCurrentUser();
+        if (currentUser) {
+          this.currentUser = currentUser;
+        }
+      }
+    });
   }
 }
 

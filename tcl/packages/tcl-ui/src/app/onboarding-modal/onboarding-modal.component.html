@@ -1,0 +1,92 @@
+<div class="onboarding-modal">
+  <div class="modal-header">
+    <h2>Complete Your Profile</h2>
+    <p class="subtitle">Help us customize your ProtectQA experience</p>
+    <button mat-icon-button class="close-button" (click)="onDismiss()" type="button">
+      <mat-icon>close</mat-icon>
+    </button>
+  </div>
+
+  <div class="modal-content">
+    <form [formGroup]="onboardingForm" (ngSubmit)="onSubmit()">
+      <mat-form-field appearance="outline" class="full-width">
+        <mat-label>Company Role / Title</mat-label>
+        <input matInput formControlName="companyRole" placeholder="e.g., QA Manager, Compliance Officer">
+        <mat-icon matPrefix>badge</mat-icon>
+      </mat-form-field>
+
+      <mat-form-field appearance="outline" class="full-width">
+        <mat-label>Company Industry</mat-label>
+        <mat-select formControlName="companyIndustry" required>
+          <mat-option value="Financial Services / Banking">Financial Services / Banking</mat-option>
+          <mat-option value="Insurance">Insurance</mat-option>
+          <mat-option value="Healthcare">Healthcare</mat-option>
+          <mat-option value="Telecommunications">Telecommunications</mat-option>
+          <mat-option value="Retail / eCommerce">Retail / eCommerce</mat-option>
+          <mat-option value="SaaS / Technology">SaaS / Technology</mat-option>
+          <mat-option value="Travel / Hospitality">Travel / Hospitality</mat-option>
+          <mat-option value="Utilities / Energy">Utilities / Energy</mat-option>
+          <mat-option value="Government / Public Sector">Government / Public Sector</mat-option>
+          <mat-option value="Other">Other</mat-option>
+        </mat-select>
+        <mat-icon matPrefix>business</mat-icon>
+        <mat-error *ngIf="onboardingForm.get('companyIndustry')?.hasError('required')">
+          Industry is required
+        </mat-error>
+      </mat-form-field>
+
+      <mat-form-field appearance="outline" class="full-width">
+        <mat-label>How do your calls operate?</mat-label>
+        <mat-select formControlName="callOperation" required>
+          <mat-option value="Inbound">Inbound</mat-option>
+          <mat-option value="Outbound">Outbound</mat-option>
+          <mat-option value="Both">Both</mat-option>
+        </mat-select>
+        <mat-icon matPrefix>phone</mat-icon>
+        <mat-error *ngIf="onboardingForm.get('callOperation')?.hasError('required')">
+          Call operation is required
+        </mat-error>
+      </mat-form-field>
+
+      <mat-form-field appearance="outline" class="full-width">
+        <mat-label>Primary Use Case</mat-label>
+        <mat-select formControlName="primaryUseCase" required>
+          <mat-option value="Compliance / Risk Detection">Compliance / Risk Detection</mat-option>
+          <mat-option value="QA Scoring & Audits">QA Scoring & Audits</mat-option>
+          <mat-option value="Dispute Defense">Dispute Defense</mat-option>
+          <mat-option value="Regulatory Readiness">Regulatory Readiness</mat-option>
+          <mat-option value="Policy Drift Detection">Policy Drift Detection</mat-option>
+          <mat-option value="Executive Reporting">Executive Reporting</mat-option>
+        </mat-select>
+        <mat-icon matPrefix>target</mat-icon>
+        <mat-error *ngIf="onboardingForm.get('primaryUseCase')?.hasError('required')">
+          Primary use case is required
+        </mat-error>
+      </mat-form-field>
+
+      <div *ngIf="errorMessage" class="error-message">
+        <mat-icon>error</mat-icon>
+        {{ errorMessage }}
+      </div>
+
+      <div class="modal-actions">
+        <button 
+          mat-button 
+          type="button"
+          (click)="onDismiss()"
+          [disabled]="loading">
+          Skip for now
+        </button>
+        <button 
+          mat-raised-button 
+          color="primary" 
+          type="submit"
+          [disabled]="onboardingForm.invalid || loading">
+          <mat-spinner *ngIf="loading" diameter="20" class="inline-spinner"></mat-spinner>
+          <span *ngIf="!loading">Save</span>
+        </button>
+      </div>
+    </form>
+  </div>
+</div>
+
