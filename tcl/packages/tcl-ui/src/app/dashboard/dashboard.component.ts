@@ -33,6 +33,8 @@ import { InviteModalComponent } from '../invite-modal/invite-modal.component';
 export class DashboardComponent implements OnInit {
   currentUser: User | null = null;
   userOrgs: Array<{ id: string; name: string; slug: string; role: string }> = [];
+  canInviteMembers: boolean = false;
+  primaryOrgId: string = '';
 
   constructor(
     private authService: AuthService,
@@ -100,9 +102,21 @@ export class DashboardComponent implements OnInit {
     this.memberService.getUserOrgs(userId).subscribe({
       next: (response) => {
         this.userOrgs = response.orgs || [];
+        
+        // Find primary org (where user is owner) or first org where they can manage members
+        const ownerOrg = this.userOrgs.find(org => org.role === 'owner');
+        const adminOrg = this.userOrgs.find(org => org.role === 'admin');
+        
+        // Primary org is the one they own, or first admin org, or first org
+        this.primaryOrgId = ownerOrg?.id || adminOrg?.id || (this.userOrgs.length > 0 ? this.userOrgs[0].id : '');
+        
+        // User can invite if they're owner or admin in at least one org
+        this.canInviteMembers = this.userOrgs.some(org => org.role === 'owner' || org.role === 'admin');
       },
       error: (err: any) => {
         console.error('Failed to load user orgs:', err);
+        this.canInviteMembers = false;
+        this.primaryOrgId = '';
       }
     });
   }
@@ -116,10 +130,22 @@ export class DashboardComponent implements OnInit {
   }
 
   openInviteModal() {
+    if (!this.canInviteMembers || !this.primaryOrgId) {
+      console.warn('User does not have permission to invite members');
+      return;
+    }
+
+    // Only pass orgs where user can manage members (owner or admin)
+    const manageableOrgs = this.userOrgs.filter(org => org.role === 'owner' || org.role === 'admin');
+    
     const dialogRef = this.dialog.open(InviteModalComponent, {
       width: '700px',
       disableClose: false,
-      autoFocus: true
+      autoFocus: true,
+      data: {
+        orgId: this.primaryOrgId,
+        orgs: manageableOrgs
+      } as any
     });
 
     dialogRef.afterClosed().subscribe((result: boolean) => {

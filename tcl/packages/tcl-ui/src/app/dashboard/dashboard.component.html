@@ -77,7 +77,11 @@
           <p>Invite team members and manage their roles and permissions.</p>
         </mat-card-content>
         <mat-card-actions>
-          <button mat-button color="primary" (click)="openInviteModal()">
+          <button 
+            *ngIf="canInviteMembers" 
+            mat-button 
+            color="primary" 
+            (click)="openInviteModal()">
             <mat-icon>person_add</mat-icon>
             Invite Members
           </button>

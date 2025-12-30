@@ -21,7 +21,11 @@
             <mat-card-title>Profile Settings</mat-card-title>
             <mat-card-subtitle>Update your account information</mat-card-subtitle>
           </div>
-          <button mat-raised-button color="primary" (click)="openInviteModal()">
+          <button 
+            *ngIf="canInviteMembers" 
+            mat-raised-button 
+            color="primary" 
+            (click)="openInviteModal()">
             <mat-icon>person_add</mat-icon>
             Invite Team Members
           </button>

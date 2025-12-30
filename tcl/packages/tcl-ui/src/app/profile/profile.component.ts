@@ -14,6 +14,7 @@ import { MatDialog, MatDialogModule } from '@angular/material/dialog';
 import { AuthService } from '../auth.service';
 import { LogoComponent } from '../shared/logo.component';
 import { InviteModalComponent } from '../invite-modal/invite-modal.component';
+import { MemberService } from '../member.service';
 
 @Component({
   selector: 'app-profile',
@@ -41,13 +42,16 @@ export class ProfileComponent implements OnInit {
   loading = false;
   errorMessage = '';
   currentUser: any = null;
+  canInviteMembers: boolean = false;
+  primaryOrgId: string = '';
 
   constructor(
     private fb: FormBuilder,
     private authService: AuthService,
     private router: Router,
     private snackBar: MatSnackBar,
-    private dialog: MatDialog
+    private dialog: MatDialog,
+    private memberService: MemberService
   ) {
     this.profileForm = this.fb.group({
       companyRole: [''],
@@ -75,6 +79,32 @@ export class ProfileComponent implements OnInit {
           callOperation: user.callOperation || '',
           primaryUseCase: user.primaryUseCase || ''
         });
+        
+        // Load user's orgs to check permissions
+        this.loadUserOrgs(user.id);
+      }
+    });
+  }
+
+  loadUserOrgs(userId: string) {
+    this.memberService.getUserOrgs(userId).subscribe({
+      next: (response) => {
+        const orgs = response.orgs || [];
+        
+        // Find primary org (where user is owner) or first org where they can manage members
+        const ownerOrg = orgs.find(org => org.role === 'owner');
+        const adminOrg = orgs.find(org => org.role === 'admin');
+        
+        // Primary org is the one they own, or first admin org, or first org
+        this.primaryOrgId = ownerOrg?.id || adminOrg?.id || (orgs.length > 0 ? orgs[0].id : '');
+        
+        // User can invite if they're owner or admin in at least one org
+        this.canInviteMembers = orgs.some(org => org.role === 'owner' || org.role === 'admin');
+      },
+      error: (err: any) => {
+        console.error('Failed to load user orgs:', err);
+        this.canInviteMembers = false;
+        this.primaryOrgId = '';
       }
     });
   }
@@ -117,14 +147,38 @@ export class ProfileComponent implements OnInit {
   }
 
   openInviteModal() {
-    const dialogRef = this.dialog.open(InviteModalComponent, {
-      width: '700px',
-      disableClose: false,
-      autoFocus: true
-    });
+    if (!this.canInviteMembers || !this.primaryOrgId) {
+      console.warn('User does not have permission to invite members');
+      return;
+    }
 
-    dialogRef.afterClosed().subscribe((result: boolean) => {
-      // Modal closed
+    const currentUser = this.authService.getCurrentUser();
+    if (!currentUser) {
+      return;
+    }
+
+    // Get orgs where user can manage members
+    this.memberService.getUserOrgs(currentUser.id).subscribe({
+      next: (orgResponse) => {
+        const manageableOrgs = (orgResponse.orgs || []).filter(org => org.role === 'owner' || org.role === 'admin');
+        
+        const dialogRef = this.dialog.open(InviteModalComponent, {
+          width: '700px',
+          disableClose: false,
+          autoFocus: true,
+          data: {
+            orgId: this.primaryOrgId,
+            orgs: manageableOrgs
+          } as any
+        });
+
+        dialogRef.afterClosed().subscribe((result: boolean) => {
+          // Modal closed
+        });
+      },
+      error: (err: any) => {
+        console.error('Failed to load organizations:', err);
+      }
     });
   }
 }
