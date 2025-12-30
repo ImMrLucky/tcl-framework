@@ -1,70 +1,38 @@
 <div class="app-container">
-  <header class="app-header">
-    <div class="header-content">
-      <div class="header-left">
-        <app-logo></app-logo>
-      </div>
-      <div class="header-title">
-        <h1>Call Center QA</h1>
-        <p class="subtitle">Compliance & Risk Analysis for Call Transcripts</p>
-      </div>
-      <div class="header-actions">
-        <a mat-button routerLink="/original-qa" routerLinkActive="active">
-          <mat-icon>swap_horiz</mat-icon>
-          Switch to Original QA
-        </a>
-        <button *ngIf="!isAuthenticated" mat-button routerLink="/login">
-          <mat-icon>login</mat-icon>
-          Sign In
-        </button>
-        <button *ngIf="isAuthenticated" mat-icon-button [matMenuTriggerFor]="userMenu">
-          <mat-icon>account_circle</mat-icon>
-        </button>
-        <mat-menu #userMenu="matMenu">
-          <div class="user-menu-header">
-            <div class="user-email">{{ currentUser?.email }}</div>
-            <div class="user-role" *ngIf="currentUser?.companyRole">{{ currentUser?.companyRole }}</div>
-          </div>
-          <mat-divider></mat-divider>
-          <button mat-menu-item routerLink="/profile">
-            <mat-icon>settings</mat-icon>
-            <span>Profile Settings</span>
-          </button>
-          <button mat-menu-item (click)="signOut()">
-            <mat-icon>logout</mat-icon>
-            <span>Sign Out</span>
-          </button>
-        </mat-menu>
-        <button
-          *ngIf="result"
-          mat-icon-button
-          matTooltip="Export to CSV"
-          (click)="exportToCSV()"
-          color="primary"
-        >
-          <mat-icon>table_chart</mat-icon>
-        </button>
-        <button
-          *ngIf="result"
-          mat-icon-button
-          matTooltip="Export to PDF"
-          (click)="exportToPDF()"
-          color="primary"
-        >
-          <mat-icon>picture_as_pdf</mat-icon>
-        </button>
-        <button
-          *ngIf="result"
-          mat-icon-button
-          matTooltip="Download Report JSON"
-          (click)="downloadReport()"
-          color="primary"
-        >
-          <mat-icon>download</mat-icon>
-        </button>
-      </div>
+  <app-header 
+    pageTitle="Call Center QA" 
+    pageSubtitle="Compliance & Risk Analysis for Call Transcripts"
+    [showNavigation]="true">
+    <div headerActions>
+      <button
+        *ngIf="result"
+        mat-icon-button
+        matTooltip="Export to CSV"
+        (click)="exportToCSV()"
+        color="primary"
+      >
+        <mat-icon>table_chart</mat-icon>
+      </button>
+      <button
+        *ngIf="result"
+        mat-icon-button
+        matTooltip="Export to PDF"
+        (click)="exportToPDF()"
+        color="primary"
+      >
+        <mat-icon>picture_as_pdf</mat-icon>
+      </button>
+      <button
+        *ngIf="result"
+        mat-icon-button
+        matTooltip="Download Report JSON"
+        (click)="downloadReport()"
+        color="primary"
+      >
+        <mat-icon>download</mat-icon>
+      </button>
     </div>
-  </header>
+  </app-header>
 
   <div class="main-layout">
     <div class="left-column">

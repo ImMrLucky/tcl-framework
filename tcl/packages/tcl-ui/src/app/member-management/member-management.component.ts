@@ -15,7 +15,7 @@ import { MatSnackBar, MatSnackBarModule } from '@angular/material/snack-bar';
 import { MatDialog, MatDialogModule } from '@angular/material/dialog';
 import { MatTooltipModule } from '@angular/material/tooltip';
 import { MatDividerModule } from '@angular/material/divider';
-import { LogoComponent } from '../shared/logo.component';
+import { AppHeaderComponent } from '../shared/app-header.component';
 import { AuthService, User } from '../auth.service';
 import { MemberService, Member, Role } from '../member.service';
 
@@ -39,7 +39,7 @@ import { MemberService, Member, Role } from '../member.service';
     MatDialogModule,
     MatTooltipModule,
     MatDividerModule,
-    LogoComponent
+    AppHeaderComponent
   ],
   templateUrl: './member-management.component.html',
   styleUrls: ['./member-management.component.scss']

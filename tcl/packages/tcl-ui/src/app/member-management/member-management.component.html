@@ -1,33 +1,9 @@
 <div class="member-management-container">
-  <header class="header">
-    <div class="header-content">
-      <app-logo></app-logo>
-      <div class="header-actions">
-        <a routerLink="/dashboard" class="header-link">
-          <mat-icon>dashboard</mat-icon>
-          Dashboard
-        </a>
-        <button mat-icon-button [matMenuTriggerFor]="userMenu">
-          <mat-icon>account_circle</mat-icon>
-        </button>
-        <mat-menu #userMenu="matMenu">
-          <div class="user-menu-header">
-            <div class="user-info">
-              <div class="user-email">{{ currentUser?.email || 'User' }}</div>
-              <div class="user-role" *ngIf="currentUserRole">
-                {{ getRoleLabel(currentUserRole) }}
-              </div>
-            </div>
-          </div>
-          <mat-divider></mat-divider>
-          <button mat-menu-item (click)="signOut()">
-            <mat-icon>logout</mat-icon>
-            <span>Sign Out</span>
-          </button>
-        </mat-menu>
-      </div>
-    </div>
-  </header>
+  <app-header 
+    pageTitle="Team Members"
+    [showBackButton]="true"
+    [showNavigation]="false">
+  </app-header>
 
   <div class="content">
     <div class="page-header">

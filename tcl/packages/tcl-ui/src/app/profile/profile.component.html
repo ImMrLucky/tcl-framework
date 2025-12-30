@@ -1,16 +1,7 @@
-<header>
-  <div class="container">
-    <div class="header-content">
-      <app-logo></app-logo>
-      <div class="header-actions">
-        <button mat-button routerLink="/dashboard">
-          <mat-icon>arrow_back</mat-icon>
-          Back to Dashboard
-        </button>
-      </div>
-    </div>
-  </div>
-</header>
+<app-header 
+  [showBackButton]="true"
+  [showNavigation]="false">
+</app-header>
 
 <div class="profile-container">
   <div class="container">

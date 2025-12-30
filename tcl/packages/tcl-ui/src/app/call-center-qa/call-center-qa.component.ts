@@ -13,7 +13,7 @@ import { MatMenuModule } from '@angular/material/menu';
 import { MatDividerModule } from '@angular/material/divider';
 import { RouterModule } from '@angular/router';
 import { AuthService, User } from '../auth.service';
-import { LogoComponent } from '../shared/logo.component';
+import { AppHeaderComponent } from '../shared/app-header.component';
 
 @Component({
   selector: 'app-call-center-qa',
@@ -30,7 +30,7 @@ import { LogoComponent } from '../shared/logo.component';
     MatTooltipModule,
     MatMenuModule,
     MatDividerModule,
-    LogoComponent
+    AppHeaderComponent
   ],
   templateUrl: './call-center-qa.component.html',
   styleUrls: ['./call-center-qa.component.scss']

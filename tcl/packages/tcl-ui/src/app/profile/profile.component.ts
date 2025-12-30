@@ -12,7 +12,7 @@ import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
 import { MatSnackBar, MatSnackBarModule } from '@angular/material/snack-bar';
 import { MatDialog, MatDialogModule } from '@angular/material/dialog';
 import { AuthService } from '../auth.service';
-import { LogoComponent } from '../shared/logo.component';
+import { AppHeaderComponent } from '../shared/app-header.component';
 import { InviteModalComponent } from '../invite-modal/invite-modal.component';
 import { MemberService } from '../member.service';
 
@@ -32,7 +32,7 @@ import { MemberService } from '../member.service';
     MatProgressSpinnerModule,
     MatSnackBarModule,
     MatDialogModule,
-    LogoComponent
+    AppHeaderComponent
   ],
   templateUrl: './profile.component.html',
   styleUrls: ['./profile.component.scss']

@@ -7,7 +7,7 @@ import { MatIconModule } from '@angular/material/icon';
 import { MatMenuModule } from '@angular/material/menu';
 import { MatDividerModule } from '@angular/material/divider';
 import { MatDialog, MatDialogModule } from '@angular/material/dialog';
-import { LogoComponent } from '../shared/logo.component';
+import { AppHeaderComponent } from '../shared/app-header.component';
 import { AuthService, User } from '../auth.service';
 import { MemberService } from '../member.service';
 import { OnboardingModalComponent } from '../onboarding-modal/onboarding-modal.component';
@@ -25,7 +25,7 @@ import { InviteModalComponent } from '../invite-modal/invite-modal.component';
     MatMenuModule,
     MatDividerModule,
     MatDialogModule,
-    LogoComponent
+    AppHeaderComponent
   ],
   templateUrl: './dashboard.component.html',
   styleUrls: ['./dashboard.component.scss']
