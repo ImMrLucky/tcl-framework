@@ -112,3 +112,24 @@
   stroke: #94a3b8;
   stroke-width: 1.5;
 }
+
+.logged-in-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.user-menu-header {
+  padding: 16px;
+  min-width: 200px;
+}
+
+.user-email {
+  font-weight: 500;
+  margin-bottom: 4px;
+}
+
+.user-role {
+  font-size: 0.875rem;
+  color: #666;
+}

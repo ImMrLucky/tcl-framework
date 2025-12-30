@@ -5,6 +5,32 @@
       <div class="header-actions">
         <a *ngIf="!isAuthenticated" routerLink="/login" class="header-link">Login / Sign Up</a>
         <a *ngIf="!isAuthenticated" routerLink="/pricing" class="btn-get-started">Get Started Free</a>
+        
+        <!-- Logged in UI -->
+        <div *ngIf="isAuthenticated" class="logged-in-actions">
+          <button mat-button routerLink="/dashboard">
+            <mat-icon>dashboard</mat-icon>
+            Dashboard
+          </button>
+          <button mat-icon-button [matMenuTriggerFor]="userMenu">
+            <mat-icon>account_circle</mat-icon>
+          </button>
+          <mat-menu #userMenu="matMenu">
+            <div class="user-menu-header">
+              <div class="user-email">{{ currentUser?.email }}</div>
+              <div class="user-role" *ngIf="currentUser?.companyRole">{{ currentUser?.companyRole }}</div>
+            </div>
+            <mat-divider></mat-divider>
+            <button mat-menu-item routerLink="/profile">
+              <mat-icon>settings</mat-icon>
+              <span>Profile Settings</span>
+            </button>
+            <button mat-menu-item (click)="signOut()">
+              <mat-icon>logout</mat-icon>
+              <span>Sign Out</span>
+            </button>
+          </mat-menu>
+        </div>
       </div>
     </div>
   </div>
