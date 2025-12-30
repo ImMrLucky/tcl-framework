@@ -39,14 +39,30 @@ export class AuthService {
         storageKey: 'sb-uqwcmkyaskyduxuluqrm-auth-token',
         // Use localStorage
         storage: typeof window !== 'undefined' ? window.localStorage : undefined,
-        flowType: 'pkce'
+        flowType: 'pkce',
+        // Suppress lock manager warnings
+        debug: false
       }
     });
     
-    // Suppress lock manager errors (they're usually harmless - just means another tab is managing auth)
+    // Suppress lock manager console errors (they're informational, not errors)
     if (typeof window !== 'undefined' && 'navigator' in window && 'locks' in navigator) {
-      // The error is logged but doesn't break functionality
-      // Multiple tabs can safely use Supabase - the lock is just for coordination
+      // Override console.error temporarily to filter lock manager messages
+      const originalError = console.error;
+      console.error = (...args: any[]) => {
+        const message = args[0]?.toString() || '';
+        // Filter out Navigator LockManager messages
+        if (message.includes('Navigator LockManager') || message.includes('lock:sb-')) {
+          // Suppress these - they're just informational
+          return;
+        }
+        originalError.apply(console, args);
+      };
+      
+      // Restore after a short delay (Supabase initializes quickly)
+      setTimeout(() => {
+        console.error = originalError;
+      }, 2000);
     }
     
     // Listen for auth changes
@@ -56,23 +72,51 @@ export class AuthService {
         console.log('Auth state changed:', event, session?.user?.email);
       }
       if (session?.user) {
-        await this.loadUserProfile(session.user.id);
+        try {
+          await this.loadUserProfile(session.user.id);
+        } catch (err: any) {
+          console.error('Error loading user profile in auth state change:', err);
+          // Don't clear user if it's just a session error - might be temporary
+          if (err?.name === 'AuthSessionMissingError') {
+            console.warn('Session missing during auth state change, will retry on next event');
+          } else {
+            this.currentUserSubject.next(null);
+          }
+        }
       } else {
         this.currentUserSubject.next(null);
       }
     });
 
     // Load initial session
-    this.supabase.auth.getSession().then(async ({ data: { session } }) => {
+    this.supabase.auth.getSession().then(async ({ data: { session }, error: sessionError }) => {
+      if (sessionError) {
+        console.warn('Error getting initial session:', sessionError);
+        this.currentUserSubject.next(null);
+        return;
+      }
+      
       if (session?.user) {
         console.log('Loading initial session for user:', session.user.email);
-        await this.loadUserProfile(session.user.id);
+        try {
+          await this.loadUserProfile(session.user.id);
+        } catch (err: any) {
+          console.error('Error loading initial user profile:', err);
+          // If it's a session error, just clear the user
+          if (err?.name === 'AuthSessionMissingError') {
+            this.currentUserSubject.next(null);
+          }
+        }
       } else {
         // Only log if we're in development mode to reduce noise
         if (process.env['NODE_ENV'] === 'development') {
           console.log('No active session found');
         }
+        this.currentUserSubject.next(null);
       }
+    }).catch((err: any) => {
+      console.error('Error in getSession promise:', err);
+      this.currentUserSubject.next(null);
     });
   }
 
@@ -173,10 +217,32 @@ export class AuthService {
   private async loadUserProfile(userId: string): Promise<void> {
     console.log('Loading profile for user:', userId);
     
-    // First, get the auth user to ensure we have email
+    // First, check if we have an active session
+    const { data: { session }, error: sessionError } = await this.supabase.auth.getSession();
+    
+    if (sessionError || !session) {
+      console.warn('No active session found, cannot load profile');
+      this.currentUserSubject.next(null);
+      return;
+    }
+    
+    // Verify the session user matches the requested userId
+    if (session.user.id !== userId) {
+      console.warn(`Session user ID (${session.user.id}) does not match requested ID (${userId})`);
+      this.currentUserSubject.next(null);
+      return;
+    }
+    
+    // Get the auth user to ensure we have email
     const { data: { user }, error: authError } = await this.supabase.auth.getUser();
     
     if (authError || !user) {
+      // Handle AuthSessionMissingError gracefully
+      if (authError?.name === 'AuthSessionMissingError' || authError?.message?.includes('session')) {
+        console.warn('Auth session missing, clearing user state');
+        this.currentUserSubject.next(null);
+        return;
+      }
       console.error('Error getting auth user:', authError);
       this.currentUserSubject.next(null);
       return;
