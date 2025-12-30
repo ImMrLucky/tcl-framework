@@ -75,6 +75,14 @@ export class AuthService {
       if (event !== 'INITIAL_SESSION') {
         console.log('Auth state changed:', event, session?.user?.email);
       }
+      
+      // Handle SIGNED_OUT event explicitly
+      if (event === 'SIGNED_OUT' || !session) {
+        console.log('User signed out, clearing user state');
+        this.currentUserSubject.next(null);
+        return;
+      }
+      
       if (session?.user) {
         // Set basic user immediately so UI updates right away
         const basicUser: User = {
@@ -93,6 +101,7 @@ export class AuthService {
           // User is still logged in, just without profile data
         }
       } else {
+        // No session - clear user state
         this.currentUserSubject.next(null);
       }
     });
@@ -205,9 +214,47 @@ export class AuthService {
   }
 
   async signOut(): Promise<void> {
-    await this.supabase.auth.signOut();
+    // Clear user state immediately
     this.currentUserSubject.next(null);
-    this.router.navigate(['/home']);
+    
+    // Sign out from Supabase (this should clear the session)
+    const { error } = await this.supabase.auth.signOut();
+    
+    if (error) {
+      console.error('Error signing out from Supabase:', error);
+    }
+    
+    // Explicitly clear localStorage for the auth token (Supabase storage key)
+    if (typeof window !== 'undefined' && window.localStorage) {
+      try {
+        // Clear the Supabase auth token
+        localStorage.removeItem('sb-uqwcmkyaskyduxuluqrm-auth-token');
+        // Also clear any other Supabase-related keys (in case of variations)
+        const keysToRemove: string[] = [];
+        for (let i = 0; i < localStorage.length; i++) {
+          const key = localStorage.key(i);
+          if (key && (key.startsWith('sb-') || key.includes('supabase'))) {
+            keysToRemove.push(key);
+          }
+        }
+        keysToRemove.forEach(key => localStorage.removeItem(key));
+        console.log('Cleared auth tokens from localStorage');
+      } catch (err) {
+        console.error('Error clearing localStorage:', err);
+      }
+    }
+    
+    // Navigate to home page
+    // Use setTimeout to ensure state is cleared before navigation
+    setTimeout(() => {
+      this.router.navigate(['/home']).catch(err => {
+        console.error('Navigation error:', err);
+        // Fallback: force reload if navigation fails
+        if (typeof window !== 'undefined') {
+          window.location.href = '/home';
+        }
+      });
+    }, 100);
   }
 
   async updateProfile(updates: {
