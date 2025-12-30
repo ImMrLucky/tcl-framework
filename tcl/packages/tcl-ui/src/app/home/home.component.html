@@ -8,10 +8,6 @@
         
         <!-- Logged in UI -->
         <div *ngIf="isAuthenticated" class="logged-in-actions">
-          <button mat-button routerLink="/dashboard">
-            <mat-icon>dashboard</mat-icon>
-            Dashboard
-          </button>
           <button mat-icon-button [matMenuTriggerFor]="userMenu">
             <mat-icon>account_circle</mat-icon>
           </button>
@@ -21,6 +17,10 @@
               <div class="user-role" *ngIf="currentUser?.companyRole">{{ currentUser?.companyRole }}</div>
             </div>
             <mat-divider></mat-divider>
+            <button mat-menu-item routerLink="/dashboard">
+              <mat-icon>dashboard</mat-icon>
+              <span>Dashboard</span>
+            </button>
             <button mat-menu-item routerLink="/profile">
               <mat-icon>settings</mat-icon>
               <span>Profile Settings</span>
