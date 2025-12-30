@@ -89,11 +89,14 @@ export async function ensureProfile(userId: string, email?: string): Promise<boo
     return false;
   }
   
+  console.log(`ensureProfile: Starting for user ${userId}, email: ${email || 'not provided'}`);
+  
   // Get email from user if not provided
   if (!email) {
     try {
       const { data: userData } = await supabaseAdmin.auth.admin.getUserById(userId);
       email = userData?.user?.email || undefined;
+      console.log(`ensureProfile: Retrieved email from auth: ${email || 'none'}`);
     } catch (err) {
       console.warn('ensureProfile: Could not get user email, continuing without email');
       email = undefined;
@@ -106,6 +109,7 @@ export async function ensureProfile(userId: string, email?: string): Promise<boo
   // 3. Can check if user exists atomically
   // 4. Falls back to trigger if needed
   try {
+    console.log(`ensureProfile: Calling RPC ensure_user_profile with userId=${userId}, email=${email || 'null'}`);
     const { data, error } = await supabaseAdmin.rpc('ensure_user_profile', {
       p_user_id: userId,
       p_email: email
@@ -114,24 +118,48 @@ export async function ensureProfile(userId: string, email?: string): Promise<boo
     if (error) {
       // If function doesn't exist, fall back to direct upsert
       if (error.code === '42883' || error.message?.includes('function') || error.message?.includes('does not exist')) {
-        console.warn('ensureProfile: RPC function not available, using direct upsert fallback...');
+        console.warn('ensureProfile: RPC function not available (function does not exist), using direct upsert fallback...');
+        console.warn('ensureProfile: To fix this, run: supabase/sql/009_ensure_profile_function.sql');
         return await ensureProfileFallback(userId, email);
       }
       
       console.error('ensureProfile: RPC call failed:', error);
+      console.error('ensureProfile: Error code:', error.code, 'Message:', error.message);
       // Try fallback anyway
       return await ensureProfileFallback(userId, email);
     }
     
+    console.log(`ensureProfile: RPC returned: ${data}`);
+    
     if (data === true) {
-      console.log(`✅ Profile ensured via RPC: ${userId}`);
-      return true;
+      // Verify profile actually exists
+      const { data: profile, error: verifyError } = await supabaseAdmin
+        .from('profiles')
+        .select('id, email')
+        .eq('id', userId)
+        .maybeSingle();
+      
+      if (verifyError) {
+        console.error('ensureProfile: Failed to verify profile after RPC:', verifyError);
+        return false;
+      }
+      
+      if (profile) {
+        console.log(`✅ Profile ensured via RPC: id=${profile.id}, email=${profile.email || 'null'}`);
+        return true;
+      } else {
+        console.error('ensureProfile: RPC returned true but profile not found in database!');
+        // Try fallback
+        return await ensureProfileFallback(userId, email);
+      }
     }
     
     // If RPC returned false or unexpected value, try fallback
+    console.warn(`ensureProfile: RPC returned unexpected value: ${data}, trying fallback...`);
     return await ensureProfileFallback(userId, email);
   } catch (err: any) {
     console.error('ensureProfile: Error calling RPC:', err);
+    console.error('ensureProfile: Error stack:', err?.stack);
     return await ensureProfileFallback(userId, email);
   }
 }
@@ -141,57 +169,127 @@ export async function ensureProfile(userId: string, email?: string): Promise<boo
  * This is less reliable but works if the database function doesn't exist
  */
 async function ensureProfileFallback(userId: string, email: string | undefined): Promise<boolean> {
-  if (!supabaseAdmin) return false;
+  if (!supabaseAdmin) {
+    console.error('ensureProfileFallback: supabaseAdmin is null');
+    return false;
+  }
   
-  // Wait a bit for user to be committed
-  await new Promise(resolve => setTimeout(resolve, 1000));
+  console.log(`ensureProfileFallback: Starting fallback for user ${userId}`);
   
-  // Try upsert with a few retries
-  for (let attempt = 1; attempt <= 3; attempt++) {
+  // Verify user exists first - wait up to 3 seconds
+  let userExists = false;
+  for (let check = 0; check < 6; check++) {
     try {
+      const { data: userData } = await supabaseAdmin.auth.admin.getUserById(userId);
+      if (userData?.user) {
+        userExists = true;
+        if (!email) {
+          email = userData.user.email || undefined;
+        }
+        console.log(`ensureProfileFallback: User verified in auth.users`);
+        break;
+      }
+    } catch (err) {
+      // Continue checking
+    }
+    if (check < 5) {
+      await new Promise(resolve => setTimeout(resolve, 500));
+    }
+  }
+  
+  if (!userExists) {
+    console.error('ensureProfileFallback: User not found in auth.users after checks');
+    return false;
+  }
+  
+  // Wait additional time for user to be fully committed
+  console.log('ensureProfileFallback: Waiting 1.5 seconds for user to be fully committed...');
+  await new Promise(resolve => setTimeout(resolve, 1500));
+  
+  // Try upsert with retries - use service role which should bypass RLS
+  for (let attempt = 1; attempt <= 5; attempt++) {
+    try {
+      console.log(`ensureProfileFallback: Attempt ${attempt}/5`);
+      
       const profileData: any = {
         id: userId,
+        created_at: new Date().toISOString(),
         updated_at: new Date().toISOString()
       };
       if (email !== undefined) {
         profileData.email = email;
       }
       
-      const { error: upsertError } = await supabaseAdmin
+      console.log(`ensureProfileFallback: Upserting profile with data:`, { id: userId, email: email || 'null' });
+      
+      // Use service role client (supabaseAdmin) which should bypass RLS
+      const { data: upsertData, error: upsertError } = await supabaseAdmin
         .from('profiles')
         .upsert(profileData, {
           onConflict: 'id'
-        });
+        })
+        .select('id')
+        .single();
       
       if (upsertError) {
-        if (upsertError.code === '23503' && attempt < 3) {
-          // Foreign key error - wait and retry
-          await new Promise(resolve => setTimeout(resolve, 1000 * attempt));
+        console.error(`ensureProfileFallback: Upsert error on attempt ${attempt}:`, upsertError);
+        console.error('Error code:', upsertError.code, 'Message:', upsertError.message, 'Details:', upsertError.details);
+        
+        if (upsertError.code === '23503' && attempt < 5) {
+          // Foreign key error - wait longer and retry
+          const waitTime = 1500 * attempt; // 1.5s, 3s, 4.5s, 6s
+          console.warn(`ensureProfileFallback: Foreign key error, waiting ${waitTime}ms and retrying...`);
+          await new Promise(resolve => setTimeout(resolve, waitTime));
           continue;
+        } else if (upsertError.code === '42501') {
+          // Permission denied - RLS blocking
+          console.error('ensureProfileFallback: Permission denied - RLS policy blocking insert');
+          console.error('ensureProfileFallback: Service role should bypass RLS - check SUPABASE_SERVICE_ROLE_KEY');
+          return false;
         }
-        console.error('ensureProfile fallback: Upsert failed:', upsertError);
+        console.error('ensureProfileFallback: Upsert failed and not retrying:', upsertError);
         return false;
       }
       
-      // Verify it was created
-      const { data: profile } = await supabaseAdmin
+      console.log('ensureProfileFallback: Upsert succeeded, verifying profile exists...');
+      
+      // Verify it was created - wait a moment for commit
+      await new Promise(resolve => setTimeout(resolve, 200));
+      
+      const { data: profile, error: verifyError } = await supabaseAdmin
         .from('profiles')
-        .select('id')
+        .select('id, email')
         .eq('id', userId)
         .maybeSingle();
       
+      if (verifyError) {
+        console.error('ensureProfileFallback: Failed to verify profile:', verifyError);
+        if (attempt < 5) {
+          await new Promise(resolve => setTimeout(resolve, 1000 * attempt));
+          continue;
+        }
+        return false;
+      }
+      
       if (profile) {
-        console.log(`✅ Profile ensured via fallback: ${userId}`);
+        console.log(`✅ Profile ensured via fallback: id=${profile.id}, email=${profile.email || 'null'}`);
         return true;
+      } else {
+        console.warn(`ensureProfileFallback: Upsert succeeded but profile not found, retrying... (attempt ${attempt}/5)`);
+        if (attempt < 5) {
+          await new Promise(resolve => setTimeout(resolve, 1500 * attempt));
+        }
       }
     } catch (err: any) {
-      console.error(`ensureProfile fallback: Error on attempt ${attempt}:`, err);
-      if (attempt < 3) {
-        await new Promise(resolve => setTimeout(resolve, 1000 * attempt));
+      console.error(`ensureProfileFallback: Exception on attempt ${attempt}:`, err);
+      console.error('Exception stack:', err?.stack);
+      if (attempt < 5) {
+        await new Promise(resolve => setTimeout(resolve, 1500 * attempt));
       }
     }
   }
   
+  console.error('ensureProfileFallback: ❌ Failed after 5 attempts');
   return false;
 }
 
@@ -209,7 +307,22 @@ export async function provisionUser(userId: string, email: string): Promise<{ or
     
     // Ensure profile exists
     console.log('Step 1: Ensuring profile exists...');
+    console.log(`Step 1: User ID: ${userId}, Email: ${email}`);
     const profileEnsured = await ensureProfile(userId, email);
+    console.log(`Step 1: ensureProfile returned: ${profileEnsured}`);
+    
+    // Verify profile exists regardless of return value
+    const { data: profileCheck } = await supabaseAdmin
+      .from('profiles')
+      .select('id, email')
+      .eq('id', userId)
+      .maybeSingle();
+    
+    if (profileCheck) {
+      console.log(`Step 1: ✅ Profile verified to exist: id=${profileCheck.id}, email=${profileCheck.email || 'null'}`);
+    } else {
+      console.error(`Step 1: ❌ Profile does NOT exist in database even though ensureProfile returned ${profileEnsured}`);
+    }
     
     if (!profileEnsured) {
       console.error('Step 1 FAILED: Could not ensure profile exists');
