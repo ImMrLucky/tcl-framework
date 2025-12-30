@@ -1,6 +1,8 @@
 import express from "express";
 import { supabaseAdmin, verifyApiKeyExtended, provisionUser, getUserOrgs, getUserRole, checkUserPermission, getOrgProjects, getProjectEnvs, generateApiKey, logAudit, trackUsage } from "./supabase.js";
 import { inviteMember, updateMemberRole, removeMember, listMembers } from "./member-management.js";
+import { setupIntegrationRoutes } from "./integrations/routes.js";
+import { setupAuditRoutes } from "./audit/routes.js";
 const app = express();
 app.use(express.json({ limit: "10mb" }));
 app.use(express.raw({ type: 'application/json', limit: '10mb' })); // For HMAC webhook verification
@@ -807,6 +809,10 @@ app.get("/conversations/:conversationId/evaluations", async (req, res) => {
         });
     }
 });
+// Setup integration routes
+setupIntegrationRoutes(app);
+// Setup audit-grade analysis routes
+setupAuditRoutes(app);
 // Railway sets PORT automatically, but we default to 8787
 const port = Number(process.env.PORT || 8787);
 console.log(`Starting server...`);

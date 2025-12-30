@@ -38,6 +38,14 @@ export const routes: Routes = [
     loadComponent: () => import('./member-management/member-management.component').then(m => m.MemberManagementComponent)
   },
   {
+    path: 'ingest',
+    loadComponent: () => import('./ingestion/ingestion.component').then(m => m.IngestionComponent)
+  },
+  {
+    path: 'evaluations/:id',
+    loadComponent: () => import('./evaluation-results/evaluation-results.component').then(m => m.EvaluationResultsComponent)
+  },
+  {
     path: '',
     redirectTo: '/home',
     pathMatch: 'full'

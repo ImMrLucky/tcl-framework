@@ -19,16 +19,8 @@
         <!-- Navigation buttons (optional) -->
         <ng-container *ngIf="showNavigation && isAuthenticated">
           <button mat-button routerLink="/dashboard" routerLinkActive="active">
-            <mat-icon>dashboard</mat-icon>
-            Dashboard
-          </button>
-          <button mat-button routerLink="/call-center-qa" routerLinkActive="active">
-            <mat-icon>phone</mat-icon>
-            Call Center QA
-          </button>
-          <button mat-button routerLink="/original-qa" routerLinkActive="active">
-            <mat-icon>description</mat-icon>
-            Original QA
+            <mat-icon>analytics</mat-icon>
+            Analyze Conversations
           </button>
         </ng-container>
 
@@ -47,8 +39,8 @@
             </div>
             <mat-divider></mat-divider>
             <button mat-menu-item routerLink="/dashboard">
-              <mat-icon>dashboard</mat-icon>
-              <span>Dashboard</span>
+              <mat-icon>analytics</mat-icon>
+              <span>Analyze Conversations</span>
             </button>
             <button mat-menu-item routerLink="/profile">
               <mat-icon>settings</mat-icon>

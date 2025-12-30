@@ -1,0 +1,325 @@
+.results-container {
+  min-height: 100vh;
+  background: #f5f5f5;
+  padding-bottom: 40px;
+}
+
+.container {
+  max-width: 1600px;
+  margin: 0 auto;
+  padding: 20px;
+}
+
+.main-layout {
+  display: grid;
+  grid-template-columns: 1fr 350px;
+  gap: 20px;
+  margin-top: 20px;
+}
+
+@media (max-width: 1200px) {
+  .main-layout {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* A) Audit Summary */
+.audit-summary-card {
+  margin-bottom: 24px;
+}
+
+.audit-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 20px;
+  margin-bottom: 20px;
+}
+
+.summary-metric {
+  text-align: center;
+  padding: 16px;
+  background: #f9f9f9;
+  border-radius: 8px;
+}
+
+.metric-label {
+  font-size: 0.875rem;
+  color: #666;
+  margin-bottom: 8px;
+  font-weight: 500;
+}
+
+.metric-value-large {
+  font-size: 3rem;
+  font-weight: bold;
+  color: #1976d2;
+  line-height: 1;
+  margin-bottom: 8px;
+}
+
+.metric-value {
+  font-size: 2rem;
+  font-weight: bold;
+  color: #d32f2f;
+  line-height: 1;
+  margin-bottom: 4px;
+}
+
+.metric-sublabel {
+  font-size: 0.75rem;
+  color: #999;
+}
+
+.metric-gauge {
+  margin-top: 8px;
+}
+
+.circularity-warning {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #f57c00;
+  font-size: 0.875rem;
+  text-align: left;
+}
+
+.run-integrity-panel,
+.spectral-metrics-panel {
+  margin-top: 16px;
+}
+
+.integrity-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: 12px;
+  padding: 16px 0;
+}
+
+.integrity-item {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.hash-code {
+  font-family: 'Courier New', monospace;
+  font-size: 0.75rem;
+  background: #f5f5f5;
+  padding: 4px 8px;
+  border-radius: 4px;
+  word-break: break-all;
+}
+
+.metrics-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 12px;
+  padding: 16px 0;
+}
+
+.metric-item {
+  padding: 8px;
+  background: #f9f9f9;
+  border-radius: 4px;
+}
+
+/* B) Top Issues Table */
+.issues-card {
+  margin-bottom: 24px;
+}
+
+.issues-table {
+  width: 100%;
+}
+
+.severity-chip {
+  font-weight: 600;
+  font-size: 0.75rem;
+}
+
+.claim-text {
+  max-width: 300px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.875rem;
+}
+
+.where-text {
+  font-size: 0.875rem;
+  font-weight: 500;
+}
+
+.timestamp-text {
+  font-size: 0.75rem;
+  color: #666;
+  margin-top: 4px;
+}
+
+.importance-value {
+  font-size: 0.875rem;
+  font-weight: 500;
+  margin-bottom: 4px;
+}
+
+.importance-bar {
+  height: 4px;
+  width: 100%;
+}
+
+.status-select {
+  width: 140px;
+  font-size: 0.875rem;
+}
+
+.no-evidence {
+  color: #999;
+  font-size: 0.875rem;
+  font-style: italic;
+}
+
+.issue-type-contradiction {
+  color: #d32f2f;
+  font-weight: 500;
+}
+
+.issue-type-unsupported {
+  color: #f57c00;
+  font-weight: 500;
+}
+
+.issue-type-policy_miss,
+.issue-type-policy_violation {
+  color: #b71c1c;
+  font-weight: 600;
+}
+
+.speaker-agent {
+  color: #1976d2;
+  font-weight: 500;
+}
+
+.speaker-customer {
+  color: #388e3c;
+  font-weight: 500;
+}
+
+/* C) Side Panel */
+.side-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.offenders-card,
+.traceability-card {
+  margin-bottom: 0;
+}
+
+.offender-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.offender-item {
+  display: flex;
+  gap: 12px;
+  padding: 12px;
+  background: #f9f9f9;
+  border-radius: 4px;
+  border-left: 3px solid #d32f2f;
+}
+
+.offender-rank {
+  font-size: 1.25rem;
+  font-weight: bold;
+  color: #d32f2f;
+  min-width: 30px;
+}
+
+.offender-content {
+  flex: 1;
+}
+
+.offender-text {
+  font-size: 0.875rem;
+  margin-bottom: 8px;
+  line-height: 1.4;
+}
+
+.offender-blame {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.offender-blame mat-progress-bar {
+  flex: 1;
+  height: 6px;
+}
+
+.blame-value {
+  font-size: 0.75rem;
+  color: #666;
+  font-family: monospace;
+}
+
+.trace-section {
+  margin-bottom: 16px;
+}
+
+.trace-section h4 {
+  margin: 0 0 8px 0;
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: #666;
+}
+
+.edge-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+
+.edge-list li {
+  padding: 6px 0;
+  font-size: 0.875rem;
+  border-bottom: 1px solid #eee;
+}
+
+.claim-link {
+  color: #1976d2;
+  cursor: pointer;
+  text-decoration: underline;
+}
+
+.edge-weight {
+  color: #666;
+  font-family: monospace;
+  margin-left: 8px;
+}
+
+.no-offenders,
+.no-trace {
+  color: #999;
+  font-style: italic;
+  text-align: center;
+  padding: 20px;
+}
+
+.loading-container,
+.error-container {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 40px;
+  gap: 16px;
+}
+
+.error-container mat-icon {
+  font-size: 48px;
+  width: 48px;
+  height: 48px;
+}

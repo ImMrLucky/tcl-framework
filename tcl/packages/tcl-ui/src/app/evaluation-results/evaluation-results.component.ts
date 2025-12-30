@@ -1,0 +1,370 @@
+import { Component, OnInit } from '@angular/core';
+import { CommonModule } from '@angular/common';
+import { ActivatedRoute, Router } from '@angular/router';
+import { MatCardModule } from '@angular/material/card';
+import { MatTableModule } from '@angular/material/table';
+import { MatButtonModule } from '@angular/material/button';
+import { MatIconModule } from '@angular/material/icon';
+import { MatMenuModule } from '@angular/material/menu';
+import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
+import { MatChipsModule } from '@angular/material/chips';
+import { MatTooltipModule } from '@angular/material/tooltip';
+import { MatDialog, MatDialogModule } from '@angular/material/dialog';
+import { MatSnackBar, MatSnackBarModule } from '@angular/material/snack-bar';
+import { MatSelectModule } from '@angular/material/select';
+import { MatProgressBarModule } from '@angular/material/progress-bar';
+import { MatExpansionModule } from '@angular/material/expansion';
+import { AppHeaderComponent } from '../shared/app-header.component';
+import { AuditService, Evaluation, Issue } from '../audit.service';
+import { EvidenceViewerComponent } from '../evidence-viewer/evidence-viewer.component';
+
+@Component({
+  selector: 'app-evaluation-results',
+  standalone: true,
+  imports: [
+    CommonModule,
+    MatCardModule,
+    MatTableModule,
+    MatButtonModule,
+    MatIconModule,
+    MatMenuModule,
+    MatProgressSpinnerModule,
+    MatChipsModule,
+    MatTooltipModule,
+    MatDialogModule,
+    MatSnackBarModule,
+    MatSelectModule,
+    MatProgressBarModule,
+    MatExpansionModule,
+    AppHeaderComponent
+  ],
+  templateUrl: './evaluation-results.component.html',
+  styleUrls: ['./evaluation-results.component.scss']
+})
+export class EvaluationResultsComponent implements OnInit {
+  evaluationId: string = '';
+  evaluation: Evaluation | null = null;
+  issues: Issue[] = [];
+  loading = true;
+  errorMessage = '';
+
+  displayedColumns: string[] = ['severity', 'issueType', 'claim', 'speaker', 'where', 'evidence', 'importance', 'status', 'actions'];
+  
+  sortedIssues: Issue[] = [];
+  topOffenders: Array<{ claimId: string; text: string; nodeBlameNorm: number }> = [];
+  topContradictions: Array<{ claimAId: string; claimBId: string; weight: number }> = [];
+  topSupports: Array<{ claimAId: string; claimBId: string; weight: number }> = [];
+
+  constructor(
+    private route: ActivatedRoute,
+    private router: Router,
+    private auditService: AuditService,
+    private dialog: MatDialog,
+    private snackBar: MatSnackBar
+  ) {}
+
+  ngOnInit() {
+    this.route.params.subscribe(params => {
+      this.evaluationId = params['id'];
+      if (this.evaluationId) {
+        this.loadEvaluation();
+      }
+    });
+  }
+
+  async loadEvaluation() {
+    this.loading = true;
+    this.errorMessage = '';
+
+    try {
+      // Load evaluation
+      const evalResponse = await this.auditService.getEvaluation(this.evaluationId).toPromise();
+      if (!evalResponse) {
+        throw new Error('Failed to load evaluation');
+      }
+      this.evaluation = evalResponse.evaluation;
+
+      // Load issues
+      const issuesResponse = await this.auditService.getIssues(this.evaluationId).toPromise();
+      if (issuesResponse) {
+        this.issues = issuesResponse.issues;
+        this.sortAndProcessIssues();
+        this.extractTopOffenders();
+      }
+    } catch (error: any) {
+      console.error('Load evaluation error:', error);
+      this.errorMessage = error.error?.error || error.message || 'Failed to load evaluation';
+      this.snackBar.open(this.errorMessage, 'Close', { duration: 5000 });
+    } finally {
+      this.loading = false;
+    }
+  }
+
+  getSeverity(issue: Issue): 'critical' | 'high' | 'medium' | 'low' {
+    if (issue.issueType === 'POLICY_VIOLATION' && issue.truthState === 'Contradicted') {
+      return 'critical';
+    }
+    if (issue.truthState === 'Contradicted' || issue.issueType === 'POLICY_VIOLATION') {
+      return 'high';
+    }
+    if (issue.truthState === 'Ungrounded' || issue.issueType === 'POLICY_MISS') {
+      return 'medium';
+    }
+    return 'low';
+  }
+
+  getSeverityColor(severity: 'critical' | 'high' | 'medium' | 'low'): string {
+    switch (severity) {
+      case 'critical': return '#b71c1c';
+      case 'high': return '#d32f2f';
+      case 'medium': return '#f57c00';
+      case 'low': return '#1976d2';
+      default: return '#666';
+    }
+  }
+  
+  getSeverityLabel(severity: 'critical' | 'high' | 'medium' | 'low'): string {
+    return severity.charAt(0).toUpperCase() + severity.slice(1);
+  }
+
+  getClaimText(claimId: string): string {
+    const claim = this.evaluation?.report?.inputs?.claims?.find((c: any) => c.id === claimId);
+    return claim?.text || claimId;
+  }
+
+  async openEvidenceViewer(issue: Issue) {
+    const claim = this.evaluation?.report?.inputs?.claims?.find((c: any) => c.id === issue.claimId);
+    const conversationId = this.evaluation?.conversation_id;
+    
+    // Fetch transcript with turns
+    let transcript = null;
+    let turns: Array<{ idx: number; speaker: string; text: string; startMs?: number; endMs?: number }> = [];
+    
+    if (conversationId) {
+      try {
+        const transcriptResponse = await this.auditService.getConversationTranscript(conversationId).toPromise();
+        if (transcriptResponse) {
+          transcript = transcriptResponse.raw_text;
+          turns = transcriptResponse.turns || [];
+        }
+      } catch (error) {
+        console.warn('Failed to load transcript:', error);
+      }
+    }
+
+    this.dialog.open(EvidenceViewerComponent, {
+      width: '1200px',
+      maxWidth: '95vw',
+      maxHeight: '90vh',
+      data: {
+        issue,
+        claim,
+        conversationId,
+        transcript,
+        turns,
+        evaluation: this.evaluation
+      }
+    });
+  }
+
+  async exportClaimsCSV() {
+    try {
+      const result = await this.auditService.exportClaimsCSV(this.evaluationId).toPromise();
+      if (result?.downloadUrl) {
+        window.open(result.downloadUrl, '_blank');
+        this.snackBar.open('Claims CSV exported successfully', 'Close', { duration: 3000 });
+      }
+    } catch (error: any) {
+      this.snackBar.open('Failed to export CSV: ' + (error.error?.error || error.message), 'Close', { duration: 5000 });
+    }
+  }
+
+  async exportRunJSON() {
+    try {
+      const result = await this.auditService.exportRunJSON(this.evaluationId).toPromise();
+      if (result?.downloadUrl) {
+        window.open(result.downloadUrl, '_blank');
+        this.snackBar.open('Run JSON exported successfully', 'Close', { duration: 3000 });
+      }
+    } catch (error: any) {
+      this.snackBar.open('Failed to export JSON: ' + (error.error?.error || error.message), 'Close', { duration: 5000 });
+    }
+  }
+
+  async exportIssuePDF(claimId: string) {
+    try {
+      const result = await this.auditService.exportIssuePDF(this.evaluationId, claimId).toPromise();
+      if (result?.downloadUrl) {
+        window.open(result.downloadUrl, '_blank');
+        this.snackBar.open('Issue PDF exported successfully', 'Close', { duration: 3000 });
+      }
+    } catch (error: any) {
+      this.snackBar.open('Failed to export PDF: ' + (error.error?.error || error.message), 'Close', { duration: 5000 });
+    }
+  }
+
+  getSpectralScores() {
+    return this.evaluation?.scores?.spectral || {};
+  }
+
+  getCounts() {
+    return this.evaluation?.scores?.counts || {};
+  }
+
+  getRunInfo() {
+    return this.evaluation?.report?.run || {};
+  }
+
+  getSubtitle(): string {
+    return this.evaluation ? `Evaluation ID: ${this.evaluationId}` : '';
+  }
+
+  goToDashboard() {
+    this.router.navigate(['/dashboard']);
+  }
+
+  /**
+   * Sort issues: Contradicted first, then Ungrounded, then Inconclusive
+   * Within each: by nodeBlameNorm desc, then by importance desc
+   */
+  sortAndProcessIssues() {
+    const truthStateOrder: Record<string, number> = {
+      'Contradicted': 1,
+      'Ungrounded': 2,
+      'Inconclusive': 3,
+      'Supported': 4
+    };
+    
+    this.sortedIssues = [...this.issues].sort((a, b) => {
+      // First by truth state
+      const stateA = truthStateOrder[a.truthState] || 99;
+      const stateB = truthStateOrder[b.truthState] || 99;
+      if (stateA !== stateB) {
+        return stateA - stateB;
+      }
+      
+      // Then by nodeBlameNorm desc
+      const blameA = a.nodeBlameNorm || 0;
+      const blameB = b.nodeBlameNorm || 0;
+      if (blameA !== blameB) {
+        return blameB - blameA;
+      }
+      
+      // Then by importance desc
+      return (b.importance || 0) - (a.importance || 0);
+    });
+  }
+
+  /**
+   * Extract top offenders from spectral output
+   */
+  extractTopOffenders() {
+    const spectral = this.evaluation?.report?.spectral;
+    const claims = this.evaluation?.report?.inputs?.claims || [];
+    
+    if (spectral?.nodeBlameNorm && claims.length > 0) {
+      // Create array of claim + blame pairs
+      const claimBlame = claims.map((claim: any, idx: number) => ({
+        claimId: claim.id,
+        text: claim.text,
+        nodeBlameNorm: spectral.nodeBlameNorm?.[idx] || 0
+      }));
+      
+      // Sort by nodeBlameNorm desc and take top 5
+      this.topOffenders = claimBlame
+        .sort((a: { claimId: string; text: string; nodeBlameNorm: number }, b: { claimId: string; text: string; nodeBlameNorm: number }) => b.nodeBlameNorm - a.nodeBlameNorm)
+        .slice(0, 5);
+    }
+    
+    // Extract top contradictions and supports
+    if (spectral?.topBadContradictions) {
+      this.topContradictions = spectral.topBadContradictions.slice(0, 5).map((e: any) => ({
+        claimAId: e.claimAId || e.claimA,
+        claimBId: e.claimBId || e.claimB,
+        weight: e.weight || 0
+      }));
+    }
+    
+    if (spectral?.topBadSupports) {
+      this.topSupports = spectral.topBadSupports.slice(0, 5).map((e: any) => ({
+        claimAId: e.claimAId || e.claimA,
+        claimBId: e.claimBId || e.claimB,
+        weight: e.weight || 0
+      }));
+    }
+  }
+
+  /**
+   * Get "Where" text for an issue (turn numbers)
+   */
+  getWhereText(issue: Issue): string {
+    if (issue.turnStartIdx !== undefined && issue.turnEndIdx !== undefined) {
+      if (issue.turnStartIdx === issue.turnEndIdx) {
+        return `Turn ${issue.turnStartIdx}`;
+      }
+      return `Turns ${issue.turnStartIdx}–${issue.turnEndIdx}`;
+    }
+    return 'N/A';
+  }
+
+  /**
+   * Update issue status
+   */
+  async updateStatus(issue: Issue, newStatus: 'OPEN' | 'ACKNOWLEDGED' | 'RESOLVED' | 'FALSE_POSITIVE') {
+    try {
+      const result = await this.auditService.updateIssueStatus(this.evaluationId, issue.claimId, newStatus).toPromise();
+      if (result?.success) {
+        // Update local issue
+        const issueIndex = this.issues.findIndex(i => i.claimId === issue.claimId);
+        if (issueIndex !== -1) {
+          this.issues[issueIndex].status = newStatus;
+          this.sortAndProcessIssues();
+        }
+        this.snackBar.open('Status updated successfully', 'Close', { duration: 3000 });
+      }
+    } catch (error: any) {
+      this.snackBar.open('Failed to update status: ' + (error.error?.error || error.message), 'Close', { duration: 5000 });
+    }
+  }
+
+  /**
+   * Get circularity warning message
+   */
+  getCircularityWarning(): string | null {
+    const spectral = this.getSpectralScores();
+    const circularityScore = spectral.circularityScore || 0;
+    const cycleMass = spectral.cycleMass || 0;
+    
+    if (circularityScore > 30 || cycleMass > 0.1) {
+      return `Multiple claims appear to mutually support without grounding (Circularity: ${circularityScore.toFixed(1)}, Cycle Mass: ${cycleMass.toFixed(3)})`;
+    }
+    return null;
+  }
+
+  /**
+   * Get issue type label
+   */
+  getIssueTypeLabel(issueType: string): string {
+    const labels: Record<string, string> = {
+      'CONTRADICTION': 'Contradiction',
+      'UNSUPPORTED': 'Unsupported',
+      'POLICY_MISS': 'Policy Miss',
+      'POLICY_VIOLATION': 'Policy Violation'
+    };
+    return labels[issueType] || issueType;
+  }
+
+  /**
+   * Get model fingerprint as text
+   */
+  getModelFingerprintText(): string {
+    const fingerprint = this.getRunInfo().modelFingerprint;
+    if (!fingerprint) return 'N/A';
+    try {
+      return JSON.stringify(fingerprint);
+    } catch {
+      return String(fingerprint);
+    }
+  }
+}
+

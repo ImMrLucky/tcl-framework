@@ -1,0 +1,179 @@
+<div class="evidence-viewer">
+  <div class="dialog-header">
+    <h2>Evidence Viewer</h2>
+    <button mat-icon-button (click)="close()">
+      <mat-icon>close</mat-icon>
+    </button>
+  </div>
+
+  <div class="dialog-content">
+    <div class="split-panel">
+      <!-- Left: Transcript Context -->
+      <div class="transcript-panel">
+        <h3>
+          <mat-icon>description</mat-icon>
+          Transcript Context
+        </h3>
+        <div class="transcript-container" *ngIf="data.turns && data.turns.length > 0">
+          <div 
+            *ngFor="let turn of getContextTurns()" 
+            class="turn-item"
+            [class.turn-claim]="isClaimTurn(turn.idx)"
+            [class.turn-evidence]="isEvidenceTurn(turn.idx)"
+            [class.turn-highlight]="isHighlightedTurn(turn.idx)">
+            <div class="turn-header">
+              <span class="turn-number">Turn {{ turn.idx }}</span>
+              <span class="turn-speaker" [class.speaker-agent]="turn.speaker === 'AGENT'" [class.speaker-customer]="turn.speaker === 'CUSTOMER'">
+                {{ turn.speaker }}:
+              </span>
+              <span class="turn-timestamp" *ngIf="turn.startMs !== undefined">
+                {{ formatTimestamp(turn.startMs) }}
+              </span>
+            </div>
+            <div class="turn-text">{{ turn.text }}</div>
+            <div class="turn-label claim-label" *ngIf="isClaimTurn(turn.idx)">Claim</div>
+            <div class="turn-label evidence-label" *ngIf="isEvidenceTurn(turn.idx)">Evidence</div>
+          </div>
+        </div>
+        <div class="transcript-fallback" *ngIf="!data.turns || data.turns.length === 0">
+          <p>Transcript not available. Raw text:</p>
+          <pre>{{ data.transcript || 'No transcript data' }}</pre>
+        </div>
+      </div>
+
+      <!-- Right: Why It's Flagged -->
+      <div class="analysis-panel">
+        <h3>
+          <mat-icon>psychology</mat-icon>
+          Why It's Flagged
+        </h3>
+        
+        <!-- Truth State -->
+        <mat-card class="analysis-card">
+          <mat-card-header>
+            <mat-card-title>Truth State</mat-card-title>
+          </mat-card-header>
+          <mat-card-content>
+            <mat-chip 
+              [style.background-color]="getTruthStateColor(data.issue.truthState)" 
+              [style.color]="'white'"
+              class="truth-state-chip">
+              {{ data.issue.truthState }}
+            </mat-chip>
+            <div class="state-explanation" *ngIf="getStateExplanation(data.issue.truthState)">
+              {{ getStateExplanation(data.issue.truthState) }}
+            </div>
+          </mat-card-content>
+        </mat-card>
+
+        <!-- Node Blame -->
+        <mat-card class="analysis-card" *ngIf="data.issue.nodeBlameNorm !== undefined">
+          <mat-card-header>
+            <mat-card-title>Node Blame (Normalized)</mat-card-title>
+          </mat-card-header>
+          <mat-card-content>
+            <div class="blame-display">
+              <div class="blame-value">{{ data.issue.nodeBlameNorm.toFixed(3) }}</div>
+              <mat-progress-bar 
+                mode="determinate" 
+                [value]="data.issue.nodeBlameNorm * 100"
+                color="warn"
+                class="blame-bar">
+              </mat-progress-bar>
+              <div class="blame-explanation">
+                Higher values indicate this claim contributes more to contradictions or inconsistencies.
+              </div>
+            </div>
+          </mat-card-content>
+        </mat-card>
+
+        <!-- Importance -->
+        <mat-card class="analysis-card" *ngIf="data.issue.importance !== undefined">
+          <mat-card-header>
+            <mat-card-title>Importance Score</mat-card-title>
+          </mat-card-header>
+          <mat-card-content>
+            <div class="importance-display">
+              <div class="importance-value">{{ data.issue.importance.toFixed(3) }}</div>
+              <mat-progress-bar 
+                mode="determinate" 
+                [value]="data.issue.importance * 100"
+                color="primary"
+                class="importance-bar">
+              </mat-progress-bar>
+            </div>
+          </mat-card-content>
+        </mat-card>
+
+        <!-- Top Contributing Edges -->
+        <mat-card class="analysis-card" *ngIf="data.issue.relatedEdges">
+          <mat-card-header>
+            <mat-card-title>Top Contributing Edges</mat-card-title>
+          </mat-card-header>
+          <mat-card-content>
+            <div class="edges-section" *ngIf="data.issue.relatedEdges.topBadContradictions?.length > 0">
+              <h4>Contradictions</h4>
+              <ul class="edge-list">
+                <li *ngFor="let edge of data.issue.relatedEdges.topBadContradictions.slice(0, 5)">
+                  <div class="edge-item">
+                    <span class="claim-link">{{ edge.claimAId || edge.claimA }}</span>
+                    <mat-icon class="edge-icon">swap_horiz</mat-icon>
+                    <span class="claim-link">{{ edge.claimBId || edge.claimB }}</span>
+                    <span class="edge-weight">weight: {{ edge.weight?.toFixed(3) || 'N/A' }}</span>
+                  </div>
+                </li>
+              </ul>
+            </div>
+            <div class="edges-section" *ngIf="data.issue.relatedEdges.topBadSupports?.length > 0">
+              <h4>Supports</h4>
+              <ul class="edge-list">
+                <li *ngFor="let edge of data.issue.relatedEdges.topBadSupports.slice(0, 5)">
+                  <div class="edge-item">
+                    <span class="claim-link">{{ edge.claimAId || edge.claimA }}</span>
+                    <mat-icon class="edge-icon">swap_horiz</mat-icon>
+                    <span class="claim-link">{{ edge.claimBId || edge.claimB }}</span>
+                    <span class="edge-weight">weight: {{ edge.weight?.toFixed(3) || 'N/A' }}</span>
+                  </div>
+                </li>
+              </ul>
+            </div>
+            <div *ngIf="(!data.issue.relatedEdges.topBadContradictions || data.issue.relatedEdges.topBadContradictions.length === 0) && 
+                        (!data.issue.relatedEdges.topBadSupports || data.issue.relatedEdges.topBadSupports.length === 0)" 
+                 class="no-edges">
+              No related edges found
+            </div>
+          </mat-card-content>
+        </mat-card>
+
+        <!-- Claim Details -->
+        <mat-card class="analysis-card">
+          <mat-card-header>
+            <mat-card-title>Claim Details</mat-card-title>
+          </mat-card-header>
+          <mat-card-content>
+            <div class="detail-item">
+              <strong>Claim ID:</strong> {{ data.claim?.id }}
+            </div>
+            <div class="detail-item">
+              <strong>Claim Text:</strong>
+              <div class="claim-text-box">{{ data.claim?.text }}</div>
+            </div>
+            <div class="detail-item">
+              <strong>Speaker:</strong> {{ data.issue.speaker }}
+            </div>
+            <div class="detail-item">
+              <strong>Turn Index:</strong> {{ data.issue.turnStartIdx ?? 'N/A' }}
+            </div>
+            <div class="detail-item">
+              <strong>Issue Type:</strong> {{ data.issue.issueType }}
+            </div>
+          </mat-card-content>
+        </mat-card>
+      </div>
+    </div>
+  </div>
+
+  <div class="dialog-actions">
+    <button mat-button (click)="close()">Close</button>
+  </div>
+</div>

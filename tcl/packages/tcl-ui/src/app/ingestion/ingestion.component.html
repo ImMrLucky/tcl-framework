@@ -1,0 +1,93 @@
+<div class="ingestion-container">
+  <app-header 
+    pageTitle="Ingest Conversation" 
+    pageSubtitle="Upload or paste a transcript to analyze"
+    [showNavigation]="true">
+  </app-header>
+
+  <div class="container">
+    <mat-card class="ingestion-card">
+      <mat-card-header>
+        <mat-card-title>
+          <mat-icon>upload_file</mat-icon>
+          Conversation Input
+        </mat-card-title>
+      </mat-card-header>
+      <mat-card-content>
+        <form (ngSubmit)="onSubmit()" #ingestionForm="ngForm">
+          <div class="form-row">
+            <mat-form-field appearance="outline" class="full-width">
+              <mat-label>Title (Optional)</mat-label>
+              <input matInput [(ngModel)]="title" name="title" placeholder="e.g., Customer Support Call - 2024-01-15">
+            </mat-form-field>
+          </div>
+
+          <div class="form-row">
+            <mat-form-field appearance="outline" class="full-width">
+              <mat-label>Channel</mat-label>
+              <mat-select [(ngModel)]="channel" name="channel">
+                <mat-option value="call">Call</mat-option>
+                <mat-option value="chat">Chat</mat-option>
+                <mat-option value="email">Email</mat-option>
+                <mat-option value="other">Other</mat-option>
+              </mat-select>
+            </mat-form-field>
+          </div>
+
+          <div class="form-row">
+            <mat-form-field appearance="outline" class="full-width">
+              <mat-label>Transcript</mat-label>
+              <textarea
+                matInput
+                [(ngModel)]="transcript"
+                name="transcript"
+                rows="15"
+                placeholder="Paste transcript here... (Agent: ... Customer: ...)"
+                required
+              ></textarea>
+              <mat-hint>Enter the full conversation transcript. Format: Agent: ... Customer: ...</mat-hint>
+            </mat-form-field>
+          </div>
+
+          <div class="file-upload-section">
+            <input
+              type="file"
+              #fileInput
+              (change)="onFileSelected($event)"
+              accept=".txt,.csv,.json"
+              style="display: none"
+            />
+            <button
+              mat-stroked-button
+              type="button"
+              (click)="fileInput.click()"
+              [disabled]="loading"
+            >
+              <mat-icon>upload</mat-icon>
+              Upload File (.txt, .csv, .json)
+            </button>
+          </div>
+
+          <div *ngIf="errorMessage" class="error-message">
+            <mat-icon>error</mat-icon>
+            {{ errorMessage }}
+          </div>
+
+          <div class="submit-section">
+            <button
+              mat-raised-button
+              color="primary"
+              type="submit"
+              [disabled]="loading || !transcript || transcript.trim().length === 0"
+            >
+              <mat-spinner *ngIf="loading" diameter="20" class="inline-spinner"></mat-spinner>
+              <mat-icon *ngIf="!loading">play_arrow</mat-icon>
+              {{ loading ? 'Processing...' : 'Run Analysis' }}
+            </button>
+          </div>
+        </form>
+      </mat-card-content>
+    </mat-card>
+  </div>
+</div>
+

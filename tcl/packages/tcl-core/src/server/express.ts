@@ -22,6 +22,8 @@ import {
   removeMember,
   listMembers
 } from "./member-management.js";
+import { setupIntegrationRoutes } from "./integrations/routes.js";
+import { setupAuditRoutes } from "./audit/routes.js";
 
 const app = express();
 app.use(express.json({ limit: "10mb" }));
@@ -956,6 +958,12 @@ app.get("/conversations/:conversationId/evaluations", async (req, res) => {
     });
   }
 });
+
+// Setup integration routes
+setupIntegrationRoutes(app);
+
+// Setup audit-grade analysis routes
+setupAuditRoutes(app);
 
 // Railway sets PORT automatically, but we default to 8787
 const port = Number(process.env.PORT || 8787);
