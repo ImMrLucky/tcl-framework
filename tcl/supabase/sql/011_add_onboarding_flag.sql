@@ -16,3 +16,7 @@ WHERE (company_industry IS NOT NULL AND company_industry != '')
    OR (call_operation IS NOT NULL AND call_operation != '')
    OR (primary_use_case IS NOT NULL AND primary_use_case != '');
 
+-- Refresh PostgREST schema cache so the new column is immediately available
+-- This is critical - without this, Supabase API will return PGRST204 errors
+NOTIFY pgrst, 'reload schema';
+

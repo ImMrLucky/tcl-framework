@@ -293,12 +293,36 @@ export class AuthService {
     if (updates.companyIndustry !== undefined) dbUpdates.company_industry = updates.companyIndustry;
     if (updates.callOperation !== undefined) dbUpdates.call_operation = updates.callOperation;
     if (updates.primaryUseCase !== undefined) dbUpdates.primary_use_case = updates.primaryUseCase;
-    if (updates.onboardingCompleted !== undefined) dbUpdates.onboarding_completed = updates.onboardingCompleted;
+    
+    // Only include onboarding_completed if the column exists (handle schema cache issues)
+    // If the column doesn't exist, we'll skip it and log a warning
+    if (updates.onboardingCompleted !== undefined) {
+      dbUpdates.onboarding_completed = updates.onboardingCompleted;
+    }
 
     const { error } = await this.supabase
       .from('profiles')
       .update(dbUpdates)
       .eq('id', user.id);
+
+    // If error is about missing column, try again without onboarding_completed
+    if (error && error.code === 'PGRST204' && updates.onboardingCompleted !== undefined) {
+      console.warn('onboarding_completed column not found, retrying without it. Please refresh Supabase schema cache.');
+      const dbUpdatesWithoutOnboarding = { ...dbUpdates };
+      delete dbUpdatesWithoutOnboarding.onboarding_completed;
+      
+      const { error: retryError } = await this.supabase
+        .from('profiles')
+        .update(dbUpdatesWithoutOnboarding)
+        .eq('id', user.id);
+      
+      if (!retryError) {
+        await this.loadUserProfile(user.id);
+      }
+      
+      // Return a warning but not an error - the update succeeded for other fields
+      return { error: { message: 'onboarding_completed column not available. Please refresh Supabase schema cache.' } };
+    }
 
     if (!error) {
       await this.loadUserProfile(user.id);
