@@ -162,11 +162,57 @@ export class AuthService {
     }, 100);
   }
 
-  async signUp(email: string, password: string): Promise<{ error: AuthError | null }> {
+  async signUp(email: string, password: string): Promise<{ error: AuthError | null; duplicateAccount?: boolean }> {
+    // Check if user already exists before attempting signup
+    try {
+      const apiUrl = this.getApiBaseUrl();
+      const checkResponse = await fetch(`${apiUrl}/auth/check-email`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email })
+      });
+      
+      if (checkResponse.ok) {
+        const checkData = await checkResponse.json();
+        if (checkData.exists) {
+          // User already exists - return special error
+          return { 
+            error: { 
+              message: 'An account with this email already exists. Please sign in or reset your password.',
+              name: 'UserAlreadyExists',
+              status: 400
+            } as AuthError,
+            duplicateAccount: true
+          };
+        }
+      }
+    } catch (err) {
+      console.error('Error checking email:', err);
+      // Continue with signup attempt if check fails
+    }
+
     const { data, error } = await this.supabase.auth.signUp({
       email,
       password
     });
+
+    // Check for duplicate signup error from Supabase
+    if (error) {
+      // Supabase may return an error if user already exists
+      if (error.message?.toLowerCase().includes('already registered') || 
+          error.message?.toLowerCase().includes('user already exists') ||
+          error.message?.toLowerCase().includes('already been registered')) {
+        return { 
+          error: { 
+            message: 'An account with this email already exists. Please sign in or reset your password.',
+            name: 'UserAlreadyExists',
+            status: 400
+          } as AuthError,
+          duplicateAccount: true
+        };
+      }
+      return { error, duplicateAccount: false };
+    }
 
     if (!error && data.user) {
       // Provision user (create profile + org)

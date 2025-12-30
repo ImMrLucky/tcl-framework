@@ -472,5 +472,61 @@ export function setupIntegrationRoutes(app: express.Application) {
       res.status(500).json({ error: error.message });
     }
   });
+
+  // Trigger S3 Drop ingestion
+  app.post('/integrations/:integration_id/ingest', async (req, res) => {
+    try {
+      const orgContext = await getOrgContext(req);
+      if (!orgContext) {
+        return res.status(401).json({ error: 'Unauthorized' });
+      }
+
+      if (!supabaseAdmin) {
+        return res.status(503).json({ error: 'Supabase not configured' });
+      }
+
+      const { integration_id } = req.params;
+      const { since, limit } = req.body;
+
+      // Get integration
+      const { data: integration, error: intError } = await supabaseAdmin
+        .from('integrations')
+        .select('*')
+        .eq('id', integration_id)
+        .eq('org_id', orgContext.orgId)
+        .eq('env', orgContext.env)
+        .single();
+
+      if (intError || !integration) {
+        return res.status(404).json({ error: 'Integration not found' });
+      }
+
+      if (integration.integration_type !== 's3_drop') {
+        return res.status(400).json({ error: 'Integration is not an S3 Drop connector' });
+      }
+
+      // Import and instantiate connector
+      const { S3DropConnector } = await import('./connectors/s3-drop.js');
+      const connector = new S3DropConnector({
+        orgId: orgContext.orgId,
+        projectId: orgContext.projectId || '',
+        env: orgContext.env,
+        integrationId: integration.id,
+        config: integration.config || {},
+        secrets: integration.secrets || {},
+      });
+
+      // Run ingestion
+      const result = await connector.ingest({ since, limit });
+
+      res.json({
+        success: true,
+        conversation_id: result.conversationId,
+        artifacts_created: result.artifacts.length,
+      });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
 }
 

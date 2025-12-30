@@ -52,3 +52,38 @@
   margin-right: 8px;
 }
 
+.file-formats-hint {
+  margin-top: 8px;
+  font-size: 0.75rem;
+  color: #666;
+}
+
+.selected-file {
+  margin-top: 12px;
+  padding: 12px;
+  background: #e3f2fd;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.875rem;
+}
+
+.audio-indicator {
+  color: #1976d2;
+  font-weight: 500;
+  margin-left: 8px;
+}
+
+.transcription-progress {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 16px;
+  background: #e3f2fd;
+  border-radius: 4px;
+  margin: 16px 0;
+  color: #1976d2;
+  font-weight: 500;
+}
+

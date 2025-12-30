@@ -54,7 +54,7 @@
               type="file"
               #fileInput
               (change)="onFileSelected($event)"
-              accept=".txt,.csv,.json"
+              accept=".txt,.csv,.json,.wav,.mp3,.flac,.m4a"
               style="display: none"
             />
             <button
@@ -64,8 +64,16 @@
               [disabled]="loading"
             >
               <mat-icon>upload</mat-icon>
-              Upload File (.txt, .csv, .json)
+              Upload File
             </button>
+            <div class="file-formats-hint">
+              Supported formats: .txt, .csv, .json, .wav, .mp3, .flac, .m4a
+            </div>
+            <div *ngIf="selectedFileName" class="selected-file">
+              <mat-icon>insert_drive_file</mat-icon>
+              {{ selectedFileName }}
+              <span *ngIf="isAudioFile" class="audio-indicator">(Audio - will be transcribed)</span>
+            </div>
           </div>
 
           <div *ngIf="errorMessage" class="error-message">
@@ -73,16 +81,22 @@
             {{ errorMessage }}
           </div>
 
+          <div *ngIf="transcriptionInProgress" class="transcription-progress">
+            <mat-spinner diameter="24"></mat-spinner>
+            <span>Transcribing audio file...</span>
+          </div>
+
           <div class="submit-section">
             <button
               mat-raised-button
               color="primary"
               type="submit"
-              [disabled]="loading || !transcript || transcript.trim().length === 0"
+              [disabled]="loading || transcriptionInProgress || (!transcript || transcript.trim().length === 0) && !isAudioFile"
             >
               <mat-spinner *ngIf="loading" diameter="20" class="inline-spinner"></mat-spinner>
-              <mat-icon *ngIf="!loading">play_arrow</mat-icon>
-              {{ loading ? 'Processing...' : 'Run Analysis' }}
+              <mat-icon *ngIf="!loading && !transcriptionInProgress">play_arrow</mat-icon>
+              <span *ngIf="transcriptionInProgress">Transcribing...</span>
+              <span *ngIf="!transcriptionInProgress">{{ loading ? 'Processing...' : (isAudioFile && !transcript ? 'Transcribe & Analyze' : 'Run Analysis') }}</span>
             </button>
           </div>
         </form>

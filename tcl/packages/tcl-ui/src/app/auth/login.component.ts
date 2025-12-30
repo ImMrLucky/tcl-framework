@@ -188,7 +188,28 @@ export class LoginComponent {
       }
 
       if (result.error) {
-        this.errorMessage = result.error.message || 'Authentication failed';
+        // Handle duplicate account case
+        if (result.duplicateAccount) {
+          this.errorMessage = result.error.message || 'An account with this email already exists.';
+          // Show option to go to login or reset password
+          setTimeout(() => {
+            if (confirm('Would you like to sign in instead? Click OK to sign in, or Cancel to reset your password.')) {
+              this.isSignUp = false;
+              this.errorMessage = '';
+              this.authForm.patchValue({ email, password: '' });
+            } else {
+              // Redirect to password reset
+              this.router.navigate(['/login'], { 
+                queryParams: { 
+                  resetPassword: 'true',
+                  email: email 
+                } 
+              });
+            }
+          }, 100);
+        } else {
+          this.errorMessage = result.error.message || 'Authentication failed';
+        }
       } else {
         // Always redirect to dashboard - onboarding modal will show if needed
         await new Promise(resolve => setTimeout(resolve, 500));

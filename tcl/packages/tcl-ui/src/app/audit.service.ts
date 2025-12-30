@@ -1,6 +1,7 @@
 import { Injectable } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
 import { Observable } from 'rxjs';
+import { map } from 'rxjs/operators';
 
 export interface ConversationIngestRequest {
   transcript: string;
@@ -12,6 +13,24 @@ export interface ConversationIngestRequest {
 
 export interface ConversationIngestResponse {
   conversationId: string;
+  conversation: {
+    id: string;
+    org_id: string;
+    project_id: string;
+    env: string;
+    title: string | null;
+    created_at: string;
+  };
+}
+
+export interface ConversationCreateRequest {
+  title?: string;
+  content: string;
+  externalId?: string;
+  metadata?: Record<string, any>;
+}
+
+export interface ConversationCreateResponse {
   conversation: {
     id: string;
     org_id: string;
@@ -117,12 +136,79 @@ export class AuditService {
   constructor(private http: HttpClient) {}
 
   /**
-   * Ingest a conversation (transcript)
+   * Ingest a conversation (transcript) - DEPRECATED: Use createConversation instead
    */
   ingestConversation(request: ConversationIngestRequest): Observable<ConversationIngestResponse> {
-    return this.http.post<ConversationIngestResponse>(
-      `${this.apiBase}/conversations/ingest`,
+    // Convert to new format
+    return this.createConversation({
+      title: request.title,
+      content: request.transcript,
+      externalId: request.externalId,
+      metadata: {
+        ...request.metadata,
+        channel: request.channel
+      }
+    }).pipe(
+      map(response => ({
+        conversationId: response.conversation.id,
+        conversation: response.conversation
+      }))
+    );
+  }
+
+  /**
+   * Create a conversation (new REST endpoint)
+   */
+  createConversation(request: ConversationCreateRequest): Observable<ConversationCreateResponse> {
+    return this.http.post<ConversationCreateResponse>(
+      `${this.apiBase}/conversations`,
       request
+    );
+  }
+
+  /**
+   * Get conversations
+   */
+  getConversations(params?: {
+    limit?: number;
+    offset?: number;
+    projectId?: string;
+    env?: string;
+  }): Observable<{ conversations: Array<{
+    id: string;
+    org_id: string;
+    project_id: string;
+    env: string;
+    external_id: string | null;
+    title: string | null;
+    created_at: string;
+  }> }> {
+    const queryParams = new URLSearchParams();
+    if (params?.limit) queryParams.set('limit', params.limit.toString());
+    if (params?.offset) queryParams.set('offset', params.offset.toString());
+    if (params?.projectId) queryParams.set('projectId', params.projectId);
+    if (params?.env) queryParams.set('env', params.env);
+    
+    const query = queryParams.toString();
+    return this.http.get<{ conversations: Array<any> }>(
+      `${this.apiBase}/conversations${query ? '?' + query : ''}`
+    );
+  }
+
+  /**
+   * Get evaluations for a conversation
+   */
+  getConversationEvaluations(conversationId: string, params?: {
+    limit?: number;
+    offset?: number;
+  }): Observable<{ evaluations: Evaluation[] }> {
+    const queryParams = new URLSearchParams();
+    if (params?.limit) queryParams.set('limit', params.limit.toString());
+    if (params?.offset) queryParams.set('offset', params.offset.toString());
+    
+    const query = queryParams.toString();
+    return this.http.get<{ evaluations: Evaluation[] }>(
+      `${this.apiBase}/conversations/${conversationId}/evaluations${query ? '?' + query : ''}`
     );
   }
 

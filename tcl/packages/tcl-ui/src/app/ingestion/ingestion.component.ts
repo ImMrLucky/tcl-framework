@@ -52,6 +52,10 @@ export class IngestionComponent implements OnInit {
   channel: 'call' | 'chat' | 'email' | 'other' = 'call';
   loading = false;
   errorMessage = '';
+  selectedFile: File | null = null;
+  selectedFileName = '';
+  isAudioFile = false;
+  transcriptionInProgress = false;
 
   constructor(
     private auditService: AuditService,
@@ -68,20 +72,43 @@ export class IngestionComponent implements OnInit {
     const input = event.target as HTMLInputElement;
     if (input.files && input.files.length > 0) {
       const file = input.files[0];
-      try {
-        const text = await file.text();
-        this.transcript = text;
-        this.snackBar.open('File loaded successfully', 'Close', { duration: 3000 });
-      } catch (error: any) {
-        this.errorMessage = `Failed to read file: ${error.message}`;
-        this.snackBar.open(this.errorMessage, 'Close', { duration: 5000 });
+      this.selectedFile = file;
+      this.selectedFileName = file.name;
+      
+      // Check if it's an audio file
+      const audioExtensions = ['.wav', '.mp3', '.flac', '.m4a', '.ogg', '.opus', '.aac'];
+      const fileExt = '.' + file.name.split('.').pop()?.toLowerCase();
+      this.isAudioFile = audioExtensions.includes(fileExt);
+      
+      if (this.isAudioFile) {
+        // For audio files, we'll transcribe on submit
+        this.transcript = '';
+        this.snackBar.open('Audio file selected. Transcription will occur when you submit.', 'Close', { duration: 4000 });
+      } else {
+        // For text files, read directly
+        try {
+          const text = await file.text();
+          this.transcript = text;
+          this.snackBar.open('File loaded successfully', 'Close', { duration: 3000 });
+        } catch (error: any) {
+          this.errorMessage = `Failed to read file: ${error.message}`;
+          this.snackBar.open(this.errorMessage, 'Close', { duration: 5000 });
+        }
       }
     }
   }
 
   async onSubmit() {
+    // If audio file is selected, transcribe it first
+    if (this.isAudioFile && this.selectedFile) {
+      await this.transcribeAudio();
+      if (!this.transcript || this.transcript.trim().length === 0) {
+        return; // Error already shown in transcribeAudio
+      }
+    }
+
     if (!this.transcript || this.transcript.trim().length === 0) {
-      this.errorMessage = 'Please enter or upload a transcript';
+      this.errorMessage = 'Please enter or upload a transcript, or select an audio file';
       this.snackBar.open(this.errorMessage, 'Close', { duration: 3000 });
       return;
     }
@@ -90,18 +117,22 @@ export class IngestionComponent implements OnInit {
     this.errorMessage = '';
 
     try {
-      // Step 1: Ingest conversation
-      const ingestResponse = await this.auditService.ingestConversation({
-        transcript: this.transcript,
-        title: this.title || undefined,
-        channel: this.channel
+      // Step 1: Create conversation using new REST endpoint
+      const createResponse = await this.auditService.createConversation({
+        title: this.title || this.selectedFileName || undefined,
+        content: this.transcript,
+        metadata: {
+          channel: this.channel,
+          source_file: this.selectedFileName || null,
+          is_audio: this.isAudioFile
+        }
       }).toPromise();
 
-      if (!ingestResponse) {
-        throw new Error('Failed to ingest conversation');
+      if (!createResponse || !createResponse.conversation) {
+        throw new Error('Failed to create conversation');
       }
 
-      const conversationId = ingestResponse.conversationId;
+      const conversationId = createResponse.conversation.id;
 
       // Step 2: Extract claims from transcript
       // Note: We're using the extractClaims function directly here
@@ -113,35 +144,44 @@ export class IngestionComponent implements OnInit {
         throw new Error('No claims extracted from transcript');
       }
 
-      // Step 3: Build graph (simplified - in production, this should be done server-side)
-      // For now, we'll create empty supports/contradictions and let the server build the graph
-      const supports: Array<{ claimA: string; claimB: string; weight?: number }> = [];
-      const contradictions: Array<{ claimA: string; claimB: string; weight?: number }> = [];
-      const grounded: string[] = [];
+      // Step 2: Trigger evaluation using /validate endpoint with conversation_id
+      // The backend will extract claims and run the evaluation
+      const apiUrl = this.auditService['apiBase'];
+      const validateResponse = await fetch(`${apiUrl}/validate`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          question: this.transcript,
+          answer: '',
+          sources: [],
+          options: {},
+          conversation_id: conversationId
+        })
+      });
 
-      // Step 4: Run evaluation
-      const evaluationResponse = await this.auditService.runEvaluation({
-        conversationId,
-        claims: claims.map(c => ({
-          id: c.id,
-          text: c.text,
-          speaker: c.meta?.speaker === 'Agent' ? 'AGENT' : c.meta?.speaker === 'Customer' ? 'CUSTOMER' : undefined,
-          turnIndex: c.meta?.turnIndex
-        })),
-        supports,
-        contradictions,
-        grounded,
-        config: {
-          // Use default config
-        }
-      }).toPromise();
-
-      if (!evaluationResponse) {
-        throw new Error('Failed to run evaluation');
+      if (!validateResponse.ok) {
+        const errorData = await validateResponse.json();
+        throw new Error(errorData.error || 'Failed to run evaluation');
       }
 
-      // Step 5: Navigate to results page
-      this.router.navigate(['/evaluations', evaluationResponse.evaluationId]);
+      const evaluationData = await validateResponse.json();
+      
+      // Step 3: Get the evaluation ID from the response or fetch it from conversation
+      // The evaluation should be linked to the conversation now
+      // We'll navigate to the conversation evaluations page
+      // First, wait a moment for the evaluation to be saved
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      
+      // Get evaluations for this conversation
+      const evaluationsResponse = await this.auditService.getConversationEvaluations(conversationId, { limit: 1 }).toPromise();
+      
+      if (evaluationsResponse && evaluationsResponse.evaluations && evaluationsResponse.evaluations.length > 0) {
+        // Navigate to the most recent evaluation
+        this.router.navigate(['/evaluations', evaluationsResponse.evaluations[0].id]);
+      } else {
+        // Fallback: navigate to conversation page
+        this.router.navigate(['/conversations', conversationId]);
+      }
     } catch (error: any) {
       console.error('Ingestion error:', error);
       this.errorMessage = error.error?.error || error.message || 'An unexpected error occurred';
@@ -207,6 +247,51 @@ export class IngestionComponent implements OnInit {
     }
 
     return claims;
+  }
+
+  /**
+   * Transcribe audio file
+   */
+  async transcribeAudio(): Promise<void> {
+    if (!this.selectedFile) {
+      this.errorMessage = 'No audio file selected';
+      return;
+    }
+
+    this.transcriptionInProgress = true;
+    this.errorMessage = '';
+
+    try {
+      const apiUrl = this.auditService['apiBase'];
+      const formData = new FormData();
+      formData.append('audio', this.selectedFile);
+      formData.append('filename', this.selectedFile.name);
+
+      const response = await fetch(`${apiUrl}/transcribe`, {
+        method: 'POST',
+        body: formData
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || 'Transcription failed');
+      }
+
+      const result = await response.json();
+      this.transcript = result.transcript || result.text || '';
+      
+      if (!this.transcript || this.transcript.trim().length === 0) {
+        throw new Error('Transcription returned empty result');
+      }
+
+      this.snackBar.open('Audio transcribed successfully', 'Close', { duration: 3000 });
+    } catch (error: any) {
+      console.error('Transcription error:', error);
+      this.errorMessage = error.message || 'Failed to transcribe audio';
+      this.snackBar.open(this.errorMessage, 'Close', { duration: 5000 });
+    } finally {
+      this.transcriptionInProgress = false;
+    }
   }
 }
 

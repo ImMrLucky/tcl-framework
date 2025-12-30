@@ -1,6 +1,8 @@
 import express from "express";
 import { URL } from "url";
+import multer from "multer";
 import type { ValidateInput, BatchValidateInput, BatchValidateOutput } from "../types.js";
+import { transcribeAudio, isValidAudioFormat } from "./transcription.js";
 import { 
   supabaseAdmin, 
   verifyApiKey,
@@ -29,6 +31,25 @@ const app = express();
 app.use(express.json({ limit: "10mb" }));
 app.use(express.raw({ type: 'application/json', limit: '10mb' })); // For HMAC webhook verification
 app.use(express.urlencoded({ extended: true })); // Enable query string parsing
+
+// Configure multer for file uploads (memory storage - we don't save files)
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: {
+    fileSize: 100 * 1024 * 1024, // 100MB max
+  },
+  fileFilter: (req, file, cb) => {
+    // Allow audio files and text files
+    const isAudio = isValidAudioFormat(file.originalname);
+    const isText = /\.(txt|csv|json)$/i.test(file.originalname);
+    
+    if (isAudio || isText) {
+      cb(null, true);
+    } else {
+      cb(new Error('Invalid file type. Supported: .wav, .mp3, .flac, .m4a, .txt, .csv, .json'));
+    }
+  },
+});
 
 // Health check endpoint - must work even if other imports fail
 app.get("/health", (req, res) => {
@@ -155,11 +176,15 @@ app.post("/validate", async (req, res) => {
     const context = await getOrgContext(req);
     if (context && supabaseAdmin) {
       try {
+        // Check if conversation_id is provided in request body
+        const conversationId = (req.body as any).conversation_id;
+        
         const { error: dbError } = await supabaseAdmin
           .from('evaluations')
           .insert({
             org_id: context.orgId,
             project_id: context.projectId || null,
+            conversation_id: conversationId || null,
             env: context.env,
             scores: out.scores || {},
             refusal: out.refusal || false,
@@ -344,6 +369,38 @@ app.post("/validate/batch", async (req, res) => {
   }
 });
 
+// Check if user exists (for duplicate signup prevention)
+app.post("/auth/check-email", async (req, res) => {
+  try {
+    const { email } = req.body;
+    
+    if (!email) {
+      return res.status(400).json({ error: "email is required" });
+    }
+    
+    if (!supabaseAdmin) {
+      return res.status(503).json({ error: "Supabase not configured" });
+    }
+    
+    // Check if user exists in auth.users
+    const { data: users, error } = await supabaseAdmin.auth.admin.listUsers();
+    
+    if (error) {
+      console.error('Error checking email:', error);
+      return res.status(500).json({ error: "Failed to check email" });
+    }
+    
+    const userExists = users?.users?.some(u => u.email?.toLowerCase() === email.toLowerCase());
+    
+    res.json({ exists: !!userExists });
+  } catch (e: any) {
+    console.error("Check email error:", e);
+    res.status(500).json({ 
+      error: e?.message ?? "unknown error"
+    });
+  }
+});
+
 // Auth provision endpoint (called after user signs up/logs in)
 app.post("/auth/provision", async (req, res) => {
   try {
@@ -355,6 +412,31 @@ app.post("/auth/provision", async (req, res) => {
     
     if (!supabaseAdmin) {
       return res.status(503).json({ error: "Supabase not configured" });
+    }
+    
+    // Check if user already has an org (duplicate signup)
+    const { data: existingOrgs } = await supabaseAdmin
+      .from('org_members')
+      .select('org_id')
+      .eq('user_id', userId)
+      .limit(1)
+      .maybeSingle();
+    
+    if (existingOrgs?.org_id) {
+      console.log(`User ${userId} already provisioned, returning existing org`);
+      // Get project for this org
+      const { data: projects } = await supabaseAdmin
+        .from('projects')
+        .select('id')
+        .eq('org_id', existingOrgs.org_id)
+        .limit(1)
+        .maybeSingle();
+      
+      return res.json({ 
+        orgId: existingOrgs.org_id, 
+        projectId: projects?.id || '',
+        message: 'User already has an account'
+      });
     }
     
     console.log(`Provision request for user: ${userId} (${email})`);
@@ -955,6 +1037,49 @@ app.get("/conversations/:conversationId/evaluations", async (req, res) => {
     console.error("Get conversation evaluations error:", e);
     res.status(500).json({ 
       error: e?.message ?? "unknown error"
+    });
+  }
+});
+
+// Audio transcription endpoint
+app.post("/transcribe", upload.single('audio'), async (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ error: "No audio file provided" });
+    }
+
+    const context = await getOrgContext(req);
+    if (!context) {
+      return res.status(401).json({ error: "Authorization required" });
+    }
+
+    // Transcribe audio (does not store the file)
+    const result = await transcribeAudio(req.file.buffer, req.file.originalname);
+
+    // Track usage
+    await trackUsage(context.orgId, context.projectId, context.env, 'transcription');
+
+    // Log audit
+    await logAudit({
+      orgId: context.orgId,
+      action: 'transcription.create',
+      targetType: 'transcription',
+      meta: {
+        filename: req.file.originalname,
+        size: req.file.size,
+        language: result.language,
+      },
+    });
+
+    res.json({
+      transcript: result.transcript,
+      text: result.transcript, // Alias for compatibility
+      language: result.language,
+    });
+  } catch (e: any) {
+    console.error("Transcription error:", e);
+    res.status(500).json({
+      error: e?.message ?? "Transcription failed",
     });
   }
 });
