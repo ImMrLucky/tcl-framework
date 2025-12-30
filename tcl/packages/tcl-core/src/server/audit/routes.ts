@@ -31,11 +31,14 @@ async function getOrgContext(req: express.Request): Promise<{ orgId: string; pro
  * Setup audit-grade analysis routes
  */
 export function setupAuditRoutes(app: express.Application) {
+  console.log("Setting up audit routes...");
+  
   // ============================================================================
   // INGESTION: POST /api/conversations/ingest
   // ============================================================================
   
   app.post("/api/conversations/ingest", async (req, res) => {
+    console.log("POST /api/conversations/ingest - Route hit");
     try {
       const context = await getOrgContext(req);
       

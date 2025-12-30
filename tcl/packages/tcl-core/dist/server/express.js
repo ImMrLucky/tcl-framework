@@ -812,7 +812,9 @@ app.get("/conversations/:conversationId/evaluations", async (req, res) => {
 // Setup integration routes
 setupIntegrationRoutes(app);
 // Setup audit-grade analysis routes
+console.log("Registering audit routes...");
 setupAuditRoutes(app);
+console.log("Audit routes registered successfully");
 // Railway sets PORT automatically, but we default to 8787
 const port = Number(process.env.PORT || 8787);
 console.log(`Starting server...`);

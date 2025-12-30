@@ -25,10 +25,12 @@ async function getOrgContext(req) {
  * Setup audit-grade analysis routes
  */
 export function setupAuditRoutes(app) {
+    console.log("Setting up audit routes...");
     // ============================================================================
     // INGESTION: POST /api/conversations/ingest
     // ============================================================================
     app.post("/api/conversations/ingest", async (req, res) => {
+        console.log("POST /api/conversations/ingest - Route hit");
         try {
             const context = await getOrgContext(req);
             if (!context) {
@@ -218,6 +220,114 @@ export function setupAuditRoutes(app) {
         }
         catch (e) {
             console.error("Get issues error:", e);
+            res.status(500).json({
+                error: e?.message ?? "unknown error"
+            });
+        }
+    });
+    // ============================================================================
+    // GET CONVERSATION TRANSCRIPT: GET /api/conversations/:id/transcript
+    // ============================================================================
+    app.get("/api/conversations/:id/transcript", async (req, res) => {
+        try {
+            const context = await getOrgContext(req);
+            if (!context) {
+                return res.status(401).json({ error: "Authorization required" });
+            }
+            if (!supabaseAdmin) {
+                return res.status(503).json({ error: "Supabase not configured" });
+            }
+            const { id } = req.params;
+            // Get conversation
+            const { data: conversation, error: convError } = await supabaseAdmin
+                .from('conversations')
+                .select('raw_text, id')
+                .eq('id', id)
+                .eq('org_id', context.orgId)
+                .single();
+            if (convError || !conversation) {
+                return res.status(404).json({ error: "Conversation not found" });
+            }
+            // Get normalized turns from artifacts
+            const { data: artifacts } = await supabaseAdmin
+                .from('conversation_artifacts')
+                .select('content_json')
+                .eq('conversation_id', id)
+                .eq('artifact_type', 'attachment')
+                .eq('filename', 'normalized_transcript.json')
+                .single();
+            const turns = artifacts?.content_json?.turns || [];
+            res.json({
+                raw_text: conversation.raw_text,
+                turns: turns
+            });
+        }
+        catch (e) {
+            console.error("Get transcript error:", e);
+            res.status(500).json({
+                error: e?.message ?? "unknown error"
+            });
+        }
+    });
+    // ============================================================================
+    // UPDATE ISSUE STATUS: PATCH /api/evaluations/:id/issues/:claimId
+    // ============================================================================
+    app.patch("/api/evaluations/:id/issues/:claimId", async (req, res) => {
+        try {
+            const context = await getOrgContext(req);
+            if (!context) {
+                return res.status(401).json({ error: "Authorization required" });
+            }
+            if (!supabaseAdmin) {
+                return res.status(503).json({ error: "Supabase not configured" });
+            }
+            const { id, claimId } = req.params;
+            const { status } = req.body;
+            if (!status || !['OPEN', 'ACKNOWLEDGED', 'RESOLVED', 'FALSE_POSITIVE'].includes(status)) {
+                return res.status(400).json({ error: "Invalid status. Must be OPEN, ACKNOWLEDGED, RESOLVED, or FALSE_POSITIVE" });
+            }
+            // Get evaluation
+            const { data: evaluation, error: evalError } = await supabaseAdmin
+                .from('evaluations')
+                .select('report')
+                .eq('id', id)
+                .eq('org_id', context.orgId)
+                .single();
+            if (evalError || !evaluation) {
+                return res.status(404).json({ error: "Evaluation not found" });
+            }
+            const report = evaluation.report;
+            const issues = report.issues || [];
+            // Update issue status
+            const issueIndex = issues.findIndex((i) => i.claimId === claimId);
+            if (issueIndex === -1) {
+                return res.status(404).json({ error: "Issue not found" });
+            }
+            issues[issueIndex].status = status;
+            // Update evaluation report
+            const { error: updateError } = await supabaseAdmin
+                .from('evaluations')
+                .update({ report: { ...report, issues } })
+                .eq('id', id);
+            if (updateError) {
+                return res.status(500).json({ error: `Failed to update issue status: ${updateError.message}` });
+            }
+            // Log audit
+            await logAudit({
+                orgId: context.orgId,
+                action: 'ISSUE_STATUS_CHANGED',
+                targetType: 'evaluation',
+                targetId: id,
+                meta: {
+                    claimId,
+                    oldStatus: issues[issueIndex].status,
+                    newStatus: status
+                }
+            });
+            res.json({ success: true, issue: issues[issueIndex] });
+        }
+        catch (e) {
+            console.error("Update issue status error:", e);
             res.status(500).json({
                 error: e?.message ?? "unknown error"
             });
