@@ -107,44 +107,59 @@ export class AuthService {
     });
 
     // Load initial session - set user immediately if session exists
-    this.supabase.auth.getSession().then(async ({ data: { session }, error: sessionError }) => {
-      if (sessionError) {
-        console.warn('Error getting initial session:', sessionError);
-        this.currentUserSubject.next(null);
-        return;
-      }
-      
-      if (session?.user) {
-        console.log('Initial session found for user:', session.user.email);
-        
-        // Set basic user immediately so UI shows logged in state
-        const basicUser: User = {
-          id: session.user.id,
-          email: session.user.email || undefined,
-          fullName: session.user.user_metadata?.['full_name'] as string | undefined
-        };
-        this.currentUserSubject.next(basicUser);
-        console.log('Set initial user from session:', basicUser);
-        
-        // Then load full profile in background
-        try {
-          await this.loadUserProfile(session.user.id);
-        } catch (err: any) {
-          console.error('Error loading initial user profile:', err);
-          // Keep the basic user even if profile load fails
-          // User is still logged in, just without profile data
+    // Use a small delay to ensure localStorage is checked after any signOut operations
+    setTimeout(() => {
+      this.supabase.auth.getSession().then(async ({ data: { session }, error: sessionError }) => {
+        if (sessionError) {
+          console.warn('Error getting initial session:', sessionError);
+          this.currentUserSubject.next(null);
+          return;
         }
-      } else {
-        // Only log if we're in development mode to reduce noise
-        if (process.env['NODE_ENV'] === 'development') {
-          console.log('No active session found');
+        
+        // Double-check localStorage - if auth token was cleared, don't restore session
+        if (typeof window !== 'undefined' && window.localStorage) {
+          const authToken = localStorage.getItem('sb-uqwcmkyaskyduxuluqrm-auth-token');
+          if (!authToken && session) {
+            console.log('Session exists but localStorage token is missing - clearing session');
+            // Session exists but token was cleared - sign out to be safe
+            await this.supabase.auth.signOut();
+            this.currentUserSubject.next(null);
+            return;
+          }
         }
+        
+        if (session?.user) {
+          console.log('Initial session found for user:', session.user.email);
+          
+          // Set basic user immediately so UI shows logged in state
+          const basicUser: User = {
+            id: session.user.id,
+            email: session.user.email || undefined,
+            fullName: session.user.user_metadata?.['full_name'] as string | undefined
+          };
+          this.currentUserSubject.next(basicUser);
+          console.log('Set initial user from session:', basicUser);
+          
+          // Then load full profile in background
+          try {
+            await this.loadUserProfile(session.user.id);
+          } catch (err: any) {
+            console.error('Error loading initial user profile:', err);
+            // Keep the basic user even if profile load fails
+            // User is still logged in, just without profile data
+          }
+        } else {
+          // Only log if we're in development mode to reduce noise
+          if (process.env['NODE_ENV'] === 'development') {
+            console.log('No active session found');
+          }
+          this.currentUserSubject.next(null);
+        }
+      }).catch((err: any) => {
+        console.error('Error in getSession promise:', err);
         this.currentUserSubject.next(null);
-      }
-    }).catch((err: any) => {
-      console.error('Error in getSession promise:', err);
-      this.currentUserSubject.next(null);
-    });
+      });
+    }, 100);
   }
 
   async signUp(email: string, password: string): Promise<{ error: AuthError | null }> {
@@ -214,17 +229,9 @@ export class AuthService {
   }
 
   async signOut(): Promise<void> {
-    // Clear user state immediately
-    this.currentUserSubject.next(null);
+    console.log('Signing out...');
     
-    // Sign out from Supabase (this should clear the session)
-    const { error } = await this.supabase.auth.signOut();
-    
-    if (error) {
-      console.error('Error signing out from Supabase:', error);
-    }
-    
-    // Explicitly clear localStorage for the auth token (Supabase storage key)
+    // STEP 1: Clear localStorage FIRST (before Supabase checks for session)
     if (typeof window !== 'undefined' && window.localStorage) {
       try {
         // Clear the Supabase auth token
@@ -244,17 +251,28 @@ export class AuthService {
       }
     }
     
-    // Navigate to home page
-    // Use setTimeout to ensure state is cleared before navigation
-    setTimeout(() => {
-      this.router.navigate(['/home']).catch(err => {
-        console.error('Navigation error:', err);
-        // Fallback: force reload if navigation fails
-        if (typeof window !== 'undefined') {
-          window.location.href = '/home';
-        }
-      });
-    }, 100);
+    // STEP 2: Clear user state immediately (UI updates)
+    this.currentUserSubject.next(null);
+    
+    // STEP 3: Sign out from Supabase (this should clear the session on server)
+    try {
+      const { error } = await this.supabase.auth.signOut();
+      if (error) {
+        console.error('Error signing out from Supabase:', error);
+      } else {
+        console.log('Signed out from Supabase successfully');
+      }
+    } catch (err) {
+      console.error('Exception during Supabase signOut:', err);
+    }
+    
+    // STEP 4: Force a full page reload to ensure everything is reset
+    // This ensures the AuthService re-initializes with no session
+    if (typeof window !== 'undefined') {
+      // Use window.location.href for a full page reload (not router navigation)
+      // This ensures all components re-initialize and check auth state fresh
+      window.location.href = '/home';
+    }
   }
 
   async updateProfile(updates: {
