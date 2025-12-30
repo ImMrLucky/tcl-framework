@@ -125,12 +125,19 @@ export class ProfileComponent implements OnInit {
       if (result.error) {
         this.errorMessage = result.error.message || 'Failed to update profile';
       } else {
-        this.snackBar.open('Profile updated successfully', 'Close', {
-          duration: 3000,
+        const snackBarRef = this.snackBar.open('Profile updated successfully', 'Close', {
+          duration: 5000,
           horizontalPosition: 'center',
-          verticalPosition: 'top'
+          verticalPosition: 'top',
+          panelClass: ['success-snackbar']
         });
-        // Optionally navigate back to dashboard
+        
+        // Handle the action click
+        snackBarRef.onAction().subscribe(() => {
+          snackBarRef.dismiss();
+        });
+        
+        // Navigate back to dashboard after a short delay
         setTimeout(() => {
           this.router.navigate(['/dashboard']);
         }, 1500);
