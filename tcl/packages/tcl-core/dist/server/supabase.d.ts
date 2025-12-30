@@ -32,6 +32,8 @@ export declare function verifyApiKeyExtended(key: string): Promise<{
 /**
  * Get or create user profile
  * Returns true if profile exists or was created, false otherwise
+ *
+ * FIX: Uses raw SQL with proper transaction handling to avoid foreign key timing issues
  */
 export declare function ensureProfile(userId: string, email?: string): Promise<boolean>;
 /**
