@@ -13,19 +13,125 @@
 <section class="hero">
   <div class="container">
     <h1>Prove What Was Said — and Whether It Was True</h1>
-    <p class="subheadline">Get audit-ready QA results you can defend. ProtectQA verifies every customer conversation for accuracy and compliance — with evidence you can trace.</p>
+    <p class="subheadline">Get audit-ready QA results you can defend. ProtectQA verifies customer conversations for accuracy and compliance — with evidence you can trace.</p>
     <div class="cta-group">
       <a routerLink="/pricing" class="btn-primary">Get Started Free (Try ProtectQA)</a>
       <a href="#how-it-works" class="btn-secondary">See How It Works</a>
     </div>
-    <p class="micro-credibility">No demo data. No black-box scores. Real evaluations on your conversations.</p>
+    <p class="micro-credibility">Claim-level verification against your policies, scripts, and knowledge base. <br/>No demo data. No black-box scores. Real evaluations on your conversations.</p>
   </div>
 </section>
 
 <section class="explanation-section">
   <div class="container">
-    <p class="explanation-text">ProtectQA is powered by an evidence-based Truth & Consistency Layer that verifies factual and policy claims against your approved sources — producing explainable, audit-ready QA results.</p>
+    <p class="explanation-text">ProtectQA is an evidence-backed, claim-level verification system for customer conversations. It checks what agents say against your policies, scripts, and knowledge base — producing traceable, audit-ready results. <br/>ProtectQA is powered by an evidence-based Truth & Consistency Layer that verifies factual and policy claims against your approved sources — producing explainable, audit-ready QA results.</p>
   </div>
+</section>
+
+<section class="visual-section">
+    <div class="container">
+        <h2>Why ProtectQA's results are different</h2>
+        <p class="section-intro">Most QA tools evaluate conversations as isolated statements or black-box scores. ProtectQA models conversations as a structured system of claims and evidence, allowing accuracy and compliance to be evaluated in context.</p>
+
+        <div class="visual-benefits">
+            <div class="visual-benefit">
+                <div class="visual-benefit-icon">✓</div>
+                <span>Consistent across runs</span>
+            </div>
+            <div class="visual-benefit">
+                <div class="visual-benefit-icon">✓</div>
+                <span>Explainable at the claim level</span>
+            </div>
+            <div class="visual-benefit">
+                <div class="visual-benefit-icon">✓</div>
+                <span>Resistant to prompt drift</span>
+            </div>
+            <div class="visual-benefit">
+                <div class="visual-benefit-icon">✓</div>
+                <span>Reproducible for audits</span>
+            </div>
+        </div>
+
+        <div class="graph-container">
+            <svg class="graph-svg" viewBox="0 0 800 500" xmlns="http://www.w3.org/2000/svg">
+                <!-- Support edges -->
+                <line class="support-edge" x1="150" y1="200" x2="400" y2="100" />
+                <line class="support-edge" x1="150" y1="200" x2="400" y2="200" />
+                <line class="support-edge" x1="650" y1="300" x2="400" y2="300" />
+
+                <!-- Contradiction edge (highlighted) -->
+                <line class="contradiction-edge" x1="400" y1="400" x2="400" y2="200" />
+                <line class="contradiction-edge" x1="400" y1="400" x2="650" y1="300" />
+
+                <!-- Neutral edges -->
+                <line class="neutral-edge" x1="400" y1="100" x2="400" y2="200" />
+                <line class="neutral-edge" x1="400" y1="200" x2="400" y2="300" />
+
+                <!-- Evidence nodes (anchors) -->
+                <g class="evidence-node">
+                    <rect x="110" y="170" width="80" height="60" rx="6" fill="#0ea5e9" />
+                    <text x="150" y="195" text-anchor="middle" fill="white" font-size="11" font-weight="600">Evidence</text>
+                    <text x="150" y="210" text-anchor="middle" fill="white" font-size="10">Policy Doc</text>
+                </g>
+
+                <g class="evidence-node">
+                    <rect x="610" y="270" width="80" height="60" rx="6" fill="#0ea5e9" />
+                    <text x="650" y="295" text-anchor="middle" fill="white" font-size="11" font-weight="600">Evidence</text>
+                    <text x="650" y="310" text-anchor="middle" fill="white" font-size="10">Script</text>
+                </g>
+
+                <!-- Claim nodes -->
+                <g class="claim-node">
+                    <circle cx="400" cy="100" r="45" fill="#22c55e" />
+                    <text x="400" y="95" text-anchor="middle" fill="white" font-size="11" font-weight="700">Claim 1</text>
+                    <text x="400" y="110" text-anchor="middle" fill="white" font-size="9">Pricing info</text>
+                </g>
+
+                <g class="claim-node">
+                    <circle cx="400" cy="200" r="45" fill="#22c55e" />
+                    <text x="400" y="195" text-anchor="middle" fill="white" font-size="11" font-weight="700">Claim 2</text>
+                    <text x="400" y="210" text-anchor="middle" fill="white" font-size="9">Coverage terms</text>
+                </g>
+
+                <g class="claim-node">
+                    <circle cx="400" cy="300" r="45" fill="#22c55e" />
+                    <text x="400" y="295" text-anchor="middle" fill="white" font-size="11" font-weight="700">Claim 3</text>
+                    <text x="400" y="310" text-anchor="middle" fill="white" font-size="9">Disclosure</text>
+                </g>
+
+                <!-- Contradicted claim (highlighted) -->
+                <g class="claim-node">
+                    <circle cx="400" cy="400" r="50" fill="#ef4444" stroke="#dc2626" stroke-width="3" />
+                    <text x="400" y="390" text-anchor="middle" fill="white" font-size="11" font-weight="700">Claim 4</text>
+                    <text x="400" y="405" text-anchor="middle" fill="white" font-size="9">Contradicted</text>
+                    <text x="400" y="418" text-anchor="middle" fill="white" font-size="8">policy claim</text>
+                </g>
+
+                <!-- Legend -->
+                <g transform="translate(20, 440)">
+                    <circle cx="8" cy="8" r="6" fill="#22c55e" />
+                    <text x="20" y="12" font-size="11" fill="#475569">Supported claim</text>
+
+                    <circle cx="140" cy="8" r="6" fill="#ef4444" />
+                    <text x="152" y="12" font-size="11" fill="#475569">Contradicted claim</text>
+
+                    <rect x="290" y="2" width="12" height="12" rx="2" fill="#0ea5e9" />
+                    <text x="308" y="12" font-size="11" fill="#475569">Evidence source</text>
+                </g>
+
+                <!-- Arrow annotations -->
+                <text x="250" y="150" font-size="12" fill="#059669" font-weight="600">✓ Supported</text>
+                <text x="500" y="250" font-size="12" fill="#059669" font-weight="600">✓ Supported</text>
+                <text x="420" y="350" font-size="12" fill="#dc2626" font-weight="600">✗ Contradiction</text>
+
+                <!-- Impact indicator -->
+                <path d="M 450 380 L 470 370 L 450 360" fill="none" stroke="#dc2626" stroke-width="2" />
+                <text x="480" y="375" font-size="11" fill="#dc2626" font-style="italic">Affects related claims</text>
+            </svg>
+        </div>
+
+        <p class="graph-caption">Claims are evaluated in relation to each other and the evidence they depend on — not as isolated AI outputs.</p>
+    </div>
 </section>
 
 <section class="problem-section">
