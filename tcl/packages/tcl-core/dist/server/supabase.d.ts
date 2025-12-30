@@ -30,8 +30,8 @@ export declare function verifyApiKeyExtended(key: string): Promise<{
     scopes: string[];
 } | null>;
 /**
- * Get or create user profile - SIMPLIFIED VERSION
- * Just wait a bit, then upsert. Simple and reliable.
+ * Get or create user profile - RELIABLE VERSION
+ * Uses database function (RPC) which runs in database context and handles timing properly
  */
 export declare function ensureProfile(userId: string, email?: string): Promise<boolean>;
 /**

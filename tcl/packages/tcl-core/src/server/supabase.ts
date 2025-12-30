@@ -80,19 +80,14 @@ export async function verifyApiKeyExtended(key: string): Promise<{ orgId: string
 }
 
 /**
- * Get or create user profile - SIMPLIFIED VERSION
- * Just wait a bit, then upsert. Simple and reliable.
+ * Get or create user profile - RELIABLE VERSION
+ * Uses database function (RPC) which runs in database context and handles timing properly
  */
 export async function ensureProfile(userId: string, email?: string): Promise<boolean> {
   if (!supabaseAdmin) {
     console.error('ensureProfile: supabaseAdmin is null');
     return false;
   }
-  
-  // Simple approach: Wait 1 second for user to be committed, then upsert
-  // This is usually enough time for Supabase Auth to commit the user
-  console.log(`ensureProfile: Waiting 1 second for user to be committed...`);
-  await new Promise(resolve => setTimeout(resolve, 1000));
   
   // Get email from user if not provided
   if (!email) {
@@ -105,57 +100,98 @@ export async function ensureProfile(userId: string, email?: string): Promise<boo
     }
   }
   
-  // Simple upsert - this handles both insert and update
-  // Try up to 3 times with increasing delays
+  // Use database function (RPC) - this is more reliable because:
+  // 1. Runs in database context (no timing issues)
+  // 2. Can handle foreign key constraints properly
+  // 3. Can check if user exists atomically
+  // 4. Falls back to trigger if needed
+  try {
+    const { data, error } = await supabaseAdmin.rpc('ensure_user_profile', {
+      p_user_id: userId,
+      p_email: email
+    });
+    
+    if (error) {
+      // If function doesn't exist, fall back to direct upsert
+      if (error.code === '42883' || error.message?.includes('function') || error.message?.includes('does not exist')) {
+        console.warn('ensureProfile: RPC function not available, using direct upsert fallback...');
+        return await ensureProfileFallback(userId, email);
+      }
+      
+      console.error('ensureProfile: RPC call failed:', error);
+      // Try fallback anyway
+      return await ensureProfileFallback(userId, email);
+    }
+    
+    if (data === true) {
+      console.log(`✅ Profile ensured via RPC: ${userId}`);
+      return true;
+    }
+    
+    // If RPC returned false or unexpected value, try fallback
+    return await ensureProfileFallback(userId, email);
+  } catch (err: any) {
+    console.error('ensureProfile: Error calling RPC:', err);
+    return await ensureProfileFallback(userId, email);
+  }
+}
+
+/**
+ * Fallback: Direct upsert if RPC function is not available
+ * This is less reliable but works if the database function doesn't exist
+ */
+async function ensureProfileFallback(userId: string, email: string | undefined): Promise<boolean> {
+  if (!supabaseAdmin) return false;
+  
+  // Wait a bit for user to be committed
+  await new Promise(resolve => setTimeout(resolve, 1000));
+  
+  // Try upsert with a few retries
   for (let attempt = 1; attempt <= 3; attempt++) {
     try {
+      const profileData: any = {
+        id: userId,
+        updated_at: new Date().toISOString()
+      };
+      if (email !== undefined) {
+        profileData.email = email;
+      }
+      
       const { error: upsertError } = await supabaseAdmin
         .from('profiles')
-        .upsert({
-          id: userId,
-          email: email || null,
-          updated_at: new Date().toISOString()
-        }, {
+        .upsert(profileData, {
           onConflict: 'id'
         });
       
       if (upsertError) {
-        // Foreign key error means user isn't committed yet - wait and retry
-        if (upsertError.code === '23503') {
-          const waitTime = attempt * 500; // 500ms, 1000ms, 1500ms
-          console.warn(`ensureProfile: Foreign key error (user not committed), waiting ${waitTime}ms and retrying... (attempt ${attempt}/3)`);
-          await new Promise(resolve => setTimeout(resolve, waitTime));
+        if (upsertError.code === '23503' && attempt < 3) {
+          // Foreign key error - wait and retry
+          await new Promise(resolve => setTimeout(resolve, 1000 * attempt));
           continue;
-        } else {
-          console.error('ensureProfile: Upsert failed:', upsertError);
-          return false;
         }
+        console.error('ensureProfile fallback: Upsert failed:', upsertError);
+        return false;
       }
       
       // Verify it was created
       const { data: profile } = await supabaseAdmin
         .from('profiles')
-        .select('id, email')
+        .select('id')
         .eq('id', userId)
         .maybeSingle();
       
       if (profile) {
-        console.log(`✅ Profile ensured: id=${profile.id}, email=${profile.email || 'null'}`);
+        console.log(`✅ Profile ensured via fallback: ${userId}`);
         return true;
-      } else {
-        console.warn(`ensureProfile: Upsert succeeded but profile not found, retrying... (attempt ${attempt}/3)`);
-        await new Promise(resolve => setTimeout(resolve, 500 * attempt));
-        continue;
       }
     } catch (err: any) {
-      console.error(`ensureProfile: Error on attempt ${attempt}:`, err);
+      console.error(`ensureProfile fallback: Error on attempt ${attempt}:`, err);
       if (attempt < 3) {
-        await new Promise(resolve => setTimeout(resolve, 500 * attempt));
+        await new Promise(resolve => setTimeout(resolve, 1000 * attempt));
       }
     }
   }
   
-  console.error('❌ ensureProfile: Failed after 3 attempts');
   return false;
 }
 
@@ -179,42 +215,43 @@ export async function provisionUser(userId: string, email: string): Promise<{ or
       console.error('Step 1 FAILED: Could not ensure profile exists');
       console.error('Attempting fallback: Direct profile creation...');
       
-      // FALLBACK: Try to create profile directly with multiple attempts
-      let fallbackSuccess = false;
-      for (let attempt = 1; attempt <= 5; attempt++) {
-        await new Promise(resolve => setTimeout(resolve, attempt * 200)); // Wait longer each attempt
-        
-        // Try direct insert
-        const { error: insertError } = await supabaseAdmin
-          .from('profiles')
-          .insert({
-            id: userId,
-            email: email,
-            created_at: new Date().toISOString(),
-            updated_at: new Date().toISOString()
-          });
-        
-        if (!insertError) {
-          // Verify it was created
-          const { data: verifyProfile } = await supabaseAdmin
-            .from('profiles')
-            .select('id')
-            .eq('id', userId)
-            .maybeSingle();
-          
-          if (verifyProfile) {
-            console.log(`Step 1 FALLBACK: ✅ Profile created successfully on attempt ${attempt}`);
-            fallbackSuccess = true;
+      // FALLBACK: Wait longer and try to create profile directly
+      // The user needs more time to be committed to auth.users
+      console.log('Step 1 FALLBACK: Waiting 2 seconds for user to be fully committed...');
+      await new Promise(resolve => setTimeout(resolve, 2000));
+      
+      // Verify user exists first
+      let userVerified = false;
+      for (let check = 0; check < 5; check++) {
+        try {
+          const { data: userData } = await supabaseAdmin.auth.admin.getUserById(userId);
+          if (userData?.user) {
+            userVerified = true;
+            console.log('Step 1 FALLBACK: User verified in auth.users');
             break;
           }
-        } else if (insertError.code === '23505') {
-          // Profile already exists (unique constraint)
-          console.log('Step 1 FALLBACK: Profile already exists (unique constraint)');
-          fallbackSuccess = true;
-          break;
-        } else if (insertError.code !== '23503') {
-          // Not a foreign key error - log and try upsert
-          console.warn(`Step 1 FALLBACK: Insert failed (${insertError.code}), trying upsert...`);
+        } catch (err) {
+          // Continue checking
+        }
+        if (check < 4) {
+          await new Promise(resolve => setTimeout(resolve, 400));
+        }
+      }
+      
+      let fallbackSuccess = false;
+      
+      if (!userVerified) {
+        console.error('Step 1 FALLBACK: User not found in auth.users, cannot create profile');
+      } else {
+        // Try to create profile with multiple attempts and longer waits
+        for (let attempt = 1; attempt <= 5; attempt++) {
+          const waitTime = attempt * 1000; // 1s, 2s, 3s, 4s, 5s
+          if (attempt > 1) {
+            console.log(`Step 1 FALLBACK: Waiting ${waitTime}ms before attempt ${attempt}...`);
+            await new Promise(resolve => setTimeout(resolve, waitTime));
+          }
+          
+          // Try upsert (more reliable than insert)
           const { error: upsertError } = await supabaseAdmin
             .from('profiles')
             .upsert({
@@ -226,13 +263,37 @@ export async function provisionUser(userId: string, email: string): Promise<{ or
             });
           
           if (!upsertError) {
-            console.log(`Step 1 FALLBACK: ✅ Profile created via upsert on attempt ${attempt}`);
+            // Verify it was created
+            const { data: verifyProfile } = await supabaseAdmin
+              .from('profiles')
+              .select('id')
+              .eq('id', userId)
+              .maybeSingle();
+            
+            if (verifyProfile) {
+              console.log(`Step 1 FALLBACK: ✅ Profile created successfully on attempt ${attempt}`);
+              fallbackSuccess = true;
+              break;
+            }
+          } else if (upsertError.code === '23503') {
+            // Foreign key error - user still not committed, wait longer
+            console.warn(`Step 1 FALLBACK: Foreign key error on attempt ${attempt}, will wait longer...`);
+            continue;
+          } else if (upsertError.code === '23505') {
+            // Profile already exists (unique constraint) - this is OK
+            console.log('Step 1 FALLBACK: Profile already exists (unique constraint)');
             fallbackSuccess = true;
+            break;
+          } else {
+            console.error(`Step 1 FALLBACK: Upsert failed:`, upsertError);
+            // Don't retry for non-foreign-key errors
             break;
           }
         }
         
-        console.warn(`Step 1 FALLBACK: Attempt ${attempt} failed, retrying...`);
+        if (!fallbackSuccess) {
+          console.error('Step 1 FALLBACK: All attempts failed. Profile may not exist.');
+        }
       }
       
       if (!fallbackSuccess) {
@@ -296,11 +357,16 @@ export async function provisionUser(userId: string, email: string): Promise<{ or
       // This saves 10+ seconds of retries
       console.log('Step 4: User already verified in Step 1, proceeding to add to org...');
       
+      // Wait a bit more to ensure user is fully committed before adding to org
+      // Profile should be created by now, but user might still be committing
+      console.log('Step 4: Waiting 1 second before adding user to org...');
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      
       // Try to insert org_members with retry logic
-      // OPTIMIZED: Reduced retries and delays
+      // Increased retries and waits for foreign key errors
       let memberInserted = false;
-      let memberRetries = 3; // Reduced from 5 to 3
-      let memberRetryDelay = 200; // Reduced from 300ms to 200ms
+      let memberRetries = 5; // Increased from 3 to 5
+      let memberRetryDelay = 1000; // Increased from 200ms to 1000ms
       
       while (memberRetries > 0 && !memberInserted) {
         const { error: memberError } = await supabaseAdmin
@@ -313,11 +379,9 @@ export async function provisionUser(userId: string, email: string): Promise<{ or
         
         if (memberError) {
           if (memberError.code === '23503') {
-            if (memberRetries > 1) {
-              console.warn(`Step 4: Foreign key error, waiting ${memberRetryDelay}ms... (${memberRetries} retries left)`);
-            }
+            console.warn(`Step 4: Foreign key error, waiting ${memberRetryDelay}ms... (${memberRetries} retries left)`);
             await new Promise(resolve => setTimeout(resolve, memberRetryDelay));
-            memberRetryDelay = Math.min(memberRetryDelay * 1.4, 500); // Reduced max from 1500ms to 500ms
+            memberRetryDelay = Math.min(memberRetryDelay * 1.5, 3000); // Increased max to 3000ms
             memberRetries--;
             continue;
           } else if (memberError.code === '23505') {
@@ -333,7 +397,7 @@ export async function provisionUser(userId: string, email: string): Promise<{ or
           }
         } else {
           memberInserted = true;
-          console.log('Step 4: User added as owner');
+          console.log('Step 4: ✅ User added as owner');
           break;
         }
       }
