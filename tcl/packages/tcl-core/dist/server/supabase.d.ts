@@ -30,10 +30,8 @@ export declare function verifyApiKeyExtended(key: string): Promise<{
     scopes: string[];
 } | null>;
 /**
- * Get or create user profile
- * Returns true if profile exists or was created, false otherwise
- *
- * FIX: Uses raw SQL with proper transaction handling to avoid foreign key timing issues
+ * Get or create user profile - SIMPLIFIED VERSION
+ * Just wait a bit, then upsert. Simple and reliable.
  */
 export declare function ensureProfile(userId: string, email?: string): Promise<boolean>;
 /**

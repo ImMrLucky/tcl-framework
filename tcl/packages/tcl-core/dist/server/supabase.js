@@ -71,162 +71,79 @@ export async function verifyApiKeyExtended(key) {
     };
 }
 /**
- * Get or create user profile
- * Returns true if profile exists or was created, false otherwise
- *
- * FIX: Uses raw SQL with proper transaction handling to avoid foreign key timing issues
+ * Get or create user profile - SIMPLIFIED VERSION
+ * Just wait a bit, then upsert. Simple and reliable.
  */
 export async function ensureProfile(userId, email) {
     if (!supabaseAdmin) {
         console.error('ensureProfile: supabaseAdmin is null');
         return false;
     }
-    // First, wait for user to be fully committed to auth.users
-    // This is critical - user might not be committed immediately after signup
-    // OPTIMIZED: Reduced retries and delays for faster response
-    let userExists = false;
-    let retries = 3; // Reduced from 10 to 3
-    let retryDelay = 200; // Reduced from 500ms to 200ms
-    while (retries > 0 && !userExists) {
+    // Simple approach: Wait 1 second for user to be committed, then upsert
+    // This is usually enough time for Supabase Auth to commit the user
+    console.log(`ensureProfile: Waiting 1 second for user to be committed...`);
+    await new Promise(resolve => setTimeout(resolve, 1000));
+    // Get email from user if not provided
+    if (!email) {
         try {
-            const { data: userCheck, error: userCheckError } = await supabaseAdmin.auth.admin.getUserById(userId);
-            if (userCheck?.user && !userCheckError) {
-                userExists = true;
-                email = email || userCheck.user.email || undefined;
-                console.log(`ensureProfile: User verified in auth.users: ${userId} (${email || 'no email'})`);
-                break;
-            }
-            else {
-                if (retries > 1) { // Only log if we have retries left
-                    console.warn(`ensureProfile: User not found yet, waiting ${retryDelay}ms... (${retries} retries left)`);
-                }
-                await new Promise(resolve => setTimeout(resolve, retryDelay));
-                retryDelay = Math.min(retryDelay * 1.3, 800); // Reduced max from 2000ms to 800ms
-                retries--;
-            }
+            const { data: userData } = await supabaseAdmin.auth.admin.getUserById(userId);
+            email = userData?.user?.email || undefined;
         }
         catch (err) {
-            if (retries > 1) {
-                console.warn(`ensureProfile: Error checking user: ${err?.message}, waiting ${retryDelay}ms...`);
-            }
-            await new Promise(resolve => setTimeout(resolve, retryDelay));
-            retryDelay = Math.min(retryDelay * 1.3, 800);
-            retries--;
+            console.warn('ensureProfile: Could not get user email, continuing without email');
+            email = undefined;
         }
     }
-    if (!userExists) {
-        console.error(`ensureProfile: User ${userId} not found in auth.users after retries`);
-        return false;
-    }
-    // Wait brief time to ensure user is fully committed to database
-    // OPTIMIZED: Reduced from 500ms to 200ms
-    await new Promise(resolve => setTimeout(resolve, 200));
-    // Try to create profile using direct insert/upsert
-    // OPTIMIZED: Reduced retries and delays for faster response
-    let profileRetries = 4; // Reduced from 8 to 4
-    let profileRetryDelay = 200; // Reduced from 500ms to 200ms
-    let lastError = null;
-    while (profileRetries > 0) {
+    // Simple upsert - this handles both insert and update
+    // Try up to 3 times with increasing delays
+    for (let attempt = 1; attempt <= 3; attempt++) {
         try {
-            // Try direct insert first (most reliable for new profiles)
-            const { error: insertError } = await supabaseAdmin
+            const { error: upsertError } = await supabaseAdmin
                 .from('profiles')
-                .insert({
+                .upsert({
                 id: userId,
-                email: email,
-                created_at: new Date().toISOString(),
+                email: email || null,
                 updated_at: new Date().toISOString()
+            }, {
+                onConflict: 'id'
             });
-            if (insertError) {
-                // If it's a unique constraint (profile already exists), use upsert
-                if (insertError.code === '23505') {
-                    console.log('ensureProfile: Profile already exists, updating...');
-                    const { error: upsertError } = await supabaseAdmin
-                        .from('profiles')
-                        .upsert({
-                        id: userId,
-                        email: email || null,
-                        updated_at: new Date().toISOString()
-                    }, {
-                        onConflict: 'id'
-                    });
-                    if (upsertError) {
-                        if (upsertError.code === '23503') {
-                            if (profileRetries > 1) {
-                                console.warn(`ensureProfile: Foreign key constraint on upsert, waiting ${profileRetryDelay}ms... (${profileRetries} retries left)`);
-                            }
-                            lastError = upsertError;
-                            await new Promise(resolve => setTimeout(resolve, profileRetryDelay));
-                            profileRetryDelay = Math.min(profileRetryDelay * 1.4, 600); // Reduced max from 2000ms to 600ms
-                            profileRetries--;
-                            continue;
-                        }
-                        else {
-                            console.error('ensureProfile: Upsert failed:', upsertError);
-                            lastError = upsertError;
-                            profileRetries--;
-                            continue;
-                        }
-                    }
-                }
-                else if (insertError.code === '23503') {
-                    // Foreign key error - user might not be fully committed yet
-                    if (profileRetries > 1) {
-                        console.warn(`ensureProfile: Foreign key constraint, waiting ${profileRetryDelay}ms... (${profileRetries} retries left)`);
-                    }
-                    lastError = insertError;
-                    await new Promise(resolve => setTimeout(resolve, profileRetryDelay));
-                    profileRetryDelay = Math.min(profileRetryDelay * 1.4, 600); // Reduced max from 2000ms to 600ms
-                    profileRetries--;
+            if (upsertError) {
+                // Foreign key error means user isn't committed yet - wait and retry
+                if (upsertError.code === '23503') {
+                    const waitTime = attempt * 500; // 500ms, 1000ms, 1500ms
+                    console.warn(`ensureProfile: Foreign key error (user not committed), waiting ${waitTime}ms and retrying... (attempt ${attempt}/3)`);
+                    await new Promise(resolve => setTimeout(resolve, waitTime));
                     continue;
                 }
                 else {
-                    console.error('ensureProfile: Insert failed:', insertError);
-                    lastError = insertError;
-                    profileRetries--;
-                    continue;
+                    console.error('ensureProfile: Upsert failed:', upsertError);
+                    return false;
                 }
             }
-            // Verify the profile was actually created/updated
-            const { data: profileCheck, error: verifyError } = await supabaseAdmin
+            // Verify it was created
+            const { data: profile } = await supabaseAdmin
                 .from('profiles')
                 .select('id, email')
                 .eq('id', userId)
                 .maybeSingle();
-            if (verifyError) {
-                console.error('ensureProfile: Failed to verify profile creation:', verifyError);
-                lastError = verifyError;
-                profileRetries--;
+            if (profile) {
+                console.log(`✅ Profile ensured: id=${profile.id}, email=${profile.email || 'null'}`);
+                return true;
+            }
+            else {
+                console.warn(`ensureProfile: Upsert succeeded but profile not found, retrying... (attempt ${attempt}/3)`);
+                await new Promise(resolve => setTimeout(resolve, 500 * attempt));
                 continue;
             }
-            if (!profileCheck) {
-                console.error('ensureProfile: Profile insert/upsert succeeded but profile not found in database');
-                lastError = new Error('Profile not found after insert/upsert');
-                profileRetries--;
-                continue;
-            }
-            // Success! Profile exists
-            console.log(`✅ Profile ensured: id=${profileCheck.id}, email=${profileCheck.email}`);
-            return true;
         }
         catch (err) {
-            console.error('ensureProfile: Unexpected error:', err);
-            lastError = err;
-            await new Promise(resolve => setTimeout(resolve, profileRetryDelay));
-            profileRetryDelay = Math.min(profileRetryDelay * 1.4, 600); // Reduced max from 2000ms to 600ms
-            profileRetries--;
+            console.error(`ensureProfile: Error on attempt ${attempt}:`, err);
+            if (attempt < 3) {
+                await new Promise(resolve => setTimeout(resolve, 500 * attempt));
+            }
         }
     }
-    // If we get here, all retries failed
-    if (lastError) {
-        console.error('❌ Failed to ensure profile after all retries:', lastError);
-        console.error('Error details:', {
-            code: lastError.code,
-            message: lastError.message,
-            details: lastError.details,
-            hint: lastError.hint
-        });
-    }
+    console.error('❌ ensureProfile: Failed after 3 attempts');
     return false;
 }
 /**
@@ -244,22 +161,63 @@ export async function provisionUser(userId, email) {
         const profileEnsured = await ensureProfile(userId, email);
         if (!profileEnsured) {
             console.error('Step 1 FAILED: Could not ensure profile exists');
-            console.error('This is critical - profile is required for user to function');
-            console.error('Attempting to continue, but user may experience issues');
-            // Don't return null immediately - try to continue and see if trigger created it
-            // OPTIMIZED: Reduced wait from 1000ms to 300ms
-            await new Promise(resolve => setTimeout(resolve, 300));
-            const { data: profileCheck } = await supabaseAdmin
-                .from('profiles')
-                .select('id')
-                .eq('id', userId)
-                .maybeSingle();
-            if (!profileCheck) {
-                console.error('Step 1: Profile still does not exist after wait. Provisioning may fail.');
-                // Continue anyway - maybe trigger will create it
+            console.error('Attempting fallback: Direct profile creation...');
+            // FALLBACK: Try to create profile directly with multiple attempts
+            let fallbackSuccess = false;
+            for (let attempt = 1; attempt <= 5; attempt++) {
+                await new Promise(resolve => setTimeout(resolve, attempt * 200)); // Wait longer each attempt
+                // Try direct insert
+                const { error: insertError } = await supabaseAdmin
+                    .from('profiles')
+                    .insert({
+                    id: userId,
+                    email: email,
+                    created_at: new Date().toISOString(),
+                    updated_at: new Date().toISOString()
+                });
+                if (!insertError) {
+                    // Verify it was created
+                    const { data: verifyProfile } = await supabaseAdmin
+                        .from('profiles')
+                        .select('id')
+                        .eq('id', userId)
+                        .maybeSingle();
+                    if (verifyProfile) {
+                        console.log(`Step 1 FALLBACK: ✅ Profile created successfully on attempt ${attempt}`);
+                        fallbackSuccess = true;
+                        break;
+                    }
+                }
+                else if (insertError.code === '23505') {
+                    // Profile already exists (unique constraint)
+                    console.log('Step 1 FALLBACK: Profile already exists (unique constraint)');
+                    fallbackSuccess = true;
+                    break;
+                }
+                else if (insertError.code !== '23503') {
+                    // Not a foreign key error - log and try upsert
+                    console.warn(`Step 1 FALLBACK: Insert failed (${insertError.code}), trying upsert...`);
+                    const { error: upsertError } = await supabaseAdmin
+                        .from('profiles')
+                        .upsert({
+                        id: userId,
+                        email: email,
+                        updated_at: new Date().toISOString()
+                    }, {
+                        onConflict: 'id'
+                    });
+                    if (!upsertError) {
+                        console.log(`Step 1 FALLBACK: ✅ Profile created via upsert on attempt ${attempt}`);
+                        fallbackSuccess = true;
+                        break;
+                    }
+                }
+                console.warn(`Step 1 FALLBACK: Attempt ${attempt} failed, retrying...`);
             }
-            else {
-                console.log('Step 1: Profile found after wait (likely created by trigger)');
+            if (!fallbackSuccess) {
+                console.error('Step 1 FALLBACK: All attempts failed. Profile may not exist.');
+                console.error('CRITICAL: User will not be able to use the app without a profile.');
+                // Continue anyway - user can still sign in, but profile needs to be created manually
             }
         }
         else {
