@@ -1,0 +1,114 @@
+<header>
+  <div class="container">
+    <div class="header-content">
+      <app-logo></app-logo>
+      <div class="header-actions">
+        <button mat-button routerLink="/dashboard">
+          <mat-icon>arrow_back</mat-icon>
+          Back to Dashboard
+        </button>
+      </div>
+    </div>
+  </div>
+</header>
+
+<div class="profile-container">
+  <div class="container">
+    <mat-card class="profile-card">
+      <mat-card-header>
+        <div class="header-content">
+          <div>
+            <mat-card-title>Profile Settings</mat-card-title>
+            <mat-card-subtitle>Update your account information</mat-card-subtitle>
+          </div>
+          <button mat-raised-button color="primary" (click)="openInviteModal()">
+            <mat-icon>person_add</mat-icon>
+            Invite Team Members
+          </button>
+        </div>
+      </mat-card-header>
+      <mat-card-content>
+        <form [formGroup]="profileForm" (ngSubmit)="onSubmit()">
+          <mat-form-field appearance="outline" class="full-width">
+            <mat-label>Company Role / Title</mat-label>
+            <input matInput formControlName="companyRole" placeholder="e.g., QA Manager, Compliance Officer">
+            <mat-icon matPrefix>badge</mat-icon>
+          </mat-form-field>
+
+          <mat-form-field appearance="outline" class="full-width">
+            <mat-label>Company Industry</mat-label>
+            <mat-select formControlName="companyIndustry" required>
+              <mat-option value="Financial Services / Banking">Financial Services / Banking</mat-option>
+              <mat-option value="Insurance">Insurance</mat-option>
+              <mat-option value="Healthcare">Healthcare</mat-option>
+              <mat-option value="Telecommunications">Telecommunications</mat-option>
+              <mat-option value="Retail / eCommerce">Retail / eCommerce</mat-option>
+              <mat-option value="SaaS / Technology">SaaS / Technology</mat-option>
+              <mat-option value="Travel / Hospitality">Travel / Hospitality</mat-option>
+              <mat-option value="Utilities / Energy">Utilities / Energy</mat-option>
+              <mat-option value="Government / Public Sector">Government / Public Sector</mat-option>
+              <mat-option value="Other">Other</mat-option>
+            </mat-select>
+            <mat-icon matPrefix>business</mat-icon>
+            <mat-error *ngIf="profileForm.get('companyIndustry')?.hasError('required')">
+              Industry is required
+            </mat-error>
+          </mat-form-field>
+
+          <mat-form-field appearance="outline" class="full-width">
+            <mat-label>How do your calls operate?</mat-label>
+            <mat-select formControlName="callOperation" required>
+              <mat-option value="Inbound">Inbound</mat-option>
+              <mat-option value="Outbound">Outbound</mat-option>
+              <mat-option value="Both">Both</mat-option>
+            </mat-select>
+            <mat-icon matPrefix>phone</mat-icon>
+            <mat-error *ngIf="profileForm.get('callOperation')?.hasError('required')">
+              Call operation is required
+            </mat-error>
+          </mat-form-field>
+
+          <mat-form-field appearance="outline" class="full-width">
+            <mat-label>Primary Use Case</mat-label>
+            <mat-select formControlName="primaryUseCase" required>
+              <mat-option value="Compliance / Risk Detection">Compliance / Risk Detection</mat-option>
+              <mat-option value="QA Scoring & Audits">QA Scoring & Audits</mat-option>
+              <mat-option value="Dispute Defense">Dispute Defense</mat-option>
+              <mat-option value="Regulatory Readiness">Regulatory Readiness</mat-option>
+              <mat-option value="Policy Drift Detection">Policy Drift Detection</mat-option>
+              <mat-option value="Executive Reporting">Executive Reporting</mat-option>
+            </mat-select>
+            <mat-icon matPrefix>target</mat-icon>
+            <mat-error *ngIf="profileForm.get('primaryUseCase')?.hasError('required')">
+              Primary use case is required
+            </mat-error>
+          </mat-form-field>
+
+          <div *ngIf="errorMessage" class="error-message">
+            <mat-icon>error</mat-icon>
+            {{ errorMessage }}
+          </div>
+
+          <div class="form-actions">
+            <button 
+              mat-button 
+              type="button"
+              (click)="onCancel()"
+              [disabled]="loading">
+              Cancel
+            </button>
+            <button 
+              mat-raised-button 
+              color="primary" 
+              type="submit"
+              [disabled]="profileForm.invalid || loading">
+              <mat-spinner *ngIf="loading" diameter="20" class="inline-spinner"></mat-spinner>
+              <span *ngIf="!loading">Save Changes</span>
+            </button>
+          </div>
+        </form>
+      </mat-card-content>
+    </mat-card>
+  </div>
+</div>
+

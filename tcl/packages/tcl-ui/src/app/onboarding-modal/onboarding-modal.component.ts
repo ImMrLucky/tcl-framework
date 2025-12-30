@@ -58,7 +58,14 @@ export class OnboardingModalComponent implements OnInit {
     }
   }
 
-  onDismiss() {
+  async onDismiss() {
+    // Mark onboarding as completed even if dismissed
+    // This prevents the modal from showing again
+    try {
+      await this.authService.markOnboardingCompleted();
+    } catch (err) {
+      console.error('Error marking onboarding as completed:', err);
+    }
     this.dialogRef.close(false);
   }
 
@@ -69,7 +76,11 @@ export class OnboardingModalComponent implements OnInit {
     this.errorMessage = '';
 
     try {
-      const result = await this.authService.updateProfile(this.onboardingForm.value);
+      // Update profile and mark onboarding as completed
+      const result = await this.authService.updateProfile({
+        ...this.onboardingForm.value,
+        onboardingCompleted: true
+      });
       
       if (result.error) {
         this.errorMessage = result.error.message || 'Failed to update profile';

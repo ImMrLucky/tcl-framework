@@ -1,0 +1,89 @@
+<div class="invite-modal">
+  <div class="modal-header">
+    <h2>Invite Team Members</h2>
+    <p class="subtitle">Send invitations to join your organization</p>
+    <button mat-icon-button class="close-button" (click)="onCancel()" type="button">
+      <mat-icon>close</mat-icon>
+    </button>
+  </div>
+
+  <div class="modal-content">
+    <form [formGroup]="inviteForm" (ngSubmit)="onSubmit()">
+      <div formArrayName="invites">
+        <div *ngFor="let invite of invites.controls; let i = index" [formGroupName]="i" class="invite-row">
+          <mat-form-field appearance="outline" class="email-field">
+            <mat-label>Email Address</mat-label>
+            <input matInput type="email" formControlName="email" placeholder="user@example.com">
+            <mat-icon matPrefix>email</mat-icon>
+            <mat-error *ngIf="invite.get('email')?.hasError('required')">
+              Email is required
+            </mat-error>
+            <mat-error *ngIf="invite.get('email')?.hasError('email')">
+              Invalid email format
+            </mat-error>
+          </mat-form-field>
+
+          <mat-form-field appearance="outline" class="role-field">
+            <mat-label>Role</mat-label>
+            <mat-select formControlName="role">
+              <mat-option *ngFor="let role of roles" [value]="role">
+                {{ roleLabels[role] }}
+              </mat-option>
+            </mat-select>
+            <mat-icon matPrefix>badge</mat-icon>
+          </mat-form-field>
+
+          <button 
+            mat-icon-button 
+            type="button"
+            (click)="removeInvite(i)"
+            [disabled]="invites.length === 1"
+            class="remove-button">
+            <mat-icon>delete</mat-icon>
+          </button>
+        </div>
+      </div>
+
+      <button mat-button type="button" (click)="addInvite()" class="add-invite-button">
+        <mat-icon>add</mat-icon>
+        Add Another Invite
+      </button>
+
+      <div *ngIf="results.length > 0" class="results-section">
+        <h3>Invitation Results</h3>
+        <div *ngFor="let result of results" class="result-item" [class.success]="result.success" [class.error]="!result.success">
+          <mat-icon>{{ result.success ? 'check_circle' : 'error' }}</mat-icon>
+          <div class="result-content">
+            <strong>{{ result.email }}</strong>
+            <span class="result-message">{{ result.message }}</span>
+          </div>
+        </div>
+      </div>
+
+      <div *ngIf="errorMessage" class="error-message">
+        <mat-icon>error</mat-icon>
+        {{ errorMessage }}
+      </div>
+
+      <div class="modal-actions">
+        <button 
+          mat-button 
+          type="button"
+          (click)="onCancel()"
+          [disabled]="loading">
+          Cancel
+        </button>
+        <button 
+          mat-raised-button 
+          color="primary" 
+          type="submit"
+          [disabled]="loading || inviteForm.invalid">
+          <mat-spinner *ngIf="loading" diameter="20" class="inline-spinner"></mat-spinner>
+          <span *ngIf="!loading">Send Invitations</span>
+          <span *ngIf="loading">Sending...</span>
+        </button>
+      </div>
+    </form>
+  </div>
+</div>
+

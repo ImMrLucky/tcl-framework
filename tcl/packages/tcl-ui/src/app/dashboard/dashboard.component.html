@@ -20,7 +20,7 @@
             <div class="user-role" *ngIf="currentUser?.companyRole">{{ currentUser?.companyRole }}</div>
           </div>
           <mat-divider></mat-divider>
-          <button mat-menu-item (click)="openOnboardingModal()">
+          <button mat-menu-item routerLink="/profile">
             <mat-icon>settings</mat-icon>
             <span>Profile Settings</span>
           </button>
@@ -68,7 +68,7 @@
         </mat-card-actions>
       </mat-card>
 
-      <mat-card class="dashboard-card" *ngIf="currentUser" [routerLink]="'/orgs/' + getFirstOrgId() + '/members'">
+      <mat-card class="dashboard-card" *ngIf="currentUser">
         <mat-card-header>
           <mat-icon class="card-icon">people</mat-icon>
           <mat-card-title>Team Members</mat-card-title>
@@ -77,7 +77,13 @@
           <p>Invite team members and manage their roles and permissions.</p>
         </mat-card-content>
         <mat-card-actions>
-          <button mat-button color="primary">Manage Team</button>
+          <button mat-button color="primary" (click)="openInviteModal()">
+            <mat-icon>person_add</mat-icon>
+            Invite Members
+          </button>
+          <button mat-button [routerLink]="'/orgs/' + getFirstOrgId() + '/members'">
+            Manage Team
+          </button>
         </mat-card-actions>
       </mat-card>
     </div>

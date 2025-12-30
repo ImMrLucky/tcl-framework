@@ -11,6 +11,7 @@ import { LogoComponent } from '../shared/logo.component';
 import { AuthService, User } from '../auth.service';
 import { MemberService } from '../member.service';
 import { OnboardingModalComponent } from '../onboarding-modal/onboarding-modal.component';
+import { InviteModalComponent } from '../invite-modal/invite-modal.component';
 
 @Component({
   selector: 'app-dashboard',
@@ -63,32 +64,36 @@ export class DashboardComponent implements OnInit {
   }
 
   checkAndShowOnboarding(user: User) {
-    // Show onboarding modal if user hasn't completed onboarding
-    // We check if any of the required fields are missing
+    // Only show onboarding modal if:
+    // 1. User hasn't completed onboarding (onboardingCompleted === false)
+    // 2. User hasn't filled in required fields
+    const hasCompletedOnboarding = user.onboardingCompleted === true;
     const needsOnboarding = !user.companyIndustry || !user.callOperation || !user.primaryUseCase;
     
-    if (needsOnboarding) {
-      // Small delay to ensure dashboard is rendered first
-      setTimeout(() => {
-        const dialogRef = this.dialog.open(OnboardingModalComponent, {
-          width: '600px',
-          disableClose: false, // Allow closing by clicking outside or ESC
-          autoFocus: true
-        });
-
-        dialogRef.afterClosed().subscribe((result: boolean) => {
-          if (result) {
-            // User completed onboarding, refresh user data
-            const currentUser = this.authService.getCurrentUser();
-            if (currentUser) {
-              this.currentUser = currentUser;
-            }
-          }
-          // If result is false or undefined, user dismissed the modal
-          // We don't force them to complete it
-        });
-      }, 500);
+    // Don't show if already completed or if user has all required fields
+    if (hasCompletedOnboarding || !needsOnboarding) {
+      return;
     }
+    
+    // Show modal for new users who haven't completed onboarding
+    setTimeout(() => {
+      const dialogRef = this.dialog.open(OnboardingModalComponent, {
+        width: '600px',
+        disableClose: false, // Allow closing by clicking outside or ESC
+        autoFocus: true
+      });
+
+      dialogRef.afterClosed().subscribe((result: boolean) => {
+        if (result) {
+          // User completed onboarding, refresh user data
+          const currentUser = this.authService.getCurrentUser();
+          if (currentUser) {
+            this.currentUser = currentUser;
+          }
+        }
+        // If result is false, user dismissed - onboarding_completed is already set to true
+      });
+    }, 500);
   }
 
   loadUserOrgs(userId: string) {
@@ -110,19 +115,19 @@ export class DashboardComponent implements OnInit {
     this.authService.signOut();
   }
 
-  openOnboardingModal() {
-    const dialogRef = this.dialog.open(OnboardingModalComponent, {
-      width: '600px',
+  openInviteModal() {
+    const dialogRef = this.dialog.open(InviteModalComponent, {
+      width: '700px',
       disableClose: false,
       autoFocus: true
     });
 
     dialogRef.afterClosed().subscribe((result: boolean) => {
       if (result) {
-        // User completed onboarding, refresh user data
+        // Refresh user orgs if needed
         const currentUser = this.authService.getCurrentUser();
         if (currentUser) {
-          this.currentUser = currentUser;
+          this.loadUserOrgs(currentUser.id);
         }
       }
     });

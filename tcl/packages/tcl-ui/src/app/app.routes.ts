@@ -22,6 +22,10 @@ export const routes: Routes = [
     loadComponent: () => import('./auth/onboarding.component').then(m => m.OnboardingComponent)
   },
   {
+    path: 'profile',
+    loadComponent: () => import('./profile/profile.component').then(m => m.ProfileComponent)
+  },
+  {
     path: 'call-center-qa',
     loadComponent: () => import('./call-center-qa/call-center-qa.component').then(m => m.CallCenterQaComponent)
   },

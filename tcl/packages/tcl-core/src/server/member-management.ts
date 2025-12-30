@@ -147,12 +147,38 @@ export async function inviteMember(
       return { success: false, message: `Failed to add member: ${memberError.message}` };
     }
 
-    // TODO: Send invitation email via Supabase Auth or your email service
-    // For now, the user will receive a confirmation email from Supabase
+    // Send invitation email with signup link
+    // Use PROTECTQA_URL for production (ProtectQA.com), fallback to FRONTEND_URL or default
+    const frontendUrl = process.env.PROTECTQA_URL || process.env.FRONTEND_URL || 'https://ProtectQA.com';
+    const signupUrl = `${frontendUrl}/login?invite=true&email=${encodeURIComponent(email)}`;
+    
+    // Use Supabase's inviteUserByEmail which sends a proper invitation email
+    const { data: inviteData, error: inviteError } = await supabaseAdmin.auth.admin.inviteUserByEmail(
+      email,
+      {
+        data: {
+          invited_by: inviterUserId,
+          invited_to_org: orgId,
+          role: role
+        },
+        redirectTo: signupUrl
+      }
+    );
+
+    if (inviteError) {
+      console.error('Failed to send invitation email:', inviteError);
+      // Still return success since user was created, but log the email error
+      return {
+        success: true,
+        message: 'User created and added to organization. Email invitation may have failed - please contact them directly.',
+        userId: newUser.user.id,
+        memberId: `${orgId}-${newUser.user.id}`
+      };
+    }
 
     return {
       success: true,
-      message: 'User created and invited to organization. They will receive an email to set their password.',
+      message: 'User invited successfully. They will receive an email with a signup link.',
       userId: newUser.user.id,
       memberId: `${orgId}-${newUser.user.id}`
     };
