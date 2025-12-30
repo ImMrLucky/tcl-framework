@@ -92,9 +92,9 @@ export class MemberService {
    * Get user's organizations
    */
   getUserOrgs(userId: string): Observable<{ orgs: Array<{ id: string; name: string; slug: string; role: string }> }> {
-    return this.http.get<{ orgs: Array<{ id: string; name: string; slug: string; role: string }> }>(
+    return this.http.post<{ orgs: Array<{ id: string; name: string; slug: string; role: string }> }>(
       `${this.apiBase}/me/orgs`,
-      { params: { userId } }
+      { userId }
     );
   }
 }

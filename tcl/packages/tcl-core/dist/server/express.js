@@ -1,10 +1,10 @@
 import express from "express";
-import { URL } from "url";
 import { supabaseAdmin, verifyApiKeyExtended, provisionUser, getUserOrgs, getUserRole, checkUserPermission, getOrgProjects, getProjectEnvs, generateApiKey, logAudit, trackUsage } from "./supabase.js";
 import { inviteMember, updateMemberRole, removeMember, listMembers } from "./member-management.js";
 const app = express();
 app.use(express.json({ limit: "10mb" }));
 app.use(express.raw({ type: 'application/json', limit: '10mb' })); // For HMAC webhook verification
+app.use(express.urlencoded({ extended: true })); // Enable query string parsing
 // Health check endpoint - must work even if other imports fail
 app.get("/health", (req, res) => {
     res.json({ status: "ok", service: "tcl-core" });
@@ -351,28 +351,10 @@ app.post("/auth/provision", async (req, res) => {
     }
 });
 // Get user's organizations
-app.get("/me/orgs", async (req, res) => {
+app.post("/me/orgs", async (req, res) => {
     try {
-        // Get userId from query parameter
-        // Try req.query first (Express parsed), then parse manually from URL if needed
-        let userId = req.query.userId;
-        // If not found in req.query, parse manually from the URL
-        if (!userId && req.url) {
-            try {
-                // Handle both absolute and relative URLs
-                const baseUrl = req.protocol ? `${req.protocol}://${req.get('host')}` : 'http://localhost';
-                const fullUrl = req.url.startsWith('http') ? req.url : `${baseUrl}${req.url}`;
-                const urlObj = new URL(fullUrl);
-                userId = urlObj.searchParams.get('userId') || undefined;
-            }
-            catch (urlParseError) {
-                // Fallback: simple string parsing
-                const match = req.url.match(/[?&]userId=([^&]+)/);
-                if (match) {
-                    userId = decodeURIComponent(match[1]);
-                }
-            }
-        }
+        // Get userId from request body
+        const userId = req.body.userId;
         if (!userId || userId.trim() === '') {
             return res.status(400).json({ error: "userId required" });
         }
