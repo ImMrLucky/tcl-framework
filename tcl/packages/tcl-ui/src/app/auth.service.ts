@@ -544,7 +544,8 @@ export class AuthService {
       let session: any = null;
       let expiresAt: number | string | null = null;
 
-      // Check different possible structures
+      // Check different possible Supabase session structures
+      // Supabase can store it in various formats depending on version
       if (parsed?.currentSession) {
         session = parsed.currentSession;
         expiresAt = session.expires_at;
@@ -552,8 +553,17 @@ export class AuthService {
         session = parsed.session;
         expiresAt = session.expires_at;
       } else if (parsed?.access_token) {
+        // Direct access_token at root level
         session = parsed;
         expiresAt = parsed.expires_at;
+      } else if (parsed?.value?.currentSession) {
+        // Nested value structure
+        session = parsed.value.currentSession;
+        expiresAt = session.expires_at;
+      } else if (parsed?.value?.session) {
+        // Nested value.session structure
+        session = parsed.value.session;
+        expiresAt = session.expires_at;
       }
 
       if (!session?.access_token) {
@@ -593,6 +603,8 @@ export class AuthService {
     }
 
     // If no valid stored session, try getSession with timeout
+    // Don't call handleSessionExpired here - let the caller handle the null return
+    // This prevents redirects during API calls
     try {
       const sessionPromise = this.supabase.auth.getSession();
       const timeoutPromise = new Promise<null>((resolve) => 
@@ -601,26 +613,22 @@ export class AuthService {
       
       const sessionResponse = await Promise.race([sessionPromise, timeoutPromise]);
       if (!sessionResponse || sessionResponse.error) {
-        // No valid session, redirect to login
-        this.handleSessionExpired();
+        // No valid session, return null (don't redirect here)
         return null;
       }
 
       const session = sessionResponse.data?.session;
       if (!session?.access_token) {
-        this.handleSessionExpired();
         return null;
       }
 
       // Check if token is expired
       if (this.isTokenExpired(session.expires_at)) {
-        this.handleSessionExpired();
         return null;
       }
 
       return session.access_token;
     } catch (error) {
-      this.handleSessionExpired();
       return null;
     }
   }

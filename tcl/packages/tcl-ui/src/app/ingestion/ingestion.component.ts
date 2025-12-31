@@ -14,7 +14,7 @@ import { AppHeaderComponent } from '../shared/app-header.component';
 import { AuditService } from '../audit.service';
 import { TclService } from '../tcl.service';
 import { AuthService } from '../auth.service';
-import { HttpClient, HttpHeaders } from '@angular/common/http';
+import { HttpClient } from '@angular/common/http';
 import { firstValueFrom } from 'rxjs';
 
 // Note: extractClaims is used client-side for now
@@ -268,14 +268,8 @@ export class IngestionComponent implements OnInit {
     this.transcriptionInProgress = true;
     this.errorMessage = '';
 
-    const accessToken = await this.authService.getAccessToken();
-    if (!accessToken) {
-      this.errorMessage = 'Not authenticated. Please log in.';
-      this.snackBar.open(this.errorMessage, 'Close', { duration: 5000 });
-      this.transcriptionInProgress = false;
-      return;
-    }
-
+    // Authorization header is now automatically added by AuthInterceptor
+    // No need to manually check for token here - interceptor will handle it
     const apiUrl = this.auditService.getApiBaseUrl();
     const fullUrl = `${apiUrl}/transcribe`;
     
@@ -283,16 +277,11 @@ export class IngestionComponent implements OnInit {
     formData.append('audio', this.selectedFile);
     formData.append('filename', this.selectedFile.name);
 
-    // Create headers with Authorization
-    // Note: Don't set Content-Type for FormData - browser will set it with boundary
-    // HttpHeaders is immutable, so set() returns a new instance - must use the returned value
-    const headers = new HttpHeaders().set('Authorization', `Bearer ${accessToken}`);
-
+    // Authorization header is now automatically added by AuthInterceptor
+    // No need to manually set it here
     try {
       const result = await firstValueFrom(
-        this.http.post<{ transcript?: string; text?: string }>(fullUrl, formData, { 
-          headers: headers
-        })
+        this.http.post<{ transcript?: string; text?: string }>(fullUrl, formData)
       );
       
       this.transcript = result.transcript || result.text || '';
