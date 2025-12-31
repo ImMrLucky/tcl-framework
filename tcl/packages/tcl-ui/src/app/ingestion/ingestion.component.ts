@@ -283,30 +283,18 @@ export class IngestionComponent implements OnInit {
       const apiUrl = this.auditService.getApiBaseUrl();
       const fullUrl = `${apiUrl}/transcribe`;
       
-      // Verify file exists
-      if (!this.selectedFile) {
-        throw new Error('Selected file is null');
-      }
-
       const formData = new FormData();
-      formData.append('audio', this.selectedFile, this.selectedFile.name);
+      formData.append('audio', this.selectedFile);
       formData.append('filename', this.selectedFile.name);
 
-      // HttpClient will automatically set Content-Type with boundary for FormData
-      // Don't set Content-Type manually - let Angular handle it
       const headers = new HttpHeaders({
         'Authorization': `Bearer ${accessToken}`
       });
 
-      // Make the HTTP request using HttpClient
-      // Explicitly subscribe to ensure the request is made
-      const result = await new Promise<{ transcript?: string; text?: string }>((resolve, reject) => {
-        const observable = this.http.post<{ transcript?: string; text?: string }>(fullUrl, formData, { headers });
-        observable.subscribe({
-          next: (data) => resolve(data),
-          error: (err) => reject(err)
-        });
-      });
+      // Simple, direct HTTP POST call
+      const result = await firstValueFrom(
+        this.http.post<{ transcript?: string; text?: string }>(fullUrl, formData, { headers })
+      );
       
       this.transcript = result.transcript || result.text || '';
       
@@ -316,11 +304,9 @@ export class IngestionComponent implements OnInit {
 
       this.snackBar.open('Audio transcribed successfully', 'Close', { duration: 3000 });
     } catch (error: any) {
-      // Extract error message from HTTP error response
       const errorMessage = error.error?.error || error.message || 'Failed to transcribe audio';
       this.errorMessage = errorMessage;
       this.snackBar.open(errorMessage, 'Close', { duration: 5000 });
-      // Re-throw so onSubmit can handle it
       throw error;
     } finally {
       this.transcriptionInProgress = false;
