@@ -1,7 +1,8 @@
 import { Injectable } from '@angular/core';
 import { createClient, SupabaseClient, AuthError } from '@supabase/supabase-js';
-import { BehaviorSubject, Observable } from 'rxjs';
+import { BehaviorSubject, Observable, firstValueFrom } from 'rxjs';
 import { Router } from '@angular/router';
+import { HttpClient } from '@angular/common/http';
 
 export interface User {
   id: string;
@@ -25,7 +26,7 @@ export class AuthService {
   private readonly INACTIVITY_TIMEOUT = 30 * 60 * 1000; // 30 minutes in milliseconds
   private lastActivityTime = Date.now();
 
-  constructor(private router: Router) {
+  constructor(private router: Router, private http: HttpClient) {
     // Use environment variables if available, fallback to hardcoded for development
     const supabaseUrl = (typeof window !== 'undefined' && (window as any).__SUPABASE_URL) 
       || 'https://uqwcmkyaskyduxuluqrm.supabase.co';
@@ -184,28 +185,22 @@ export class AuthService {
     // Check if user already exists before attempting signup
     try {
       const apiUrl = this.getApiBaseUrl();
-      const checkResponse = await fetch(`${apiUrl}/auth/check-email`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email })
-      });
+      const checkData = await firstValueFrom(
+        this.http.post<{ exists: boolean }>(`${apiUrl}/auth/check-email`, { email })
+      );
       
-      if (checkResponse.ok) {
-        const checkData = await checkResponse.json();
-        if (checkData.exists) {
-          // User already exists - return special error
-          return { 
-            error: { 
-              message: 'An account with this email already exists. Please sign in or reset your password.',
-              name: 'UserAlreadyExists',
-              status: 400
-            } as AuthError,
-            duplicateAccount: true
-          };
-        }
+      if (checkData.exists) {
+        // User already exists - return special error
+        return { 
+          error: { 
+            message: 'An account with this email already exists. Please sign in or reset your password.',
+            name: 'UserAlreadyExists',
+            status: 400
+          } as AuthError,
+          duplicateAccount: true
+        };
       }
     } catch (err) {
-      console.error('Error checking email:', err);
       // Continue with signup attempt if check fails
     }
 
@@ -238,22 +233,11 @@ export class AuthService {
       try {
         // Use same API URL pattern as TclService
         const apiUrl = this.getApiBaseUrl();
-        const response = await fetch(`${apiUrl}/auth/provision`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ userId: data.user.id, email })
-        });
-        
-        if (!response.ok) {
-          const errorText = await response.text();
-          console.error('Failed to provision user:', errorText);
-          // Don't fail signup if provision fails - user can still log in
-        } else {
-          console.log('User provisioned successfully');
-        }
+        await firstValueFrom(
+          this.http.post(`${apiUrl}/auth/provision`, { userId: data.user.id, email })
+        );
       } catch (err) {
-        console.error('Error provisioning user:', err);
-        // Don't fail signup if provision fails
+        // Don't fail signup if provision fails - user can still log in
       }
 
       // Load profile after signup (will create basic profile if provision succeeded)

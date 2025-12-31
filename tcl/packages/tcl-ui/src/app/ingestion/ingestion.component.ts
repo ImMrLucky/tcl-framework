@@ -124,15 +124,17 @@ export class IngestionComponent implements OnInit {
 
     try {
       // Step 1: Create conversation using new REST endpoint
-      const createResponse = await this.auditService.createConversation({
-        title: this.title || this.selectedFileName || undefined,
-        content: this.transcript,
-        metadata: {
-          channel: this.channel,
-          source_file: this.selectedFileName || null,
-          is_audio: this.isAudioFile
-        }
-      }).toPromise();
+      const createResponse = await firstValueFrom(
+        this.auditService.createConversation({
+          title: this.title || this.selectedFileName || undefined,
+          content: this.transcript,
+          metadata: {
+            channel: this.channel,
+            source_file: this.selectedFileName || null,
+            is_audio: this.isAudioFile
+          }
+        })
+      );
 
       if (!createResponse || !createResponse.conversation) {
         throw new Error('Failed to create conversation');
@@ -150,27 +152,18 @@ export class IngestionComponent implements OnInit {
         throw new Error('No claims extracted from transcript');
       }
 
-      // Step 2: Trigger evaluation using /validate endpoint with conversation_id
-      // The backend will extract claims and run the evaluation
+      // Step 3: Trigger evaluation using /validate endpoint with conversation_id
+      // Using HttpClient so the interceptor adds the Authorization header
       const apiUrl = this.auditService.getApiBaseUrl();
-      const validateResponse = await fetch(`${apiUrl}/validate`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
+      const evaluationData = await firstValueFrom(
+        this.http.post<any>(`${apiUrl}/validate`, {
           question: this.transcript,
           answer: '',
           sources: [],
           options: {},
           conversation_id: conversationId
         })
-      });
-
-      if (!validateResponse.ok) {
-        const errorData = await validateResponse.json();
-        throw new Error(errorData.error || 'Failed to run evaluation');
-      }
-
-      const evaluationData = await validateResponse.json();
+      );
       
       // Step 3: Get the evaluation ID from the response or fetch it from conversation
       // The evaluation should be linked to the conversation now
@@ -179,7 +172,9 @@ export class IngestionComponent implements OnInit {
       await new Promise(resolve => setTimeout(resolve, 1000));
       
       // Get evaluations for this conversation
-      const evaluationsResponse = await this.auditService.getConversationEvaluations(conversationId, { limit: 1 }).toPromise();
+      const evaluationsResponse = await firstValueFrom(
+        this.auditService.getConversationEvaluations(conversationId, { limit: 1 })
+      );
       
       if (evaluationsResponse && evaluationsResponse.evaluations && evaluationsResponse.evaluations.length > 0) {
         // Navigate to the most recent evaluation
