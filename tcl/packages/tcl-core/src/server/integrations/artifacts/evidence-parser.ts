@@ -174,14 +174,20 @@ function parseCSV(content: string, filename: string): ParsedEvidence {
 }
 
 async function parseXLSX(content: string | Buffer, filename: string): Promise<ParsedEvidence> {
-  // Try to load XLSX dynamically
+  // Try to load XLSX dynamically (optional dependency)
   let XLSX: any;
   try {
-    const xlsxModule = await import('xlsx');
+    // @ts-ignore - xlsx is an optional dependency
+    const xlsxModule = await import('xlsx' as string);
     XLSX = xlsxModule.default || xlsxModule;
   } catch (e) {
     // XLSX not available - fallback to text
     console.warn('XLSX library not available. XLSX file parsing will be disabled. Install with: npm install xlsx');
+    const contentStr = Buffer.isBuffer(content) ? content.toString('utf-8') : content;
+    return parseTXT(contentStr, filename);
+  }
+  
+  if (!XLSX) {
     const contentStr = Buffer.isBuffer(content) ? content.toString('utf-8') : content;
     return parseTXT(contentStr, filename);
   }

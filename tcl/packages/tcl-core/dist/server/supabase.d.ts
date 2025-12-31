@@ -78,7 +78,7 @@ export declare function getProjectEnvs(projectId: string): Promise<Array<{
 /**
  * Track usage for an evaluation or conversation
  */
-export declare function trackUsage(orgId: string, projectId: string, env: string, type: 'evaluation' | 'conversation'): Promise<void>;
+export declare function trackUsage(orgId: string, projectId: string, env: string, type: 'evaluation' | 'conversation' | 'transcription'): Promise<void>;
 /**
  * Log audit event
  */
