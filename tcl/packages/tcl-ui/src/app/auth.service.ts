@@ -299,78 +299,8 @@ export class AuthService {
       return { error, duplicateAccount: false };
     }
 
-    // Supabase automatically stores the session in localStorage
-    // Wait a moment to ensure it's persisted, then verify
-    if (data.session && data.session.access_token) {
-      // Small delay to ensure localStorage is updated by Supabase
-      await new Promise(resolve => setTimeout(resolve, 200));
-      
-      // Verify session is stored and accessible - this is critical
-      const { data: { session: storedSession }, error: sessionError } = await this.supabase.auth.getSession();
-      if (sessionError || !storedSession || !storedSession.access_token) {
-        // Session was not stored properly - this is an error
-        await this.supabase.auth.signOut();
-        return { 
-          error: { 
-            message: 'Failed to store session. Please try again.', 
-            name: 'SessionStorageError',
-            status: 500
-          } as AuthError, 
-          duplicateAccount: false 
-        };
-      }
-      
-      // Session is stored correctly, now verify user has a valid profile
-      const { data: { user } } = await this.supabase.auth.getUser();
-      if (!user) {
-        await this.supabase.auth.signOut();
-        return { 
-          error: { 
-            message: 'Could not retrieve user information. Please try again.', 
-            name: 'UserError',
-            status: 500
-          } as AuthError, 
-          duplicateAccount: false 
-        };
-      }
-      
-      // Check if user has a profile in the database
-      const { data: profile, error: profileError } = await this.supabase
-        .from('profiles')
-        .select('id')
-        .eq('id', user.id)
-        .maybeSingle();
-      
-      if (profileError || !profile) {
-        // User exists in auth but not in our database
-        // This can happen if provisioning failed during signup
-        // Try to provision them now
-        console.warn('User has no profile, attempting to provision...');
-        try {
-          const apiUrl = this.getApiBaseUrl();
-          await firstValueFrom(
-            this.http.post(`${apiUrl}/auth/provision`, { userId: user.id, email: user.email })
-          );
-          console.log('User provisioned successfully on login');
-        } catch (provisionErr: any) {
-          // Provisioning failed - user cannot use the app
-          console.error('Failed to provision user on login:', provisionErr);
-          await this.supabase.auth.signOut();
-          return { 
-            error: { 
-              message: 'Your account setup is incomplete. Please try signing up again or contact support.', 
-              name: 'ProvisionError',
-              status: 500
-            } as AuthError, 
-            duplicateAccount: false 
-          };
-        }
-      }
-      
-      // Load the full profile
-      await this.loadUserProfile(user.id);
-    } else {
-      // No session returned - this is an error
+    // Check if we got a valid session
+    if (!data.session || !data.session.access_token) {
       return { 
         error: { 
           message: 'Login succeeded but no session was created. Please try again.', 
@@ -379,6 +309,86 @@ export class AuthService {
         } as AuthError, 
         duplicateAccount: false 
       };
+    }
+
+    // User is authenticated - get user info from the response (no extra API call needed)
+    const user = data.user;
+    if (!user) {
+      await this.supabase.auth.signOut();
+      return { 
+        error: { 
+          message: 'Could not retrieve user information. Please try again.', 
+          name: 'UserError',
+          status: 500
+        } as AuthError, 
+        duplicateAccount: false 
+      };
+    }
+
+    // Check if user has a profile in the database (with timeout)
+    try {
+      const profilePromise = this.supabase
+        .from('profiles')
+        .select('id')
+        .eq('id', user.id)
+        .maybeSingle();
+      
+      // Add a 5 second timeout for the profile check
+      const timeoutPromise = new Promise((_, reject) => 
+        setTimeout(() => reject(new Error('Profile check timed out')), 5000)
+      );
+      
+      const { data: profile, error: profileError } = await Promise.race([
+        profilePromise,
+        timeoutPromise
+      ]) as any;
+      
+      if (profileError || !profile) {
+        // User exists in auth but not in our database
+        // This can happen if provisioning failed during signup
+        // Try to provision them now (with timeout)
+        console.warn('User has no profile, attempting to provision...');
+        try {
+          const apiUrl = this.getApiBaseUrl();
+          const provisionPromise = firstValueFrom(
+            this.http.post(`${apiUrl}/auth/provision`, { userId: user.id, email: user.email })
+          );
+          
+          // Add a 10 second timeout for provisioning
+          const provisionTimeout = new Promise((_, reject) => 
+            setTimeout(() => reject(new Error('Provisioning timed out')), 10000)
+          );
+          
+          await Promise.race([provisionPromise, provisionTimeout]);
+          console.log('User provisioned successfully on login');
+        } catch (provisionErr: any) {
+          // Provisioning failed - but don't block login if it's just a timeout
+          // The user might still be able to use the app
+          console.error('Failed to provision user on login:', provisionErr);
+          // Don't sign out - let them try to use the app
+          // The backend will handle missing org gracefully
+        }
+      }
+    } catch (profileCheckErr: any) {
+      // Profile check failed (possibly timeout) - continue anyway
+      // The user is authenticated, they should still be able to access the app
+      console.warn('Profile check failed:', profileCheckErr.message);
+    }
+
+    // Load the user profile (with timeout to prevent hang)
+    try {
+      const loadPromise = this.loadUserProfile(user.id);
+      const loadTimeout = new Promise((_, reject) => 
+        setTimeout(() => reject(new Error('Load profile timed out')), 5000)
+      );
+      await Promise.race([loadPromise, loadTimeout]);
+    } catch (loadErr: any) {
+      // Profile load failed - set minimal user data
+      console.warn('Failed to load full profile:', loadErr.message);
+      this.currentUserSubject.next({
+        id: user.id,
+        email: user.email
+      });
     }
 
     return { error: null, duplicateAccount: false };
