@@ -14,6 +14,8 @@ import { AppHeaderComponent } from '../shared/app-header.component';
 import { AuditService } from '../audit.service';
 import { TclService } from '../tcl.service';
 import { AuthService } from '../auth.service';
+import { HttpClient, HttpHeaders } from '@angular/common/http';
+import { firstValueFrom } from 'rxjs';
 
 // Note: extractClaims is used client-side for now
 // In production, this should be done server-side via an API endpoint
@@ -63,7 +65,8 @@ export class IngestionComponent implements OnInit {
     private tclService: TclService,
     private router: Router,
     private snackBar: MatSnackBar,
-    private authService: AuthService
+    private authService: AuthService,
+    private http: HttpClient
   ) {}
 
   ngOnInit() {
@@ -268,65 +271,36 @@ export class IngestionComponent implements OnInit {
    * Transcribe audio file
    */
   async transcribeAudio(): Promise<void> {
-    console.log('transcribeAudio called', { hasFile: !!this.selectedFile, fileName: this.selectedFile?.name });
-    
     if (!this.selectedFile) {
-      console.error('No file selected');
       this.errorMessage = 'No audio file selected';
       return;
     }
 
-    console.log('Setting transcriptionInProgress to true');
     this.transcriptionInProgress = true;
     this.errorMessage = '';
 
     try {
-      console.log('Getting access token...');
       // Get session token for authentication
       const accessToken = await this.authService.getAccessToken();
-      console.log('Access token retrieved:', accessToken ? 'Yes' : 'No');
-      
       if (!accessToken) {
-        console.error('No access token available');
         throw new Error('Not authenticated. Please log in.');
       }
 
-      console.log('Getting API base URL...');
       const apiUrl = this.auditService.getApiBaseUrl();
-      console.log('API base URL:', apiUrl);
       const fullUrl = `${apiUrl}/transcribe`;
-      console.log('Full transcription URL:', fullUrl);
-      console.log('Transcribing audio file:', this.selectedFile.name, 'Size:', this.selectedFile.size, 'bytes');
       
-      console.log('Creating FormData...');
       const formData = new FormData();
       formData.append('audio', this.selectedFile);
       formData.append('filename', this.selectedFile.name);
-      console.log('FormData created with file:', this.selectedFile.name, 'size:', this.selectedFile.size, 'bytes');
 
-      // Don't set Content-Type header - browser will set it automatically with boundary for FormData
-      const headers: HeadersInit = {
+      // HttpClient will automatically set Content-Type with boundary for FormData
+      const headers = new HttpHeaders({
         'Authorization': `Bearer ${accessToken}`
-      };
-      console.log('Headers prepared:', Object.keys(headers));
-
-      console.log('About to call fetch...');
-      const response = await fetch(fullUrl, {
-        method: 'POST',
-        headers: headers,
-        body: formData
       });
-      console.log('Fetch completed, response status:', response.status);
 
-      console.log('Transcription response status:', response.status);
-
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({ error: `Transcription failed with status ${response.status}` }));
-        throw new Error(errorData.error || 'Transcription failed');
-      }
-
-      const result = await response.json();
-      console.log('Transcription result:', result);
+      const result = await firstValueFrom(
+        this.http.post<{ transcript?: string; text?: string }>(fullUrl, formData, { headers })
+      );
       
       this.transcript = result.transcript || result.text || '';
       
@@ -336,8 +310,7 @@ export class IngestionComponent implements OnInit {
 
       this.snackBar.open('Audio transcribed successfully', 'Close', { duration: 3000 });
     } catch (error: any) {
-      console.error('Transcription error:', error);
-      this.errorMessage = error.message || 'Failed to transcribe audio';
+      this.errorMessage = error.error?.error || error.message || 'Failed to transcribe audio';
       this.snackBar.open(this.errorMessage, 'Close', { duration: 5000 });
     } finally {
       this.transcriptionInProgress = false;
