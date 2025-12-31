@@ -283,13 +283,18 @@ export class IngestionComponent implements OnInit {
     formData.append('audio', this.selectedFile);
     formData.append('filename', this.selectedFile.name);
 
+    // Create headers with Authorization
+    // Note: Don't set Content-Type for FormData - browser will set it with boundary
     const headers = new HttpHeaders({
       'Authorization': `Bearer ${accessToken}`
     });
 
     try {
       const result = await firstValueFrom(
-        this.http.post<{ transcript?: string; text?: string }>(fullUrl, formData, { headers })
+        this.http.post<{ transcript?: string; text?: string }>(fullUrl, formData, { 
+          headers,
+          // Don't set Content-Type - let browser set it for multipart/form-data
+        })
       );
       
       this.transcript = result.transcript || result.text || '';

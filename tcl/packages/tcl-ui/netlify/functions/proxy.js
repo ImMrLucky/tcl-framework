@@ -86,17 +86,22 @@ exports.handler = async (event, context) => {
     // Forward the request to TCL Core
     const headers = {};
     
-    // Forward all relevant headers
+    // Forward all relevant headers from the original request
+    // Netlify lowercases all header names, so check both cases
     const contentType = event.headers['content-type'] || event.headers['Content-Type'];
-    if (contentType) {
+    if (contentType && !contentType.includes('multipart/form-data')) {
+      // Only set Content-Type if it's not multipart/form-data
+      // For multipart, let fetch set it automatically with the boundary
       headers['Content-Type'] = contentType;
-    } else {
-      headers['Content-Type'] = 'application/json';
     }
     
-    // Forward authorization if present
-    if (event.headers.authorization || event.headers['Authorization']) {
-      headers['Authorization'] = event.headers.authorization || event.headers['Authorization'];
+    // Forward authorization header (Netlify lowercases headers)
+    const authHeader = event.headers.authorization || event.headers['Authorization'];
+    if (authHeader) {
+      headers['Authorization'] = authHeader;
+      console.log('Forwarding Authorization header');
+    } else {
+      console.log('No Authorization header found in request');
     }
     
     // Handle body based on content type
@@ -112,6 +117,8 @@ exports.handler = async (event, context) => {
         } else if (typeof body === 'string') {
           body = Buffer.from(body, 'utf8');
         }
+        // Don't set Content-Type for multipart - fetch will set it with boundary
+        delete headers['Content-Type'];
       } else {
         // For JSON, ensure it's a string
         if (typeof body !== 'string') {
@@ -119,6 +126,8 @@ exports.handler = async (event, context) => {
         }
       }
     }
+    
+    console.log('Forwarding request with headers:', Object.keys(headers));
     
     const response = await fetch(url, {
       method: event.httpMethod,
