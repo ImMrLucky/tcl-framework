@@ -302,7 +302,7 @@ export class IngestionComponent implements OnInit {
       const formData = new FormData();
       formData.append('audio', this.selectedFile);
       formData.append('filename', this.selectedFile.name);
-      console.log('FormData created, entries:', Array.from(formData.entries()).map(([k, v]) => [k, v instanceof File ? `${v.name} (${v.size} bytes)` : v]));
+      console.log('FormData created with file:', this.selectedFile.name, 'size:', this.selectedFile.size, 'bytes');
 
       // Don't set Content-Type header - browser will set it automatically with boundary for FormData
       const headers: HeadersInit = {
