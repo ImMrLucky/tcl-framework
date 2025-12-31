@@ -5,7 +5,9 @@ import { catchError, switchMap } from 'rxjs/operators';
 import { AuthService } from './auth.service';
 import { Router } from '@angular/router';
 
-@Injectable()
+@Injectable({
+  providedIn: 'root'
+})
 export class AuthInterceptor implements HttpInterceptor {
   // Public endpoints that don't require authentication
   private publicEndpoints = [
@@ -36,27 +38,33 @@ export class AuthInterceptor implements HttpInterceptor {
     // For authenticated endpoints, get the token and add it to the request
     return from(this.authService.getAccessToken()).pipe(
       switchMap(token => {
+        // Clone the request
+        let authReq = req;
+        
+        // If we have a token, add the Authorization header
+        if (token) {
+          authReq = req.clone({
+            setHeaders: {
+              Authorization: `Bearer ${token}`
+            }
+          });
+        }
         // If no token, proceed without auth header (backend will return 401)
-        if (!token) {
-          return next.handle(req);
-        }
 
-        // Clone the request and add the Authorization header
-        const authReq = req.clone({
-          setHeaders: {
-            Authorization: `Bearer ${token}`
-          }
-        });
-
-        return next.handle(authReq);
+        return next.handle(authReq).pipe(
+          catchError((error: HttpErrorResponse) => {
+            // Handle 401 Unauthorized responses
+            if (error.status === 401) {
+              // Clear session and redirect to login
+              this.authService.signOut();
+            }
+            return throwError(() => error);
+          })
+        );
       }),
-      catchError((error: HttpErrorResponse) => {
-        // Handle 401 Unauthorized responses
-        if (error.status === 401) {
-          // Clear session and redirect to login
-          this.authService.signOut();
-        }
-        return throwError(() => error);
+      catchError((error) => {
+        // If token retrieval fails, proceed without auth header
+        return next.handle(req);
       })
     );
   }

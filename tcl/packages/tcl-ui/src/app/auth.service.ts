@@ -306,9 +306,13 @@ export class AuthService {
   }
 
   async signOut(): Promise<void> {
-    console.log('Signing out...');
+    // STEP 1: Clear inactivity timer
+    this.clearInactivityTimer();
     
-    // STEP 1: Clear localStorage FIRST (before Supabase checks for session)
+    // STEP 2: Clear user state immediately (UI updates)
+    this.currentUserSubject.next(null);
+    
+    // STEP 3: Clear all localStorage (including Supabase auth tokens)
     if (typeof window !== 'undefined' && window.localStorage) {
       try {
         // Clear the Supabase auth token
@@ -322,33 +326,24 @@ export class AuthService {
           }
         }
         keysToRemove.forEach(key => localStorage.removeItem(key));
-        console.log('Cleared auth tokens from localStorage');
       } catch (err) {
-        console.error('Error clearing localStorage:', err);
+        // Ignore errors when clearing storage
       }
     }
     
-    // STEP 2: Clear user state immediately (UI updates)
-    this.currentUserSubject.next(null);
-    
-    // STEP 3: Sign out from Supabase (this should clear the session on server)
+    // STEP 4: Sign out from Supabase (this clears the session on server)
     try {
-      const { error } = await this.supabase.auth.signOut();
-      if (error) {
-        console.error('Error signing out from Supabase:', error);
-      } else {
-        console.log('Signed out from Supabase successfully');
-      }
+      await this.supabase.auth.signOut();
     } catch (err) {
-      console.error('Exception during Supabase signOut:', err);
+      // Continue even if Supabase signOut fails
     }
     
-    // STEP 4: Force a full page reload to ensure everything is reset
-    // This ensures the AuthService re-initializes with no session
+    // STEP 5: Redirect to homepage with full page reload
+    // This ensures all components re-initialize and check auth state fresh
     if (typeof window !== 'undefined') {
       // Use window.location.href for a full page reload (not router navigation)
       // This ensures all components re-initialize and check auth state fresh
-      window.location.href = '/home';
+      window.location.href = '/';
     }
   }
 
