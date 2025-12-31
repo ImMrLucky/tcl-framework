@@ -1,6 +1,6 @@
 import { Component, OnInit } from '@angular/core';
 import { CommonModule } from '@angular/common';
-import { RouterModule } from '@angular/router';
+import { Router, RouterModule } from '@angular/router';
 import { MatCardModule } from '@angular/material/card';
 import { MatButtonModule } from '@angular/material/button';
 import { MatIconModule } from '@angular/material/icon';
@@ -39,15 +39,16 @@ export class DashboardComponent implements OnInit {
   constructor(
     private authService: AuthService,
     private memberService: MemberService,
-    private dialog: MatDialog
+    private dialog: MatDialog,
+    private router: Router
   ) {}
 
   async ngOnInit() {
     // Check authentication first
     const isAuth = await this.authService.isAuthenticated();
     if (!isAuth) {
-      console.log('Not authenticated, redirecting to home');
-      // Will be handled by router guard if we add one
+      console.log('Not authenticated, redirecting to login');
+      this.router.navigate(['/login']);
       return;
     }
 
@@ -55,9 +56,7 @@ export class DashboardComponent implements OnInit {
     this.authService.currentUser$.subscribe(user => {
       console.log('Dashboard: User changed:', user?.email);
       this.currentUser = user;
-      if (!user) {
-        console.log('Dashboard: User is null, but session exists - this might be a profile loading issue');
-      } else if (user.id) {
+      if (user?.id) {
         this.loadUserOrgs(user.id);
         // Check if user needs onboarding (show modal if onboarding not completed)
         this.checkAndShowOnboarding(user);

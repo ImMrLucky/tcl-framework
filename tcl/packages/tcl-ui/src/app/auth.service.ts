@@ -322,17 +322,23 @@ export class AuthService {
   }
 
   async signIn(email: string, password: string): Promise<{ error: AuthError | null; duplicateAccount?: boolean }> {
+    console.log('signIn: Starting login for', email);
+    
     const { data, error } = await this.supabase.auth.signInWithPassword({
       email,
       password
     });
 
+    console.log('signIn: Supabase response - error:', error, 'hasSession:', !!data?.session);
+
     if (error) {
+      console.log('signIn: Returning error from Supabase');
       return { error, duplicateAccount: false };
     }
 
     // Check if we got a valid session
     if (!data.session || !data.session.access_token) {
+      console.log('signIn: No session in response');
       return { 
         error: { 
           message: 'Login succeeded but no session was created. Please try again.', 
@@ -346,6 +352,7 @@ export class AuthService {
     // User is authenticated - set user state immediately
     const user = data.user;
     if (!user) {
+      console.log('signIn: No user in response');
       await this.supabase.auth.signOut();
       return { 
         error: { 
@@ -357,6 +364,8 @@ export class AuthService {
       };
     }
 
+    console.log('signIn: Setting user state for', user.email);
+    
     // Set user state immediately so the UI updates
     this.currentUserSubject.next({
       id: user.id,
@@ -368,6 +377,7 @@ export class AuthService {
     this.ensureUserProvisioned(user.id, user.email || '');
     this.loadUserProfileAsync(user.id);
 
+    console.log('signIn: Returning success');
     return { error: null, duplicateAccount: false };
   }
 
@@ -624,9 +634,24 @@ export class AuthService {
   }
 
   async isAuthenticated(): Promise<boolean> {
-    // Check both: current user subject AND Supabase session
+    // Check Supabase session - this is the source of truth
     const { data: { session } } = await this.supabase.auth.getSession();
-    return session !== null && this.currentUserSubject.value !== null;
+    
+    if (!session) {
+      return false;
+    }
+    
+    // If we have a session but no user subject, populate it
+    if (!this.currentUserSubject.value && session.user) {
+      this.currentUserSubject.next({
+        id: session.user.id,
+        email: session.user.email
+      });
+      // Also trigger background profile load
+      this.loadUserProfileAsync(session.user.id);
+    }
+    
+    return true;
   }
 
   // Synchronous check (for quick UI checks)
