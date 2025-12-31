@@ -41,9 +41,10 @@
                 }
               ],
               "outputHashing": "all",
-              "optimization": false,
-              "sourceMap": true,
-              "extractLicenses": false
+              "optimization": {
+                "fonts": false
+              },
+              "sourceMap": true
             },
             "development": {
               "optimization": false,
