@@ -286,6 +286,25 @@ export class AuthService {
     return { error, duplicateAccount: false };
   }
 
+  /**
+   * Set up activity tracking for inactivity timeout
+   */
+  private setupActivityTracking(): void {
+    if (typeof window === 'undefined') return;
+
+    // Track user activity
+    const activityEvents = ['mousedown', 'mousemove', 'keypress', 'scroll', 'touchstart', 'click'];
+    activityEvents.forEach(event => {
+      window.addEventListener(event, () => {
+        this.lastActivityTime = Date.now();
+        // Only reset timer if user is authenticated
+        if (this.currentUserSubject.value) {
+          this.resetInactivityTimer();
+        }
+      }, { passive: true });
+    });
+  }
+
   async signOut(): Promise<void> {
     console.log('Signing out...');
     
