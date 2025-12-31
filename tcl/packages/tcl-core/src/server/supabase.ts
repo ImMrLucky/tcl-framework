@@ -517,7 +517,6 @@ export async function provisionUser(userId: string, email: string): Promise<{ or
       
       if (!memberInserted) {
         console.error('Step 4: Could not add user as owner after all retries');
-        console.error('SOLUTION: Run supabase/sql/005_fix_provision_issues.sql to make foreign keys deferrable');
         
         // Check if user is already a member (maybe from a previous attempt)
         const { data: existingMember } = await supabaseAdmin
@@ -531,11 +530,34 @@ export async function provisionUser(userId: string, email: string): Promise<{ or
           console.log('Step 4: User is already a member (from previous attempt), continuing...');
           memberInserted = true;
         } else {
-          // Continue anyway - org exists, user can still use the app
-          // We'll try to add them to org_members later or manually
-          console.warn('Step 4: User not added to org_members, but org exists - continuing with provision');
-          console.warn('User may need to be added to org_members manually or on next login');
-          // Don't return null - continue to Step 5
+          // CRITICAL: User MUST be in org_members for auth to work
+          // Try one more time with a longer delay
+          console.warn('Step 4: Final attempt to add user to org_members...');
+          await new Promise(resolve => setTimeout(resolve, 3000)); // Wait 3 seconds
+          
+          const { error: finalMemberError } = await supabaseAdmin
+            .from('org_members')
+            .insert({
+              org_id: orgId,
+              user_id: userId,
+              role: 'owner'
+            });
+          
+          if (finalMemberError) {
+            if (finalMemberError.code === '23505') {
+              // Unique constraint - already exists (race condition, this is OK)
+              console.log('Step 4: User already exists in org_members (race condition)');
+              memberInserted = true;
+            } else {
+              console.error('Step 4: CRITICAL - Cannot add user to org_members:', finalMemberError);
+              console.error('User will not be able to authenticate. Manual intervention required.');
+              // Return null to indicate failure - user needs to be fixed manually
+              return null;
+            }
+          } else {
+            console.log('Step 4: ✅ User added as owner (on final attempt)');
+            memberInserted = true;
+          }
         }
       }
     }

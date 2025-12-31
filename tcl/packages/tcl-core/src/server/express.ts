@@ -108,7 +108,7 @@ async function loadModules() {
 // This ensures health check works even if modules fail to load
 
 // Extract org/project/env from request (API key or user session)
-async function getOrgContext(req: express.Request): Promise<{ orgId: string; projectId: string; env: string; userId?: string; role?: string } | null> {
+async function getOrgContext(req: express.Request): Promise<{ orgId: string; projectId: string; env: string; userId?: string; role?: string; error?: string } | null> {
   // Check for API key in Authorization header
   // Express lowercases header names, so check 'authorization' (lowercase)
   // Also check raw headers in case Express hasn't lowercased it yet
@@ -116,87 +116,103 @@ async function getOrgContext(req: express.Request): Promise<{ orgId: string; pro
                      (req.headers as any).Authorization || 
                      (req.headers as any)['authorization'] ||
                      (req.headers as any)['Authorization'];
-  if (authHeader && typeof authHeader === 'string' && authHeader.startsWith('Bearer ')) {
-    const token = authHeader.substring(7);
-    
-    // First try API key verification
-    const verified = await verifyApiKeyExtended(token);
-    if (verified) {
-      return {
-        orgId: verified.orgId,
-        projectId: verified.projectId,
-        env: verified.env
-      };
-    }
-    
-    // If not an API key, try Supabase JWT verification
-    if (supabaseAdmin) {
-      try {
-        // Verify the JWT token with Supabase
-        const { data: { user }, error: userError } = await supabaseAdmin.auth.getUser(token);
-        if (userError || !user) {
-          return null;
-        }
-
-        // Get user's org membership (use maybeSingle to handle no membership gracefully)
-        const { data: membership, error: memberError } = await supabaseAdmin
-          .from('org_members')
-          .select('org_id, role')
-          .eq('user_id', user.id)
-          .limit(1)
-          .maybeSingle();
-        
-        if (memberError || !membership) {
-          // User exists but has no org membership - try to provision
-          // This can happen if provisioning failed or user was created outside normal flow
-          return null;
-        }
-
-        // Get default project for the org
-        // If no default project, try to get any project for the org
-        let project = null;
-        const { data: defaultProject, error: defaultProjectError } = await supabaseAdmin
-          .from('projects')
-          .select('id')
-          .eq('org_id', membership.org_id)
-          .eq('is_default', true)
-          .maybeSingle();
-        
-        if (!defaultProjectError && defaultProject) {
-          project = defaultProject;
-        } else {
-          // No default project - try to get any project for the org
-          const { data: anyProject, error: anyProjectError } = await supabaseAdmin
-            .from('projects')
-            .select('id')
-            .eq('org_id', membership.org_id)
-            .limit(1)
-            .maybeSingle();
-          
-          if (!anyProjectError && anyProject) {
-            project = anyProject;
-          }
-        }
-        
-        if (!project) {
-          // User has org membership but no projects
-          return null;
-        }
-
-        return {
-          orgId: membership.org_id,
-          projectId: project.id,
-          env: 'sandbox', // Default to sandbox for user-initiated requests
-          userId: user.id,
-          role: membership.role || null
-        };
-      } catch (err: any) {
-        return null;
-      }
-    }
+  
+  if (!authHeader || typeof authHeader !== 'string') {
+    return { error: 'No authorization header' } as any;
   }
   
-  return null;
+  if (!authHeader.startsWith('Bearer ')) {
+    return { error: 'Invalid authorization format (expected Bearer token)' } as any;
+  }
+  
+  const token = authHeader.substring(7);
+  if (!token || token.trim().length === 0) {
+    return { error: 'Empty token' } as any;
+  }
+  
+  // First try API key verification
+  const verified = await verifyApiKeyExtended(token);
+  if (verified) {
+    return {
+      orgId: verified.orgId,
+      projectId: verified.projectId,
+      env: verified.env
+    };
+  }
+  
+  // If not an API key, try Supabase JWT verification
+  if (!supabaseAdmin) {
+    return { error: 'Supabase not configured on server' } as any;
+  }
+  
+  try {
+    // Verify the JWT token with Supabase
+    const { data: { user }, error: userError } = await supabaseAdmin.auth.getUser(token);
+    if (userError) {
+      return { error: `Token verification failed: ${userError.message}` } as any;
+    }
+    if (!user) {
+      return { error: 'Token valid but no user found' } as any;
+    }
+
+    // Get user's org membership (use maybeSingle to handle no membership gracefully)
+    const { data: membership, error: memberError } = await supabaseAdmin
+      .from('org_members')
+      .select('org_id, role')
+      .eq('user_id', user.id)
+      .limit(1)
+      .maybeSingle();
+    
+    if (memberError) {
+      return { error: `Error fetching org membership: ${memberError.message}` } as any;
+    }
+    
+    if (!membership) {
+      // User exists but has no org membership - this is a provisioning issue
+      return { error: 'User has no organization. Please contact support or re-register.' } as any;
+    }
+
+    // Get default project for the org
+    // If no default project, try to get any project for the org
+    let project = null;
+    const { data: defaultProject, error: defaultProjectError } = await supabaseAdmin
+      .from('projects')
+      .select('id')
+      .eq('org_id', membership.org_id)
+      .eq('is_default', true)
+      .maybeSingle();
+    
+    if (!defaultProjectError && defaultProject) {
+      project = defaultProject;
+    } else {
+      // No default project - try to get any project for the org
+      const { data: anyProject, error: anyProjectError } = await supabaseAdmin
+        .from('projects')
+        .select('id')
+        .eq('org_id', membership.org_id)
+        .limit(1)
+        .maybeSingle();
+      
+      if (!anyProjectError && anyProject) {
+        project = anyProject;
+      }
+    }
+    
+    if (!project) {
+      // User has org membership but no projects
+      return { error: 'No projects found for your organization. Please contact support.' } as any;
+    }
+
+    return {
+      orgId: membership.org_id,
+      projectId: project.id,
+      env: 'sandbox', // Default to sandbox for user-initiated requests
+      userId: user.id,
+      role: membership.role || null
+    };
+  } catch (err: any) {
+    return { error: `Exception: ${err.message || err}` } as any;
+  }
 }
 
 /**
@@ -567,11 +583,46 @@ app.post("/auth/provision", async (req, res) => {
           .maybeSingle();
         
         if (orgsByEmail?.id) {
-          console.log(`Partial success: Found org ${orgsByEmail.id} by email, returning it`);
+          console.log(`Found org ${orgsByEmail.id} by email, attempting to add user to org_members...`);
+          
+          // Try to add the user to org_members
+          const { error: fixMemberError } = await supabaseAdmin
+            .from('org_members')
+            .insert({
+              org_id: orgsByEmail.id,
+              user_id: userId,
+              role: 'owner'
+            });
+          
+          if (fixMemberError) {
+            if (fixMemberError.code === '23505') {
+              // Already exists - this is fine
+              console.log('User already in org_members');
+            } else {
+              console.error('Failed to fix org_members:', fixMemberError);
+            }
+          } else {
+            console.log('✅ Successfully added user to org_members');
+          }
+          
+          // Get or create project for this org
+          let projectId = '';
+          const { data: existingProject } = await supabaseAdmin
+            .from('projects')
+            .select('id')
+            .eq('org_id', orgsByEmail.id)
+            .limit(1)
+            .maybeSingle();
+          
+          if (existingProject) {
+            projectId = existingProject.id;
+          }
+          
           return res.json({ 
             orgId: orgsByEmail.id, 
-            projectId: '',
-            warning: 'Provision partially completed - org exists but member not added'
+            projectId: projectId,
+            fixed: true,
+            message: 'User org membership has been fixed'
           });
         }
       }
@@ -862,8 +913,8 @@ app.get("/evaluations", async (req, res) => {
   try {
     const context = await getOrgContext(req);
     
-    if (!context) {
-      return res.status(401).json({ error: "Authorization required" });
+    if (!context || context.error) {
+      return res.status(401).json({ error: context?.error || "Authorization required" });
     }
     
     if (!supabaseAdmin) {
@@ -994,8 +1045,8 @@ app.post("/conversations", async (req, res) => {
   try {
     const context = await getOrgContext(req);
     
-    if (!context) {
-      return res.status(401).json({ error: "Authorization required" });
+    if (!context || context.error) {
+      return res.status(401).json({ error: context?.error || "Authorization required" });
     }
     
     if (!supabaseAdmin) {
@@ -1054,8 +1105,8 @@ app.get("/conversations", async (req, res) => {
   try {
     const context = await getOrgContext(req);
     
-    if (!context) {
-      return res.status(401).json({ error: "Authorization required" });
+    if (!context || context.error) {
+      return res.status(401).json({ error: context?.error || "Authorization required" });
     }
     
     if (!supabaseAdmin) {
@@ -1102,8 +1153,8 @@ app.get("/conversations/:conversationId/evaluations", async (req, res) => {
     const context = await getOrgContext(req);
     const { conversationId } = req.params;
     
-    if (!context) {
-      return res.status(401).json({ error: "Authorization required" });
+    if (!context || context.error) {
+      return res.status(401).json({ error: context?.error || "Authorization required" });
     }
     
     if (!supabaseAdmin) {
@@ -1142,8 +1193,8 @@ app.post("/transcribe", upload.single('audio'), async (req, res) => {
     }
 
     const context = await getOrgContext(req);
-    if (!context) {
-      return res.status(401).json({ error: "Authorization required" });
+    if (!context || context.error) {
+      return res.status(401).json({ error: context?.error || "Authorization required" });
     }
 
     // Transcribe audio (does not store the file)
