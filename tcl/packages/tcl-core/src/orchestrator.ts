@@ -93,7 +93,14 @@ async function callSpectralAnalyzeService(
   }
   
   const result = await res.json() as SpectralReport;
-  console.log(`Spectral analyze response received`);
+  console.log(`Spectral analyze response received:`, {
+    coherenceScore: result.coherenceScore,
+    truthVectorLength: result.truthVector?.length || 0,
+    truthStatesLength: result.truthStates?.length || 0,
+    nodeBlameNormLength: result.nodeBlameNorm?.length || 0,
+    topBadContradictions: result.topBadContradictions?.length || 0,
+    topBadSupports: result.topBadSupports?.length || 0
+  });
   return result;
 }
 
@@ -209,20 +216,20 @@ async function validateOnce(input: ValidateInput, adapter?: LLMAdapter, startTim
       
       if (isHeuristic) {
         // Token heuristic: very low thresholds
-        defaultSupportThreshold = 0.40 * transcriptMultiplier;
-        defaultContradictionThreshold = 0.50 * transcriptMultiplier;
-        defaultGroundingThreshold = 0.40 * transcriptMultiplier;
+        defaultSupportThreshold = 0.30 * transcriptMultiplier;
+        defaultContradictionThreshold = 0.40 * transcriptMultiplier;
+        defaultGroundingThreshold = 0.30 * transcriptMultiplier;
       } else if (isLocalTransformers) {
-        // Local Transformers model: medium thresholds (balance between accuracy and coverage)
-        // Lower for transcripts because conversational support is harder to detect
-        defaultSupportThreshold = (isCallTranscript || hasConversationalPatterns) ? 0.35 : 0.45;
-        defaultContradictionThreshold = (isCallTranscript || hasConversationalPatterns) ? 0.45 : 0.55;
-        defaultGroundingThreshold = (isCallTranscript || hasConversationalPatterns) ? 0.35 : 0.45;
+        // Local Transformers model: lower thresholds to find more relationships
+        // Conversational text has implicit support that's harder to detect
+        defaultSupportThreshold = (isCallTranscript || hasConversationalPatterns) ? 0.25 : 0.35;
+        defaultContradictionThreshold = (isCallTranscript || hasConversationalPatterns) ? 0.35 : 0.45;
+        defaultGroundingThreshold = (isCallTranscript || hasConversationalPatterns) ? 0.25 : 0.35;
       } else {
-        // HTTP NLI or Mistral API: higher thresholds (more accurate models)
-        defaultSupportThreshold = 0.58 * transcriptMultiplier;
-        defaultContradictionThreshold = 0.70 * transcriptMultiplier;
-        defaultGroundingThreshold = 0.60 * transcriptMultiplier;
+        // HTTP NLI or Mistral API: medium thresholds (more accurate models)
+        defaultSupportThreshold = 0.45 * transcriptMultiplier;
+        defaultContradictionThreshold = 0.55 * transcriptMultiplier;
+        defaultGroundingThreshold = 0.45 * transcriptMultiplier;
       }
       
       console.log(`Building graph with ${evidenceRes.claims.length} claims, scorer: ${scorer.id}`);
@@ -356,14 +363,43 @@ async function validateOnce(input: ValidateInput, adapter?: LLMAdapter, startTim
           debugReason: "no_spectral_url_configured"
         } as any;
         coherenceScore = null;
-      } else if (totalEdges === 0) {
-        console.warn("⚠️ Spectral enabled but no edges available. Skipping Spectral analysis.");
+      } else if (evidenceRes.claims.length === 0) {
+        // Only skip spectral if there are truly no claims to analyze
+        console.warn("⚠️ Spectral enabled but no claims to analyze. Skipping Spectral analysis.");
         spectral = {
           spectralSkipped: true,
-          debugReason: "no_edges_for_spectral"
+          debugReason: "no_claims_for_spectral"
         } as any;
         coherenceScore = null;
       } else {
+        // ALWAYS run spectral when we have claims - even with 0 edges
+        // Spectral can still compute truth states and identify ungrounded claims
+        if (totalEdges === 0) {
+          console.log("📊 No edges detected, but running Spectral anyway to identify ungrounded claims");
+        }
+        
+        // If no grounding detected, synthetically ground agent claims
+        // This gives spectral a starting point for truth flow
+        let groundedForSpectral = [...graph.groundedClaimIds];
+        if (groundedForSpectral.length === 0) {
+          // Ground claims from the agent (they have some authority)
+          const agentClaims = evidenceRes.claims
+            .filter((c: any) => c.meta?.speaker === 'Agent' || c.meta?.speaker === 'AGENT')
+            .slice(0, 3) // Limit to first 3 agent claims
+            .map((c: any) => c.id);
+          
+          if (agentClaims.length > 0) {
+            groundedForSpectral = agentClaims;
+            console.log(`📌 No grounding detected, synthetically grounding ${agentClaims.length} agent claims: ${agentClaims.join(', ')}`);
+          } else {
+            // If no agent claims, ground the first claim as a baseline
+            if (evidenceRes.claims.length > 0) {
+              groundedForSpectral = [evidenceRes.claims[0].id];
+              console.log(`📌 No grounding detected, synthetically grounding first claim: ${evidenceRes.claims[0].id}`);
+            }
+          }
+        }
+        
         try {
           const spectralMode = options?.spectralMode ?? "analyze"; // Default to "analyze" for new features
           console.log(`📡 Calling Spectral service at: ${urlToUse} (mode: ${spectralMode})`);
@@ -376,7 +412,7 @@ async function validateOnce(input: ValidateInput, adapter?: LLMAdapter, startTim
                 evidenceRes.claims.map((c) => ({ id: c.id, text: c.text })),
                 graph.supports,
                 uniqueContradictions.map(c => ({ claimA: c.claimA, claimB: c.claimB, weight: c.weight })),
-                graph.groundedClaimIds,
+                groundedForSpectral,
                 {
                   wSupport: undefined, // Use spectral service defaults
                   wContradiction: undefined,
@@ -394,7 +430,7 @@ async function validateOnce(input: ValidateInput, adapter?: LLMAdapter, startTim
                 evidenceRes.claims.map((c) => ({ id: c.id, text: c.text })),
                 graph.supports,
                 uniqueContradictions.map(c => ({ claimA: c.claimA, claimB: c.claimB, weight: c.weight })),
-                graph.groundedClaimIds
+                groundedForSpectral
               );
               coherenceScore = spectral.coherenceScore;
               console.log(`✅ Spectral SCORE complete. Coherence: ${coherenceScore}`);
@@ -406,7 +442,7 @@ async function validateOnce(input: ValidateInput, adapter?: LLMAdapter, startTim
               evidenceRes.claims.map((c) => ({ id: c.id, text: c.text })),
               graph.supports,
               uniqueContradictions.map(c => ({ claimA: c.claimA, claimB: c.claimB, weight: c.weight })),
-              graph.groundedClaimIds
+              groundedForSpectral
             );
             coherenceScore = spectral.coherenceScore;
             console.log(`✅ Spectral SCORE complete. Coherence: ${coherenceScore}`);

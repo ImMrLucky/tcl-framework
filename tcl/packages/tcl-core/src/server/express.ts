@@ -220,6 +220,19 @@ app.post("/validate", async (req, res) => {
       }
     }
 
+    // Log spectral data for debugging
+    const spectralData = out.report?.spectral;
+    console.log("📊 Spectral data from orchestrator:", {
+      hasSpectral: !!spectralData,
+      spectralSkipped: spectralData?.spectralSkipped,
+      coherenceScore: spectralData?.coherenceScore,
+      truthVectorLength: spectralData?.truthVector?.length || 0,
+      truthStatesLength: spectralData?.truthStates?.length || 0,
+      nodeBlameNormLength: spectralData?.nodeBlameNorm?.length || 0,
+      topBadContradictions: spectralData?.topBadContradictions?.length || 0,
+      topBadSupports: spectralData?.topBadSupports?.length || 0
+    });
+    
     // Add issues to the report and normalize the structure
     // Ensure report has consistent structure for frontend
     const reportWithIssues = {
@@ -251,6 +264,16 @@ app.post("/validate", async (req, res) => {
         }
       }
     };
+    
+    console.log("📦 Report structure being stored:", {
+      hasSpectral: !!reportWithIssues.spectral,
+      spectralCoherence: reportWithIssues.spectral?.coherenceScore,
+      issuesCount: issues.length,
+      claimsCount: reportWithIssues.claims?.length || 0,
+      inputsClaimsCount: reportWithIssues.inputs?.claims?.length || 0,
+      supportsCount: reportWithIssues.graph?.supports?.length || 0,
+      contradictionsCount: reportWithIssues.graph?.contradictions?.length || 0
+    });
 
     // Store validation in Supabase if configured
     const context = await getOrgContext(req);
@@ -259,6 +282,52 @@ app.post("/validate", async (req, res) => {
         // Check if conversation_id is provided in request body
         const conversationId = (req.body as any).conversation_id;
         
+        // Build proper scores structure that frontend expects
+        const spectralReport = out.report?.spectral || {};
+        const spectralSkipped = spectralReport.spectralSkipped === true;
+        
+        // Count issues by type
+        const contradictedCount = issues.filter((i: any) => 
+          i.what?.truthState === 'Contradicted' || i.truthState === 'Contradicted'
+        ).length;
+        const ungroundedCount = issues.filter((i: any) => 
+          i.what?.truthState === 'Ungrounded' || i.truthState === 'Ungrounded'
+        ).length;
+        const totalClaims = out.report?.claims?.length || 0;
+        
+        // Calculate coherence - use spectral if available, fallback to orchestrator score
+        const coherenceScore = spectralReport.coherenceScore ?? out.scores?.coherence;
+        
+        const scoresForDb = {
+          // Top-level scores from orchestrator
+          truth: out.scores?.truth,
+          consistency: out.scores?.consistency,
+          coherence: out.scores?.coherence,
+          overall: out.scores?.overall,
+          // Spectral metrics (from report.spectral)
+          spectral: spectralSkipped ? {
+            spectralSkipped: true,
+            coherenceScore: out.scores?.coherence, // Use orchestrator coherence as fallback
+          } : {
+            coherenceScore: spectralReport.coherenceScore,
+            contradictionEnergy: spectralReport.contradictionEnergy,
+            supportEnergy: spectralReport.supportEnergy,
+            circularityScore: spectralReport.circularityScore,
+            spectralGap: spectralReport.spectralGap,
+            cycleMass: spectralReport.cycleMass,
+            heatTrace: spectralReport.heatTrace
+          },
+          // Counts (always include for UI display)
+          counts: {
+            claims: totalClaims,
+            contradicted: contradictedCount,
+            ungrounded: ungroundedCount,
+            supported: Math.max(0, totalClaims - contradictedCount - ungroundedCount),
+            supports: out.report?.graph?.supports?.length || 0,
+            contradictions: out.report?.graph?.contradictions?.length || 0
+          }
+        };
+        
         const { error: dbError } = await supabaseAdmin
           .from('evaluations')
           .insert({
@@ -266,7 +335,7 @@ app.post("/validate", async (req, res) => {
             project_id: context.projectId || null,
             conversation_id: conversationId || null,
             env: context.env,
-            scores: out.scores || {},
+            scores: scoresForDb,
             refusal: out.refusal || false,
             scorer_id: out.scorerId || null,
             engine_version: process.env.ENGINE_VERSION || '0.2.0',
@@ -1434,12 +1503,22 @@ console.log(`Starting server...`);
 console.log(`PORT environment variable: ${process.env.PORT || 'not set'}`);
 console.log(`Using port: ${port}`);
 
+// Check critical environment variables
+const spectralUrl = process.env.TCL_SPECTRAL_URL;
+if (spectralUrl) {
+  console.log(`✅ TCL_SPECTRAL_URL configured: ${spectralUrl}`);
+} else {
+  console.warn(`⚠️ TCL_SPECTRAL_URL not set - spectral analysis will be skipped!`);
+  console.warn(`   Set this to your tcl-spectral service URL (e.g., https://tcl-spectral-production-xxxx.up.railway.app)`);
+}
+
 // Start server with error handling
 try {
   const server = app.listen(port, '0.0.0.0', () => {
     console.log(`✅ TCL-Core listening on ${port}`);
     console.log(`Health check available at http://0.0.0.0:${port}/health`);
     console.log(`Environment: PORT=${process.env.PORT || 'default (8787)'}, NODE_ENV=${process.env.NODE_ENV || 'not set'}`);
+    console.log(`TCL_SPECTRAL_URL: ${process.env.TCL_SPECTRAL_URL || 'NOT SET'}`);
     
     // Verify server is actually listening
     const address = server.address();

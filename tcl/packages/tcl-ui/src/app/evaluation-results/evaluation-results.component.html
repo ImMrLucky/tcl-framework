@@ -79,8 +79,10 @@
         <div class="audit-summary-grid">
           <div class="summary-metric">
             <div class="metric-label">Coherence Score</div>
-            <div class="metric-value-large">{{ getSpectralScores().coherenceScore ?? 'N/A' }}</div>
-            <div class="metric-gauge">
+            <div class="metric-value-large" [class.no-data]="getSpectralScores().coherenceScore === undefined">
+              {{ getSpectralScores().coherenceScore !== undefined ? getSpectralScores().coherenceScore : 'N/A' }}
+            </div>
+            <div class="metric-gauge" *ngIf="getSpectralScores().coherenceScore !== undefined">
               <mat-progress-bar 
                 mode="determinate" 
                 [value]="getSpectralScores().coherenceScore || 0"
@@ -91,14 +93,26 @@
 
           <div class="summary-metric">
             <div class="metric-label">Contradicted Claims</div>
-            <div class="metric-value">{{ getCounts().contradicted ?? 0 }}</div>
+            <div class="metric-value" [class.has-issues]="(getCounts().contradicted || 0) > 0">
+              {{ getCounts().contradicted ?? 0 }}
+            </div>
             <div class="metric-sublabel">out of {{ getCounts().claims ?? 0 }} total</div>
           </div>
 
           <div class="summary-metric">
             <div class="metric-label">Ungrounded Claims</div>
-            <div class="metric-value">{{ getCounts().ungrounded ?? 0 }}</div>
+            <div class="metric-value" [class.has-issues]="(getCounts().ungrounded || 0) > 0">
+              {{ getCounts().ungrounded ?? 0 }}
+            </div>
             <div class="metric-sublabel">no supporting evidence</div>
+          </div>
+
+          <div class="summary-metric">
+            <div class="metric-label">Total Issues</div>
+            <div class="metric-value" [class.has-issues]="issues.length > 0">
+              {{ issues.length }}
+            </div>
+            <div class="metric-sublabel">requiring review</div>
           </div>
 
           <div class="summary-metric" *ngIf="getCircularityWarning()">
@@ -151,23 +165,38 @@
             </mat-panel-title>
           </mat-expansion-panel-header>
           <div class="metrics-grid">
-            <div class="metric-item">
-              <strong>Contradiction Energy:</strong> {{ getSpectralScores().contradictionEnergy?.toFixed(3) ?? 'N/A' }}
+            <div class="metric-item" *ngIf="getSpectralScores().spectralSkipped">
+              <div class="spectral-skipped-notice">
+                <mat-icon color="accent">info</mat-icon>
+                <span>Spectral analysis was skipped (no relationship edges detected). Basic metrics shown below.</span>
+              </div>
             </div>
             <div class="metric-item">
-              <strong>Support Energy:</strong> {{ getSpectralScores().supportEnergy?.toFixed(3) ?? 'N/A' }}
-            </div>
-            <div class="metric-item">
-              <strong>Circularity Score:</strong> {{ getSpectralScores().circularityScore ?? 'N/A' }}
-            </div>
-            <div class="metric-item">
-              <strong>Spectral Gap:</strong> {{ getSpectralScores().spectralGap?.toFixed(3) ?? 'N/A' }}
-            </div>
-            <div class="metric-item">
-              <strong>Cycle Mass:</strong> {{ getSpectralScores().cycleMass?.toFixed(3) ?? 'N/A' }}
+              <strong>Total Claims:</strong> {{ getCounts().claims ?? 0 }}
             </div>
             <div class="metric-item">
               <strong>Supported Claims:</strong> {{ getCounts().supported ?? 0 }}
+            </div>
+            <div class="metric-item">
+              <strong>Support Edges:</strong> {{ getCounts().supports ?? 0 }}
+            </div>
+            <div class="metric-item">
+              <strong>Contradiction Edges:</strong> {{ getCounts().contradictions ?? 0 }}
+            </div>
+            <div class="metric-item" *ngIf="!getSpectralScores().spectralSkipped">
+              <strong>Contradiction Energy:</strong> {{ getSpectralScores().contradictionEnergy?.toFixed(3) ?? 'N/A' }}
+            </div>
+            <div class="metric-item" *ngIf="!getSpectralScores().spectralSkipped">
+              <strong>Support Energy:</strong> {{ getSpectralScores().supportEnergy?.toFixed(3) ?? 'N/A' }}
+            </div>
+            <div class="metric-item" *ngIf="!getSpectralScores().spectralSkipped">
+              <strong>Circularity Score:</strong> {{ getSpectralScores().circularityScore ?? 'N/A' }}
+            </div>
+            <div class="metric-item" *ngIf="!getSpectralScores().spectralSkipped">
+              <strong>Spectral Gap:</strong> {{ getSpectralScores().spectralGap?.toFixed(3) ?? 'N/A' }}
+            </div>
+            <div class="metric-item" *ngIf="!getSpectralScores().spectralSkipped">
+              <strong>Cycle Mass:</strong> {{ getSpectralScores().cycleMass?.toFixed(3) ?? 'N/A' }}
             </div>
           </div>
         </mat-expansion-panel>

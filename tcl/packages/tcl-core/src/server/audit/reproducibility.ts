@@ -437,10 +437,30 @@ export function calculateImportance(params: {
   truthState?: "Supported" | "Contradicted" | "Ungrounded" | "Inconclusive";
   speaker?: string;
   hasPolicyTag?: boolean;
+  claimConfidence?: number;
 }): number {
-  const { nodeBlameNorm = 0, truthState, speaker, hasPolicyTag = false } = params;
+  const { nodeBlameNorm = 0, truthState, speaker, hasPolicyTag = false, claimConfidence } = params;
   
-  // Truth state multipliers
+  // Base importance - if no nodeBlameNorm, use truth state and other factors
+  let baseImportance = nodeBlameNorm;
+  
+  // If nodeBlameNorm is 0 or undefined (spectral skipped), compute a base importance from truth state
+  if (!nodeBlameNorm || nodeBlameNorm < 0.01) {
+    // Use truth state as primary signal
+    baseImportance = {
+      "Contradicted": 0.85,    // High base importance
+      "Ungrounded": 0.65,      // Medium-high base importance
+      "Inconclusive": 0.35,    // Medium base importance
+      "Supported": 0.15        // Low base importance (shouldn't be an issue)
+    }[truthState || "Inconclusive"] || 0.35;
+    
+    // Reduce if claim has high confidence (more likely to be correct)
+    if (claimConfidence !== undefined && claimConfidence > 0.8) {
+      baseImportance *= 0.85;
+    }
+  }
+  
+  // Truth state multipliers (still apply as adjustment)
   const truthStateMultiplier = {
     "Contradicted": 1.35,
     "Ungrounded": 1.15,
@@ -448,13 +468,15 @@ export function calculateImportance(params: {
     "Supported": 0.75
   }[truthState || "Inconclusive"] || 1.0;
   
-  // Agent multiplier
+  // Agent multiplier - agent statements are more important for compliance
   const agentMultiplier = speaker === "AGENT" ? 1.15 : 1.0;
   
-  // Policy multiplier
+  // Policy multiplier - policy-related issues are more important
   const policyMultiplier = hasPolicyTag ? 1.25 : 1.0;
   
-  return nodeBlameNorm * truthStateMultiplier * agentMultiplier * policyMultiplier;
+  // Calculate final importance, capped at 1.0
+  const raw = baseImportance * truthStateMultiplier * agentMultiplier * policyMultiplier;
+  return Math.min(1.0, raw);
 }
 
 /**
@@ -572,8 +594,25 @@ export function buildIssuesList(
   // Process each claim
   for (let i = 0; i < claims.length; i++) {
     const claim = claims[i];
-    const truthState = (truthStates[i] || "Inconclusive") as "Contradicted" | "Supported" | "Ungrounded" | "Inconclusive";
+    let truthState = (truthStates[i] || "Inconclusive") as "Contradicted" | "Supported" | "Ungrounded" | "Inconclusive";
     const blame = nodeBlameNorm[i] || 0;
+    
+    // When spectral is skipped, derive truth state from destructive claims and other signals
+    if (!hasSpectralData) {
+      if (destructiveClaimIds.has(claim.id)) {
+        // Destructive claims are likely ungrounded or contradicted
+        truthState = "Ungrounded";
+      } else if (claim.confidence !== undefined && claim.confidence < 0.3) {
+        // Very low confidence claims are likely ungrounded
+        truthState = "Ungrounded";
+      } else if (claim.confidence !== undefined && claim.confidence < 0.5) {
+        // Low confidence claims are inconclusive
+        truthState = "Inconclusive";
+      } else if (claim.confidence !== undefined && claim.confidence >= 0.7) {
+        // High confidence claims are likely supported
+        truthState = "Supported";
+      }
+    }
     
     // Determine if this claim should be flagged
     let shouldFlag = false;
@@ -662,7 +701,8 @@ export function buildIssuesList(
       importance = calculateImportance({
         nodeBlameNorm: blame,
         truthState,
-        speaker
+        speaker,
+        claimConfidence: claim.confidence
       });
     }
     

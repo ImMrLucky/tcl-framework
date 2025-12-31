@@ -237,17 +237,24 @@ export class EvaluationResultsComponent implements OnInit {
   }
 
   getSpectralScores() {
-    // Try scores.spectral first, then report.spectral
+    // Try scores.spectral first, then report.spectral, then fallback to top-level scores
     const scores = this.evaluation?.scores?.spectral || {};
     const reportSpectral = this.evaluation?.report?.spectral || {};
+    const topLevelScores = this.evaluation?.scores || {};
+    
+    // Use coherence from spectral if available, otherwise use orchestrator coherence
+    const coherenceScore = scores.coherenceScore ?? 
+                          reportSpectral.coherenceScore ?? 
+                          topLevelScores.coherence;
     
     return {
-      coherenceScore: scores.coherenceScore ?? reportSpectral.coherenceScore,
+      coherenceScore,
       contradictionEnergy: scores.contradictionEnergy ?? reportSpectral.contradictionEnergy,
       supportEnergy: scores.supportEnergy ?? reportSpectral.supportEnergy,
       circularityScore: scores.circularityScore ?? reportSpectral.circularityScore,
       spectralGap: scores.spectralGap ?? reportSpectral.spectralGap,
       cycleMass: scores.cycleMass ?? reportSpectral.cycleMass,
+      spectralSkipped: scores.spectralSkipped ?? reportSpectral.spectralSkipped,
       ...scores,
       ...reportSpectral
     };

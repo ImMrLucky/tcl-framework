@@ -96,14 +96,23 @@
   color: #1976d2;
   line-height: 1;
   margin-bottom: 8px;
+  
+  &.no-data {
+    color: #999;
+    font-size: 2rem;
+  }
 }
 
 .metric-value {
   font-size: 2rem;
   font-weight: bold;
-  color: #d32f2f;
+  color: #333;
   line-height: 1;
   margin-bottom: 4px;
+  
+  &.has-issues {
+    color: #d32f2f;
+  }
 }
 
 .metric-sublabel {
@@ -127,6 +136,25 @@
 .run-integrity-panel,
 .spectral-metrics-panel {
   margin-top: 16px;
+}
+
+.spectral-skipped-notice {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 16px;
+  background: rgba(255, 152, 0, 0.1);
+  border-radius: 8px;
+  border-left: 3px solid #ff9800;
+  color: #856404;
+  font-size: 0.9rem;
+  grid-column: 1 / -1;
+  
+  mat-icon {
+    font-size: 20px;
+    width: 20px;
+    height: 20px;
+  }
 }
 
 .integrity-grid {
