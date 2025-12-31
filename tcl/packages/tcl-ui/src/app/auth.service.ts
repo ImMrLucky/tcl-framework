@@ -489,12 +489,6 @@ export class AuthService {
    */
   async getAccessToken(): Promise<string | null> {
     try {
-      // Check if supabase client is initialized
-      if (!this.supabase) {
-        console.error('Supabase client not initialized');
-        return null;
-      }
-
       const { data: { session }, error } = await this.supabase.auth.getSession();
       if (error) {
         console.error('Error getting session:', error);
