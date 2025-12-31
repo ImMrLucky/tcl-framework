@@ -138,10 +138,10 @@ interface EvaluationSummary {
             <!-- Date Column -->
             <ng-container matColumnDef="date">
               <th mat-header-cell *matHeaderCellDef mat-sort-header>Date</th>
-              <td mat-cell *matCellDef="let eval">
+              <td mat-cell *matCellDef="let ev">
                 <div class="date-cell">
-                  <span class="date-primary">{{ eval.created_at | date:'MMM d, yyyy' }}</span>
-                  <span class="date-secondary">{{ eval.created_at | date:'h:mm a' }}</span>
+                  <span class="date-primary">{{ ev.created_at | date:'MMM d, yyyy' }}</span>
+                  <span class="date-secondary">{{ ev.created_at | date:'h:mm a' }}</span>
                 </div>
               </td>
             </ng-container>
@@ -149,10 +149,10 @@ interface EvaluationSummary {
             <!-- Source Column -->
             <ng-container matColumnDef="source">
               <th mat-header-cell *matHeaderCellDef>Source</th>
-              <td mat-cell *matCellDef="let eval">
+              <td mat-cell *matCellDef="let ev">
                 <div class="source-cell">
-                  <span class="source-title">{{ getSourceTitle(eval) }}</span>
-                  <span class="source-id">{{ eval.conversation_id | slice:0:8 }}...</span>
+                  <span class="source-title">{{ getSourceTitle(ev) }}</span>
+                  <span class="source-id">{{ ev.conversation_id | slice:0:8 }}...</span>
                 </div>
               </td>
             </ng-container>
@@ -160,9 +160,9 @@ interface EvaluationSummary {
             <!-- Coherence Column -->
             <ng-container matColumnDef="coherence">
               <th mat-header-cell *matHeaderCellDef mat-sort-header>Coherence</th>
-              <td mat-cell *matCellDef="let eval">
-                <div class="score-cell" [class]="getScoreClass(eval.scores?.spectral?.coherenceScore)">
-                  <span class="score-value">{{ eval.scores?.spectral?.coherenceScore ?? 'N/A' }}</span>
+              <td mat-cell *matCellDef="let ev">
+                <div class="score-cell" [class]="getScoreClass(ev.scores?.spectral?.coherenceScore)">
+                  <span class="score-value">{{ ev.scores?.spectral?.coherenceScore ?? 'N/A' }}</span>
                 </div>
               </td>
             </ng-container>
@@ -170,15 +170,15 @@ interface EvaluationSummary {
             <!-- Issues Column -->
             <ng-container matColumnDef="issues">
               <th mat-header-cell *matHeaderCellDef>Issues</th>
-              <td mat-cell *matCellDef="let eval">
+              <td mat-cell *matCellDef="let ev">
                 <div class="issues-cell">
-                  <mat-chip *ngIf="eval.scores?.counts?.contradicted > 0" class="issue-chip critical">
-                    {{ eval.scores?.counts?.contradicted }} contradicted
+                  <mat-chip *ngIf="ev.scores?.counts?.contradicted > 0" class="issue-chip critical">
+                    {{ ev.scores?.counts?.contradicted }} contradicted
                   </mat-chip>
-                  <mat-chip *ngIf="eval.scores?.counts?.ungrounded > 0" class="issue-chip warning">
-                    {{ eval.scores?.counts?.ungrounded }} ungrounded
+                  <mat-chip *ngIf="ev.scores?.counts?.ungrounded > 0" class="issue-chip warning">
+                    {{ ev.scores?.counts?.ungrounded }} ungrounded
                   </mat-chip>
-                  <span *ngIf="!eval.scores?.counts?.contradicted && !eval.scores?.counts?.ungrounded" class="no-issues">
+                  <span *ngIf="!ev.scores?.counts?.contradicted && !ev.scores?.counts?.ungrounded" class="no-issues">
                     No issues
                   </span>
                 </div>
@@ -188,20 +188,20 @@ interface EvaluationSummary {
             <!-- Claims Column -->
             <ng-container matColumnDef="claims">
               <th mat-header-cell *matHeaderCellDef>Claims</th>
-              <td mat-cell *matCellDef="let eval">
-                {{ eval.scores?.counts?.claims ?? 0 }}
+              <td mat-cell *matCellDef="let ev">
+                {{ ev.scores?.counts?.claims ?? 0 }}
               </td>
             </ng-container>
 
             <!-- Mode Column -->
             <ng-container matColumnDef="mode">
               <th mat-header-cell *matHeaderCellDef>Mode</th>
-              <td mat-cell *matCellDef="let eval">
-                <mat-chip *ngIf="isSimulation(eval)" class="mode-chip simulation">
+              <td mat-cell *matCellDef="let ev">
+                <mat-chip *ngIf="isSimulation(ev)" class="mode-chip simulation">
                   <mat-icon>science</mat-icon>
                   Simulation
                 </mat-chip>
-                <mat-chip *ngIf="!isSimulation(eval)" class="mode-chip evaluation">
+                <mat-chip *ngIf="!isSimulation(ev)" class="mode-chip evaluation">
                   <mat-icon>verified</mat-icon>
                   Evaluation
                 </mat-chip>
@@ -211,9 +211,9 @@ interface EvaluationSummary {
             <!-- Env Column -->
             <ng-container matColumnDef="env">
               <th mat-header-cell *matHeaderCellDef>Env</th>
-              <td mat-cell *matCellDef="let eval">
-                <mat-chip [class]="'env-chip ' + eval.env">
-                  {{ eval.env }}
+              <td mat-cell *matCellDef="let ev">
+                <mat-chip [class]="'env-chip ' + ev.env">
+                  {{ ev.env }}
                 </mat-chip>
               </td>
             </ng-container>
@@ -221,10 +221,10 @@ interface EvaluationSummary {
             <!-- Integrity Column -->
             <ng-container matColumnDef="integrity">
               <th mat-header-cell *matHeaderCellDef>Integrity</th>
-              <td mat-cell *matCellDef="let eval">
-                <div class="integrity-cell" [matTooltip]="getIntegrityTooltip(eval)">
+              <td mat-cell *matCellDef="let ev">
+                <div class="integrity-cell" [matTooltip]="getIntegrityTooltip(ev)">
                   <mat-icon class="integrity-icon">verified</mat-icon>
-                  <span class="hash-preview">{{ getInputHashPreview(eval) }}</span>
+                  <span class="hash-preview">{{ getInputHashPreview(ev) }}</span>
                 </div>
               </td>
             </ng-container>
@@ -232,8 +232,8 @@ interface EvaluationSummary {
             <!-- Actions Column -->
             <ng-container matColumnDef="actions">
               <th mat-header-cell *matHeaderCellDef>Actions</th>
-              <td mat-cell *matCellDef="let eval">
-                <button mat-button color="primary" (click)="viewEvaluation(eval.id)">
+              <td mat-cell *matCellDef="let ev">
+                <button mat-button color="primary" (click)="viewEvaluation(ev.id)">
                   <mat-icon>visibility</mat-icon>
                   View
                 </button>
@@ -605,25 +605,25 @@ export class EvaluationsListComponent implements OnInit {
   }
 
   applyFilters() {
-    this.filteredEvaluations = this.evaluations.filter(eval => {
+    this.filteredEvaluations = this.evaluations.filter(ev => {
       // Search filter
       if (this.searchQuery) {
         const query = this.searchQuery.toLowerCase();
-        const matchesId = eval.id.toLowerCase().includes(query);
-        const matchesConvId = eval.conversation_id?.toLowerCase().includes(query);
-        const matchesTitle = this.getSourceTitle(eval).toLowerCase().includes(query);
+        const matchesId = ev.id.toLowerCase().includes(query);
+        const matchesConvId = ev.conversation_id?.toLowerCase().includes(query);
+        const matchesTitle = this.getSourceTitle(ev).toLowerCase().includes(query);
         if (!matchesId && !matchesConvId && !matchesTitle) {
           return false;
         }
       }
       
       // Env filter
-      if (this.envFilter && eval.env !== this.envFilter) {
+      if (this.envFilter && ev.env !== this.envFilter) {
         return false;
       }
       
       // Coherence filter
-      const coherence = eval.scores?.spectral?.coherenceScore ?? 0;
+      const coherence = ev.scores?.spectral?.coherenceScore ?? 0;
       if (coherence < this.minCoherence) {
         return false;
       }
@@ -675,9 +675,9 @@ export class EvaluationsListComponent implements OnInit {
     this.router.navigate(['/evaluations', id]);
   }
 
-  getSourceTitle(eval: EvaluationSummary): string {
-    return eval.report?.source?.sourceTitle || 
-           eval.report?.run?.inputHash?.substring(0, 8) || 
+  getSourceTitle(ev: EvaluationSummary): string {
+    return ev.report?.source?.sourceTitle || 
+           ev.report?.run?.inputHash?.substring(0, 8) || 
            'Untitled';
   }
 
@@ -688,13 +688,13 @@ export class EvaluationsListComponent implements OnInit {
     return 'low';
   }
 
-  getInputHashPreview(eval: EvaluationSummary): string {
-    const hash = eval.report?.run?.inputHash;
+  getInputHashPreview(ev: EvaluationSummary): string {
+    const hash = ev.report?.run?.inputHash;
     return hash ? hash.substring(0, 8) : 'N/A';
   }
 
-  getIntegrityTooltip(eval: EvaluationSummary): string {
-    const run = eval.report?.run;
+  getIntegrityTooltip(ev: EvaluationSummary): string {
+    const run = ev.report?.run;
     if (!run) return 'No integrity data';
     return `Input Hash: ${run.inputHash || 'N/A'}\nConfig Hash: ${run.configHash || 'N/A'}\nEngine: ${run.engineVersion || 'N/A'}`;
   }
@@ -717,8 +717,8 @@ export class EvaluationsListComponent implements OnInit {
     return this.evaluations.filter(e => e.env === 'production').length;
   }
 
-  isSimulation(eval: EvaluationSummary): boolean {
-    return eval.report?.mode === 'SIMULATION';
+  isSimulation(ev: EvaluationSummary): boolean {
+    return (ev.report as any)?.mode === 'SIMULATION';
   }
 
   getSimulationCount(): number {
