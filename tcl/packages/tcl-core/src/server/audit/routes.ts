@@ -307,7 +307,45 @@ export function setupAuditRoutes(app: express.Application) {
         return res.status(404).json({ error: "Evaluation not found" });
       }
       
-      const issues = (evaluation.report as any)?.issues || [];
+      const rawIssues = (evaluation.report as any)?.issues || [];
+      
+      // Transform DefensibleIssue format to frontend Issue format
+      const issues = rawIssues.map((issue: any) => {
+        // If already in flat format, return as-is
+        if (issue.claimId && issue.truthState && !issue.what) {
+          return issue;
+        }
+        
+        // Transform from DefensibleIssue to flat Issue format
+        return {
+          claimId: issue.claimId || issue.what?.claimId,
+          truthState: issue.what?.truthState || issue.truthState || 'Inconclusive',
+          nodeBlameNorm: issue.confidence?.nodeBlameNorm ?? issue.nodeBlameNorm ?? 0,
+          importance: issue.confidence?.importance ?? issue.importance ?? 0.5,
+          issueType: issue.what?.issueType || issue.issueType || 'UNSUPPORTED',
+          speaker: issue.who?.speaker || issue.speaker || 'UNKNOWN',
+          turnStartIdx: issue.where?.turnStartIdx ?? issue.turnStartIdx,
+          turnEndIdx: issue.where?.turnEndIdx ?? issue.turnEndIdx,
+          primaryEvidence: issue.where ? {
+            turnIdx: issue.where.turnStartIdx ?? 0,
+            speaker: issue.who?.speaker || 'UNKNOWN',
+            excerpt: issue.where.excerpt || issue.what?.claimText?.substring(0, 200) || ''
+          } : issue.primaryEvidence,
+          relatedEdges: {
+            topBadContradictions: issue.conflictsWith?.filter((c: any) => c.relationshipType === 'contradiction') || 
+                                  issue.relatedEdges?.topBadContradictions || [],
+            topBadSupports: issue.conflictsWith?.filter((c: any) => c.relationshipType === 'unsupported_by') ||
+                           issue.relatedEdges?.topBadSupports || []
+          },
+          status: issue.status || 'OPEN',
+          // Include additional fields for display
+          claimText: issue.what?.claimText || issue.claimText,
+          description: issue.what?.description || issue.description,
+          severity: issue.risk?.severity || issue.severity || 'low',
+          riskCategory: issue.risk?.category || issue.riskCategory,
+          riskExplanation: issue.risk?.explanation || issue.riskExplanation
+        };
+      });
       
       res.json({ issues });
     } catch (e: any) {
@@ -489,11 +527,35 @@ export function setupAuditRoutes(app: express.Application) {
       const originalReport = originalEval.report as any || {};
       const originalInputs = originalReport.frozenInputs || originalReport.inputs || {};
       
+      // Get claims from various possible locations
+      let rawClaims = originalInputs.claims || [];
+      if (rawClaims.length === 0) {
+        // Try report.claims (ValidateOutput format)
+        rawClaims = (originalReport.claims || []).map((c: any) => ({
+          id: c.id,
+          text: c.text,
+          speaker: c.meta?.speaker === 'Agent' ? 'AGENT' : 
+                   c.meta?.speaker === 'Customer' ? 'CUSTOMER' : 
+                   c.meta?.speaker || 'UNKNOWN',
+          turnStartIdx: c.meta?.turnIndex,
+          tags: []
+        }));
+      }
+      
+      // Get edges from various possible locations
+      let rawSupports = originalInputs.supports || originalReport.graph?.supports || [];
+      let rawContradictions = originalInputs.contradictions || 
+                              originalReport.graph?.contradictions || 
+                              (originalReport.contradictions || []).map((c: any) => ({ claimA: c.claimA, claimB: c.claimB, weight: c.weight || 1.0 }));
+      let rawGrounded = originalInputs.grounded || 
+                        originalReport.graph?.groundedClaimIds || 
+                        (originalReport.graph?.grounding || []).map((g: any) => g.claimId);
+      
       // Apply modifications to create simulation inputs
-      let simulationClaims = [...(originalInputs.claims || [])];
-      let simulationSupports = [...(originalInputs.supports || [])];
-      let simulationContradictions = [...(originalInputs.contradictions || [])];
-      let simulationGrounded = [...(originalInputs.grounded || [])];
+      let simulationClaims = [...rawClaims];
+      let simulationSupports = [...rawSupports];
+      let simulationContradictions = [...rawContradictions];
+      let simulationGrounded = [...rawGrounded];
       
       // Process modifications
       if (modifications) {

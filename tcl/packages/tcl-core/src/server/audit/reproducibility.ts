@@ -562,14 +562,36 @@ export function buildIssuesList(
   const topBadContradictions = spectral.topBadContradictions || [];
   const topBadSupports = spectral.topBadSupports || [];
   
+  // Check if we have valid spectral data
+  const hasSpectralData = truthStates.length > 0 || nodeBlameNorm.length > 0;
+  
+  // If we have destructive claims from the orchestrator, use those as a priority source
+  const destructiveClaimIds = new Set((destructiveClaims || []).map(dc => dc.claimId));
+  const destructiveImportanceMap = new Map((destructiveClaims || []).map(dc => [dc.claimId, dc.importance]));
+  
   // Process each claim
   for (let i = 0; i < claims.length; i++) {
     const claim = claims[i];
     const truthState = (truthStates[i] || "Inconclusive") as "Contradicted" | "Supported" | "Ungrounded" | "Inconclusive";
     const blame = nodeBlameNorm[i] || 0;
     
-    // Only create issues for problematic claims
-    if (blame <= 0.05 && truthState !== "Contradicted" && truthState !== "Ungrounded") {
+    // Determine if this claim should be flagged
+    let shouldFlag = false;
+    
+    if (hasSpectralData) {
+      // With spectral data, use blame and truth state
+      shouldFlag = blame > 0.05 || truthState === "Contradicted" || truthState === "Ungrounded";
+    } else {
+      // Without spectral data, flag claims from destructiveClaims or use heuristics
+      if (destructiveClaimIds.has(claim.id)) {
+        shouldFlag = true;
+      } else if (claim.confidence !== undefined && claim.confidence < 0.5) {
+        // Flag low confidence claims
+        shouldFlag = true;
+      }
+    }
+    
+    if (!shouldFlag) {
       continue;
     }
     
@@ -634,15 +656,22 @@ export function buildIssuesList(
       }
     }
     
-    // Calculate importance
-    const importance = calculateImportance({
-      nodeBlameNorm: blame,
-      truthState,
-      speaker
-    });
+    // Calculate importance - use destructive claims importance if available
+    let importance = destructiveImportanceMap.get(claim.id);
+    if (importance === undefined) {
+      importance = calculateImportance({
+        nodeBlameNorm: blame,
+        truthState,
+        speaker
+      });
+    }
     
-    // Get severity
-    const severity = getSeverity(truthState, issueType, blame);
+    // Get severity - boost if no spectral data but claim is destructive
+    let severity = getSeverity(truthState, issueType, blame);
+    if (!hasSpectralData && destructiveClaimIds.has(claim.id)) {
+      // Bump severity for destructive claims when no spectral data
+      if (severity === 'low') severity = 'medium';
+    }
     
     // Build the defensible issue
     const issue: DefensibleIssue = {

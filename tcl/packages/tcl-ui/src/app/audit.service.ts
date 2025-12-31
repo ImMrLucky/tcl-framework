@@ -99,8 +99,8 @@ export interface Issue {
   truthState: 'Contradicted' | 'Supported' | 'Ungrounded' | 'Inconclusive';
   nodeBlameNorm: number;
   importance: number;
-  issueType: 'CONTRADICTION' | 'UNSUPPORTED' | 'POLICY_MISS' | 'POLICY_VIOLATION';
-  speaker: 'AGENT' | 'CUSTOMER' | 'UNKNOWN';
+  issueType: 'CONTRADICTION' | 'UNSUPPORTED' | 'POLICY_MISS' | 'POLICY_VIOLATION' | 'CIRCULAR';
+  speaker: 'AGENT' | 'CUSTOMER' | 'UNKNOWN' | 'SYSTEM';
   turnStartIdx?: number;
   turnEndIdx?: number;
   primaryEvidence?: {
@@ -113,6 +113,12 @@ export interface Issue {
     topBadSupports: any[];
   };
   status: 'OPEN' | 'ACKNOWLEDGED' | 'RESOLVED' | 'FALSE_POSITIVE';
+  // Additional fields from DefensibleIssue
+  claimText?: string;
+  description?: string;
+  severity?: 'critical' | 'high' | 'medium' | 'low';
+  riskCategory?: string;
+  riskExplanation?: string;
 }
 
 export interface ExportResponse {

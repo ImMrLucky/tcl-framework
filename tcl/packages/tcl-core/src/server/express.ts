@@ -176,8 +176,9 @@ app.post("/validate", async (req, res) => {
     console.log("Validation complete");
 
     // Build issues list from spectral output if available
+    // Also build issues from destructive claims even if spectral was skipped
     let issues: any[] = [];
-    if (out.report?.spectral && out.report?.claims) {
+    if (out.report?.claims && out.report.claims.length > 0) {
       try {
         // Map claims to the format expected by buildIssuesList
         const claimsForIssues = out.report.claims.map((c: any) => ({
@@ -191,21 +192,64 @@ app.post("/validate", async (req, res) => {
           }
         }));
         
+        // Use spectral if available, otherwise create empty spectral report
+        const spectralData = out.report.spectral?.spectralSkipped 
+          ? { 
+              truthStates: [], 
+              nodeBlameNorm: [], 
+              topBadContradictions: [],
+              topBadSupports: [],
+              coherenceScore: null 
+            } 
+          : (out.report.spectral || { 
+              truthStates: [], 
+              nodeBlameNorm: [], 
+              topBadContradictions: [],
+              topBadSupports: [],
+              coherenceScore: null 
+            });
+        
         issues = buildIssuesList(
-          out.report.spectral,
+          spectralData,
           claimsForIssues,
           out.report.destructiveClaims
         );
-        console.log(`Built ${issues.length} issues from spectral analysis`);
+        console.log(`Built ${issues.length} issues (spectral available: ${!out.report.spectral?.spectralSkipped})`);
       } catch (issueErr: any) {
         console.warn('Failed to build issues list:', issueErr.message);
       }
     }
 
-    // Add issues to the report
+    // Add issues to the report and normalize the structure
+    // Ensure report has consistent structure for frontend
     const reportWithIssues = {
       ...out.report,
-      issues
+      issues,
+      // Normalize: ensure inputs is available (for simulation modal and evaluation results)
+      inputs: {
+        claims: (out.report?.claims || []).map((c: any, idx: number) => ({
+          id: c.id,
+          text: c.text,
+          speaker: c.meta?.speaker === 'Agent' ? 'AGENT' : 
+                   c.meta?.speaker === 'Customer' ? 'CUSTOMER' : 
+                   c.meta?.speaker || 'UNKNOWN',
+          turnStartIdx: c.meta?.turnIndex,
+          turnEndIdx: c.meta?.turnIndex,
+          tags: []
+        })),
+        supports: out.report?.graph?.supports || [],
+        contradictions: out.report?.graph?.contradictions || [],
+        grounded: out.report?.graph?.grounding?.map((g: any) => g.claimId) || []
+      },
+      // Normalize: ensure run metadata is available
+      run: {
+        engineVersion: process.env.ENGINE_VERSION || '0.2.0',
+        scorerId: out.scorerId,
+        modelFingerprint: {
+          nliModel: out.scorerId || 'unknown',
+          claimExtractor: 'v1'
+        }
+      }
     };
 
     // Store validation in Supabase if configured

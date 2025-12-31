@@ -102,13 +102,24 @@ export class EvaluationResultsComponent implements OnInit {
   }
 
   getSeverity(issue: Issue): 'critical' | 'high' | 'medium' | 'low' {
+    // Use pre-computed severity if available
+    if (issue.severity) {
+      return issue.severity;
+    }
+    
+    // Fallback to computing severity from other fields
+    const nodeBlame = issue.nodeBlameNorm || 0;
+    
     if (issue.issueType === 'POLICY_VIOLATION' && issue.truthState === 'Contradicted') {
       return 'critical';
     }
     if (issue.truthState === 'Contradicted' || issue.issueType === 'POLICY_VIOLATION') {
       return 'high';
     }
-    if (issue.truthState === 'Ungrounded' || issue.issueType === 'POLICY_MISS') {
+    if (issue.truthState === 'Ungrounded' || issue.issueType === 'POLICY_MISS' || nodeBlame > 0.7) {
+      return 'medium';
+    }
+    if (nodeBlame > 0.3) {
       return 'medium';
     }
     return 'low';
@@ -128,9 +139,26 @@ export class EvaluationResultsComponent implements OnInit {
     return severity.charAt(0).toUpperCase() + severity.slice(1);
   }
 
-  getClaimText(claimId: string): string {
-    const claim = this.evaluation?.report?.inputs?.claims?.find((c: any) => c.id === claimId);
-    return claim?.text || claimId;
+  getClaimText(claimId: string, issue?: Issue): string {
+    // First check if issue has the claim text directly
+    if (issue?.claimText) {
+      return issue.claimText;
+    }
+    
+    // Try report.inputs.claims
+    let claim = this.evaluation?.report?.inputs?.claims?.find((c: any) => c.id === claimId);
+    if (claim?.text) {
+      return claim.text;
+    }
+    
+    // Try report.claims (original ValidateOutput format)
+    claim = this.evaluation?.report?.claims?.find((c: any) => c.id === claimId);
+    if (claim?.text) {
+      return claim.text;
+    }
+    
+    // Fallback to claimId
+    return claimId;
   }
 
   async openEvidenceViewer(issue: Issue) {
@@ -205,15 +233,56 @@ export class EvaluationResultsComponent implements OnInit {
   }
 
   getSpectralScores() {
-    return this.evaluation?.scores?.spectral || {};
+    // Try scores.spectral first, then report.spectral
+    const scores = this.evaluation?.scores?.spectral || {};
+    const reportSpectral = this.evaluation?.report?.spectral || {};
+    
+    return {
+      coherenceScore: scores.coherenceScore ?? reportSpectral.coherenceScore,
+      contradictionEnergy: scores.contradictionEnergy ?? reportSpectral.contradictionEnergy,
+      supportEnergy: scores.supportEnergy ?? reportSpectral.supportEnergy,
+      circularityScore: scores.circularityScore ?? reportSpectral.circularityScore,
+      spectralGap: scores.spectralGap ?? reportSpectral.spectralGap,
+      cycleMass: scores.cycleMass ?? reportSpectral.cycleMass,
+      ...scores,
+      ...reportSpectral
+    };
   }
 
   getCounts() {
-    return this.evaluation?.scores?.counts || {};
+    const counts = this.evaluation?.scores?.counts || {};
+    
+    // If counts not populated, derive from issues and claims
+    if (!counts.claims && !counts.contradicted) {
+      const claims = this.evaluation?.report?.inputs?.claims || 
+                     this.evaluation?.report?.claims || [];
+      const contradictedIssues = this.issues.filter(i => i.truthState === 'Contradicted');
+      const ungroundedIssues = this.issues.filter(i => i.truthState === 'Ungrounded');
+      
+      return {
+        claims: claims.length,
+        contradicted: contradictedIssues.length,
+        ungrounded: ungroundedIssues.length,
+        supported: claims.length - contradictedIssues.length - ungroundedIssues.length,
+        ...counts
+      };
+    }
+    
+    return counts;
   }
 
   getRunInfo() {
-    return this.evaluation?.report?.run || {};
+    // Try report.run first, then construct from other sources
+    const run = this.evaluation?.report?.run || {};
+    
+    return {
+      inputHash: run.inputHash || this.evaluation?.report?.frozenInputs?.inputHash,
+      configHash: run.configHash || this.evaluation?.report?.frozenConfig?.configHash,
+      engineVersion: run.engineVersion || this.evaluation?.engine_version || 'N/A',
+      codeVersion: run.codeVersion || 'N/A',
+      modelFingerprint: run.modelFingerprint || this.evaluation?.report?.frozenConfig?.modelFingerprint,
+      ...run
+    };
   }
 
   getSubtitle(): string {
@@ -261,7 +330,10 @@ export class EvaluationResultsComponent implements OnInit {
    */
   extractTopOffenders() {
     const spectral = this.evaluation?.report?.spectral;
-    const claims = this.evaluation?.report?.inputs?.claims || [];
+    // Try both claim locations
+    const claims = this.evaluation?.report?.inputs?.claims || 
+                   this.evaluation?.report?.claims || 
+                   [];
     
     if (spectral?.nodeBlameNorm && claims.length > 0) {
       // Create array of claim + blame pairs
@@ -273,8 +345,22 @@ export class EvaluationResultsComponent implements OnInit {
       
       // Sort by nodeBlameNorm desc and take top 5
       this.topOffenders = claimBlame
+        .filter((c: any) => c.nodeBlameNorm > 0) // Only include if there's actual blame
         .sort((a: { claimId: string; text: string; nodeBlameNorm: number }, b: { claimId: string; text: string; nodeBlameNorm: number }) => b.nodeBlameNorm - a.nodeBlameNorm)
         .slice(0, 5);
+    }
+    
+    // If no spectral nodeBlameNorm, try to derive from issues
+    if (this.topOffenders.length === 0 && this.issues.length > 0) {
+      // Use issues with highest importance as top offenders
+      this.topOffenders = [...this.issues]
+        .sort((a, b) => (b.importance || 0) - (a.importance || 0))
+        .slice(0, 5)
+        .map(issue => ({
+          claimId: issue.claimId,
+          text: issue.claimText || this.getClaimText(issue.claimId, issue),
+          nodeBlameNorm: issue.nodeBlameNorm || issue.importance || 0
+        }));
     }
     
     // Extract top contradictions and supports
@@ -282,6 +368,17 @@ export class EvaluationResultsComponent implements OnInit {
       this.topContradictions = spectral.topBadContradictions.slice(0, 5).map((e: any) => ({
         claimAId: e.claimAId || e.claimA,
         claimBId: e.claimBId || e.claimB,
+        weight: e.weight || e.badness || 0
+      }));
+    }
+    
+    // If no spectral topBadContradictions, try graph.contradictions
+    if (this.topContradictions.length === 0) {
+      const graphContradictions = this.evaluation?.report?.graph?.contradictions || 
+                                  this.evaluation?.report?.contradictions || [];
+      this.topContradictions = graphContradictions.slice(0, 5).map((e: any) => ({
+        claimAId: e.claimA,
+        claimBId: e.claimB,
         weight: e.weight || 0
       }));
     }
@@ -290,6 +387,16 @@ export class EvaluationResultsComponent implements OnInit {
       this.topSupports = spectral.topBadSupports.slice(0, 5).map((e: any) => ({
         claimAId: e.claimAId || e.claimA,
         claimBId: e.claimBId || e.claimB,
+        weight: e.weight || e.badness || 0
+      }));
+    }
+    
+    // If no spectral topBadSupports, try graph.supports
+    if (this.topSupports.length === 0) {
+      const graphSupports = this.evaluation?.report?.graph?.supports || [];
+      this.topSupports = graphSupports.slice(0, 5).map((e: any) => ({
+        claimAId: e.claimA,
+        claimBId: e.claimB,
         weight: e.weight || 0
       }));
     }
@@ -396,7 +503,32 @@ export class EvaluationResultsComponent implements OnInit {
     if (!this.evaluation) return;
 
     const report = this.evaluation.report as any;
+    // Try multiple locations for claims and graph data
     const inputs = report?.frozenInputs || report?.inputs || {};
+    
+    // Fallback to report.claims if inputs.claims doesn't exist
+    if (!inputs.claims || inputs.claims.length === 0) {
+      inputs.claims = (report?.claims || []).map((c: any) => ({
+        id: c.id,
+        text: c.text,
+        speaker: c.meta?.speaker === 'Agent' ? 'AGENT' : 
+                 c.meta?.speaker === 'Customer' ? 'CUSTOMER' : 
+                 c.meta?.speaker || 'UNKNOWN',
+        turnStartIdx: c.meta?.turnIndex
+      }));
+    }
+    
+    // Fallback to report.graph if inputs don't have edges
+    if (!inputs.supports || inputs.supports.length === 0) {
+      inputs.supports = report?.graph?.supports || [];
+    }
+    if (!inputs.contradictions || inputs.contradictions.length === 0) {
+      inputs.contradictions = report?.graph?.contradictions || report?.contradictions || [];
+    }
+    if (!inputs.grounded || inputs.grounded.length === 0) {
+      inputs.grounded = report?.graph?.grounding?.map((g: any) => g.claimId) || 
+                        report?.graph?.groundedClaimIds || [];
+    }
     
     const dialogRef = this.dialog.open(SimulationDialogComponent, {
       width: '800px',
