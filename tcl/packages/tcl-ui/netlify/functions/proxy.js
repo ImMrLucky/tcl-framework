@@ -81,11 +81,7 @@ exports.handler = async (event, context) => {
     // Forward all relevant headers from the original request
     // Netlify lowercases all header names, so check both cases
     const contentType = event.headers['content-type'] || event.headers['Content-Type'];
-    if (contentType && !contentType.includes('multipart/form-data')) {
-      // Only set Content-Type if it's not multipart/form-data
-      // For multipart, let fetch set it automatically with the boundary
-      headers['Content-Type'] = contentType;
-    }
+    const isMultipart = contentType && contentType.includes('multipart/form-data');
     
     // Forward authorization header (Netlify lowercases headers)
     const authHeader = event.headers.authorization || event.headers['Authorization'];
@@ -95,21 +91,27 @@ exports.handler = async (event, context) => {
     
     // Handle body based on content type
     let body = event.body;
-    const isMultipart = contentType && contentType.includes('multipart/form-data');
     
     if (body) {
       if (isMultipart) {
-        // For multipart/form-data, Netlify provides body as base64-encoded string
-        // We need to convert it to a Buffer for fetch
+        // For multipart/form-data, preserve the original Content-Type with boundary
+        // This is critical for multer to parse the multipart data correctly
+        if (contentType) {
+          headers['Content-Type'] = contentType;
+        }
+        
+        // Netlify provides multipart body as base64-encoded string or raw string
+        // Convert to Buffer for fetch
         if (event.isBase64Encoded) {
           body = Buffer.from(body, 'base64');
         } else if (typeof body === 'string') {
           body = Buffer.from(body, 'utf8');
         }
-        // Don't set Content-Type for multipart - fetch will set it with boundary
-        delete headers['Content-Type'];
       } else {
-        // For JSON, ensure it's a string
+        // For JSON, set Content-Type and ensure body is a string
+        if (contentType) {
+          headers['Content-Type'] = contentType;
+        }
         if (typeof body !== 'string') {
           body = JSON.stringify(body);
         }
