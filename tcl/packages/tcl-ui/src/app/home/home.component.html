@@ -17,11 +17,11 @@
               <div class="user-role" *ngIf="currentUser?.companyRole">{{ currentUser?.companyRole }}</div>
             </div>
             <mat-divider></mat-divider>
-            <button mat-menu-item routerLink="/dashboard">
+            <button mat-menu-item (click)="goToDashboard()">
               <mat-icon>dashboard</mat-icon>
               <span>Dashboard</span>
             </button>
-            <button mat-menu-item routerLink="/profile">
+            <button mat-menu-item (click)="goToProfile()">
               <mat-icon>settings</mat-icon>
               <span>Profile Settings</span>
             </button>

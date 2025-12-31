@@ -208,10 +208,7 @@ export class LoginComponent {
         result = await this.authService.signIn(email, password);
       }
 
-      console.log('Auth result:', result);
-
       if (result.error) {
-        console.log('Auth error:', result.error);
         // Handle email confirmation required (not really an error)
         if ((result.error as any).name === 'EmailConfirmationRequired') {
           this.successMessage = result.error.message || 'Please check your email to confirm your account.';
@@ -242,12 +239,10 @@ export class LoginComponent {
           this.errorMessage = result.error.message || 'Authentication failed';
         }
       } else {
-        // Success! Redirect to dashboard immediately
-        console.log('Login successful, redirecting to dashboard...');
+        // Success! Redirect to dashboard
         this.router.navigate(['/dashboard']);
       }
     } catch (error: any) {
-      console.error('Login exception:', error);
       this.errorMessage = error.message || 'An unexpected error occurred';
     } finally {
       this.loading = false;
