@@ -133,6 +133,13 @@ export class AuditService {
     return '/api';
   }
 
+  /**
+   * Get the API base URL (public method for components that need it)
+   */
+  getApiBaseUrl(): string {
+    return this.apiBase;
+  }
+
   constructor(private http: HttpClient) {}
 
   /**

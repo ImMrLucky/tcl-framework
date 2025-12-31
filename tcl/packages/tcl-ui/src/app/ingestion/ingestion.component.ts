@@ -103,8 +103,18 @@ export class IngestionComponent implements OnInit {
   async onSubmit() {
     // If audio file is selected, transcribe it first
     if (this.isAudioFile && this.selectedFile) {
-      console.log('Audio file detected, starting transcription...');
-      await this.transcribeAudio();
+      console.log('Audio file detected, starting transcription...', {
+        fileName: this.selectedFile.name,
+        fileSize: this.selectedFile.size,
+        isAudioFile: this.isAudioFile
+      });
+      try {
+        await this.transcribeAudio();
+        console.log('transcribeAudio completed, transcript length:', this.transcript?.length || 0);
+      } catch (error) {
+        console.error('Error in onSubmit calling transcribeAudio:', error);
+        // Error already shown in transcribeAudio, but log it here too
+      }
       if (!this.transcript || this.transcript.trim().length === 0) {
         console.log('Transcription failed or returned empty result');
         return; // Error already shown in transcribeAudio
@@ -151,7 +161,7 @@ export class IngestionComponent implements OnInit {
 
       // Step 2: Trigger evaluation using /validate endpoint with conversation_id
       // The backend will extract claims and run the evaluation
-      const apiUrl = this.auditService['apiBase'];
+      const apiUrl = this.auditService.getApiBaseUrl();
       const validateResponse = await fetch(`${apiUrl}/validate`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -258,39 +268,55 @@ export class IngestionComponent implements OnInit {
    * Transcribe audio file
    */
   async transcribeAudio(): Promise<void> {
+    console.log('transcribeAudio called', { hasFile: !!this.selectedFile, fileName: this.selectedFile?.name });
+    
     if (!this.selectedFile) {
+      console.error('No file selected');
       this.errorMessage = 'No audio file selected';
       return;
     }
 
+    console.log('Setting transcriptionInProgress to true');
     this.transcriptionInProgress = true;
     this.errorMessage = '';
 
     try {
+      console.log('Getting access token...');
       // Get session token for authentication
       const accessToken = await this.authService.getAccessToken();
+      console.log('Access token retrieved:', accessToken ? 'Yes' : 'No');
+      
       if (!accessToken) {
+        console.error('No access token available');
         throw new Error('Not authenticated. Please log in.');
       }
 
-      const apiUrl = this.auditService['apiBase'];
-      console.log('Transcribing audio file:', this.selectedFile.name, 'API URL:', `${apiUrl}/transcribe`);
+      console.log('Getting API base URL...');
+      const apiUrl = this.auditService.getApiBaseUrl();
+      console.log('API base URL:', apiUrl);
+      const fullUrl = `${apiUrl}/transcribe`;
+      console.log('Full transcription URL:', fullUrl);
+      console.log('Transcribing audio file:', this.selectedFile.name, 'Size:', this.selectedFile.size, 'bytes');
       
+      console.log('Creating FormData...');
       const formData = new FormData();
       formData.append('audio', this.selectedFile);
       formData.append('filename', this.selectedFile.name);
+      console.log('FormData created, entries:', Array.from(formData.entries()).map(([k, v]) => [k, v instanceof File ? `${v.name} (${v.size} bytes)` : v]));
 
       // Don't set Content-Type header - browser will set it automatically with boundary for FormData
       const headers: HeadersInit = {
         'Authorization': `Bearer ${accessToken}`
       };
+      console.log('Headers prepared:', Object.keys(headers));
 
-      console.log('Sending transcription request...');
-      const response = await fetch(`${apiUrl}/transcribe`, {
+      console.log('About to call fetch...');
+      const response = await fetch(fullUrl, {
         method: 'POST',
         headers: headers,
         body: formData
       });
+      console.log('Fetch completed, response status:', response.status);
 
       console.log('Transcription response status:', response.status);
 
