@@ -112,8 +112,10 @@ async function getOrgContext(req: express.Request): Promise<{ orgId: string; pro
   // Check for API key in Authorization header
   const authHeader = req.headers.authorization;
   if (authHeader?.startsWith('Bearer ')) {
-    const key = authHeader.substring(7);
-    const verified = await verifyApiKeyExtended(key);
+    const token = authHeader.substring(7);
+    
+    // First try API key verification
+    const verified = await verifyApiKeyExtended(token);
     if (verified) {
       return {
         orgId: verified.orgId,
@@ -121,10 +123,47 @@ async function getOrgContext(req: express.Request): Promise<{ orgId: string; pro
         env: verified.env
       };
     }
+    
+    // If not an API key, try Supabase JWT verification
+    if (supabaseAdmin) {
+      try {
+        const { data: { user }, error } = await supabaseAdmin.auth.getUser(token);
+        if (!error && user) {
+          // Get user's org membership
+          const { data: membership, error: memberError } = await supabaseAdmin
+            .from('org_members')
+            .select('org_id, role')
+            .eq('user_id', user.id)
+            .limit(1)
+            .single();
+          
+          if (!memberError && membership) {
+            // Get default project for the org
+            const { data: project, error: projectError } = await supabaseAdmin
+              .from('projects')
+              .select('id')
+              .eq('org_id', membership.org_id)
+              .eq('is_default', true)
+              .single();
+            
+            if (!projectError && project) {
+              return {
+                orgId: membership.org_id,
+                projectId: project.id,
+                env: 'sandbox', // Default to sandbox for user-initiated requests
+                userId: user.id,
+                role: membership.role || null
+              };
+            }
+          }
+        }
+      } catch (err) {
+        // JWT verification failed, continue to return null
+        console.debug('JWT verification failed:', err);
+      }
+    }
   }
   
-  // TODO: Check for user session JWT from Supabase auth
-  // For now, return null (anonymous validation)
   return null;
 }
 

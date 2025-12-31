@@ -13,6 +13,7 @@ import { MatSnackBar, MatSnackBarModule } from '@angular/material/snack-bar';
 import { AppHeaderComponent } from '../shared/app-header.component';
 import { AuditService } from '../audit.service';
 import { TclService } from '../tcl.service';
+import { AuthService } from '../auth.service';
 
 // Note: extractClaims is used client-side for now
 // In production, this should be done server-side via an API endpoint
@@ -61,7 +62,8 @@ export class IngestionComponent implements OnInit {
     private auditService: AuditService,
     private tclService: TclService,
     private router: Router,
-    private snackBar: MatSnackBar
+    private snackBar: MatSnackBar,
+    private authService: AuthService
   ) {}
 
   ngOnInit() {
@@ -262,18 +264,29 @@ export class IngestionComponent implements OnInit {
     this.errorMessage = '';
 
     try {
+      // Get session token for authentication
+      const { data: { session } } = await this.authService['supabase'].auth.getSession();
+      if (!session?.access_token) {
+        throw new Error('Not authenticated. Please log in.');
+      }
+
       const apiUrl = this.auditService['apiBase'];
       const formData = new FormData();
       formData.append('audio', this.selectedFile);
       formData.append('filename', this.selectedFile.name);
 
+      const headers: HeadersInit = {
+        'Authorization': `Bearer ${session.access_token}`
+      };
+
       const response = await fetch(`${apiUrl}/transcribe`, {
         method: 'POST',
+        headers: headers,
         body: formData
       });
 
       if (!response.ok) {
-        const errorData = await response.json();
+        const errorData = await response.json().catch(() => ({ error: 'Transcription failed' }));
         throw new Error(errorData.error || 'Transcription failed');
       }
 

@@ -84,19 +84,46 @@ exports.handler = async (event, context) => {
   
   try {
     // Forward the request to TCL Core
-    const headers = {
-      'Content-Type': 'application/json',
-    };
+    const headers = {};
+    
+    // Forward all relevant headers
+    const contentType = event.headers['content-type'] || event.headers['Content-Type'];
+    if (contentType) {
+      headers['Content-Type'] = contentType;
+    } else {
+      headers['Content-Type'] = 'application/json';
+    }
     
     // Forward authorization if present
-    if (event.headers.authorization) {
-      headers['Authorization'] = event.headers.authorization;
+    if (event.headers.authorization || event.headers['Authorization']) {
+      headers['Authorization'] = event.headers.authorization || event.headers['Authorization'];
+    }
+    
+    // Handle body based on content type
+    let body = event.body;
+    const isMultipart = contentType && contentType.includes('multipart/form-data');
+    
+    if (body) {
+      if (isMultipart) {
+        // For multipart/form-data, Netlify provides body as base64-encoded string
+        // We need to convert it to a Buffer for fetch
+        if (event.isBase64Encoded) {
+          body = Buffer.from(body, 'base64');
+        } else if (typeof body === 'string') {
+          body = Buffer.from(body, 'utf8');
+        }
+      } else {
+        // For JSON, ensure it's a string
+        if (typeof body !== 'string') {
+          body = JSON.stringify(body);
+        }
+      }
     }
     
     const response = await fetch(url, {
       method: event.httpMethod,
       headers: headers,
-      body: event.body || undefined,
+      body: body || undefined,
     });
     
     const data = await response.text();

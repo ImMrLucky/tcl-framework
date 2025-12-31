@@ -6,10 +6,8 @@ import { inviteMember, updateMemberRole, removeMember, listMembers } from "./mem
 import { setupIntegrationRoutes } from "./integrations/routes.js";
 import { setupAuditRoutes } from "./audit/routes.js";
 const app = express();
-app.use(express.json({ limit: "10mb" }));
-app.use(express.raw({ type: 'application/json', limit: '10mb' })); // For HMAC webhook verification
-app.use(express.urlencoded({ extended: true })); // Enable query string parsing
-// Configure multer for file uploads (memory storage - we don't save files)
+// Configure multer for file uploads FIRST (before JSON parsing)
+// This prevents JSON parser from trying to parse multipart/form-data
 const upload = multer({
     storage: multer.memoryStorage(),
     limits: {
@@ -27,6 +25,18 @@ const upload = multer({
         }
     },
 });
+// JSON parsing middleware (skip for file upload routes)
+app.use((req, res, next) => {
+    // Skip JSON parsing for routes that use multer (file uploads)
+    // Multer will handle multipart/form-data
+    if (req.path === '/transcribe' || req.path.startsWith('/webhooks/')) {
+        return next();
+    }
+    // Apply JSON parsing for other routes
+    express.json({ limit: "10mb" })(req, res, next);
+});
+app.use(express.raw({ type: 'application/json', limit: '10mb' })); // For HMAC webhook verification
+app.use(express.urlencoded({ extended: true })); // Enable query string parsing
 // Health check endpoint - must work even if other imports fail
 app.get("/health", (req, res) => {
     res.json({ status: "ok", service: "tcl-core" });
@@ -41,10 +51,22 @@ async function loadModules() {
         console.log("Orchestrator imported");
         validate = orchestrator.validate;
         console.log("Validate function assigned");
-        const adapter = await import("../adapters/openai_adapter.js");
-        console.log("Adapter imported");
-        OpenAIAdapter = adapter.OpenAIAdapter;
-        console.log("OpenAIAdapter assigned");
+        // Only load OpenAIAdapter if API key is set (optional, not required)
+        if (process.env.OPENAI_API_KEY) {
+            try {
+                const adapter = await import("../adapters/openai_adapter.js");
+                console.log("Adapter imported");
+                OpenAIAdapter = adapter.OpenAIAdapter;
+                console.log("OpenAIAdapter assigned (optional - only used if OPENAI_API_KEY is set)");
+            }
+            catch (adapterError) {
+                console.warn("⚠️ OpenAIAdapter not available (optional):", adapterError.message);
+                // Continue without OpenAIAdapter - not required
+            }
+        }
+        else {
+            console.log("OpenAIAdapter skipped (no OPENAI_API_KEY - using free local models)");
+        }
         console.log("✅ Modules loaded successfully");
     }
     catch (error) {
@@ -61,8 +83,9 @@ async function getOrgContext(req) {
     // Check for API key in Authorization header
     const authHeader = req.headers.authorization;
     if (authHeader?.startsWith('Bearer ')) {
-        const key = authHeader.substring(7);
-        const verified = await verifyApiKeyExtended(key);
+        const token = authHeader.substring(7);
+        // First try API key verification
+        const verified = await verifyApiKeyExtended(token);
         if (verified) {
             return {
                 orgId: verified.orgId,
@@ -70,9 +93,44 @@ async function getOrgContext(req) {
                 env: verified.env
             };
         }
+        // If not an API key, try Supabase JWT verification
+        if (supabaseAdmin) {
+            try {
+                const { data: { user }, error } = await supabaseAdmin.auth.getUser(token);
+                if (!error && user) {
+                    // Get user's org membership
+                    const { data: membership, error: memberError } = await supabaseAdmin
+                        .from('org_members')
+                        .select('org_id, role')
+                        .eq('user_id', user.id)
+                        .limit(1)
+                        .single();
+                    if (!memberError && membership) {
+                        // Get default project for the org
+                        const { data: project, error: projectError } = await supabaseAdmin
+                            .from('projects')
+                            .select('id')
+                            .eq('org_id', membership.org_id)
+                            .eq('is_default', true)
+                            .single();
+                        if (!projectError && project) {
+                            return {
+                                orgId: membership.org_id,
+                                projectId: project.id,
+                                env: 'sandbox', // Default to sandbox for user-initiated requests
+                                userId: user.id,
+                                role: membership.role || null
+                            };
+                        }
+                    }
+                }
+            }
+            catch (err) {
+                // JWT verification failed, continue to return null
+                console.debug('JWT verification failed:', err);
+            }
+        }
     }
-    // TODO: Check for user session JWT from Supabase auth
-    // For now, return null (anonymous validation)
     return null;
 }
 /**
