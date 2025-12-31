@@ -1,9 +1,8 @@
 import { Injectable } from '@angular/core';
 import { HttpInterceptor, HttpRequest, HttpHandler, HttpEvent, HttpErrorResponse } from '@angular/common/http';
 import { Observable, from, throwError } from 'rxjs';
-import { catchError, switchMap } from 'rxjs/operators';
+import { catchError, switchMap, timeout } from 'rxjs/operators';
 import { AuthService } from './auth.service';
-import { Router } from '@angular/router';
 
 @Injectable({
   providedIn: 'root'
@@ -15,13 +14,11 @@ export class AuthInterceptor implements HttpInterceptor {
     '/auth/signup',
     '/auth/check-email',
     '/auth/provision',
-    '/health',
-    '/validate' // /validate endpoint might be public for some use cases
+    '/health'
   ];
 
   constructor(
-    private authService: AuthService,
-    private router: Router
+    private authService: AuthService
   ) {}
 
   intercept(req: HttpRequest<any>, next: HttpHandler): Observable<HttpEvent<any>> {
@@ -38,29 +35,25 @@ export class AuthInterceptor implements HttpInterceptor {
     // For authenticated endpoints, get the token and add it to the request
     // Use from() to convert Promise to Observable, then switchMap to add header
     return from(this.authService.getAccessToken()).pipe(
+      // Add timeout to prevent hanging if getAccessToken takes too long
+      timeout(5000),
       switchMap(token => {
-        // For authenticated endpoints, we MUST have a token
-        if (!token || typeof token !== 'string' || token.trim().length === 0) {
-          // No token available - user is not authenticated
-          // Sign them out and return an error
-          this.authService.signOut();
-          return throwError(() => new HttpErrorResponse({
-            error: 'Authentication required',
-            status: 401,
-            statusText: 'Unauthorized'
-          }));
-        }
+        // Clone the request
+        let authReq = req;
         
-        // Clone the request and add Authorization header
-        const authReq = req.clone({
-          setHeaders: {
-            Authorization: `Bearer ${token}`
-          }
-        });
+        // If we have a valid token, add the Authorization header
+        if (token && typeof token === 'string' && token.trim().length > 0) {
+          authReq = req.clone({
+            setHeaders: {
+              Authorization: `Bearer ${token}`
+            }
+          });
+        }
+        // If no token, still proceed - backend will return 401 if needed
         
         return next.handle(authReq).pipe(
           catchError((error: HttpErrorResponse) => {
-            // Handle 401 Unauthorized responses
+            // Handle 401 Unauthorized responses from the backend
             if (error.status === 401) {
               // Clear session and redirect to login
               this.authService.signOut();
@@ -70,13 +63,16 @@ export class AuthInterceptor implements HttpInterceptor {
         );
       }),
       catchError((error) => {
-        // If token retrieval fails completely, sign out and return error
-        this.authService.signOut();
-        return throwError(() => new HttpErrorResponse({
-          error: 'Authentication required',
-          status: 401,
-          statusText: 'Unauthorized'
-        }));
+        // If token retrieval fails or times out, proceed without token
+        // Let the backend return 401 if auth is required
+        return next.handle(req).pipe(
+          catchError((err: HttpErrorResponse) => {
+            if (err.status === 401) {
+              this.authService.signOut();
+            }
+            return throwError(() => err);
+          })
+        );
       })
     );
   }

@@ -624,52 +624,35 @@ export class AuthService {
 
   /**
    * Get the current session access token for API requests
-   * Validates token expiration and handles inactivity timeout
+   * Prioritizes localStorage for speed, falls back to Supabase getSession
    */
   async getAccessToken(): Promise<string | null> {
     // Update last activity time
     this.lastActivityTime = Date.now();
     this.resetInactivityTimer();
 
-    // Try to get session from Supabase first (most reliable)
-    // Supabase handles localStorage internally and returns the current session
+    // First, try to get from localStorage (fast, synchronous)
+    const storedSession = this.getValidSessionFromStorage();
+    if (storedSession?.access_token) {
+      return storedSession.access_token;
+    }
+
+    // If localStorage doesn't have a valid token, try Supabase getSession
+    // This handles cases where the session was refreshed but localStorage wasn't updated
     try {
       const { data: { session }, error } = await this.supabase.auth.getSession();
       
-      if (error || !session) {
-        // No session - user is not logged in
-        return null;
-      }
-
-      if (!session.access_token) {
-        // Session exists but no token - invalid state, clear it
-        await this.supabase.auth.signOut();
+      if (error || !session || !session.access_token) {
         return null;
       }
 
       // Check if token is expired
       if (this.isTokenExpired(session.expires_at)) {
-        // Token expired - clear session
-        await this.supabase.auth.signOut();
         return null;
       }
 
-      // Return the token from Supabase session
       return session.access_token;
     } catch (error) {
-      // If getSession fails, try localStorage as fallback
-      const storedSession = this.getValidSessionFromStorage();
-      if (storedSession?.access_token) {
-        // Validate the token from localStorage
-        if (this.isTokenExpired(storedSession.expires_at)) {
-          // Token expired - clear storage
-          if (typeof window !== 'undefined' && window.localStorage) {
-            window.localStorage.removeItem('sb-uqwcmkyaskyduxuluqrm-auth-token');
-          }
-          return null;
-        }
-        return storedSession.access_token;
-      }
       return null;
     }
   }
