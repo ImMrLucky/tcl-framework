@@ -42,10 +42,11 @@
                 [(ngModel)]="transcript"
                 name="transcript"
                 rows="15"
-                placeholder="Paste transcript here... (Agent: ... Customer: ...)"
-                required
+                [placeholder]="isAudioFile ? 'Audio file selected - transcript will be generated automatically' : 'Paste transcript here... (Agent: ... Customer: ...)'"
+                [required]="!isAudioFile"
               ></textarea>
-              <mat-hint>Enter the full conversation transcript. Format: Agent: ... Customer: ...</mat-hint>
+              <mat-hint *ngIf="!isAudioFile">Enter the full conversation transcript. Format: Agent: ... Customer: ...</mat-hint>
+              <mat-hint *ngIf="isAudioFile">Upload an audio file above and click 'Transcribe & Analyze' to generate the transcript automatically.</mat-hint>
             </mat-form-field>
           </div>
 
