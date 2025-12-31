@@ -189,9 +189,9 @@ export async function runEvaluation(
         } : {},
         counts: {
           claims: claims.length,
-          contradicted: issues.filter(i => i.truthState === 'Contradicted').length,
-          ungrounded: issues.filter(i => i.truthState === 'Ungrounded').length,
-          supported: issues.filter(i => i.truthState === 'Supported').length
+          contradicted: issues.filter(i => i.what.truthState === 'Contradicted').length,
+          ungrounded: issues.filter(i => i.what.truthState === 'Ungrounded').length,
+          supported: issues.filter(i => i.what.truthState === 'Supported').length
         }
       },
       refusal: false,
