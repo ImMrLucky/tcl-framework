@@ -489,11 +489,6 @@ export class AuthService {
    */
   async getAccessToken(): Promise<string | null> {
     try {
-      // Wait for auth to initialize if needed
-      if (this.supabase.auth.initializePromise) {
-        await this.supabase.auth.initializePromise;
-      }
-      
       const sessionResponse = await this.supabase.auth.getSession();
       if (sessionResponse.error) {
         return null;
