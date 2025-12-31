@@ -63,6 +63,11 @@ import type { AuthError } from '@supabase/supabase-js';
               </mat-error>
             </mat-form-field>
 
+            <div *ngIf="successMessage" class="success-message">
+              <mat-icon>check_circle</mat-icon>
+              {{ successMessage }}
+            </div>
+
             <div *ngIf="errorMessage" class="error-message">
               <mat-icon>error</mat-icon>
               {{ errorMessage }}
@@ -131,6 +136,18 @@ import type { AuthError } from '@supabase/supabase-js';
       font-size: 14px;
     }
 
+    .success-message {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      color: #2e7d32;
+      margin-bottom: 16px;
+      padding: 12px;
+      background: #e8f5e9;
+      border-radius: 4px;
+      font-size: 14px;
+    }
+
     .switch-mode {
       text-align: center;
       margin-top: 24px;
@@ -154,6 +171,7 @@ export class LoginComponent {
   hidePassword = true;
   loading = false;
   errorMessage = '';
+  successMessage = '';
 
   constructor(
     private fb: FormBuilder,
@@ -169,6 +187,7 @@ export class LoginComponent {
   toggleMode() {
     this.isSignUp = !this.isSignUp;
     this.errorMessage = '';
+    this.successMessage = '';
     this.authForm.reset();
   }
 
@@ -177,6 +196,7 @@ export class LoginComponent {
 
     this.loading = true;
     this.errorMessage = '';
+    this.successMessage = '';
 
     const { email, password } = this.authForm.value;
 
@@ -189,8 +209,15 @@ export class LoginComponent {
       }
 
       if (result.error) {
+        // Handle email confirmation required (not really an error)
+        if ((result.error as any).name === 'EmailConfirmationRequired') {
+          this.successMessage = result.error.message || 'Please check your email to confirm your account.';
+          this.errorMessage = '';
+          // Switch to login mode after showing the message
+          this.isSignUp = false;
+        }
         // Handle duplicate account case
-        if (result.duplicateAccount) {
+        else if (result.duplicateAccount) {
           this.errorMessage = result.error.message || 'An account with this email already exists.';
           // Show option to go to login or reset password
           setTimeout(() => {

@@ -227,26 +227,55 @@ export class AuthService {
       return { error, duplicateAccount: false };
     }
 
-    if (!error && data.user) {
-      // Provision user (create profile + org)
-      // The profile will be created with onboarding_completed = false by default
+    if (!data.user) {
+      return { 
+        error: { 
+          message: 'Sign up failed. Please try again.',
+          name: 'SignUpError',
+          status: 500
+        } as AuthError,
+        duplicateAccount: false
+      };
+    }
+
+    // Check if email confirmation is required
+    // If session is null but user exists, email confirmation is needed
+    if (!data.session) {
+      // Still provision the user so their profile is ready when they confirm
       try {
-        // Use same API URL pattern as TclService
         const apiUrl = this.getApiBaseUrl();
         await firstValueFrom(
           this.http.post(`${apiUrl}/auth/provision`, { userId: data.user.id, email })
         );
       } catch (err) {
-        // Don't fail signup if provision fails - user can still log in
+        // Don't fail - user will be provisioned on first login if needed
       }
-
-      // Load profile after signup (will create basic profile if provision succeeded)
-      if (data.user) {
-        await this.loadUserProfile(data.user.id);
-      }
+      
+      // Return a special message - user needs to confirm email
+      return { 
+        error: { 
+          message: 'Please check your email to confirm your account before signing in.',
+          name: 'EmailConfirmationRequired',
+          status: 200 // Not really an error
+        } as AuthError,
+        duplicateAccount: false
+      };
     }
 
-    return { error };
+    // Session exists - user is logged in, provision and load profile
+    try {
+      const apiUrl = this.getApiBaseUrl();
+      await firstValueFrom(
+        this.http.post(`${apiUrl}/auth/provision`, { userId: data.user.id, email })
+      );
+    } catch (err) {
+      // Don't fail signup if provision fails
+    }
+
+    // Load profile after signup
+    await this.loadUserProfile(data.user.id);
+
+    return { error: null, duplicateAccount: false };
   }
 
   private getApiBaseUrl(): string {
@@ -313,17 +342,29 @@ export class AuthService {
         .maybeSingle();
       
       if (profileError || !profile) {
-        // User exists in auth but not in our database - invalid state
-        console.error('User has no profile in database');
-        await this.supabase.auth.signOut();
-        return { 
-          error: { 
-            message: 'Your account is incomplete or has been deleted. Please sign up again or contact support.', 
-            name: 'AccountNotFound',
-            status: 404
-          } as AuthError, 
-          duplicateAccount: false 
-        };
+        // User exists in auth but not in our database
+        // This can happen if provisioning failed during signup
+        // Try to provision them now
+        console.warn('User has no profile, attempting to provision...');
+        try {
+          const apiUrl = this.getApiBaseUrl();
+          await firstValueFrom(
+            this.http.post(`${apiUrl}/auth/provision`, { userId: user.id, email: user.email })
+          );
+          console.log('User provisioned successfully on login');
+        } catch (provisionErr: any) {
+          // Provisioning failed - user cannot use the app
+          console.error('Failed to provision user on login:', provisionErr);
+          await this.supabase.auth.signOut();
+          return { 
+            error: { 
+              message: 'Your account setup is incomplete. Please try signing up again or contact support.', 
+              name: 'ProvisionError',
+              status: 500
+            } as AuthError, 
+            duplicateAccount: false 
+          };
+        }
       }
       
       // Load the full profile
