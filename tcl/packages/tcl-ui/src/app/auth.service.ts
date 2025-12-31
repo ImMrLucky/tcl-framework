@@ -21,6 +21,9 @@ export class AuthService {
   private supabase: SupabaseClient;
   private currentUserSubject = new BehaviorSubject<User | null>(null);
   public currentUser$ = this.currentUserSubject.asObservable();
+  private inactivityTimer: any = null;
+  private readonly INACTIVITY_TIMEOUT = 30 * 60 * 1000; // 30 minutes in milliseconds
+  private lastActivityTime = Date.now();
 
   constructor(private router: Router) {
     // Use environment variables if available, fallback to hardcoded for development
@@ -70,6 +73,9 @@ export class AuthService {
     }
     
     // Listen for auth changes
+    // Set up activity tracking for inactivity timeout
+    this.setupActivityTracking();
+
     this.supabase.auth.onAuthStateChange(async (event, session) => {
       // Only log non-INITIAL_SESSION events to reduce noise
       if (event !== 'INITIAL_SESSION') {
@@ -84,6 +90,9 @@ export class AuthService {
       }
       
       if (session?.user) {
+        // User is logged in, start inactivity timer
+        this.resetInactivityTimer();
+        
         // Set basic user immediately so UI updates right away
         const basicUser: User = {
           id: session.user.id,
@@ -101,7 +110,8 @@ export class AuthService {
           // User is still logged in, just without profile data
         }
       } else {
-        // No session - clear user state
+        // No session - clear user state and timer
+        this.clearInactivityTimer();
         this.currentUserSubject.next(null);
       }
     });
@@ -129,6 +139,8 @@ export class AuthService {
         }
         
         if (session?.user) {
+          // User is logged in, start inactivity timer
+          this.resetInactivityTimer();
           console.log('Initial session found for user:', session.user.email);
           
           // Set basic user immediately so UI shows logged in state
@@ -485,17 +497,153 @@ export class AuthService {
   }
 
   /**
-   * Get the current session access token for API requests
+   * Check if a session token is expired
    */
-  async getAccessToken(): Promise<string | null> {
+  private isTokenExpired(expiresAt: number | string | null | undefined): boolean {
+    if (!expiresAt) return true;
+    const expiryTime = typeof expiresAt === 'string' ? parseInt(expiresAt, 10) : expiresAt;
+    const now = Math.floor(Date.now() / 1000); // Current time in seconds
+    return expiryTime < now;
+  }
+
+  /**
+   * Validate and get session from localStorage
+   */
+  private getValidSessionFromStorage(): { access_token: string; expires_at?: number } | null {
+    if (typeof window === 'undefined' || !window.localStorage) {
+      return null;
+    }
+
+    const storageKey = 'sb-uqwcmkyaskyduxuluqrm-auth-token';
+    const stored = window.localStorage.getItem(storageKey);
+    if (!stored) {
+      return null;
+    }
+
     try {
-      const sessionResponse = await this.supabase.auth.getSession();
-      if (sessionResponse.error) {
+      const parsed = JSON.parse(stored);
+      let session: any = null;
+      let expiresAt: number | string | null = null;
+
+      // Check different possible structures
+      if (parsed?.currentSession) {
+        session = parsed.currentSession;
+        expiresAt = session.expires_at;
+      } else if (parsed?.session) {
+        session = parsed.session;
+        expiresAt = session.expires_at;
+      } else if (parsed?.access_token) {
+        session = parsed;
+        expiresAt = parsed.expires_at;
+      }
+
+      if (!session?.access_token) {
         return null;
       }
-      return sessionResponse.data?.session?.access_token || null;
-    } catch (error) {
+
+      // Check if token is expired
+      if (this.isTokenExpired(expiresAt)) {
+        // Token expired, clear storage
+        window.localStorage.removeItem(storageKey);
+        return null;
+      }
+
+      return {
+        access_token: session.access_token,
+        expires_at: expiresAt ? (typeof expiresAt === 'string' ? parseInt(expiresAt, 10) : expiresAt) : undefined
+      };
+    } catch (e) {
+      // Invalid JSON
       return null;
+    }
+  }
+
+  /**
+   * Get the current session access token for API requests
+   * Validates token expiration and handles inactivity timeout
+   */
+  async getAccessToken(): Promise<string | null> {
+    // Update last activity time
+    this.lastActivityTime = Date.now();
+    this.resetInactivityTimer();
+
+    // First, try to get valid session from localStorage
+    const storedSession = this.getValidSessionFromStorage();
+    if (storedSession?.access_token) {
+      return storedSession.access_token;
+    }
+
+    // If no valid stored session, try getSession with timeout
+    try {
+      const sessionPromise = this.supabase.auth.getSession();
+      const timeoutPromise = new Promise<null>((resolve) => 
+        setTimeout(() => resolve(null), 2000)
+      );
+      
+      const sessionResponse = await Promise.race([sessionPromise, timeoutPromise]);
+      if (!sessionResponse || sessionResponse.error) {
+        // No valid session, redirect to login
+        this.handleSessionExpired();
+        return null;
+      }
+
+      const session = sessionResponse.data?.session;
+      if (!session?.access_token) {
+        this.handleSessionExpired();
+        return null;
+      }
+
+      // Check if token is expired
+      if (this.isTokenExpired(session.expires_at)) {
+        this.handleSessionExpired();
+        return null;
+      }
+
+      return session.access_token;
+    } catch (error) {
+      this.handleSessionExpired();
+      return null;
+    }
+  }
+
+  /**
+   * Handle expired or invalid session
+   */
+  private handleSessionExpired(): void {
+    // Clear user state
+    this.currentUserSubject.next(null);
+    
+    // Clear storage
+    if (typeof window !== 'undefined' && window.localStorage) {
+      window.localStorage.removeItem('sb-uqwcmkyaskyduxuluqrm-auth-token');
+    }
+
+    // Clear inactivity timer
+    this.clearInactivityTimer();
+
+    // Redirect to login
+    this.router.navigate(['/login']);
+  }
+
+  /**
+   * Reset inactivity timer
+   */
+  private resetInactivityTimer(): void {
+    this.clearInactivityTimer();
+    
+    this.inactivityTimer = setTimeout(() => {
+      // User inactive for timeout period, sign them out
+      this.signOut();
+    }, this.INACTIVITY_TIMEOUT);
+  }
+
+  /**
+   * Clear inactivity timer
+   */
+  private clearInactivityTimer(): void {
+    if (this.inactivityTimer) {
+      clearTimeout(this.inactivityTimer);
+      this.inactivityTimer = null;
     }
   }
 }
