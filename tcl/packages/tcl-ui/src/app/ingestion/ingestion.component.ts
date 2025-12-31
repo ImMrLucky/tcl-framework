@@ -15,7 +15,6 @@ import { AuditService } from '../audit.service';
 import { TclService } from '../tcl.service';
 import { AuthService } from '../auth.service';
 import { HttpClient, HttpHeaders } from '@angular/common/http';
-import { firstValueFrom } from 'rxjs';
 
 // Note: extractClaims is used client-side for now
 // In production, this should be done server-side via an API endpoint
@@ -293,9 +292,15 @@ export class IngestionComponent implements OnInit {
         'Authorization': `Bearer ${accessToken}`
       });
 
-      // Make the HTTP request - firstValueFrom converts Observable to Promise
-      const request$ = this.http.post<{ transcript?: string; text?: string }>(fullUrl, formData, { headers });
-      const result = await firstValueFrom(request$);
+      // Make the HTTP request using HttpClient
+      // Wrap Observable in Promise for async/await pattern
+      const result = await new Promise<{ transcript?: string; text?: string }>((resolve, reject) => {
+        this.http.post<{ transcript?: string; text?: string }>(fullUrl, formData, { headers })
+          .subscribe({
+            next: (data) => resolve(data),
+            error: (err) => reject(err)
+          });
+      });
       
       this.transcript = result.transcript || result.text || '';
       
