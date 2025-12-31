@@ -1,6 +1,7 @@
 import { Injectable } from '@angular/core';
 import { CanActivate, Router, UrlTree } from '@angular/router';
-import { Observable, map, take } from 'rxjs';
+import { Observable, map, filter, take, from, of } from 'rxjs';
+import { switchMap } from 'rxjs/operators';
 import { AuthService } from './auth.service';
 
 @Injectable({
@@ -13,15 +14,16 @@ export class AuthGuard implements CanActivate {
   ) {}
 
   canActivate(): Observable<boolean | UrlTree> {
-    return this.authService.currentUser$.pipe(
-      take(1),
-      map(user => {
-        if (user) {
-          // User is logged in
-          return true;
+    // First check if there's a session in localStorage directly
+    // This handles the case where the page loads before onAuthStateChange fires
+    return from(this.authService.checkSession()).pipe(
+      switchMap(hasSession => {
+        if (hasSession) {
+          // Valid session exists, allow access
+          return of(true as boolean | UrlTree);
         }
-        // User is not logged in, redirect to login
-        return this.router.createUrlTree(['/login']);
+        // No valid session, redirect to login
+        return of(this.router.createUrlTree(['/login']));
       })
     );
   }
