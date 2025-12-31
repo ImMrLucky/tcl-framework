@@ -15,6 +15,7 @@ import { AuditService } from '../audit.service';
 import { TclService } from '../tcl.service';
 import { AuthService } from '../auth.service';
 import { HttpClient, HttpHeaders } from '@angular/common/http';
+import { firstValueFrom } from 'rxjs';
 
 // Note: extractClaims is used client-side for now
 // In production, this should be done server-side via an API endpoint
@@ -282,8 +283,13 @@ export class IngestionComponent implements OnInit {
       const apiUrl = this.auditService.getApiBaseUrl();
       const fullUrl = `${apiUrl}/transcribe`;
       
+      // Verify file exists
+      if (!this.selectedFile) {
+        throw new Error('Selected file is null');
+      }
+
       const formData = new FormData();
-      formData.append('audio', this.selectedFile);
+      formData.append('audio', this.selectedFile, this.selectedFile.name);
       formData.append('filename', this.selectedFile.name);
 
       // HttpClient will automatically set Content-Type with boundary for FormData
@@ -293,13 +299,13 @@ export class IngestionComponent implements OnInit {
       });
 
       // Make the HTTP request using HttpClient
-      // Wrap Observable in Promise for async/await pattern
+      // Explicitly subscribe to ensure the request is made
       const result = await new Promise<{ transcript?: string; text?: string }>((resolve, reject) => {
-        this.http.post<{ transcript?: string; text?: string }>(fullUrl, formData, { headers })
-          .subscribe({
-            next: (data) => resolve(data),
-            error: (err) => reject(err)
-          });
+        const observable = this.http.post<{ transcript?: string; text?: string }>(fullUrl, formData, { headers });
+        observable.subscribe({
+          next: (data) => resolve(data),
+          error: (err) => reject(err)
+        });
       });
       
       this.transcript = result.transcript || result.text || '';
