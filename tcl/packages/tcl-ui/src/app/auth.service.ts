@@ -291,11 +291,43 @@ export class AuthService {
         };
       }
       
-      // Session is stored correctly, load user profile
+      // Session is stored correctly, now verify user has a valid profile
       const { data: { user } } = await this.supabase.auth.getUser();
-      if (user) {
-        await this.loadUserProfile(user.id);
+      if (!user) {
+        await this.supabase.auth.signOut();
+        return { 
+          error: { 
+            message: 'Could not retrieve user information. Please try again.', 
+            name: 'UserError',
+            status: 500
+          } as AuthError, 
+          duplicateAccount: false 
+        };
       }
+      
+      // Check if user has a profile in the database
+      const { data: profile, error: profileError } = await this.supabase
+        .from('profiles')
+        .select('id')
+        .eq('id', user.id)
+        .maybeSingle();
+      
+      if (profileError || !profile) {
+        // User exists in auth but not in our database - invalid state
+        console.error('User has no profile in database');
+        await this.supabase.auth.signOut();
+        return { 
+          error: { 
+            message: 'Your account is incomplete or has been deleted. Please sign up again or contact support.', 
+            name: 'AccountNotFound',
+            status: 404
+          } as AuthError, 
+          duplicateAccount: false 
+        };
+      }
+      
+      // Load the full profile
+      await this.loadUserProfile(user.id);
     } else {
       // No session returned - this is an error
       return { 
