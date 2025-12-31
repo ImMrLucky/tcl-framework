@@ -539,8 +539,11 @@ export class AuthService {
    * Check if a session token is expired
    */
   private isTokenExpired(expiresAt: number | string | null | undefined): boolean {
-    if (!expiresAt) return true;
+    // If no expiration provided, assume token is valid (let backend validate)
+    if (!expiresAt) return false;
     const expiryTime = typeof expiresAt === 'string' ? parseInt(expiresAt, 10) : expiresAt;
+    // Check if expiryTime is valid
+    if (isNaN(expiryTime) || expiryTime <= 0) return false;
     const now = Math.floor(Date.now() / 1000); // Current time in seconds
     return expiryTime < now;
   }
@@ -624,35 +627,36 @@ export class AuthService {
 
   /**
    * Get the current session access token for API requests
-   * Prioritizes localStorage for speed, falls back to Supabase getSession
+   * Uses Supabase's built-in session management which handles refresh automatically
    */
   async getAccessToken(): Promise<string | null> {
     // Update last activity time
     this.lastActivityTime = Date.now();
     this.resetInactivityTimer();
 
-    // First, try to get from localStorage (fast, synchronous)
-    const storedSession = this.getValidSessionFromStorage();
-    if (storedSession?.access_token) {
-      return storedSession.access_token;
-    }
-
-    // If localStorage doesn't have a valid token, try Supabase getSession
-    // This handles cases where the session was refreshed but localStorage wasn't updated
+    // Use Supabase getSession - it handles localStorage and token refresh automatically
     try {
       const { data: { session }, error } = await this.supabase.auth.getSession();
       
-      if (error || !session || !session.access_token) {
+      if (error) {
+        console.warn('Error getting session:', error.message);
+        return null;
+      }
+      
+      if (!session) {
+        // No session - user is not logged in
+        return null;
+      }
+      
+      if (!session.access_token) {
+        console.warn('Session exists but no access token');
         return null;
       }
 
-      // Check if token is expired
-      if (this.isTokenExpired(session.expires_at)) {
-        return null;
-      }
-
+      // Return the token - Supabase handles refresh automatically
       return session.access_token;
-    } catch (error) {
+    } catch (error: any) {
+      console.warn('Exception getting session:', error?.message || error);
       return null;
     }
   }

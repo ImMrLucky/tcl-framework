@@ -49,30 +49,15 @@ export class AuthInterceptor implements HttpInterceptor {
             }
           });
         }
-        // If no token, still proceed - backend will return 401 if needed
+        // If no token, still proceed - backend will return error if needed
         
-        return next.handle(authReq).pipe(
-          catchError((error: HttpErrorResponse) => {
-            // Handle 401 Unauthorized responses from the backend
-            if (error.status === 401) {
-              // Clear session and redirect to login
-              this.authService.signOut();
-            }
-            return throwError(() => error);
-          })
-        );
+        return next.handle(authReq);
       }),
       catchError((error) => {
         // If token retrieval fails or times out, proceed without token
-        // Let the backend return 401 if auth is required
-        return next.handle(req).pipe(
-          catchError((err: HttpErrorResponse) => {
-            if (err.status === 401) {
-              this.authService.signOut();
-            }
-            return throwError(() => err);
-          })
-        );
+        // Let the backend return appropriate error if auth is required
+        console.warn('Token retrieval failed, proceeding without auth:', error.message || error);
+        return next.handle(req);
       })
     );
   }
