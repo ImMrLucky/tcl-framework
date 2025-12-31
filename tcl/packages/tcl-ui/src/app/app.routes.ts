@@ -63,6 +63,11 @@ export const routes: Routes = [
     path: '',
     redirectTo: '/home',
     pathMatch: 'full'
+  },
+  // Wildcard route - redirect unknown routes to home
+  {
+    path: '**',
+    redirectTo: '/home'
   }
 ];
 

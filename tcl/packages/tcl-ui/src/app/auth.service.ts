@@ -78,14 +78,8 @@ export class AuthService {
     this.setupActivityTracking();
 
     this.supabase.auth.onAuthStateChange(async (event, session) => {
-      // Only log non-INITIAL_SESSION events to reduce noise
-      if (event !== 'INITIAL_SESSION') {
-        console.log('Auth state changed:', event, session?.user?.email);
-      }
-      
       // Handle SIGNED_OUT event explicitly
       if (event === 'SIGNED_OUT' || !session) {
-        console.log('User signed out, clearing user state');
         this.currentUserSubject.next(null);
         return;
       }
@@ -128,7 +122,6 @@ export class AuthService {
     setTimeout(() => {
       this.supabase.auth.getSession().then(async ({ data: { session }, error: sessionError }) => {
         if (sessionError) {
-          console.warn('Error getting initial session:', sessionError);
           this.currentUserSubject.next(null);
           return;
         }
@@ -137,8 +130,6 @@ export class AuthService {
         if (typeof window !== 'undefined' && window.localStorage) {
           const authToken = localStorage.getItem('sb-uqwcmkyaskyduxuluqrm-auth-token');
           if (!authToken && session) {
-            console.log('Session exists but localStorage token is missing - clearing session');
-            // Session exists but token was cleared - sign out to be safe
             await this.supabase.auth.signOut();
             this.currentUserSubject.next(null);
             return;
@@ -146,36 +137,24 @@ export class AuthService {
         }
         
         if (session?.user) {
-          // User is logged in, start inactivity timer
           this.resetInactivityTimer();
-          console.log('Initial session found for user:', session.user.email);
           
-          // Set basic user immediately so UI shows logged in state
           const basicUser: User = {
             id: session.user.id,
             email: session.user.email || undefined,
             fullName: session.user.user_metadata?.['full_name'] as string | undefined
           };
           this.currentUserSubject.next(basicUser);
-          console.log('Set initial user from session:', basicUser);
           
-          // Then load full profile in background
           try {
             await this.loadUserProfile(session.user.id);
-          } catch (err: any) {
-            console.error('Error loading initial user profile:', err);
+          } catch {
             // Keep the basic user even if profile load fails
-            // User is still logged in, just without profile data
           }
         } else {
-          // Only log if we're in development mode to reduce noise
-          if (process.env['NODE_ENV'] === 'development') {
-            console.log('No active session found');
-          }
           this.currentUserSubject.next(null);
         }
-      }).catch((err: any) => {
-        console.error('Error in getSession promise:', err);
+      }).catch(() => {
         this.currentUserSubject.next(null);
       });
     }, 100);
@@ -186,61 +165,62 @@ export class AuthService {
    * Returns true if user has a valid session, false otherwise
    */
   async checkSession(): Promise<boolean> {
+    // Check localStorage first - this is synchronous and avoids race conditions
+    const storageKey = 'sb-uqwcmkyaskyduxuluqrm-auth-token';
+    const storedSession = typeof window !== 'undefined' ? localStorage.getItem(storageKey) : null;
+    
+    if (storedSession) {
+      try {
+        const parsed = JSON.parse(storedSession);
+        if (parsed.access_token && parsed.user) {
+          // Check expiry
+          const expiresAt = parsed.expires_at;
+          if (expiresAt && expiresAt * 1000 < Date.now()) {
+            // Token expired
+            return false;
+          }
+          
+          // Valid token found - update user subject if needed
+          if (!this.currentUserSubject.value) {
+            this.currentUserSubject.next({
+              id: parsed.user.id,
+              email: parsed.user.email || undefined
+            });
+            // Load full profile in background
+            this.loadUserProfileAsync(parsed.user.id);
+          }
+          return true;
+        }
+      } catch {
+        // Invalid JSON in storage - fall through
+      }
+    }
+    
+    // Fallback: Try Supabase getSession (handles refresh tokens, etc.)
     try {
-      // First try to get session from Supabase
       const { data: { session } } = await this.supabase.auth.getSession();
       
       if (session?.access_token) {
-        // Check if token is expired
         const expiresAt = session.expires_at;
         if (expiresAt && expiresAt * 1000 < Date.now()) {
           return false;
         }
         
-        // Valid session - update user subject if needed
         if (!this.currentUserSubject.value && session.user) {
           this.currentUserSubject.next({
             id: session.user.id,
             email: session.user.email || undefined
           });
-          // Load full profile in background
           this.loadUserProfileAsync(session.user.id);
         }
         
         return true;
       }
-      
-      // Fallback: Check localStorage directly for Supabase token
-      const storageKey = 'sb-uqwcmkyaskyduxuluqrm-auth-token';
-      const storedSession = localStorage.getItem(storageKey);
-      if (storedSession) {
-        try {
-          const parsed = JSON.parse(storedSession);
-          if (parsed.access_token && parsed.user) {
-            // Check expiry
-            const expiresAt = parsed.expires_at;
-            if (expiresAt && expiresAt * 1000 < Date.now()) {
-              return false;
-            }
-            
-            // Update user subject
-            if (!this.currentUserSubject.value) {
-              this.currentUserSubject.next({
-                id: parsed.user.id,
-                email: parsed.user.email || undefined
-              });
-            }
-            return true;
-          }
-        } catch {
-          // Invalid JSON in storage
-        }
-      }
-      
-      return false;
     } catch {
-      return false;
+      // Supabase error - already checked localStorage
     }
+    
+    return false;
   }
 
   async signUp(email: string, password: string): Promise<{ error: AuthError | null; duplicateAccount?: boolean }> {
@@ -414,15 +394,12 @@ export class AuthService {
       
       if (!profile) {
         // No profile - try to provision
-        console.warn('User has no profile, attempting to provision...');
         const apiUrl = this.getApiBaseUrl();
         await firstValueFrom(
           this.http.post(`${apiUrl}/auth/provision`, { userId, email })
         );
-        console.log('User provisioned successfully');
       }
-    } catch (err: any) {
-      console.warn('Background provisioning failed:', err.message);
+    } catch {
       // Don't throw - this is background work
     }
   }
@@ -433,8 +410,7 @@ export class AuthService {
   private async loadUserProfileAsync(userId: string): Promise<void> {
     try {
       await this.loadUserProfile(userId);
-    } catch (err: any) {
-      console.warn('Background profile load failed:', err.message);
+    } catch {
       // Don't throw - user is already set with minimal data
     }
   }
@@ -532,7 +508,6 @@ export class AuthService {
 
     // If error is about missing column, try again without onboarding_completed
     if (error && error.code === 'PGRST204' && updates.onboardingCompleted !== undefined) {
-      console.warn('onboarding_completed column not found, retrying without it. Please refresh Supabase schema cache.');
       const dbUpdatesWithoutOnboarding = { ...dbUpdates };
       delete dbUpdatesWithoutOnboarding.onboarding_completed;
       
@@ -561,19 +536,14 @@ export class AuthService {
   }
 
   private async loadUserProfile(userId: string): Promise<void> {
-    console.log('Loading profile for user:', userId);
-    
     // Get the auth user first (this also validates the session)
     const { data: { user }, error: authError } = await this.supabase.auth.getUser();
     
     if (authError || !user) {
       // Handle AuthSessionMissingError gracefully - don't clear user if session might still exist
       if (authError?.name === 'AuthSessionMissingError' || authError?.message?.includes('session')) {
-        console.warn('Auth session missing during profile load, but keeping basic user state');
-        // Don't clear user - session might be temporarily unavailable
         return;
       }
-      console.error('Error getting auth user:', authError);
       // Only clear user if it's a real error, not a session timing issue
       if (authError && !authError.message?.includes('session')) {
         this.currentUserSubject.next(null);
@@ -583,14 +553,10 @@ export class AuthService {
 
     // Verify the user matches the requested userId
     if (user.id !== userId) {
-      console.warn(`Auth user ID (${user.id}) does not match requested ID (${userId})`);
       return;
     }
 
-    console.log('Auth user found:', user.email, 'Email confirmed:', user.email_confirmed_at ? 'yes' : 'no');
-
     // Try to load profile from database
-    // Use .maybeSingle() instead of .single() to handle missing profiles gracefully
     const { data, error } = await this.supabase
       .from('profiles')
       .select('*')
@@ -598,9 +564,7 @@ export class AuthService {
       .maybeSingle();
 
     if (error) {
-      // Database error (not just missing profile)
-      console.error('Error loading profile from database:', error);
-      // Still set user with basic info from auth so they can use the app
+      // Database error - still set user with basic info from auth
       const basicUser: User = {
         id: userId,
         email: user.email || undefined,
@@ -615,10 +579,7 @@ export class AuthService {
     }
 
     if (!data) {
-      // Profile doesn't exist yet (provision might have failed or is in progress)
-      // Still set user with basic info from auth so they can use the app
-      console.warn('Profile not found in database (this is OK if user just signed up)');
-      
+      // Profile doesn't exist yet - set basic info from auth
       const basicUser: User = {
         id: userId,
         email: user.email || undefined,
@@ -630,12 +591,10 @@ export class AuthService {
       };
       
       this.currentUserSubject.next(basicUser);
-      console.log('Set basic user info from auth:', basicUser);
       return;
     }
 
     // Profile exists, use it
-    console.log('Profile loaded from database:', data);
     this.currentUserSubject.next({
       id: userId,
       email: user.email || data.email || undefined,
@@ -777,31 +736,36 @@ export class AuthService {
     this.lastActivityTime = Date.now();
     this.resetInactivityTimer();
 
-    // Use Supabase getSession - it handles localStorage and token refresh automatically
-    try {
-      const { data: { session }, error } = await this.supabase.auth.getSession();
-      
-      if (error) {
-        console.warn('Error getting session:', error.message);
-        return null;
+    // Check localStorage first for faster access
+    const storageKey = 'sb-uqwcmkyaskyduxuluqrm-auth-token';
+    const storedSession = typeof window !== 'undefined' ? localStorage.getItem(storageKey) : null;
+    
+    if (storedSession) {
+      try {
+        const parsed = JSON.parse(storedSession);
+        if (parsed.access_token) {
+          // Check expiry
+          const expiresAt = parsed.expires_at;
+          if (!expiresAt || expiresAt * 1000 > Date.now()) {
+            return parsed.access_token;
+          }
+        }
+      } catch {
+        // Invalid JSON - fall through to getSession
       }
-      
-      if (!session) {
-        // No session - user is not logged in
-        return null;
-      }
-      
-      if (!session.access_token) {
-        console.warn('Session exists but no access token');
-        return null;
-      }
-
-      // Return the token - Supabase handles refresh automatically
-      return session.access_token;
-    } catch (error: any) {
-      console.warn('Exception getting session:', error?.message || error);
-      return null;
     }
+
+    // Fallback to Supabase getSession - handles token refresh
+    try {
+      const { data: { session } } = await this.supabase.auth.getSession();
+      if (session?.access_token) {
+        return session.access_token;
+      }
+    } catch {
+      // Error getting session
+    }
+    
+    return null;
   }
 
   /**
