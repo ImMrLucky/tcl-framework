@@ -160,7 +160,12 @@ export class IngestionComponent implements OnInit {
           question: this.transcript,
           answer: '',
           sources: [],
-          options: {},
+          options: {
+            spectral: true,  // Enable spectral analysis
+            spectralMode: 'analyze',  // Use full analyze mode for truthVector, issues, etc.
+            includeConfidenceMetrics: true,
+            includeSuggestions: true
+          },
           conversation_id: conversationId
         })
       );

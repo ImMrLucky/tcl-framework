@@ -26,6 +26,7 @@ import {
 } from "./member-management.js";
 import { setupIntegrationRoutes } from "./integrations/routes.js";
 import { setupAuditRoutes } from "./audit/routes.js";
+import { buildIssuesList } from "./audit/reproducibility.js";
 import { getOrgContext } from "./auth-context.js";
 
 const app = express();
@@ -174,6 +175,39 @@ app.post("/validate", async (req, res) => {
     const latency = Date.now() - startTime;
     console.log("Validation complete");
 
+    // Build issues list from spectral output if available
+    let issues: any[] = [];
+    if (out.report?.spectral && out.report?.claims) {
+      try {
+        // Map claims to the format expected by buildIssuesList
+        const claimsForIssues = out.report.claims.map((c: any) => ({
+          id: c.id,
+          text: c.text,
+          confidence: c.confidence || 0.75,
+          evidence: c.evidence || [],
+          meta: {
+            speaker: c.meta?.speaker,
+            turnIndex: c.meta?.turnIndex
+          }
+        }));
+        
+        issues = buildIssuesList(
+          out.report.spectral,
+          claimsForIssues,
+          out.report.destructiveClaims
+        );
+        console.log(`Built ${issues.length} issues from spectral analysis`);
+      } catch (issueErr: any) {
+        console.warn('Failed to build issues list:', issueErr.message);
+      }
+    }
+
+    // Add issues to the report
+    const reportWithIssues = {
+      ...out.report,
+      issues
+    };
+
     // Store validation in Supabase if configured
     const context = await getOrgContext(req);
     if (context && supabaseAdmin) {
@@ -193,7 +227,7 @@ app.post("/validate", async (req, res) => {
             scorer_id: out.scorerId || null,
             engine_version: process.env.ENGINE_VERSION || '0.2.0',
             latency_ms: latency,
-            report: out.report || {}
+            report: reportWithIssues
           });
         
         if (dbError) {
@@ -216,7 +250,11 @@ app.post("/validate", async (req, res) => {
     }
 
     clearTimeout(timeout);
-    res.json(out);
+    // Return output with issues included
+    res.json({
+      ...out,
+      report: reportWithIssues
+    });
   } catch (e: any) {
     clearTimeout(timeout);
     console.error("Validation error:", e);
