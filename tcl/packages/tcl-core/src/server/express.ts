@@ -28,11 +28,9 @@ import { setupIntegrationRoutes } from "./integrations/routes.js";
 import { setupAuditRoutes } from "./audit/routes.js";
 
 const app = express();
-app.use(express.json({ limit: "10mb" }));
-app.use(express.raw({ type: 'application/json', limit: '10mb' })); // For HMAC webhook verification
-app.use(express.urlencoded({ extended: true })); // Enable query string parsing
 
-// Configure multer for file uploads (memory storage - we don't save files)
+// Configure multer for file uploads FIRST (before JSON parsing)
+// This prevents JSON parser from trying to parse multipart/form-data
 const upload = multer({
   storage: multer.memoryStorage(),
   limits: {
@@ -51,6 +49,20 @@ const upload = multer({
   },
 });
 
+// JSON parsing middleware (skip for file upload routes)
+app.use((req, res, next) => {
+  // Skip JSON parsing for routes that use multer (file uploads)
+  // Multer will handle multipart/form-data
+  if (req.path === '/transcribe' || req.path.startsWith('/webhooks/')) {
+    return next();
+  }
+  // Apply JSON parsing for other routes
+  express.json({ limit: "10mb" })(req, res, next);
+});
+
+app.use(express.raw({ type: 'application/json', limit: '10mb' })); // For HMAC webhook verification
+app.use(express.urlencoded({ extended: true })); // Enable query string parsing
+
 // Health check endpoint - must work even if other imports fail
 app.get("/health", (req, res) => {
   res.json({ status: "ok", service: "tcl-core" });
@@ -68,10 +80,20 @@ async function loadModules() {
     validate = orchestrator.validate;
     console.log("Validate function assigned");
     
-    const adapter = await import("../adapters/openai_adapter.js");
-    console.log("Adapter imported");
-    OpenAIAdapter = adapter.OpenAIAdapter;
-    console.log("OpenAIAdapter assigned");
+    // Only load OpenAIAdapter if API key is set (optional, not required)
+    if (process.env.OPENAI_API_KEY) {
+      try {
+        const adapter = await import("../adapters/openai_adapter.js");
+        console.log("Adapter imported");
+        OpenAIAdapter = adapter.OpenAIAdapter;
+        console.log("OpenAIAdapter assigned (optional - only used if OPENAI_API_KEY is set)");
+      } catch (adapterError: any) {
+        console.warn("⚠️ OpenAIAdapter not available (optional):", adapterError.message);
+        // Continue without OpenAIAdapter - not required
+      }
+    } else {
+      console.log("OpenAIAdapter skipped (no OPENAI_API_KEY - using free local models)");
+    }
     
     console.log("✅ Modules loaded successfully");
   } catch (error: any) {
