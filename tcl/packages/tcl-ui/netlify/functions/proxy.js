@@ -74,14 +74,6 @@ exports.handler = async (event, context) => {
   
   const url = `${TCL_CORE_URL}${path}`;
   
-  console.log('Proxy request:', {
-    method: event.httpMethod,
-    originalUrl: originalUrl,
-    path: path,
-    targetUrl: url,
-    hasBody: !!event.body
-  });
-  
   try {
     // Forward the request to TCL Core
     const headers = {};
@@ -99,9 +91,6 @@ exports.handler = async (event, context) => {
     const authHeader = event.headers.authorization || event.headers['Authorization'];
     if (authHeader) {
       headers['Authorization'] = authHeader;
-      console.log('Forwarding Authorization header');
-    } else {
-      console.log('No Authorization header found in request');
     }
     
     // Handle body based on content type
@@ -126,8 +115,6 @@ exports.handler = async (event, context) => {
         }
       }
     }
-    
-    console.log('Forwarding request with headers:', Object.keys(headers));
     
     const response = await fetch(url, {
       method: event.httpMethod,

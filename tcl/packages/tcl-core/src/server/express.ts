@@ -1134,17 +1134,10 @@ app.post("/transcribe", upload.single('audio'), async (req, res) => {
       return res.status(400).json({ error: "No audio file provided" });
     }
 
-    // Log authorization header for debugging
-    const authHeader = req.headers.authorization;
-    console.log('Transcribe request - Authorization header present:', !!authHeader);
-    
     const context = await getOrgContext(req);
     if (!context) {
-      console.error('Transcribe request - No org context found. Auth header:', !!authHeader);
       return res.status(401).json({ error: "Authorization required" });
     }
-    
-    console.log('Transcribe request - Org context:', { orgId: context.orgId, userId: context.userId });
 
     // Transcribe audio (does not store the file)
     const result = await transcribeAudio(req.file.buffer, req.file.originalname);
