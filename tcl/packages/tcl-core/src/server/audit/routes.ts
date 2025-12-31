@@ -1,31 +1,12 @@
 import express from "express";
-import { supabaseAdmin, logAudit, trackUsage, verifyApiKeyExtended } from "../supabase.js";
+import { supabaseAdmin, logAudit, trackUsage } from "../supabase.js";
+import { getOrgContext } from "../auth-context.js";
 import { extractClaims } from "../../claim_extractor.js";
 import { buildClaimGraph } from "../../graph/edge_builder.js";
 import { runEvaluation } from "./evaluation-run.js";
 import { processArtifacts } from "../integrations/artifacts/processor.js";
 import type { ConversationArtifact } from "../integrations/types.js";
 import { exportClaimsCSV, exportRunJSON, exportIssuePDF } from "./exports.js";
-
-/**
- * Get organization context from request (API key or JWT)
- */
-async function getOrgContext(req: express.Request): Promise<{ orgId: string; projectId: string; env: string; userId?: string } | null> {
-  const authHeader = req.headers.authorization;
-  if (authHeader?.startsWith('Bearer ')) {
-    const key = authHeader.substring(7);
-    const verified = await verifyApiKeyExtended(key);
-    if (verified) {
-      return {
-        orgId: verified.orgId,
-        projectId: verified.projectId,
-        env: verified.env
-      };
-    }
-  }
-  // TODO: Check for user session JWT from Supabase auth
-  return null;
-}
 
 /**
  * Setup audit-grade analysis routes
@@ -42,8 +23,8 @@ export function setupAuditRoutes(app: express.Application) {
     try {
       const context = await getOrgContext(req);
       
-      if (!context) {
-        return res.status(401).json({ error: "Authorization required" });
+      if (!context || context.error) {
+        return res.status(401).json({ error: context?.error || "Authorization required" });
       }
       
       if (!supabaseAdmin) {
@@ -147,8 +128,8 @@ export function setupAuditRoutes(app: express.Application) {
     try {
       const context = await getOrgContext(req);
       
-      if (!context) {
-        return res.status(401).json({ error: "Authorization required" });
+      if (!context || context.error) {
+        return res.status(401).json({ error: context?.error || "Authorization required" });
       }
       
       if (!supabaseAdmin) {
@@ -211,8 +192,8 @@ export function setupAuditRoutes(app: express.Application) {
     try {
       const context = await getOrgContext(req);
       
-      if (!context) {
-        return res.status(401).json({ error: "Authorization required" });
+      if (!context || context.error) {
+        return res.status(401).json({ error: context?.error || "Authorization required" });
       }
       
       if (!supabaseAdmin) {
@@ -249,8 +230,8 @@ export function setupAuditRoutes(app: express.Application) {
     try {
       const context = await getOrgContext(req);
       
-      if (!context) {
-        return res.status(401).json({ error: "Authorization required" });
+      if (!context || context.error) {
+        return res.status(401).json({ error: context?.error || "Authorization required" });
       }
       
       if (!supabaseAdmin) {
@@ -289,8 +270,8 @@ export function setupAuditRoutes(app: express.Application) {
     try {
       const context = await getOrgContext(req);
       
-      if (!context) {
-        return res.status(401).json({ error: "Authorization required" });
+      if (!context || context.error) {
+        return res.status(401).json({ error: context?.error || "Authorization required" });
       }
       
       if (!supabaseAdmin) {
@@ -342,8 +323,8 @@ export function setupAuditRoutes(app: express.Application) {
     try {
       const context = await getOrgContext(req);
       
-      if (!context) {
-        return res.status(401).json({ error: "Authorization required" });
+      if (!context || context.error) {
+        return res.status(401).json({ error: context?.error || "Authorization required" });
       }
       
       if (!supabaseAdmin) {
@@ -420,8 +401,8 @@ export function setupAuditRoutes(app: express.Application) {
     try {
       const context = await getOrgContext(req);
       
-      if (!context) {
-        return res.status(401).json({ error: "Authorization required" });
+      if (!context || context.error) {
+        return res.status(401).json({ error: context?.error || "Authorization required" });
       }
       
       if (!supabaseAdmin) {
@@ -473,8 +454,8 @@ export function setupAuditRoutes(app: express.Application) {
     try {
       const context = await getOrgContext(req);
       
-      if (!context) {
-        return res.status(401).json({ error: "Authorization required" });
+      if (!context || context.error) {
+        return res.status(401).json({ error: context?.error || "Authorization required" });
       }
       
       if (!supabaseAdmin) {
@@ -526,8 +507,8 @@ export function setupAuditRoutes(app: express.Application) {
     try {
       const context = await getOrgContext(req);
       
-      if (!context) {
-        return res.status(401).json({ error: "Authorization required" });
+      if (!context || context.error) {
+        return res.status(401).json({ error: context?.error || "Authorization required" });
       }
       
       if (!supabaseAdmin) {

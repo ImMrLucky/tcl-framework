@@ -26,6 +26,7 @@ import {
 } from "./member-management.js";
 import { setupIntegrationRoutes } from "./integrations/routes.js";
 import { setupAuditRoutes } from "./audit/routes.js";
+import { getOrgContext } from "./auth-context.js";
 
 const app = express();
 
@@ -106,114 +107,6 @@ async function loadModules() {
 
 // Don't load modules on startup - let server start first, then load modules
 // This ensures health check works even if modules fail to load
-
-// Extract org/project/env from request (API key or user session)
-async function getOrgContext(req: express.Request): Promise<{ orgId: string; projectId: string; env: string; userId?: string; role?: string; error?: string } | null> {
-  // Check for API key in Authorization header
-  // Express lowercases header names, so check 'authorization' (lowercase)
-  // Also check raw headers in case Express hasn't lowercased it yet
-  const authHeader = req.headers.authorization || 
-                     (req.headers as any).Authorization || 
-                     (req.headers as any)['authorization'] ||
-                     (req.headers as any)['Authorization'];
-  
-  if (!authHeader || typeof authHeader !== 'string') {
-    return { error: 'No authorization header' } as any;
-  }
-  
-  if (!authHeader.startsWith('Bearer ')) {
-    return { error: 'Invalid authorization format (expected Bearer token)' } as any;
-  }
-  
-  const token = authHeader.substring(7);
-  if (!token || token.trim().length === 0) {
-    return { error: 'Empty token' } as any;
-  }
-  
-  // First try API key verification
-  const verified = await verifyApiKeyExtended(token);
-  if (verified) {
-    return {
-      orgId: verified.orgId,
-      projectId: verified.projectId,
-      env: verified.env
-    };
-  }
-  
-  // If not an API key, try Supabase JWT verification
-  if (!supabaseAdmin) {
-    return { error: 'Supabase not configured on server' } as any;
-  }
-  
-  try {
-    // Verify the JWT token with Supabase
-    const { data: { user }, error: userError } = await supabaseAdmin.auth.getUser(token);
-    if (userError) {
-      return { error: `Token verification failed: ${userError.message}` } as any;
-    }
-    if (!user) {
-      return { error: 'Token valid but no user found' } as any;
-    }
-
-    // Get user's org membership (use maybeSingle to handle no membership gracefully)
-    const { data: membership, error: memberError } = await supabaseAdmin
-      .from('org_members')
-      .select('org_id, role')
-      .eq('user_id', user.id)
-      .limit(1)
-      .maybeSingle();
-    
-    if (memberError) {
-      return { error: `Error fetching org membership: ${memberError.message}` } as any;
-    }
-    
-    if (!membership) {
-      // User exists but has no org membership - this is a provisioning issue
-      return { error: 'User has no organization. Please contact support or re-register.' } as any;
-    }
-
-    // Get default project for the org
-    // If no default project, try to get any project for the org
-    let project = null;
-    const { data: defaultProject, error: defaultProjectError } = await supabaseAdmin
-      .from('projects')
-      .select('id')
-      .eq('org_id', membership.org_id)
-      .eq('is_default', true)
-      .maybeSingle();
-    
-    if (!defaultProjectError && defaultProject) {
-      project = defaultProject;
-    } else {
-      // No default project - try to get any project for the org
-      const { data: anyProject, error: anyProjectError } = await supabaseAdmin
-        .from('projects')
-        .select('id')
-        .eq('org_id', membership.org_id)
-        .limit(1)
-        .maybeSingle();
-      
-      if (!anyProjectError && anyProject) {
-        project = anyProject;
-      }
-    }
-    
-    if (!project) {
-      // User has org membership but no projects
-      return { error: 'No projects found for your organization. Please contact support.' } as any;
-    }
-
-    return {
-      orgId: membership.org_id,
-      projectId: project.id,
-      env: 'sandbox', // Default to sandbox for user-initiated requests
-      userId: user.id,
-      role: membership.role || null
-    };
-  } catch (err: any) {
-    return { error: `Exception: ${err.message || err}` } as any;
-  }
-}
 
 /**
  * Check if user has permission for an org
@@ -949,6 +842,152 @@ app.get("/evaluations", async (req, res) => {
     res.json({ evaluations: data || [] });
   } catch (e: any) {
     console.error("Get evaluations error:", e);
+    res.status(500).json({ 
+      error: e?.message ?? "unknown error"
+    });
+  }
+});
+
+// Get a single evaluation by ID
+app.get("/evaluations/:evaluationId", async (req, res) => {
+  try {
+    const { evaluationId } = req.params;
+    const context = await getOrgContext(req);
+    
+    if (!context || context.error) {
+      return res.status(401).json({ error: context?.error || "Authorization required" });
+    }
+    
+    if (!supabaseAdmin) {
+      return res.status(503).json({ error: "Supabase not configured" });
+    }
+    
+    const { data, error } = await supabaseAdmin
+      .from('evaluations')
+      .select('*')
+      .eq('id', evaluationId)
+      .eq('org_id', context.orgId)
+      .maybeSingle();
+    
+    if (error) {
+      return res.status(500).json({ error: error.message });
+    }
+    
+    if (!data) {
+      return res.status(404).json({ error: "Evaluation not found" });
+    }
+    
+    res.json({ evaluation: data });
+  } catch (e: any) {
+    console.error("Get evaluation error:", e);
+    res.status(500).json({ 
+      error: e?.message ?? "unknown error"
+    });
+  }
+});
+
+// Get issues for a specific evaluation
+app.get("/evaluations/:evaluationId/issues", async (req, res) => {
+  try {
+    const { evaluationId } = req.params;
+    const context = await getOrgContext(req);
+    
+    if (!context || context.error) {
+      return res.status(401).json({ error: context?.error || "Authorization required" });
+    }
+    
+    if (!supabaseAdmin) {
+      return res.status(503).json({ error: "Supabase not configured" });
+    }
+    
+    // Get the evaluation with its report (which contains issues)
+    const { data: evaluation, error: evalError } = await supabaseAdmin
+      .from('evaluations')
+      .select('id, org_id, report')
+      .eq('id', evaluationId)
+      .eq('org_id', context.orgId)
+      .maybeSingle();
+    
+    if (evalError) {
+      return res.status(500).json({ error: evalError.message });
+    }
+    
+    if (!evaluation) {
+      return res.status(404).json({ error: "Evaluation not found" });
+    }
+    
+    // Issues are stored in the report JSONB field
+    const issues = (evaluation.report as any)?.issues || [];
+    
+    res.json({ issues });
+  } catch (e: any) {
+    console.error("Get evaluation issues error:", e);
+    res.status(500).json({ 
+      error: e?.message ?? "unknown error"
+    });
+  }
+});
+
+// Update an issue status (e.g., mark as resolved)
+app.patch("/evaluations/:evaluationId/issues/:issueId", async (req, res) => {
+  try {
+    const { evaluationId, issueId } = req.params;
+    const { status } = req.body;
+    const context = await getOrgContext(req);
+    
+    if (!context || context.error) {
+      return res.status(401).json({ error: context?.error || "Authorization required" });
+    }
+    
+    if (!supabaseAdmin) {
+      return res.status(503).json({ error: "Supabase not configured" });
+    }
+    
+    // Get the evaluation with its report
+    const { data: evaluation, error: evalError } = await supabaseAdmin
+      .from('evaluations')
+      .select('id, org_id, report')
+      .eq('id', evaluationId)
+      .eq('org_id', context.orgId)
+      .maybeSingle();
+    
+    if (evalError) {
+      return res.status(500).json({ error: evalError.message });
+    }
+    
+    if (!evaluation) {
+      return res.status(404).json({ error: "Evaluation not found" });
+    }
+    
+    // Find and update the issue in the report
+    const report = evaluation.report as any;
+    if (!report || !report.issues) {
+      return res.status(404).json({ error: "No issues found in evaluation" });
+    }
+    
+    // issueId could be the claimId or issue index
+    const issueIndex = report.issues.findIndex((i: any) => i.claimId === issueId || i.id === issueId);
+    if (issueIndex === -1) {
+      return res.status(404).json({ error: "Issue not found" });
+    }
+    
+    // Update the issue status
+    report.issues[issueIndex].status = status;
+    report.issues[issueIndex].updated_at = new Date().toISOString();
+    
+    // Save the updated report
+    const { error: updateError } = await supabaseAdmin
+      .from('evaluations')
+      .update({ report })
+      .eq('id', evaluationId);
+    
+    if (updateError) {
+      return res.status(500).json({ error: updateError.message });
+    }
+    
+    res.json({ success: true, issue: report.issues[issueIndex] });
+  } catch (e: any) {
+    console.error("Update evaluation issue error:", e);
     res.status(500).json({ 
       error: e?.message ?? "unknown error"
     });
