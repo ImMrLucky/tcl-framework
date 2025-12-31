@@ -754,7 +754,7 @@ export async function getProjectEnvs(projectId: string): Promise<Array<{ id: str
 /**
  * Track usage for an evaluation or conversation
  */
-export async function trackUsage(orgId: string, projectId: string, env: string, type: 'evaluation' | 'conversation'): Promise<void> {
+export async function trackUsage(orgId: string, projectId: string, env: string, type: 'evaluation' | 'conversation' | 'transcription'): Promise<void> {
   if (!supabaseAdmin) return;
   
   const today = new Date().toISOString().split('T')[0];

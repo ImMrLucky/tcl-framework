@@ -120,7 +120,7 @@ export class S3DropConnector extends IngestConnector {
         const content = getResponse.Body ? getResponse.Body.toString('utf-8') : '';
 
         // Parse file using evidence parser
-        const parsed = parseEvidenceDocument(
+        const parsed = await parseEvidenceDocument(
           content,
           obj.Key,
           getResponse.ContentType

@@ -10,6 +10,7 @@ import { MatIconModule } from '@angular/material/icon';
 import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
 import { AuthService } from '../auth.service';
 import { LogoComponent } from '../shared/logo.component';
+import type { AuthError } from '@supabase/supabase-js';
 
 @Component({
   selector: 'app-login',
@@ -180,7 +181,7 @@ export class LoginComponent {
     const { email, password } = this.authForm.value;
 
     try {
-      let result;
+      let result: { error: AuthError | null; duplicateAccount?: boolean };
       if (this.isSignUp) {
         result = await this.authService.signUp(email, password);
       } else {

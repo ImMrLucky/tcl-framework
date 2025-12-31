@@ -1,9 +1,8 @@
 /**
  * Evidence Document Parser
  * Parses various document formats (TXT, JSON, CSV, XLSX) for evidence extraction
+ * Note: XLSX support requires optional xlsx dependency (loaded dynamically)
  */
-
-import * as XLSX from 'xlsx';
 
 export interface ParsedEvidence {
   text: string;
@@ -18,11 +17,11 @@ export interface ParsedEvidence {
 /**
  * Parse evidence document from content
  */
-export function parseEvidenceDocument(
+export async function parseEvidenceDocument(
   content: string | Buffer,
   filename: string,
   contentType?: string
-): ParsedEvidence | null {
+): Promise<ParsedEvidence | null> {
   try {
     const fileType = detectFileType(filename, contentType);
     const contentStr = Buffer.isBuffer(content) ? content.toString('utf-8') : content;
@@ -38,7 +37,7 @@ export function parseEvidenceDocument(
         return parseCSV(contentStr, filename);
       
       case 'xlsx':
-        return parseXLSX(content, filename);
+        return await parseXLSX(content, filename);
       
       default:
         // Try to parse as text
@@ -174,7 +173,19 @@ function parseCSV(content: string, filename: string): ParsedEvidence {
   };
 }
 
-function parseXLSX(content: string | Buffer, filename: string): ParsedEvidence {
+async function parseXLSX(content: string | Buffer, filename: string): Promise<ParsedEvidence> {
+  // Try to load XLSX dynamically
+  let XLSX: any;
+  try {
+    const xlsxModule = await import('xlsx');
+    XLSX = xlsxModule.default || xlsxModule;
+  } catch (e) {
+    // XLSX not available - fallback to text
+    console.warn('XLSX library not available. XLSX file parsing will be disabled. Install with: npm install xlsx');
+    const contentStr = Buffer.isBuffer(content) ? content.toString('utf-8') : content;
+    return parseTXT(contentStr, filename);
+  }
+  
   try {
     const workbook = XLSX.read(content, { type: Buffer.isBuffer(content) ? 'buffer' : 'string' });
     const sheetName = workbook.SheetNames[0];

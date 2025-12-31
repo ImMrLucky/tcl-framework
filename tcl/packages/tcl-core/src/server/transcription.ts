@@ -41,8 +41,7 @@ export async function transcribeAudio(
       
       const transcriber = await pipeline(
         'automatic-speech-recognition',
-        modelName,
-        { device: 'cpu' } // Use CPU (can use 'gpu' if available)
+        modelName
       );
 
       console.log('Transcribing audio...');
@@ -55,9 +54,12 @@ export async function transcribeAudio(
       // Clean up temp file
       fs.unlinkSync(tempFile);
 
+      // Handle result - can be object or array
+      const transcriptionResult = Array.isArray(result) ? result[0] : result;
+      
       return {
-        transcript: result.text || '',
-        language: result.language,
+        transcript: (transcriptionResult as any).text || '',
+        language: (transcriptionResult as any).language,
       };
     } catch (error) {
       // Clean up temp file on error

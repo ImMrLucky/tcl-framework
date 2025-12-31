@@ -258,7 +258,7 @@ export class AuthService {
     return '/api';
   }
 
-  async signIn(email: string, password: string): Promise<{ error: AuthError | null }> {
+  async signIn(email: string, password: string): Promise<{ error: AuthError | null; duplicateAccount?: boolean }> {
     const { error } = await this.supabase.auth.signInWithPassword({
       email,
       password
@@ -271,7 +271,7 @@ export class AuthService {
       }
     }
 
-    return { error };
+    return { error, duplicateAccount: false };
   }
 
   async signOut(): Promise<void> {
