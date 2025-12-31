@@ -271,19 +271,33 @@ export class AuthService {
   }
 
   async signIn(email: string, password: string): Promise<{ error: AuthError | null; duplicateAccount?: boolean }> {
-    const { error } = await this.supabase.auth.signInWithPassword({
+    const { data, error } = await this.supabase.auth.signInWithPassword({
       email,
       password
     });
 
-    if (!error) {
-      const { data: { user } } = await this.supabase.auth.getUser();
-      if (user) {
-        await this.loadUserProfile(user.id);
+    if (error) {
+      return { error, duplicateAccount: false };
+    }
+
+    // Wait a moment for Supabase to persist the session to localStorage
+    // This ensures the token is available immediately after login
+    if (data.session) {
+      // Small delay to ensure localStorage is updated
+      await new Promise(resolve => setTimeout(resolve, 100));
+      
+      // Verify session is stored
+      const { data: { session: storedSession } } = await this.supabase.auth.getSession();
+      if (storedSession) {
+        // Load user profile
+        const { data: { user } } = await this.supabase.auth.getUser();
+        if (user) {
+          await this.loadUserProfile(user.id);
+        }
       }
     }
 
-    return { error, duplicateAccount: false };
+    return { error: null, duplicateAccount: false };
   }
 
   /**
@@ -591,28 +605,27 @@ export class AuthService {
     this.lastActivityTime = Date.now();
     this.resetInactivityTimer();
 
-    // First, try to get valid session from localStorage
+    // First, try to get valid session from localStorage (fast, synchronous check)
     const storedSession = this.getValidSessionFromStorage();
     if (storedSession?.access_token) {
       return storedSession.access_token;
     }
 
     // If no valid stored session, try getSession with timeout
-    // Don't call handleSessionExpired here - let the caller handle the null return
-    // This prevents redirects during API calls
+    // This ensures we get the latest session from Supabase
     try {
       const sessionPromise = this.supabase.auth.getSession();
-      const timeoutPromise = new Promise<null>((resolve) => 
-        setTimeout(() => resolve(null), 2000)
+      const timeoutPromise = new Promise<{ data: { session: null }, error: null }>((resolve) => 
+        setTimeout(() => resolve({ data: { session: null }, error: null }), 3000)
       );
       
       const sessionResponse = await Promise.race([sessionPromise, timeoutPromise]);
-      if (!sessionResponse || sessionResponse.error) {
-        // No valid session, return null (don't redirect here)
+      
+      if (sessionResponse?.error) {
         return null;
       }
 
-      const session = sessionResponse.data?.session;
+      const session = sessionResponse?.data?.session;
       if (!session?.access_token) {
         return null;
       }
@@ -624,6 +637,7 @@ export class AuthService {
 
       return session.access_token;
     } catch (error) {
+      // If getSession fails, return null
       return null;
     }
   }
