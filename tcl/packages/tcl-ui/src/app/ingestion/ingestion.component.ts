@@ -103,10 +103,13 @@ export class IngestionComponent implements OnInit {
   async onSubmit() {
     // If audio file is selected, transcribe it first
     if (this.isAudioFile && this.selectedFile) {
+      console.log('Audio file detected, starting transcription...');
       await this.transcribeAudio();
       if (!this.transcript || this.transcript.trim().length === 0) {
+        console.log('Transcription failed or returned empty result');
         return; // Error already shown in transcribeAudio
       }
+      console.log('Transcription successful, transcript length:', this.transcript.length);
     }
 
     if (!this.transcript || this.transcript.trim().length === 0) {
@@ -265,32 +268,40 @@ export class IngestionComponent implements OnInit {
 
     try {
       // Get session token for authentication
-      const { data: { session } } = await this.authService['supabase'].auth.getSession();
-      if (!session?.access_token) {
+      const accessToken = await this.authService.getAccessToken();
+      if (!accessToken) {
         throw new Error('Not authenticated. Please log in.');
       }
 
       const apiUrl = this.auditService['apiBase'];
+      console.log('Transcribing audio file:', this.selectedFile.name, 'API URL:', `${apiUrl}/transcribe`);
+      
       const formData = new FormData();
       formData.append('audio', this.selectedFile);
       formData.append('filename', this.selectedFile.name);
 
+      // Don't set Content-Type header - browser will set it automatically with boundary for FormData
       const headers: HeadersInit = {
-        'Authorization': `Bearer ${session.access_token}`
+        'Authorization': `Bearer ${accessToken}`
       };
 
+      console.log('Sending transcription request...');
       const response = await fetch(`${apiUrl}/transcribe`, {
         method: 'POST',
         headers: headers,
         body: formData
       });
 
+      console.log('Transcription response status:', response.status);
+
       if (!response.ok) {
-        const errorData = await response.json().catch(() => ({ error: 'Transcription failed' }));
+        const errorData = await response.json().catch(() => ({ error: `Transcription failed with status ${response.status}` }));
         throw new Error(errorData.error || 'Transcription failed');
       }
 
       const result = await response.json();
+      console.log('Transcription result:', result);
+      
       this.transcript = result.transcript || result.text || '';
       
       if (!this.transcript || this.transcript.trim().length === 0) {

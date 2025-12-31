@@ -483,5 +483,18 @@ export class AuthService {
   isAuthenticatedSync(): boolean {
     return this.currentUserSubject.value !== null;
   }
+
+  /**
+   * Get the current session access token for API requests
+   */
+  async getAccessToken(): Promise<string | null> {
+    try {
+      const { data: { session } } = await this.supabase.auth.getSession();
+      return session?.access_token || null;
+    } catch (error) {
+      console.error('Error getting access token:', error);
+      return null;
+    }
+  }
 }
 
