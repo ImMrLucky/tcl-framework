@@ -106,23 +106,18 @@ export class IngestionComponent implements OnInit {
   async onSubmit() {
     // If audio file is selected, transcribe it first
     if (this.isAudioFile && this.selectedFile) {
-      console.log('Audio file detected, starting transcription...', {
-        fileName: this.selectedFile.name,
-        fileSize: this.selectedFile.size,
-        isAudioFile: this.isAudioFile
-      });
       try {
         await this.transcribeAudio();
-        console.log('transcribeAudio completed, transcript length:', this.transcript?.length || 0);
-      } catch (error) {
-        console.error('Error in onSubmit calling transcribeAudio:', error);
-        // Error already shown in transcribeAudio, but log it here too
+        // If transcription failed, transcribeAudio will have shown an error
+        if (!this.transcript || this.transcript.trim().length === 0) {
+          return;
+        }
+      } catch (error: any) {
+        // If transcribeAudio throws, show error and stop
+        this.errorMessage = error.message || 'Transcription failed';
+        this.snackBar.open(this.errorMessage, 'Close', { duration: 5000 });
+        return;
       }
-      if (!this.transcript || this.transcript.trim().length === 0) {
-        console.log('Transcription failed or returned empty result');
-        return; // Error already shown in transcribeAudio
-      }
-      console.log('Transcription successful, transcript length:', this.transcript.length);
     }
 
     if (!this.transcript || this.transcript.trim().length === 0) {
@@ -272,8 +267,7 @@ export class IngestionComponent implements OnInit {
    */
   async transcribeAudio(): Promise<void> {
     if (!this.selectedFile) {
-      this.errorMessage = 'No audio file selected';
-      return;
+      throw new Error('No audio file selected');
     }
 
     this.transcriptionInProgress = true;
@@ -294,13 +288,14 @@ export class IngestionComponent implements OnInit {
       formData.append('filename', this.selectedFile.name);
 
       // HttpClient will automatically set Content-Type with boundary for FormData
+      // Don't set Content-Type manually - let Angular handle it
       const headers = new HttpHeaders({
         'Authorization': `Bearer ${accessToken}`
       });
 
-      const result = await firstValueFrom(
-        this.http.post<{ transcript?: string; text?: string }>(fullUrl, formData, { headers })
-      );
+      // Make the HTTP request - firstValueFrom converts Observable to Promise
+      const request$ = this.http.post<{ transcript?: string; text?: string }>(fullUrl, formData, { headers });
+      const result = await firstValueFrom(request$);
       
       this.transcript = result.transcript || result.text || '';
       
@@ -310,8 +305,12 @@ export class IngestionComponent implements OnInit {
 
       this.snackBar.open('Audio transcribed successfully', 'Close', { duration: 3000 });
     } catch (error: any) {
-      this.errorMessage = error.error?.error || error.message || 'Failed to transcribe audio';
-      this.snackBar.open(this.errorMessage, 'Close', { duration: 5000 });
+      // Extract error message from HTTP error response
+      const errorMessage = error.error?.error || error.message || 'Failed to transcribe audio';
+      this.errorMessage = errorMessage;
+      this.snackBar.open(errorMessage, 'Close', { duration: 5000 });
+      // Re-throw so onSubmit can handle it
+      throw error;
     } finally {
       this.transcriptionInProgress = false;
     }
