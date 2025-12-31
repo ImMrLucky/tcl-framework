@@ -83,10 +83,23 @@ exports.handler = async (event, context) => {
     const contentType = event.headers['content-type'] || event.headers['Content-Type'];
     const isMultipart = contentType && contentType.includes('multipart/form-data');
     
-    // Forward authorization header (Netlify lowercases headers)
-    const authHeader = event.headers.authorization || event.headers['Authorization'];
+    // Forward authorization header (Netlify lowercases all headers)
+    // Check both lowercase and original case
+    const authHeader = event.headers.authorization || event.headers['Authorization'] || event.headers['authorization'];
     if (authHeader) {
       headers['Authorization'] = authHeader;
+    }
+    
+    // Also forward any other headers that might be needed
+    // Netlify lowercases all header names, so we need to check lowercase versions
+    for (const [key, value] of Object.entries(event.headers)) {
+      const lowerKey = key.toLowerCase();
+      // Skip headers we've already handled or that Netlify manages
+      if (lowerKey !== 'content-type' && lowerKey !== 'authorization' && 
+          lowerKey !== 'host' && lowerKey !== 'content-length' &&
+          !lowerKey.startsWith('x-') && !lowerKey.startsWith('netlify-')) {
+        headers[key] = value;
+      }
     }
     
     // Handle body based on content type

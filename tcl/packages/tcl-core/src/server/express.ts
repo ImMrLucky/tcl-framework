@@ -110,7 +110,8 @@ async function loadModules() {
 // Extract org/project/env from request (API key or user session)
 async function getOrgContext(req: express.Request): Promise<{ orgId: string; projectId: string; env: string; userId?: string; role?: string } | null> {
   // Check for API key in Authorization header
-  const authHeader = req.headers.authorization;
+  // Express lowercases header names, so check 'authorization' (lowercase)
+  const authHeader = req.headers.authorization || (req.headers as any).Authorization;
   if (authHeader?.startsWith('Bearer ')) {
     const token = authHeader.substring(7);
     
@@ -128,13 +129,7 @@ async function getOrgContext(req: express.Request): Promise<{ orgId: string; pro
     if (supabaseAdmin) {
       try {
         const { data: { user }, error } = await supabaseAdmin.auth.getUser(token);
-        if (error) {
-          console.debug('JWT verification error:', error.message);
-          return null;
-        }
-        
-        if (!user) {
-          console.debug('No user found in JWT');
+        if (error || !user) {
           return null;
         }
 
@@ -146,13 +141,7 @@ async function getOrgContext(req: express.Request): Promise<{ orgId: string; pro
           .limit(1)
           .maybeSingle();
         
-        if (memberError) {
-          console.error('Error fetching org membership:', memberError);
-          return null;
-        }
-        
-        if (!membership) {
-          console.debug(`User ${user.id} has no org membership`);
+        if (memberError || !membership) {
           return null;
         }
 
@@ -164,13 +153,7 @@ async function getOrgContext(req: express.Request): Promise<{ orgId: string; pro
           .eq('is_default', true)
           .maybeSingle();
         
-        if (projectError) {
-          console.error('Error fetching default project:', projectError);
-          return null;
-        }
-        
-        if (!project) {
-          console.debug(`No default project found for org ${membership.org_id}`);
+        if (projectError || !project) {
           return null;
         }
 
@@ -182,8 +165,6 @@ async function getOrgContext(req: express.Request): Promise<{ orgId: string; pro
           role: membership.role || null
         };
       } catch (err: any) {
-        // JWT verification failed, continue to return null
-        console.error('JWT verification exception:', err?.message || err);
         return null;
       }
     }
