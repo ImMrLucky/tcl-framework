@@ -14,7 +14,7 @@
         </mat-card-title>
       </mat-card-header>
       <mat-card-content>
-        <form (ngSubmit)="onSubmit()" #ingestionForm="ngForm">
+        <form (ngSubmit)="onSubmit(); $event.preventDefault()" #ingestionForm="ngForm">
           <div class="form-row">
             <mat-form-field appearance="outline" class="full-width">
               <mat-label>Title (Optional)</mat-label>

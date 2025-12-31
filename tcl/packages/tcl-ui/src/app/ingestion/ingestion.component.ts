@@ -106,16 +106,9 @@ export class IngestionComponent implements OnInit {
   async onSubmit() {
     // If audio file is selected, transcribe it first
     if (this.isAudioFile && this.selectedFile) {
-      try {
-        await this.transcribeAudio();
-        // If transcription failed, transcribeAudio will have shown an error
-        if (!this.transcript || this.transcript.trim().length === 0) {
-          return;
-        }
-      } catch (error: any) {
-        // If transcribeAudio throws, show error and stop
-        this.errorMessage = error.message || 'Transcription failed';
-        this.snackBar.open(this.errorMessage, 'Close', { duration: 5000 });
+      await this.transcribeAudio();
+      // If transcription failed, transcribeAudio will have shown an error
+      if (!this.transcript || this.transcript.trim().length === 0) {
         return;
       }
     }
@@ -267,31 +260,34 @@ export class IngestionComponent implements OnInit {
    */
   async transcribeAudio(): Promise<void> {
     if (!this.selectedFile) {
-      throw new Error('No audio file selected');
+      this.errorMessage = 'No audio file selected';
+      this.snackBar.open(this.errorMessage, 'Close', { duration: 3000 });
+      return;
     }
 
     this.transcriptionInProgress = true;
     this.errorMessage = '';
 
+    const accessToken = await this.authService.getAccessToken();
+    if (!accessToken) {
+      this.errorMessage = 'Not authenticated. Please log in.';
+      this.snackBar.open(this.errorMessage, 'Close', { duration: 5000 });
+      this.transcriptionInProgress = false;
+      return;
+    }
+
+    const apiUrl = this.auditService.getApiBaseUrl();
+    const fullUrl = `${apiUrl}/transcribe`;
+    
+    const formData = new FormData();
+    formData.append('audio', this.selectedFile);
+    formData.append('filename', this.selectedFile.name);
+
+    const headers = new HttpHeaders({
+      'Authorization': `Bearer ${accessToken}`
+    });
+
     try {
-      // Get session token for authentication
-      const accessToken = await this.authService.getAccessToken();
-      if (!accessToken) {
-        throw new Error('Not authenticated. Please log in.');
-      }
-
-      const apiUrl = this.auditService.getApiBaseUrl();
-      const fullUrl = `${apiUrl}/transcribe`;
-      
-      const formData = new FormData();
-      formData.append('audio', this.selectedFile);
-      formData.append('filename', this.selectedFile.name);
-
-      const headers = new HttpHeaders({
-        'Authorization': `Bearer ${accessToken}`
-      });
-
-      // Simple, direct HTTP POST call
       const result = await firstValueFrom(
         this.http.post<{ transcript?: string; text?: string }>(fullUrl, formData, { headers })
       );
@@ -299,15 +295,15 @@ export class IngestionComponent implements OnInit {
       this.transcript = result.transcript || result.text || '';
       
       if (!this.transcript || this.transcript.trim().length === 0) {
-        throw new Error('Transcription returned empty result');
+        this.errorMessage = 'Transcription returned empty result';
+        this.snackBar.open(this.errorMessage, 'Close', { duration: 5000 });
+        return;
       }
 
       this.snackBar.open('Audio transcribed successfully', 'Close', { duration: 3000 });
     } catch (error: any) {
-      const errorMessage = error.error?.error || error.message || 'Failed to transcribe audio';
-      this.errorMessage = errorMessage;
-      this.snackBar.open(errorMessage, 'Close', { duration: 5000 });
-      throw error;
+      this.errorMessage = error.error?.error || error.message || 'Failed to transcribe audio';
+      this.snackBar.open(this.errorMessage, 'Close', { duration: 5000 });
     } finally {
       this.transcriptionInProgress = false;
     }
