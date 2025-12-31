@@ -48,14 +48,12 @@
               },
               "sourceMap": true,
               "extractLicenses": false,
-              "vendorChunk": true,
               "buildOptimizer": false
             },
             "development": {
               "optimization": false,
               "extractLicenses": false,
               "sourceMap": true,
-              "vendorChunk": true,
               "buildOptimizer": false
             }
           },
