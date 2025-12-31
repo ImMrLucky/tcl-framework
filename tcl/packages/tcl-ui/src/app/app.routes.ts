@@ -53,6 +53,11 @@ export const routes: Routes = [
     canActivate: [AuthGuard]
   },
   {
+    path: 'evaluations',
+    loadComponent: () => import('./evaluations/evaluations-list.component').then(m => m.EvaluationsListComponent),
+    canActivate: [AuthGuard]
+  },
+  {
     path: 'evaluations/:id',
     loadComponent: () => import('./evaluation-results/evaluation-results.component').then(m => m.EvaluationResultsComponent),
     canActivate: [AuthGuard]

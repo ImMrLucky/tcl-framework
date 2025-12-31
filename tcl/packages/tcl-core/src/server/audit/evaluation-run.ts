@@ -5,7 +5,10 @@ import {
   getEngineVersion, 
   getCodeVersion, 
   getModelFingerprint,
-  buildIssuesList
+  buildIssuesList,
+  buildImmutableManifest,
+  type DefensibleIssue,
+  type ImmutableEvaluationManifest
 } from "./reproducibility.js";
 import type { SupabaseClient } from "@supabase/supabase-js";
 

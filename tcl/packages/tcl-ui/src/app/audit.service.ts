@@ -220,6 +220,20 @@ export class AuditService {
   }
 
   /**
+   * Get all evaluations for the organization (for history view)
+   */
+  getEvaluations(limit?: number, offset?: number): Observable<{ evaluations: Evaluation[]; total?: number }> {
+    const queryParams = new URLSearchParams();
+    if (limit) queryParams.set('limit', limit.toString());
+    if (offset) queryParams.set('offset', offset.toString());
+    
+    const query = queryParams.toString();
+    return this.http.get<{ evaluations: Evaluation[]; total?: number }>(
+      `${this.apiBase}/evaluations${query ? '?' + query : ''}`
+    );
+  }
+
+  /**
    * Run an evaluation with full reproducibility manifest
    */
   runEvaluation(request: EvaluationRunRequest): Observable<EvaluationRunResponse> {
@@ -293,6 +307,40 @@ export class AuditService {
     return this.http.patch<{ success: boolean; issue: Issue }>(
       `${this.apiBase}/evaluations/${evaluationId}/issues/${claimId}`,
       { status }
+    );
+  }
+
+  /**
+   * Create a simulation from an existing evaluation
+   * This creates a NEW evaluation with mode="SIMULATION" and links to the parent
+   * The original evaluation remains IMMUTABLE
+   */
+  createSimulation(
+    parentEvaluationId: string,
+    modifications: {
+      addClaims?: Array<{ id?: string; text: string; speaker?: string; turnIndex?: number }>;
+      removeClaims?: string[];
+      addSupports?: Array<{ claimA: string; claimB: string; weight?: number }>;
+      removeSupports?: Array<{ claimA: string; claimB: string }>;
+      addContradictions?: Array<{ claimA: string; claimB: string; weight?: number }>;
+      removeContradictions?: Array<{ claimA: string; claimB: string }>;
+      addGrounded?: string[];
+      removeGrounded?: string[];
+    },
+    description?: string
+  ): Observable<{
+    success: boolean;
+    evaluationId: string;
+    parentEvaluationId: string;
+    mode: 'SIMULATION';
+    expiresAt: string;
+    inputHash: string;
+    configHash: string;
+    latency: number;
+  }> {
+    return this.http.post<any>(
+      `${this.apiBase}/evaluations/${parentEvaluationId}/simulate`,
+      { modifications, description }
     );
   }
 }

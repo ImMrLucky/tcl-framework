@@ -185,6 +185,62 @@ export function setupAuditRoutes(app: express.Application) {
   });
   
   // ============================================================================
+  // LIST EVALUATIONS: GET /api/evaluations
+  // ============================================================================
+  
+  app.get("/api/evaluations", async (req, res) => {
+    try {
+      const context = await getOrgContext(req);
+      
+      if (!context || context.error) {
+        return res.status(401).json({ error: context?.error || "Authorization required" });
+      }
+      
+      if (!supabaseAdmin) {
+        return res.status(503).json({ error: "Supabase not configured" });
+      }
+      
+      const limit = Math.min(parseInt(req.query.limit as string) || 50, 100);
+      const offset = parseInt(req.query.offset as string) || 0;
+      const env = req.query.env as string;
+      const projectId = req.query.projectId as string;
+      
+      // Build query
+      let query = supabaseAdmin
+        .from('evaluations')
+        .select('id, org_id, project_id, env, conversation_id, scores, engine_version, latency_ms, report, created_at', { count: 'exact' })
+        .eq('org_id', context.orgId)
+        .order('created_at', { ascending: false });
+      
+      if (env) {
+        query = query.eq('env', env);
+      }
+      
+      if (projectId) {
+        query = query.eq('project_id', projectId);
+      }
+      
+      const { data, error, count } = await query.range(offset, offset + limit - 1);
+      
+      if (error) {
+        return res.status(500).json({ error: error.message });
+      }
+      
+      res.json({ 
+        evaluations: data || [],
+        total: count || 0,
+        limit,
+        offset
+      });
+    } catch (e: any) {
+      console.error("List evaluations error:", e);
+      res.status(500).json({ 
+        error: e?.message ?? "unknown error"
+      });
+    }
+  });
+  
+  // ============================================================================
   // GET EVALUATION: GET /api/evaluations/:id
   // ============================================================================
   
@@ -387,6 +443,218 @@ export function setupAuditRoutes(app: express.Application) {
       res.json({ success: true, issue: issues[issueIndex] });
     } catch (e: any) {
       console.error("Update issue status error:", e);
+      res.status(500).json({ 
+        error: e?.message ?? "unknown error"
+      });
+    }
+  });
+  
+  // ============================================================================
+  // SIMULATION: POST /api/evaluations/:id/simulate
+  // Creates a new SIMULATION evaluation based on an existing evaluation
+  // The original evaluation remains IMMUTABLE
+  // ============================================================================
+  
+  app.post("/api/evaluations/:id/simulate", async (req, res) => {
+    try {
+      const context = await getOrgContext(req);
+      
+      if (!context || context.error) {
+        return res.status(401).json({ error: context?.error || "Authorization required" });
+      }
+      
+      if (!supabaseAdmin) {
+        return res.status(503).json({ error: "Supabase not configured" });
+      }
+      
+      const { id: parentEvaluationId } = req.params;
+      const { 
+        modifications,  // What changes to apply
+        description     // Why this simulation is being created
+      } = req.body;
+      
+      // Get the original evaluation
+      const { data: originalEval, error: fetchError } = await supabaseAdmin
+        .from('evaluations')
+        .select('*')
+        .eq('id', parentEvaluationId)
+        .eq('org_id', context.orgId)
+        .single();
+      
+      if (fetchError || !originalEval) {
+        return res.status(404).json({ error: "Original evaluation not found" });
+      }
+      
+      // Get the original report/manifest
+      const originalReport = originalEval.report as any || {};
+      const originalInputs = originalReport.frozenInputs || originalReport.inputs || {};
+      
+      // Apply modifications to create simulation inputs
+      let simulationClaims = [...(originalInputs.claims || [])];
+      let simulationSupports = [...(originalInputs.supports || [])];
+      let simulationContradictions = [...(originalInputs.contradictions || [])];
+      let simulationGrounded = [...(originalInputs.grounded || [])];
+      
+      // Process modifications
+      if (modifications) {
+        // Add claims
+        if (modifications.addClaims && Array.isArray(modifications.addClaims)) {
+          for (const claim of modifications.addClaims) {
+            simulationClaims.push({
+              id: claim.id || `sim_claim_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`,
+              text: claim.text,
+              speaker: claim.speaker || 'UNKNOWN',
+              turnStartIdx: claim.turnIndex,
+              tags: ['SIMULATED']
+            });
+          }
+        }
+        
+        // Remove claims
+        if (modifications.removeClaims && Array.isArray(modifications.removeClaims)) {
+          const removeSet = new Set(modifications.removeClaims);
+          simulationClaims = simulationClaims.filter(c => !removeSet.has(c.id));
+          // Also remove edges involving removed claims
+          simulationSupports = simulationSupports.filter(
+            e => !removeSet.has(e.claimA) && !removeSet.has(e.claimB)
+          );
+          simulationContradictions = simulationContradictions.filter(
+            e => !removeSet.has(e.claimA) && !removeSet.has(e.claimB)
+          );
+          // Remove from grounded
+          simulationGrounded = simulationGrounded.filter(id => !removeSet.has(id));
+        }
+        
+        // Add supports
+        if (modifications.addSupports && Array.isArray(modifications.addSupports)) {
+          for (const edge of modifications.addSupports) {
+            simulationSupports.push({
+              claimA: edge.claimA,
+              claimB: edge.claimB,
+              weight: edge.weight || 1.0,
+              source: 'manual'
+            });
+          }
+        }
+        
+        // Remove supports
+        if (modifications.removeSupports && Array.isArray(modifications.removeSupports)) {
+          for (const edge of modifications.removeSupports) {
+            simulationSupports = simulationSupports.filter(
+              e => !(e.claimA === edge.claimA && e.claimB === edge.claimB)
+            );
+          }
+        }
+        
+        // Add contradictions
+        if (modifications.addContradictions && Array.isArray(modifications.addContradictions)) {
+          for (const edge of modifications.addContradictions) {
+            simulationContradictions.push({
+              claimA: edge.claimA,
+              claimB: edge.claimB,
+              weight: edge.weight || 1.0,
+              source: 'manual'
+            });
+          }
+        }
+        
+        // Remove contradictions
+        if (modifications.removeContradictions && Array.isArray(modifications.removeContradictions)) {
+          for (const edge of modifications.removeContradictions) {
+            simulationContradictions = simulationContradictions.filter(
+              e => !(e.claimA === edge.claimA && e.claimB === edge.claimB)
+            );
+          }
+        }
+        
+        // Add grounded claims
+        if (modifications.addGrounded && Array.isArray(modifications.addGrounded)) {
+          for (const claimId of modifications.addGrounded) {
+            if (!simulationGrounded.includes(claimId)) {
+              simulationGrounded.push(claimId);
+            }
+          }
+        }
+        
+        // Remove grounded claims
+        if (modifications.removeGrounded && Array.isArray(modifications.removeGrounded)) {
+          const removeSet = new Set(modifications.removeGrounded);
+          simulationGrounded = simulationGrounded.filter(id => !removeSet.has(id));
+        }
+      }
+      
+      // Now run the evaluation with the modified inputs
+      const result = await runEvaluation(
+        {
+          conversationId: originalEval.conversation_id,
+          claims: simulationClaims.map((c: any) => ({
+            id: c.id,
+            text: c.text,
+            speaker: c.speaker,
+            turnIndex: c.turnStartIdx
+          })),
+          supports: simulationSupports,
+          contradictions: simulationContradictions,
+          grounded: simulationGrounded,
+          config: originalReport.frozenConfig?.parameters || {}
+        },
+        context,
+        supabaseAdmin
+      );
+      
+      // Update the new evaluation to mark it as a SIMULATION with parent reference
+      const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(); // 7 days
+      
+      const { data: newEval, error: getNewError } = await supabaseAdmin
+        .from('evaluations')
+        .select('report')
+        .eq('id', result.evaluationId)
+        .single();
+      
+      if (!getNewError && newEval) {
+        const updatedReport = {
+          ...(newEval.report as any),
+          mode: 'SIMULATION',
+          parentEvaluationId,
+          simulationDescription: description || 'What-if analysis',
+          modifications: modifications || {},
+          expiresAt
+        };
+        
+        await supabaseAdmin
+          .from('evaluations')
+          .update({ 
+            report: updatedReport,
+            env: 'sandbox' // Simulations always go to sandbox
+          })
+          .eq('id', result.evaluationId);
+      }
+      
+      // Log audit
+      await logAudit({
+        orgId: context.orgId,
+        action: 'SIMULATION_CREATED',
+        targetType: 'evaluation',
+        targetId: result.evaluationId,
+        meta: {
+          parentEvaluationId,
+          description: description || 'What-if analysis',
+          modificationsApplied: Object.keys(modifications || {})
+        }
+      });
+      
+      res.json({
+        success: true,
+        evaluationId: result.evaluationId,
+        parentEvaluationId,
+        mode: 'SIMULATION',
+        expiresAt,
+        inputHash: result.inputHash,
+        configHash: result.configHash,
+        latency: result.latency
+      });
+    } catch (e: any) {
+      console.error("Simulation error:", e);
       res.status(500).json({ 
         error: e?.message ?? "unknown error"
       });

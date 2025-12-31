@@ -17,6 +17,7 @@ import { MatExpansionModule } from '@angular/material/expansion';
 import { AppHeaderComponent } from '../shared/app-header.component';
 import { AuditService, Evaluation, Issue } from '../audit.service';
 import { EvidenceViewerComponent } from '../evidence-viewer/evidence-viewer.component';
+import { SimulationDialogComponent, SimulationModifications } from '../simulation-dialog/simulation-dialog.component';
 
 @Component({
   selector: 'app-evaluation-results',
@@ -364,6 +365,91 @@ export class EvaluationResultsComponent implements OnInit {
       return JSON.stringify(fingerprint);
     } catch {
       return String(fingerprint);
+    }
+  }
+
+  /**
+   * Check if this is a simulation
+   */
+  isSimulation(): boolean {
+    return this.evaluation?.report?.mode === 'SIMULATION';
+  }
+
+  /**
+   * Get parent evaluation ID if this is a simulation
+   */
+  getParentEvaluationId(): string | null {
+    return this.evaluation?.report?.parentEvaluationId || null;
+  }
+
+  /**
+   * Get simulation description
+   */
+  getSimulationDescription(): string {
+    return this.evaluation?.report?.simulationDescription || '';
+  }
+
+  /**
+   * Open simulation dialog to create a what-if analysis
+   */
+  openSimulationDialog() {
+    if (!this.evaluation) return;
+
+    const report = this.evaluation.report as any;
+    const inputs = report?.frozenInputs || report?.inputs || {};
+    
+    const dialogRef = this.dialog.open(SimulationDialogComponent, {
+      width: '800px',
+      maxWidth: '95vw',
+      maxHeight: '90vh',
+      data: {
+        evaluationId: this.evaluationId,
+        claims: inputs.claims || [],
+        supports: inputs.supports || [],
+        contradictions: inputs.contradictions || [],
+        grounded: inputs.grounded || []
+      }
+    });
+
+    dialogRef.afterClosed().subscribe(async (modifications: SimulationModifications) => {
+      if (!modifications) return;
+      
+      try {
+        this.snackBar.open('Running simulation...', '', { duration: 0 });
+        
+        const result = await this.auditService.createSimulation(
+          this.evaluationId,
+          {
+            removeClaims: modifications.removeClaims,
+            addGrounded: modifications.addGrounded,
+            removeSupports: modifications.removeSupports,
+            removeContradictions: modifications.removeContradictions
+          },
+          modifications.description
+        ).toPromise();
+        
+        if (result?.evaluationId) {
+          this.snackBar.open('Simulation created! Redirecting...', 'Close', { duration: 2000 });
+          // Navigate to the new simulation evaluation
+          this.router.navigate(['/evaluations', result.evaluationId]);
+        }
+      } catch (error: any) {
+        this.snackBar.open(
+          'Simulation failed: ' + (error.error?.error || error.message),
+          'Close',
+          { duration: 5000 }
+        );
+      }
+    });
+  }
+
+  /**
+   * Navigate to parent evaluation
+   */
+  viewParentEvaluation() {
+    const parentId = this.getParentEvaluationId();
+    if (parentId) {
+      this.router.navigate(['/evaluations', parentId]);
     }
   }
 }

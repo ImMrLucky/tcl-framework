@@ -9,6 +9,16 @@
     <div headerActions>
       <button
         *ngIf="evaluation"
+        mat-raised-button
+        color="accent"
+        (click)="openSimulationDialog()"
+        matTooltip="Create a what-if simulation based on this evaluation"
+      >
+        <mat-icon>science</mat-icon>
+        What-If
+      </button>
+      <button
+        *ngIf="evaluation"
         mat-icon-button
         [matMenuTriggerFor]="exportMenu"
         matTooltip="Export"
@@ -38,6 +48,19 @@
   </div>
 
   <div class="container" *ngIf="!loading && evaluation">
+    <!-- Simulation Banner -->
+    <div class="simulation-banner" *ngIf="isSimulation()">
+      <mat-icon>science</mat-icon>
+      <div class="simulation-info">
+        <strong>SIMULATION</strong>
+        <span>{{ getSimulationDescription() || 'What-if analysis' }}</span>
+      </div>
+      <button mat-button (click)="viewParentEvaluation()" *ngIf="getParentEvaluationId()">
+        <mat-icon>arrow_back</mat-icon>
+        View Original
+      </button>
+    </div>
+
     <!-- A) Audit Summary (Top of Page) -->
     <mat-card class="audit-summary-card">
       <mat-card-header>
