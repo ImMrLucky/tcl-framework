@@ -39,20 +39,25 @@ export class AuthInterceptor implements HttpInterceptor {
     // Use from() to convert Promise to Observable, then switchMap to add header
     return from(this.authService.getAccessToken()).pipe(
       switchMap(token => {
-        // Always clone the request to avoid mutating the original
-        let authReq = req;
-        
-        // If we have a token, add the Authorization header
-        if (token && token.trim().length > 0) {
-          authReq = req.clone({
-            setHeaders: {
-              Authorization: `Bearer ${token}`
-            }
-          });
+        // For authenticated endpoints, we MUST have a token
+        if (!token || typeof token !== 'string' || token.trim().length === 0) {
+          // No token available - user is not authenticated
+          // Sign them out and return an error
+          this.authService.signOut();
+          return throwError(() => new HttpErrorResponse({
+            error: 'Authentication required',
+            status: 401,
+            statusText: 'Unauthorized'
+          }));
         }
-        // If no token, proceed without auth header (backend will return 401)
-        // This allows the request to go through so the backend can return proper error
-
+        
+        // Clone the request and add Authorization header
+        const authReq = req.clone({
+          setHeaders: {
+            Authorization: `Bearer ${token}`
+          }
+        });
+        
         return next.handle(authReq).pipe(
           catchError((error: HttpErrorResponse) => {
             // Handle 401 Unauthorized responses
@@ -65,16 +70,13 @@ export class AuthInterceptor implements HttpInterceptor {
         );
       }),
       catchError((error) => {
-        // If token retrieval fails completely, still try the request
-        // The backend will return 401 if auth is required
-        return next.handle(req).pipe(
-          catchError((err: HttpErrorResponse) => {
-            if (err.status === 401) {
-              this.authService.signOut();
-            }
-            return throwError(() => err);
-          })
-        );
+        // If token retrieval fails completely, sign out and return error
+        this.authService.signOut();
+        return throwError(() => new HttpErrorResponse({
+          error: 'Authentication required',
+          status: 401,
+          statusText: 'Unauthorized'
+        }));
       })
     );
   }

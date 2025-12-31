@@ -101,11 +101,17 @@ export class AuthService {
         };
         this.currentUserSubject.next(basicUser);
         
+        // Ensure session is persisted to localStorage
+        // Supabase should do this automatically, but we'll verify
+        if (session.access_token) {
+          // Session is available, it should be in localStorage
+          // The getAccessToken() method will retrieve it from there
+        }
+        
         // Then load full profile in background
         try {
           await this.loadUserProfile(session.user.id);
         } catch (err: any) {
-          console.error('Error loading user profile in auth state change:', err);
           // Keep the basic user even if profile load fails
           // User is still logged in, just without profile data
         }
@@ -280,21 +286,42 @@ export class AuthService {
       return { error, duplicateAccount: false };
     }
 
-    // Wait a moment for Supabase to persist the session to localStorage
-    // This ensures the token is available immediately after login
-    if (data.session) {
-      // Small delay to ensure localStorage is updated
-      await new Promise(resolve => setTimeout(resolve, 100));
+    // Supabase automatically stores the session in localStorage
+    // Wait a moment to ensure it's persisted, then verify
+    if (data.session && data.session.access_token) {
+      // Small delay to ensure localStorage is updated by Supabase
+      await new Promise(resolve => setTimeout(resolve, 200));
       
-      // Verify session is stored
-      const { data: { session: storedSession } } = await this.supabase.auth.getSession();
-      if (storedSession) {
-        // Load user profile
-        const { data: { user } } = await this.supabase.auth.getUser();
-        if (user) {
-          await this.loadUserProfile(user.id);
-        }
+      // Verify session is stored and accessible - this is critical
+      const { data: { session: storedSession }, error: sessionError } = await this.supabase.auth.getSession();
+      if (sessionError || !storedSession || !storedSession.access_token) {
+        // Session was not stored properly - this is an error
+        await this.supabase.auth.signOut();
+        return { 
+          error: { 
+            message: 'Failed to store session. Please try again.', 
+            name: 'SessionStorageError',
+            status: 500
+          } as AuthError, 
+          duplicateAccount: false 
+        };
       }
+      
+      // Session is stored correctly, load user profile
+      const { data: { user } } = await this.supabase.auth.getUser();
+      if (user) {
+        await this.loadUserProfile(user.id);
+      }
+    } else {
+      // No session returned - this is an error
+      return { 
+        error: { 
+          message: 'Login succeeded but no session was created. Please try again.', 
+          name: 'SessionError',
+          status: 500
+        } as AuthError, 
+        duplicateAccount: false 
+      };
     }
 
     return { error: null, duplicateAccount: false };
@@ -553,29 +580,43 @@ export class AuthService {
       let session: any = null;
       let expiresAt: number | string | null = null;
 
-      // Check different possible Supabase session structures
-      // Supabase can store it in various formats depending on version
+      // Supabase stores session in different structures
+      // Most common: { currentSession: { access_token, expires_at, ... } }
+      // Also possible: { session: { access_token, ... } }
+      // Or direct: { access_token, expires_at, ... }
+      
+      // Check for currentSession (most common Supabase format)
       if (parsed?.currentSession) {
         session = parsed.currentSession;
         expiresAt = session.expires_at;
-      } else if (parsed?.session) {
+      } 
+      // Check for session
+      else if (parsed?.session) {
         session = parsed.session;
         expiresAt = session.expires_at;
-      } else if (parsed?.access_token) {
-        // Direct access_token at root level
+      } 
+      // Check for direct access_token
+      else if (parsed?.access_token) {
         session = parsed;
         expiresAt = parsed.expires_at;
-      } else if (parsed?.value?.currentSession) {
-        // Nested value structure
+      }
+      // Check for nested value.currentSession
+      else if (parsed?.value?.currentSession) {
         session = parsed.value.currentSession;
         expiresAt = session.expires_at;
-      } else if (parsed?.value?.session) {
-        // Nested value.session structure
+      }
+      // Check for nested value.session
+      else if (parsed?.value?.session) {
         session = parsed.value.session;
         expiresAt = session.expires_at;
       }
+      // Check for Supabase v2 format: { access_token, expires_at, ... } at root
+      else if (parsed?.access_token && typeof parsed.access_token === 'string') {
+        session = parsed;
+        expiresAt = parsed.expires_at;
+      }
 
-      if (!session?.access_token) {
+      if (!session || !session.access_token || typeof session.access_token !== 'string') {
         return null;
       }
 
@@ -591,7 +632,8 @@ export class AuthService {
         expires_at: expiresAt ? (typeof expiresAt === 'string' ? parseInt(expiresAt, 10) : expiresAt) : undefined
       };
     } catch (e) {
-      // Invalid JSON
+      // Invalid JSON - clear corrupted storage
+      window.localStorage.removeItem(storageKey);
       return null;
     }
   }
@@ -605,39 +647,45 @@ export class AuthService {
     this.lastActivityTime = Date.now();
     this.resetInactivityTimer();
 
-    // First, try to get valid session from localStorage (fast, synchronous check)
-    const storedSession = this.getValidSessionFromStorage();
-    if (storedSession?.access_token) {
-      return storedSession.access_token;
-    }
-
-    // If no valid stored session, try getSession with timeout
-    // This ensures we get the latest session from Supabase
+    // Try to get session from Supabase first (most reliable)
+    // Supabase handles localStorage internally and returns the current session
     try {
-      const sessionPromise = this.supabase.auth.getSession();
-      const timeoutPromise = new Promise<{ data: { session: null }, error: null }>((resolve) => 
-        setTimeout(() => resolve({ data: { session: null }, error: null }), 3000)
-      );
+      const { data: { session }, error } = await this.supabase.auth.getSession();
       
-      const sessionResponse = await Promise.race([sessionPromise, timeoutPromise]);
-      
-      if (sessionResponse?.error) {
+      if (error || !session) {
+        // No session - user is not logged in
         return null;
       }
 
-      const session = sessionResponse?.data?.session;
-      if (!session?.access_token) {
+      if (!session.access_token) {
+        // Session exists but no token - invalid state, clear it
+        await this.supabase.auth.signOut();
         return null;
       }
 
       // Check if token is expired
       if (this.isTokenExpired(session.expires_at)) {
+        // Token expired - clear session
+        await this.supabase.auth.signOut();
         return null;
       }
 
+      // Return the token from Supabase session
       return session.access_token;
     } catch (error) {
-      // If getSession fails, return null
+      // If getSession fails, try localStorage as fallback
+      const storedSession = this.getValidSessionFromStorage();
+      if (storedSession?.access_token) {
+        // Validate the token from localStorage
+        if (this.isTokenExpired(storedSession.expires_at)) {
+          // Token expired - clear storage
+          if (typeof window !== 'undefined' && window.localStorage) {
+            window.localStorage.removeItem('sb-uqwcmkyaskyduxuluqrm-auth-token');
+          }
+          return null;
+        }
+        return storedSession.access_token;
+      }
       return null;
     }
   }
