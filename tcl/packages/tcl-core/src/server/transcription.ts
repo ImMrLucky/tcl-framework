@@ -1,12 +1,11 @@
 /**
  * Audio Transcription Service
  * Uses local Whisper model (free, self-contained, no API keys needed)
- * Powered by @xenova/transformers
+ * Powered by @xenova/transformers (WASM mode - no native dependencies)
  * 
  * Does not store audio files - only extracts and returns text
  */
 
-import { pipeline } from '@xenova/transformers';
 import fs from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
@@ -33,6 +32,24 @@ export async function transcribeAudio(
     fs.writeFileSync(tempFile, audioBuffer);
 
     try {
+      // Set environment variables BEFORE import to force WASM-only mode
+      // This prevents onnxruntime-node from trying to load native bindings
+      // Required for Docker/container environments without native libraries
+      if (typeof process !== 'undefined' && process.env) {
+        process.env.USE_WASM = '1';
+        process.env.ONNXRUNTIME_EXECUTION_PROVIDERS = '';
+      }
+      
+      // Dynamic import to ensure env vars are set first
+      const { pipeline, env } = await import('@xenova/transformers');
+      
+      // Force WASM backend to avoid native onnxruntime-node dependency
+      // This prevents errors in containers that don't have native libraries
+      if (env && env.backends && env.backends.onnx) {
+        env.backends.onnx.wasm.proxy = false;
+        env.backends.onnx.wasm.numThreads = 1;
+      }
+      
       // Load Whisper model (downloads on first use, ~1.5GB)
       // Uses 'Xenova/whisper-tiny' by default (fastest, smallest)
       // Can be overridden with WHISPER_MODEL env var
@@ -41,7 +58,10 @@ export async function transcribeAudio(
       
       const transcriber = await pipeline(
         'automatic-speech-recognition',
-        modelName
+        modelName,
+        {
+          quantized: true, // Use quantized model (smaller, faster)
+        }
       );
 
       console.log('Transcribing audio...');

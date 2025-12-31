@@ -69,8 +69,15 @@ This is a one-time download. Subsequent runs are instant.
 - **No requirements!** Works out of the box.
 - Just install dependencies: `npm install`
 - Model downloads automatically on first use
+- **Works in Docker/containers** - Uses WASM backend (no native dependencies needed)
 
 ## Troubleshooting
+
+### "Error loading shared library ld-linux-x86-64.so.2" (Docker/Container)
+- **Fixed!** The service now uses WASM backend automatically
+- No native libraries required
+- Works in any Docker/container environment
+- If you still see this error, ensure you're using the latest code
 
 ### "Model download failed"
 - Check internet connection (needed for first download only)

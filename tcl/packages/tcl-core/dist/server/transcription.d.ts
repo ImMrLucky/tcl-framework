@@ -1,7 +1,7 @@
 /**
  * Audio Transcription Service
  * Uses local Whisper model (free, self-contained, no API keys needed)
- * Powered by @xenova/transformers
+ * Powered by @xenova/transformers (WASM mode - no native dependencies)
  *
  * Does not store audio files - only extracts and returns text
  */
