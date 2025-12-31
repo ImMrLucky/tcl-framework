@@ -489,14 +489,17 @@ export class AuthService {
    */
   async getAccessToken(): Promise<string | null> {
     try {
-      const { data: { session }, error } = await this.supabase.auth.getSession();
-      if (error) {
-        console.error('Error getting session:', error);
+      // Wait for auth to initialize if needed
+      if (this.supabase.auth.initializePromise) {
+        await this.supabase.auth.initializePromise;
+      }
+      
+      const sessionResponse = await this.supabase.auth.getSession();
+      if (sessionResponse.error) {
         return null;
       }
-      return session?.access_token || null;
+      return sessionResponse.data?.session?.access_token || null;
     } catch (error) {
-      console.error('Error getting access token:', error);
       return null;
     }
   }
