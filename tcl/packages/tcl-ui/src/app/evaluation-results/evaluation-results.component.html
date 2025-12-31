@@ -34,6 +34,11 @@
           <mat-icon>code</mat-icon>
           <span>Export Run JSON</span>
         </button>
+        <mat-divider></mat-divider>
+        <button mat-menu-item (click)="deleteEvaluation()" class="delete-action">
+          <mat-icon color="warn">delete_forever</mat-icon>
+          <span>Delete Evaluation</span>
+        </button>
       </mat-menu>
     </div>
   </app-header>

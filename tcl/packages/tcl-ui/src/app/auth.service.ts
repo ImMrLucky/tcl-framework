@@ -23,8 +23,15 @@ export class AuthService {
   private currentUserSubject = new BehaviorSubject<User | null>(null);
   public currentUser$ = this.currentUserSubject.asObservable();
   private inactivityTimer: any = null;
-  private readonly INACTIVITY_TIMEOUT = 30 * 60 * 1000; // 30 minutes in milliseconds
+  
+  // Session duration constants
+  private readonly INACTIVITY_TIMEOUT = 30 * 60 * 1000; // 30 minutes idle timeout
+  private readonly SESSION_DURATION = 15 * 60 * 60 * 1000; // 15 hours active session
+  private readonly REAUTH_WINDOW = 5 * 60 * 1000; // 5 minutes - recent auth window for sensitive actions
+  
   private lastActivityTime = Date.now();
+  private sessionStartTime = Date.now();
+  private lastReauthTime: number | null = null;
 
   constructor(private router: Router, private http: HttpClient) {
     // Use environment variables if available, fallback to hardcoded for development
@@ -373,6 +380,9 @@ export class AuthService {
       email: user.email
     });
 
+    // Reset session timers for new login
+    this.resetSessionTimer();
+
     // Do background tasks without blocking the login flow
     this.ensureUserProvisioned(user.id, user.email || '');
     this.loadUserProfileAsync(user.id);
@@ -474,6 +484,93 @@ export class AuthService {
       // This ensures all components re-initialize and check auth state fresh
       window.location.href = '/home';
     }
+  }
+
+  /**
+   * Re-authenticate user for sensitive actions
+   * Returns true if re-authentication was successful
+   */
+  async reAuthenticate(password: string): Promise<{ success: boolean; error?: string }> {
+    const user = this.currentUserSubject.value;
+    if (!user || !user.email) {
+      return { success: false, error: 'No user logged in' };
+    }
+
+    try {
+      // Verify password by signing in again
+      const { error } = await this.supabase.auth.signInWithPassword({
+        email: user.email,
+        password
+      });
+
+      if (error) {
+        return { success: false, error: 'Invalid password' };
+      }
+
+      // Update last re-auth time
+      this.lastReauthTime = Date.now();
+      
+      return { success: true };
+    } catch (err: any) {
+      return { success: false, error: err.message || 'Re-authentication failed' };
+    }
+  }
+
+  /**
+   * Check if user has recently re-authenticated (within REAUTH_WINDOW)
+   */
+  hasRecentReauth(): boolean {
+    if (!this.lastReauthTime) {
+      return false;
+    }
+    return (Date.now() - this.lastReauthTime) < this.REAUTH_WINDOW;
+  }
+
+  /**
+   * Check if the current session is still valid (within SESSION_DURATION)
+   */
+  isSessionValid(): boolean {
+    const now = Date.now();
+    
+    // Check session duration (15 hours)
+    if ((now - this.sessionStartTime) > this.SESSION_DURATION) {
+      return false;
+    }
+    
+    // Check inactivity timeout (30 minutes)
+    if ((now - this.lastActivityTime) > this.INACTIVITY_TIMEOUT) {
+      return false;
+    }
+    
+    return true;
+  }
+
+  /**
+   * Reset session start time (call after successful login)
+   */
+  resetSessionTimer(): void {
+    this.sessionStartTime = Date.now();
+    this.lastActivityTime = Date.now();
+  }
+
+  /**
+   * List of sensitive actions that require re-authentication
+   */
+  readonly SENSITIVE_ACTIONS = [
+    'delete_evaluation',
+    'export_audit_packet',
+    'change_org_settings',
+    'manage_api_keys',
+    'modify_integrations',
+    'delete_organization',
+    'transfer_ownership'
+  ] as const;
+
+  /**
+   * Check if an action requires re-authentication
+   */
+  requiresReauth(action: string): boolean {
+    return this.SENSITIVE_ACTIONS.includes(action as any);
   }
 
   async updateProfile(updates: {

@@ -349,5 +349,15 @@ export class AuditService {
       { modifications, description }
     );
   }
+
+  /**
+   * Delete an evaluation (SENSITIVE ACTION - requires re-authentication)
+   * This permanently removes the evaluation and cannot be undone.
+   */
+  deleteEvaluation(evaluationId: string): Observable<{ success: boolean; message: string }> {
+    return this.http.delete<{ success: boolean; message: string }>(
+      `${this.apiBase}/evaluations/${evaluationId}`
+    );
+  }
 }
 

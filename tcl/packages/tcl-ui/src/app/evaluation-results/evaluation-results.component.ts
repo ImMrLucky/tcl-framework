@@ -14,10 +14,12 @@ import { MatSnackBar, MatSnackBarModule } from '@angular/material/snack-bar';
 import { MatSelectModule } from '@angular/material/select';
 import { MatProgressBarModule } from '@angular/material/progress-bar';
 import { MatExpansionModule } from '@angular/material/expansion';
+import { MatDividerModule } from '@angular/material/divider';
 import { AppHeaderComponent } from '../shared/app-header.component';
 import { AuditService, Evaluation, Issue } from '../audit.service';
 import { EvidenceViewerComponent } from '../evidence-viewer/evidence-viewer.component';
 import { SimulationDialogComponent, SimulationModifications } from '../simulation-dialog/simulation-dialog.component';
+import { SensitiveActionService } from '../sensitive-action.service';
 
 @Component({
   selector: 'app-evaluation-results',
@@ -37,6 +39,7 @@ import { SimulationDialogComponent, SimulationModifications } from '../simulatio
     MatSelectModule,
     MatProgressBarModule,
     MatExpansionModule,
+    MatDividerModule,
     AppHeaderComponent
   ],
   templateUrl: './evaluation-results.component.html',
@@ -61,7 +64,8 @@ export class EvaluationResultsComponent implements OnInit {
     private router: Router,
     private auditService: AuditService,
     private dialog: MatDialog,
-    private snackBar: MatSnackBar
+    private snackBar: MatSnackBar,
+    private sensitiveActionService: SensitiveActionService
   ) {}
 
   ngOnInit() {
@@ -582,6 +586,30 @@ export class EvaluationResultsComponent implements OnInit {
     const parentId = this.getParentEvaluationId();
     if (parentId) {
       this.router.navigate(['/evaluations', parentId]);
+    }
+  }
+
+  /**
+   * Delete evaluation (SENSITIVE ACTION - requires re-authentication)
+   */
+  async deleteEvaluation() {
+    const result = await this.sensitiveActionService.executeWithReauth(
+      'delete_evaluation',
+      async () => {
+        return await this.auditService.deleteEvaluation(this.evaluationId).toPromise();
+      }
+    );
+
+    if (result.cancelled) {
+      // User cancelled re-authentication
+      return;
+    }
+
+    if (result.success) {
+      this.snackBar.open('Evaluation deleted successfully', 'Close', { duration: 3000 });
+      this.router.navigate(['/evaluations']);
+    } else {
+      this.snackBar.open('Failed to delete evaluation: ' + (result.error || 'Unknown error'), 'Close', { duration: 5000 });
     }
   }
 }

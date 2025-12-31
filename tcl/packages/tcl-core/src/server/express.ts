@@ -1306,6 +1306,76 @@ app.get("/conversations/:conversationId/evaluations", async (req, res) => {
   }
 });
 
+// ============================================================================
+// SENSITIVE ACTIONS: Re-authentication verification
+// ============================================================================
+
+/**
+ * Verify user password for sensitive actions
+ * This endpoint is called before performing operations like:
+ * - Deleting evaluations
+ * - Exporting audit packets
+ * - Changing org settings
+ * - Managing API keys
+ * - Modifying integrations
+ */
+app.post("/auth/verify-password", async (req, res) => {
+  try {
+    const { password } = req.body;
+    
+    if (!password) {
+      return res.status(400).json({ error: "password is required" });
+    }
+    
+    const context = await getOrgContext(req);
+    if (!context || context.error || !context.userId) {
+      return res.status(401).json({ error: context?.error || "Authorization required" });
+    }
+    
+    if (!supabaseAdmin) {
+      return res.status(503).json({ error: "Supabase not configured" });
+    }
+    
+    // Get user's email
+    const { data: { user }, error: userError } = await supabaseAdmin.auth.admin.getUserById(context.userId);
+    
+    if (userError || !user || !user.email) {
+      return res.status(401).json({ error: "User not found" });
+    }
+    
+    // Verify password by signing in (this doesn't create a new session, just verifies)
+    // Note: We use signInWithPassword to verify - Supabase doesn't have a dedicated verify endpoint
+    const { error: signInError } = await supabaseAdmin.auth.signInWithPassword({
+      email: user.email,
+      password
+    });
+    
+    if (signInError) {
+      return res.status(401).json({ error: "Invalid password", verified: false });
+    }
+    
+    // Log audit event
+    await logAudit({
+      orgId: context.orgId,
+      action: 'sensitive_action.reauth',
+      targetType: 'user',
+      targetId: context.userId,
+      meta: { 
+        success: true,
+        ip: req.ip
+      }
+    });
+    
+    res.json({ verified: true });
+  } catch (e: any) {
+    console.error("Verify password error:", e);
+    res.status(500).json({ 
+      error: e?.message ?? "unknown error",
+      verified: false
+    });
+  }
+});
+
 // Audio transcription endpoint
 app.post("/transcribe", upload.single('audio'), async (req, res) => {
   try {

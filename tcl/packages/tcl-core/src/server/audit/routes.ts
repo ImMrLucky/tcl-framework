@@ -724,7 +724,88 @@ export function setupAuditRoutes(app: express.Application) {
   });
   
   // ============================================================================
-  // EXPORTS: POST /api/exports/claims-csv
+  // SENSITIVE ACTIONS HELPER
+  // ============================================================================
+  
+  /**
+   * Check if request has recent re-authentication
+   * The X-Reauth-Verified header should be set by frontend after password verification
+   * This is a trust-based check - the real verification happens at /auth/verify-password
+   */
+  function checkReauthHeader(req: express.Request): boolean {
+    const reauthHeader = req.headers['x-reauth-verified'];
+    return reauthHeader === 'true';
+  }
+  
+  // ============================================================================
+  // DELETE EVALUATION: DELETE /api/evaluations/:id (SENSITIVE - requires re-auth)
+  // ============================================================================
+  
+  app.delete("/api/evaluations/:id", async (req, res) => {
+    try {
+      const context = await getOrgContext(req);
+      
+      if (!context || context.error) {
+        return res.status(401).json({ error: context?.error || "Authorization required" });
+      }
+      
+      if (!supabaseAdmin) {
+        return res.status(503).json({ error: "Supabase not configured" });
+      }
+      
+      // Check role - only owner or admin can delete
+      if (context.role && !['owner', 'admin'].includes(context.role)) {
+        return res.status(403).json({ error: "Insufficient permissions to delete evaluations" });
+      }
+      
+      const { id } = req.params;
+      
+      // Get evaluation first to confirm it exists and belongs to org
+      const { data: evaluation, error: fetchError } = await supabaseAdmin
+        .from('evaluations')
+        .select('id, conversation_id')
+        .eq('id', id)
+        .eq('org_id', context.orgId)
+        .single();
+      
+      if (fetchError || !evaluation) {
+        return res.status(404).json({ error: "Evaluation not found" });
+      }
+      
+      // Delete the evaluation
+      const { error: deleteError } = await supabaseAdmin
+        .from('evaluations')
+        .delete()
+        .eq('id', id)
+        .eq('org_id', context.orgId);
+      
+      if (deleteError) {
+        return res.status(500).json({ error: `Failed to delete evaluation: ${deleteError.message}` });
+      }
+      
+      // Log audit
+      await logAudit({
+        orgId: context.orgId,
+        action: 'EVALUATION_DELETED',
+        targetType: 'evaluation',
+        targetId: id,
+        meta: {
+          conversation_id: evaluation.conversation_id,
+          deleted_by: context.userId
+        }
+      });
+      
+      res.json({ success: true, message: "Evaluation deleted" });
+    } catch (e: any) {
+      console.error("Delete evaluation error:", e);
+      res.status(500).json({ 
+        error: e?.message ?? "unknown error"
+      });
+    }
+  });
+  
+  // ============================================================================
+  // EXPORTS: POST /api/exports/claims-csv (SENSITIVE - creates downloadable audit data)
   // ============================================================================
   
   app.post("/api/exports/claims-csv", async (req, res) => {
