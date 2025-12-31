@@ -368,7 +368,7 @@ export class AuthService {
     if (typeof window !== 'undefined') {
       // Use window.location.href for a full page reload (not router navigation)
       // This ensures all components re-initialize and check auth state fresh
-      window.location.href = '/';
+      window.location.href = '/home';
     }
   }
 
