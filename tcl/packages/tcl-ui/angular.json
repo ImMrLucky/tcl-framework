@@ -41,20 +41,14 @@
                 }
               ],
               "outputHashing": "all",
-              "optimization": {
-                "scripts": false,
-                "styles": false,
-                "fonts": false
-              },
+              "optimization": false,
               "sourceMap": true,
-              "extractLicenses": false,
-              "buildOptimizer": false
+              "extractLicenses": false
             },
             "development": {
               "optimization": false,
               "extractLicenses": false,
-              "sourceMap": true,
-              "buildOptimizer": false
+              "sourceMap": true
             }
           },
           "defaultConfiguration": "production"
