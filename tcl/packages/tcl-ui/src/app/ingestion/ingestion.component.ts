@@ -285,8 +285,9 @@ export class IngestionComponent implements OnInit {
 
     // Create headers with Authorization
     // Note: Don't set Content-Type for FormData - browser will set it with boundary
-    // Use set() instead of object literal to ensure header is set correctly
-    const headers = new HttpHeaders().set('Authorization', `Bearer ${accessToken}`);
+    // Use append() to ensure header is set correctly (set() might not work with FormData)
+    const headers = new HttpHeaders();
+    headers.set('Authorization', `Bearer ${accessToken}`);
 
     try {
       const result = await firstValueFrom(

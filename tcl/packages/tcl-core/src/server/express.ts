@@ -111,8 +111,12 @@ async function loadModules() {
 async function getOrgContext(req: express.Request): Promise<{ orgId: string; projectId: string; env: string; userId?: string; role?: string } | null> {
   // Check for API key in Authorization header
   // Express lowercases header names, so check 'authorization' (lowercase)
-  const authHeader = req.headers.authorization || (req.headers as any).Authorization;
-  if (authHeader?.startsWith('Bearer ')) {
+  // Also check raw headers in case Express hasn't lowercased it yet
+  const authHeader = req.headers.authorization || 
+                     (req.headers as any).Authorization || 
+                     (req.headers as any)['authorization'] ||
+                     (req.headers as any)['Authorization'];
+  if (authHeader && typeof authHeader === 'string' && authHeader.startsWith('Bearer ')) {
     const token = authHeader.substring(7);
     
     // First try API key verification
@@ -128,8 +132,9 @@ async function getOrgContext(req: express.Request): Promise<{ orgId: string; pro
     // If not an API key, try Supabase JWT verification
     if (supabaseAdmin) {
       try {
-        const { data: { user }, error } = await supabaseAdmin.auth.getUser(token);
-        if (error || !user) {
+        // Verify the JWT token with Supabase
+        const { data: { user }, error: userError } = await supabaseAdmin.auth.getUser(token);
+        if (userError || !user) {
           return null;
         }
 
@@ -142,18 +147,39 @@ async function getOrgContext(req: express.Request): Promise<{ orgId: string; pro
           .maybeSingle();
         
         if (memberError || !membership) {
+          // User exists but has no org membership - try to provision
+          // This can happen if provisioning failed or user was created outside normal flow
           return null;
         }
 
         // Get default project for the org
-        const { data: project, error: projectError } = await supabaseAdmin
+        // If no default project, try to get any project for the org
+        let project = null;
+        const { data: defaultProject, error: defaultProjectError } = await supabaseAdmin
           .from('projects')
           .select('id')
           .eq('org_id', membership.org_id)
           .eq('is_default', true)
           .maybeSingle();
         
-        if (projectError || !project) {
+        if (!defaultProjectError && defaultProject) {
+          project = defaultProject;
+        } else {
+          // No default project - try to get any project for the org
+          const { data: anyProject, error: anyProjectError } = await supabaseAdmin
+            .from('projects')
+            .select('id')
+            .eq('org_id', membership.org_id)
+            .limit(1)
+            .maybeSingle();
+          
+          if (!anyProjectError && anyProject) {
+            project = anyProject;
+          }
+        }
+        
+        if (!project) {
+          // User has org membership but no projects
           return null;
         }
 
