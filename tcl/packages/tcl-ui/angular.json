@@ -42,13 +42,21 @@
               ],
               "outputHashing": "all",
               "optimization": {
+                "scripts": false,
+                "styles": false,
                 "fonts": false
-              }
+              },
+              "sourceMap": true,
+              "extractLicenses": false,
+              "vendorChunk": true,
+              "buildOptimizer": false
             },
             "development": {
               "optimization": false,
               "extractLicenses": false,
-              "sourceMap": true
+              "sourceMap": true,
+              "vendorChunk": true,
+              "buildOptimizer": false
             }
           },
           "defaultConfiguration": "production"
