@@ -117,19 +117,22 @@ export function registerIngestEndpoints(app: express.Express) {
           .map(t => `${t.speakerLabel}: ${t.text}`)
           .join("\n");
         
+        // Match the exact schema used by /conversations POST endpoint
         const { data: conv, error: convError } = await supabaseAdmin
           .from("conversations")
           .insert({
             org_id: context.orgId,
             project_id: context.projectId || null,
-            env: context.env || "sandbox",
+            env: context.env || "production",
+            external_id: null,
             title: body.title || `Ingested: ${body.filename}`,
-            content: rawText, // Required field
-            raw_text: rawText, // Also store in raw_text if column exists
-            channel: result.normalized.channel,
+            content: rawText,
             metadata: {
               sourceFormat: result.normalized.sourceFormat,
               originalFilename: body.filename,
+              channel: result.normalized.channel,
+              turnsCount: result.normalized.turns.length,
+              participantsCount: result.normalized.participants.length,
             },
           })
           .select("id")
@@ -137,17 +140,20 @@ export function registerIngestEndpoints(app: express.Express) {
         
         if (convError) {
           console.error("Failed to create conversation:", convError);
-          console.error("Conversation insert error details:", JSON.stringify(convError));
+          console.error("Error code:", convError.code);
+          console.error("Error message:", convError.message);
+          console.error("Error hint:", convError.hint);
           return res.status(500).json({ 
             error: "Failed to create conversation",
-            details: convError.message || convError.code
+            details: convError.message || convError.code,
+            hint: convError.hint || undefined
           });
         }
         
         conversationId = conv.id;
       }
       
-      // Create artifact
+      // Create artifact - include org_id, project_id, env as required by schema
       const artifactType = result.normalized.attachments.length > 0 && 
                            result.normalized.raw.inferredValues?.isAudio
         ? "audio_recording"
@@ -156,33 +162,45 @@ export function registerIngestEndpoints(app: express.Express) {
       const { data: artifact, error: artifactError } = await supabaseAdmin
         .from("conversation_artifacts")
         .insert({
+          org_id: context.orgId,
+          project_id: context.projectId || null,
+          env: context.env || "production",
           conversation_id: conversationId,
           artifact_type: artifactType,
           content_json: result.normalized,
-          storage_ref: null, // Would be set for actual file storage
+          storage_ref: null,
         })
         .select("id")
         .single();
       
       if (artifactError) {
         console.error("Failed to create artifact:", artifactError);
-        return res.status(500).json({ error: "Failed to store artifact" });
+        console.error("Artifact error details:", artifactError.message, artifactError.code);
+        return res.status(500).json({ 
+          error: "Failed to store artifact",
+          details: artifactError.message || artifactError.code
+        });
       }
       
-      // Log ingestion
-      await supabaseAdmin.from("audit_log").insert({
-        org_id: context.orgId,
-        action: "artifact_ingested",
-        entity_type: "conversation_artifact",
-        entity_id: artifact.id,
-        metadata: {
-          filename: body.filename,
-          format: result.normalized.sourceFormat,
-          turnsCount: result.normalized.turns.length,
-          participantsCount: result.normalized.participants.length,
-        },
-        user_id: context.userId,
-      });
+      // Log ingestion - wrap in try/catch so it doesn't break the response
+      try {
+        await supabaseAdmin.from("audit_log").insert({
+          org_id: context.orgId,
+          action: "artifact_ingested",
+          entity_type: "conversation_artifact",
+          entity_id: artifact.id,
+          actor_user_id: context.userId || null,
+          metadata: {
+            filename: body.filename,
+            format: result.normalized.sourceFormat,
+            turnsCount: result.normalized.turns.length,
+            participantsCount: result.normalized.participants.length,
+          },
+        });
+      } catch (auditErr) {
+        // Don't fail the request if audit logging fails
+        console.warn("Audit log insert failed:", auditErr);
+      }
       
       res.json({
         success: true,
