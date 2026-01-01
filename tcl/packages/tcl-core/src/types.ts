@@ -200,6 +200,7 @@ export type Suggestion = {
 export type GraphDebugInfo = {
   numClaims: number;
   numSources: number; // Renamed from numSourceClaims for clarity
+  transcriptSourcesGenerated?: number; // NEW: transcript-derived sources
   annEnabled: boolean;
   cacheEnabled: boolean;
   spectralEnabled: boolean;
@@ -227,6 +228,50 @@ export type GraphDebugInfo = {
   reasonIfEmptyGraph: string | null;
 };
 
+/**
+ * Run Manifest - AUDIT-CRITICAL
+ * 
+ * Contains all configuration and metadata needed to reproduce an evaluation.
+ * Required for enterprise adoption and compliance.
+ */
+export type RunManifest = {
+  /** SHA-256 hash of input */
+  inputHash: string;
+  /** Artifact ID if provided */
+  artifactId?: string;
+  /** Claim extractor version */
+  claimExtractorVersion: string;
+  /** NLI model ID */
+  nliModelId: string;
+  /** NLI thresholds used */
+  nliThresholds: {
+    support: number;
+    contradiction: number;
+    grounding: number;
+  };
+  /** Embedding model for retrieval */
+  embeddingModel: string;
+  /** Retrieval k (top-k chunks per claim) */
+  retrievalK: number;
+  /** Spectral engine version */
+  spectralEngineVersion?: string;
+  /** Code version */
+  codeVersion: string;
+  /** Timestamp */
+  createdAt: string;
+  /** Number of transcript sources generated */
+  transcriptSourcesCount: number;
+  /** Graph health check results */
+  graphHealth: {
+    supportEdges: number;
+    contradictionEdges: number;
+    groundingEdges: number;
+    totalEdges: number;
+    healthy: boolean;
+    reason?: string;
+  };
+};
+
 export type ValidateOutput = {
   answer: string;
   refusal: boolean;
@@ -240,7 +285,7 @@ export type ValidateOutput = {
     violations: Violation[];
     missingEvidence: { claimId: string; reason: string }[];
     contradictions: { claimA: string; claimB: string; reason: string }[];
-    spectral?: SpectralReport & { spectralSkipped?: boolean; debugReason?: string };
+    spectral?: SpectralReport & { spectralSkipped?: boolean; debugReason?: string; graphHealthDiagnostic?: any };
     // Graph edges from buildClaimGraph
     graph?: {
       supports: SupportEdge[];
@@ -252,6 +297,8 @@ export type ValidateOutput = {
     suggestions?: Suggestion[]; // Actionable suggestions for fixing issues
     destructiveClaims?: DestructiveClaim[]; // All destructive claims ranked by importance
     trajectory?: TrajectoryReport; // Trajectory scoring for transcripts
+    // AUDIT-CRITICAL: Run manifest for reproducibility
+    manifest?: RunManifest;
   };
 };
 

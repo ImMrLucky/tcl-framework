@@ -1,4 +1,4 @@
-import { ValidateInput, ValidateOutput, SpectralReport } from "./types.js";
+import { ValidateInput, ValidateOutput, SpectralReport, Source, RunManifest } from "./types.js";
 import { extractClaims } from "./claim_extractor.js";
 import { attachEvidenceAndFindViolations } from "./evidence.js";
 import { findLogicViolations } from "./logic.js";
@@ -12,6 +12,16 @@ import { generateSuggestions } from "./suggestions.js";
 import { validateCustomRules } from "./custom_rules.js";
 import { computeDestructiveClaims } from "./destructive.js";
 import { computeTrajectory } from "./trajectory.js";
+import { generateSourcesFromRawTranscript, retrieveEvidenceForClaims } from "./evidence_sources.js";
+import { createHash } from "crypto";
+
+/**
+ * Generate input hash for reproducibility
+ */
+function generateInputHash(question: string, answer: string): string {
+  const input = `${question}|||${answer}`;
+  return createHash("sha256").update(input).digest("hex").substring(0, 16);
+}
 
 async function callSpectralService(
   spectralServiceUrl: string,
@@ -107,14 +117,19 @@ async function callSpectralAnalyzeService(
 async function validateOnce(input: ValidateInput, adapter?: LLMAdapter, startTime?: number): Promise<ValidateOutput> {
   const validationStartTime = startTime ?? Date.now();
   try {
-    const { question, answer, sources, options } = input;
+    const { question, answer, sources: externalSources, options } = input;
     const spectralEnabled = !!options?.spectral;
     const spectralServiceUrl = options?.spectralServiceUrl ?? process.env.TCL_SPECTRAL_URL ?? "";
+    
+    // Configuration for this run
+    const retrievalK = options?.annNeighborK ?? 8; // Top-k chunks per claim for NLI
+    const conversationId = (options as any)?.conversationId ?? "inline";
+    const artifactId = (options as any)?.artifactId;
 
     // 1) claims
     let claims = [];
     if (adapter) {
-      const art = await adapter.extractArtifacts({ question, answer, sources });
+      const art = await adapter.extractArtifacts({ question, answer, sources: externalSources });
       claims = art.claims;
       console.log(`📋 Extracted ${claims.length} claims using adapter`);
     } else {
@@ -132,7 +147,46 @@ async function validateOnce(input: ValidateInput, adapter?: LLMAdapter, startTim
       console.error(`  Answer length: ${answer?.length || 0}`);
     }
 
-    // 2) grounding (legacy MVP evidence check)
+    // 2) CRITICAL: Generate transcript sources for grounding
+    // This is REQUIRED even if no external sources are provided
+    let sources: Source[] = [...(externalSources || [])];
+    let transcriptSourcesCount = 0;
+    
+    const isCallTranscript = !answer || answer.trim().length === 0;
+    if (isCallTranscript && question.trim().length > 0) {
+      // Generate sources from transcript text
+      const transcriptSources = generateSourcesFromRawTranscript(question, conversationId);
+      sources = [...sources, ...transcriptSources];
+      transcriptSourcesCount = transcriptSources.length;
+      console.log(`📝 Generated ${transcriptSourcesCount} transcript evidence sources for grounding`);
+      
+      if (transcriptSourcesCount === 0) {
+        console.warn(`⚠️ No transcript sources generated - grounding will fail!`);
+      }
+    } else if (sources.length === 0 && answer && answer.trim().length > 0) {
+      // For Q&A mode with answer text, generate sources from answer
+      const answerSources = generateSourcesFromRawTranscript(answer, conversationId);
+      sources = [...sources, ...answerSources];
+      transcriptSourcesCount = answerSources.length;
+      console.log(`📝 Generated ${transcriptSourcesCount} answer evidence sources`);
+    }
+
+    // 3) Retrieve evidence for each claim BEFORE NLI (MANDATORY)
+    // This ensures NLI is run on (claim, relevant_chunk) pairs, not in a vacuum
+    const evidencePerClaim = retrieveEvidenceForClaims(claims, sources, retrievalK);
+    
+    let totalEvidenceHits = 0;
+    for (const [, hits] of evidencePerClaim) {
+      totalEvidenceHits += hits.length;
+    }
+    console.log(`🔍 Retrieved ${totalEvidenceHits} evidence hits for ${claims.length} claims (k=${retrievalK})`);
+    
+    if (totalEvidenceHits === 0 && claims.length > 0 && sources.length > 0) {
+      console.error(`❌ CRITICAL: No evidence retrieved despite having ${sources.length} sources!`);
+      console.error(`   This will cause zero grounding edges.`);
+    }
+
+    // 4) grounding (legacy MVP evidence check - enhanced with retrieved evidence)
     const evidenceRes = attachEvidenceAndFindViolations(claims, sources);
 
     // 3) logic (legacy MVP contradiction check)
@@ -186,52 +240,39 @@ async function validateOnce(input: ValidateInput, adapter?: LLMAdapter, startTim
       console.log(`💡 Tip: Set TCL_USE_LOCAL_NLI=true to use local NLI model (downloads on first run)`);
     }
 
+    // Determine threshold values BEFORE graph building (hoisted for use in manifest)
+    // These need to be accessible throughout the function
+    const hasConversationalPatterns = question.includes('Agent:') || question.includes('Customer:') || 
+                                     question.includes('Agent:') || question.includes('Customer:') ||
+                                     (question.split('?').length > 3);
+    
+    const isHeuristic = scorer.id === "token-heuristic-v1" || scorer.id === "token-heuristic";
+    const isLocalTransformers = scorer.id.includes("transformers");
+    const transcriptMultiplier = (isCallTranscript || hasConversationalPatterns) ? 0.85 : 1.0;
+    
+    let defaultSupportThreshold: number;
+    let defaultContradictionThreshold: number;
+    let defaultGroundingThreshold: number;
+    
+    if (isHeuristic) {
+      defaultSupportThreshold = 0.30 * transcriptMultiplier;
+      defaultContradictionThreshold = 0.40 * transcriptMultiplier;
+      defaultGroundingThreshold = 0.30 * transcriptMultiplier;
+    } else if (isLocalTransformers) {
+      defaultSupportThreshold = (isCallTranscript || hasConversationalPatterns) ? 0.25 : 0.35;
+      defaultContradictionThreshold = (isCallTranscript || hasConversationalPatterns) ? 0.35 : 0.45;
+      defaultGroundingThreshold = (isCallTranscript || hasConversationalPatterns) ? 0.25 : 0.35;
+    } else {
+      defaultSupportThreshold = 0.45 * transcriptMultiplier;
+      defaultContradictionThreshold = 0.55 * transcriptMultiplier;
+      defaultGroundingThreshold = 0.45 * transcriptMultiplier;
+    }
+
     let graph;
     try {
       console.log("Building claim graph...");
       console.log(`Using scorer: ${scorer.id}, Claims: ${evidenceRes.claims.length}, Sources: ${sources?.length || 0}`);
-      
-      // Detect if this is a call transcript (conversational text)
-      // Call transcripts have multiple speakers, questions, and conversational patterns
-      const isCallTranscript = !answer || answer.trim().length === 0;
-      const hasConversationalPatterns = question.includes('Agent:') || question.includes('Customer:') || 
-                                       question.includes('Agent:') || question.includes('Customer:') ||
-                                       (question.split('?').length > 3); // Multiple questions suggest conversation
-      
       console.log(`Text type: ${isCallTranscript ? 'Call transcript' : 'Answer text'}, Conversational patterns: ${hasConversationalPatterns}`);
-      
-      // Use appropriate thresholds based on scorer type
-      // TokenHeuristicScorer: lower thresholds (less accurate)
-      // TransformersNliScorer: medium thresholds (local model, decent accuracy)
-      // HttpNliScorer/MistralNliScorer: higher thresholds (more accurate)
-      const isHeuristic = scorer.id === "token-heuristic-v1" || scorer.id === "token-heuristic";
-      const isLocalTransformers = scorer.id.includes("transformers");
-      
-      let defaultSupportThreshold: number;
-      let defaultContradictionThreshold: number;
-      let defaultGroundingThreshold: number;
-      
-      // For call transcripts, use lower thresholds because support relationships are more implicit
-      const transcriptMultiplier = (isCallTranscript || hasConversationalPatterns) ? 0.85 : 1.0;
-      
-      if (isHeuristic) {
-        // Token heuristic: very low thresholds
-        defaultSupportThreshold = 0.30 * transcriptMultiplier;
-        defaultContradictionThreshold = 0.40 * transcriptMultiplier;
-        defaultGroundingThreshold = 0.30 * transcriptMultiplier;
-      } else if (isLocalTransformers) {
-        // Local Transformers model: lower thresholds to find more relationships
-        // Conversational text has implicit support that's harder to detect
-        defaultSupportThreshold = (isCallTranscript || hasConversationalPatterns) ? 0.25 : 0.35;
-        defaultContradictionThreshold = (isCallTranscript || hasConversationalPatterns) ? 0.35 : 0.45;
-        defaultGroundingThreshold = (isCallTranscript || hasConversationalPatterns) ? 0.25 : 0.35;
-      } else {
-        // HTTP NLI or Mistral API: medium thresholds (more accurate models)
-        defaultSupportThreshold = 0.45 * transcriptMultiplier;
-        defaultContradictionThreshold = 0.55 * transcriptMultiplier;
-        defaultGroundingThreshold = 0.45 * transcriptMultiplier;
-      }
-      
       console.log(`Building graph with ${evidenceRes.claims.length} claims, scorer: ${scorer.id}`);
       console.log(`Thresholds: support=${options?.supportThreshold ?? defaultSupportThreshold}, contradiction=${options?.contradictionThreshold ?? defaultContradictionThreshold}, grounding=${options?.groundingThreshold ?? defaultGroundingThreshold}`);
       if (isCallTranscript || hasConversationalPatterns) {
@@ -335,24 +376,47 @@ async function validateOnce(input: ValidateInput, adapter?: LLMAdapter, startTim
     
     console.log(`Consistency: ${uniqueContradictions.length} unique contradictions (weight=${contradictionWeight.toFixed(2)}, ${logicRes.contradictions.length} from logic, ${graph.contradictions.length} from graph), score: ${consistencyScore}`);
 
-    // 5) spectral
-    let spectral: (SpectralReport & { spectralSkipped?: boolean; debugReason?: string }) | undefined;
+    // 5) spectral - WITH GRAPH HEALTH GATING
+    let spectral: (SpectralReport & { spectralSkipped?: boolean; debugReason?: string; graphHealthDiagnostic?: any }) | undefined;
     let coherenceScore: number | null = null;
     const envSpectralUrl = process.env.TCL_SPECTRAL_URL || "";
     const urlToUse = spectralServiceUrl || envSpectralUrl;
     
-    // Check if we have edges for Spectral (use uniqueContradictions after it's created)
-    // Note: This will be updated after uniqueContradictions is computed
-    let totalEdges = graph.supports.length + graph.contradictions.length + graph.grounding.length;
+    // Calculate graph health metrics
+    const supportEdgeCount = graph.supports.length;
+    const contradictionEdgeCount = uniqueContradictions.length;
+    const groundingEdgeCount = graph.grounding.length;
+    const totalEdges = supportEdgeCount + contradictionEdgeCount + groundingEdgeCount;
+    
+    // Graph health diagnostic
+    const graphHealthDiagnostic = {
+      supportEdges: supportEdgeCount,
+      contradictionEdges: contradictionEdgeCount,
+      groundingEdges: groundingEdgeCount,
+      totalEdges,
+      claimsCount: evidenceRes.claims.length,
+      sourcesCount: sources.length,
+      transcriptSourcesGenerated: transcriptSourcesCount,
+      retrievalK,
+      nliModelId: scorer.id,
+      thresholds: {
+        support: options?.supportThreshold ?? defaultSupportThreshold,
+        contradiction: options?.contradictionThreshold ?? defaultContradictionThreshold,
+        grounding: options?.groundingThreshold ?? defaultGroundingThreshold
+      }
+    };
     
     // Debug logging
-    console.log(`Spectral check: enabled=${spectralEnabled}`);
-    console.log(`  - URL from options: ${spectralServiceUrl || 'NOT SET'}`);
-    console.log(`  - URL from env (TCL_SPECTRAL_URL): ${envSpectralUrl || 'NOT SET'}`);
-    console.log(`  - Final URL to use: ${urlToUse || 'NOT SET'}`);
-    // Calculate total edges after uniqueContradictions is computed
-    totalEdges = graph.supports.length + uniqueContradictions.length + graph.grounding.length;
-    console.log(`  - Total edges for Spectral: ${totalEdges} (supports: ${graph.supports.length}, contradictions: ${uniqueContradictions.length}, grounding: ${graph.grounding.length})`);
+    console.log(`📊 Graph Health Check:`);
+    console.log(`  - Claims: ${evidenceRes.claims.length}`);
+    console.log(`  - Sources: ${sources.length} (${transcriptSourcesCount} from transcript)`);
+    console.log(`  - Edges: ${totalEdges} total (support=${supportEdgeCount}, contradiction=${contradictionEdgeCount}, grounding=${groundingEdgeCount})`);
+    console.log(`  - NLI Model: ${scorer.id}`);
+    console.log(`  - Thresholds: support=${graphHealthDiagnostic.thresholds.support.toFixed(2)}, contradiction=${graphHealthDiagnostic.thresholds.contradiction.toFixed(2)}, grounding=${graphHealthDiagnostic.thresholds.grounding.toFixed(2)}`);
+    
+    // CRITICAL: Gate spectral on graph health
+    // Spectral on an empty graph produces mathematically valid but semantically meaningless results
+    const graphIsHealthy = totalEdges > 0 || groundingEdgeCount > 0;
     
     if (spectralEnabled) {
       if (!urlToUse) {
@@ -360,22 +424,46 @@ async function validateOnce(input: ValidateInput, adapter?: LLMAdapter, startTim
         console.warn("Please set TCL_SPECTRAL_URL environment variable in Railway.");
         spectral = {
           spectralSkipped: true,
-          debugReason: "no_spectral_url_configured"
+          debugReason: "no_spectral_url_configured",
+          graphHealthDiagnostic
         } as any;
         coherenceScore = null;
       } else if (evidenceRes.claims.length === 0) {
-        // Only skip spectral if there are truly no claims to analyze
         console.warn("⚠️ Spectral enabled but no claims to analyze. Skipping Spectral analysis.");
         spectral = {
           spectralSkipped: true,
-          debugReason: "no_claims_for_spectral"
+          debugReason: "no_claims_for_spectral",
+          graphHealthDiagnostic
+        } as any;
+        coherenceScore = null;
+      } else if (!graphIsHealthy && totalEdges === 0) {
+        // GATED: Empty graph produces meaningless spectral results
+        console.error("❌ SPECTRAL GATED: Graph has ZERO edges - spectral analysis would be meaningless.");
+        console.error("   Diagnosis:");
+        console.error(`   - NLI Model: ${scorer.id}`);
+        console.error(`   - Claims: ${evidenceRes.claims.length}`);
+        console.error(`   - Sources: ${sources.length}`);
+        console.error(`   - Possible causes:`);
+        console.error(`     1. NLI label mapping failure (check LABEL_0/1/2 → ENTAILMENT/etc)`);
+        console.error(`     2. Thresholds too high`);
+        console.error(`     3. No transcript sources generated`);
+        console.error(`     4. Claims too dissimilar`);
+        
+        spectral = {
+          spectralSkipped: true,
+          debugReason: "graph_empty_no_edges",
+          graphHealthDiagnostic,
+          coherenceScore: 0,
+          contradictionEnergy: 0,
+          supportEnergy: 0,
+          circularityScore: 0,
+          spectralGap: 0
         } as any;
         coherenceScore = null;
       } else {
-        // ALWAYS run spectral when we have claims - even with 0 edges
-        // Spectral can still compute truth states and identify ungrounded claims
+        // Graph has edges OR we want to compute truth states for ungrounded claims
         if (totalEdges === 0) {
-          console.log("📊 No edges detected, but running Spectral anyway to identify ungrounded claims");
+          console.log("📊 No edges detected, but running Spectral to identify ungrounded claims");
         }
         
         // If no grounding detected, synthetically ground agent claims
@@ -568,6 +656,33 @@ async function validateOnce(input: ValidateInput, adapter?: LLMAdapter, startTim
         )
       : undefined;
 
+    // Build run manifest for audit
+    const runManifest: RunManifest = {
+      inputHash: generateInputHash(question, answer),
+      artifactId,
+      claimExtractorVersion: "v1.0.0", // TODO: Extract from package.json
+      nliModelId: scorer.id,
+      nliThresholds: {
+        support: options?.supportThreshold ?? defaultSupportThreshold,
+        contradiction: options?.contradictionThreshold ?? defaultContradictionThreshold,
+        grounding: options?.groundingThreshold ?? defaultGroundingThreshold
+      },
+      embeddingModel: "simple-ngram-v1", // Our built-in embedding
+      retrievalK,
+      spectralEngineVersion: spectralEnabled && spectral && !spectral.spectralSkipped ? "v1.0.0" : undefined,
+      codeVersion: engineVersion,
+      createdAt: new Date().toISOString(),
+      transcriptSourcesCount,
+      graphHealth: {
+        supportEdges: supportEdgeCount,
+        contradictionEdges: contradictionEdgeCount,
+        groundingEdges: groundingEdgeCount,
+        totalEdges,
+        healthy: graphIsHealthy,
+        reason: !graphIsHealthy ? "zero_edges" : undefined
+      }
+    };
+
     return {
       answer,
       refusal,
@@ -589,12 +704,14 @@ async function validateOnce(input: ValidateInput, adapter?: LLMAdapter, startTim
           debug: graph.debug ? { 
             ...graph.debug, 
             spectralEnabled: spectralEnabled,
-            numSources: graph.debug.numSources // Ensure numSources is included (renamed from numSourceClaims)
-          } : undefined // Include debug info with spectral flag
+            numSources: sources.length, // Use actual sources count
+            transcriptSourcesGenerated: transcriptSourcesCount
+          } : undefined
         },
         suggestions,
         destructiveClaims: destructiveClaims.length > 0 ? destructiveClaims : undefined,
-        trajectory
+        trajectory,
+        manifest: runManifest // AUDIT-CRITICAL: Include run manifest
       }
     };
   } catch (error: any) {
