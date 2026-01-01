@@ -299,6 +299,8 @@ async function validateOnce(input: ValidateInput, adapter?: LLMAdapter, startTim
     
     const isHeuristic = scorer.id === "token-heuristic-v1" || scorer.id === "token-heuristic";
     const isLocalTransformers = scorer.id.includes("transformers");
+    const isSpectralNli = scorer.id.includes("spectral-nli");
+    const isRealNli = isLocalTransformers || isSpectralNli; // Real NLI model
     const transcriptMultiplier = (isCallTranscript || hasConversationalPatterns) ? 0.85 : 1.0;
     
     let defaultSupportThreshold: number;
@@ -306,14 +308,19 @@ async function validateOnce(input: ValidateInput, adapter?: LLMAdapter, startTim
     let defaultGroundingThreshold: number;
     
     if (isHeuristic) {
+      // Heuristic scorer - lower thresholds since it's not as accurate
       defaultSupportThreshold = 0.30 * transcriptMultiplier;
       defaultContradictionThreshold = 0.40 * transcriptMultiplier;
       defaultGroundingThreshold = 0.30 * transcriptMultiplier;
-    } else if (isLocalTransformers) {
+    } else if (isRealNli) {
+      // Real NLI model (local transformers or spectral service) - use optimal thresholds
+      // Lower for conversational text which has more noise
       defaultSupportThreshold = (isCallTranscript || hasConversationalPatterns) ? 0.25 : 0.35;
       defaultContradictionThreshold = (isCallTranscript || hasConversationalPatterns) ? 0.35 : 0.45;
       defaultGroundingThreshold = (isCallTranscript || hasConversationalPatterns) ? 0.25 : 0.35;
+      console.log(`🔬 Using real NLI scorer: ${scorer.id} with optimized thresholds`);
     } else {
+      // Unknown scorer - use moderate thresholds
       defaultSupportThreshold = 0.45 * transcriptMultiplier;
       defaultContradictionThreshold = 0.55 * transcriptMultiplier;
       defaultGroundingThreshold = 0.45 * transcriptMultiplier;
