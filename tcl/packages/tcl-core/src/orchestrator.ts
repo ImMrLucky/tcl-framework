@@ -7,6 +7,7 @@ import { collectFailingClaimIds, repairOnce } from "./repair.js";
 import type { LLMAdapter } from "./adapters/llm_adapter.js";
 import { buildClaimGraph, HttpNliScorer, TokenHeuristicScorer } from "./graph/edge_builder.js";
 import { TransformersNliScorer } from "./graph/transformers_scorer.js";
+import { SpectralNliScorer } from "./graph/spectral_nli_scorer.js";
 import { calculateAllClaimConfidences } from "./confidence.js";
 import { generateSuggestions } from "./suggestions.js";
 import { validateCustomRules } from "./custom_rules.js";
@@ -195,51 +196,99 @@ async function validateOnce(input: ValidateInput, adapter?: LLMAdapter, startTim
     const logicRes = findLogicViolations(evidenceRes.claims);
 
     // 4) production graph build
-    // Scorer priority: Custom NLI endpoint > Mistral API > Local Transformers > TokenHeuristicScorer (default)
+    // Scorer priority:
+    //   1. Spectral NLI (if TCL_SPECTRAL_URL configured - uses Python transformers, no native deps)
+    //   2. Custom NLI endpoint (if TCL_NLI_ENDPOINT configured)
+    //   3. Mistral API (if MISTRAL_API_KEY configured)
+    //   4. Local Transformers (may fail in containers)
+    //   5. TokenHeuristicScorer (fallback)
+    
+    const spectralUrl = options?.spectralServiceUrl || process.env.TCL_SPECTRAL_URL || "";
     const nliEndpoint = options?.nliEndpoint || process.env.TCL_NLI_ENDPOINT || "";
     const nliApiKey = options?.nliApiKey || process.env.TCL_NLI_API_KEY;
     const nliModelId = options?.nliModelId || process.env.TCL_NLI_MODEL_ID || "nli-default";
     const mistralApiKey = options?.mistralApiKey || process.env.MISTRAL_API_KEY;
     const mistralModel = options?.mistralModel || process.env.MISTRAL_MODEL;
-    const useLocalNli = options?.useLocalNli ?? (process.env.TCL_USE_LOCAL_NLI !== "false"); // Default: true
+    const useLocalNli = options?.useLocalNli ?? (process.env.TCL_USE_LOCAL_NLI === "true"); // Default: false (prefer spectral)
     
     let scorer;
-    if (nliEndpoint) {
-      // Priority 1: Custom NLI endpoint (most flexible - user's own NLI)
+    
+    if (spectralUrl && !nliEndpoint) {
+      // Priority 1: Spectral NLI (Python service with transformers - works in any container)
+      // This is the RECOMMENDED approach as it avoids native onnxruntime issues
+      try {
+        const spectralScorer = new SpectralNliScorer({ endpoint: spectralUrl });
+        
+        // Test the connection
+        console.log(`🔌 Testing Spectral NLI connection...`);
+        const testScore = await spectralScorer.entailment(
+          "The sky is blue.",
+          "The sky has a blue color."
+        );
+        
+        if (testScore >= 0) {
+          scorer = spectralScorer;
+          console.log(`✅ Using scorer: ${scorer.id} (Spectral Python service, test score: ${testScore.toFixed(3)})`);
+        } else {
+          throw new Error(`Test score invalid: ${testScore}`);
+        }
+      } catch (error: any) {
+        console.warn(`⚠️ Spectral NLI failed: ${error.message}`);
+        console.warn(`   Falling back to next scorer option...`);
+      }
+    }
+    
+    if (!scorer && nliEndpoint) {
+      // Priority 2: Custom NLI endpoint (most flexible - user's own NLI)
       scorer = new HttpNliScorer({ 
         endpoint: nliEndpoint, 
         apiKey: nliApiKey,
         modelId: nliModelId
       });
       console.log(`Using scorer: ${scorer.id} (custom NLI endpoint: ${nliEndpoint})`);
-    } else if (mistralApiKey) {
-      // Priority 2: Built-in Mistral API (easy upgrade, no deployment needed)
+    }
+    
+    if (!scorer && mistralApiKey) {
+      // Priority 3: Built-in Mistral API (easy upgrade, no deployment needed)
       const { MistralNliScorer } = await import("./graph/edge_builder.js");
       scorer = new MistralNliScorer({
         apiKey: mistralApiKey,
         model: mistralModel
       });
       console.log(`Using scorer: ${scorer.id} (Mistral API - auto-enabled)`);
-    } else if (useLocalNli) {
-      // Priority 3: Local Transformers model (downloads on first run, no API keys)
+    }
+    
+    if (!scorer && useLocalNli) {
+      // Priority 4: Local Transformers model (downloads on first run, no API keys)
+      // May fail in containers without native onnxruntime libraries
       try {
-        // Use roberta-large-mnli by default (best for NLI tasks)
-        // Can override with TCL_LOCAL_NLI_MODEL env var
         const localModelName = process.env.TCL_LOCAL_NLI_MODEL;
-        scorer = new TransformersNliScorer(
-          localModelName ? { modelName: localModelName } : {} // If not set, TransformersNliScorer uses roberta-large-mnli default
+        const transformersScorer = new TransformersNliScorer(
+          localModelName ? { modelName: localModelName } : {}
         );
-        console.log(`Using scorer: ${scorer.id} (local model - downloads ~1.3GB on first run, then cached)`);
+        console.log(`Testing local NLI model: ${transformersScorer.id}...`);
+        
+        const testScore = await transformersScorer.entailment(
+          "The sky is blue.",
+          "The sky has color."
+        );
+        
+        if (testScore >= 0) {
+          scorer = transformersScorer;
+          console.log(`✅ Using scorer: ${scorer.id} (local model verified, test score: ${testScore.toFixed(3)})`);
+        } else {
+          throw new Error(`Test score invalid: ${testScore}`);
+        }
       } catch (error: any) {
-        console.warn(`Failed to load local NLI model, falling back to heuristic:`, error.message);
-        scorer = new TokenHeuristicScorer();
-        console.log(`Using scorer: ${scorer.id} (fallback - basic accuracy)`);
+        console.warn(`⚠️ Local NLI model failed: ${error.message}`);
       }
-    } else {
-      // Priority 4: Default heuristic (free, works out of box)
+    }
+    
+    if (!scorer) {
+      // Priority 5: Fallback heuristic (always works, basic accuracy)
       scorer = new TokenHeuristicScorer();
-      console.log(`Using scorer: ${scorer.id} (free, basic accuracy)`);
-      console.log(`💡 Tip: Set TCL_USE_LOCAL_NLI=true to use local NLI model (downloads on first run)`);
+      console.log(`⚠️ Using scorer: ${scorer.id} (fallback - basic accuracy)`);
+      console.log(`💡 Tip: Configure TCL_SPECTRAL_URL to use Python-based NLI (recommended)`);
     }
 
     // Determine threshold values BEFORE graph building (hoisted for use in manifest)

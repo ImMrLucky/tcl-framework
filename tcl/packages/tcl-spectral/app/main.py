@@ -1,8 +1,105 @@
-from fastapi import FastAPI
-from .models import SpectralRequest, SpectralResponse, SpectralAnalyzeResponse, EdgeAttribution
+from fastapi import FastAPI, HTTPException
+from .models import (
+    SpectralRequest, SpectralResponse, SpectralAnalyzeResponse, EdgeAttribution,
+    NliBatchRequest, NliBatchResponse, NliScore,
+    BuildEdgesRequest, BuildEdgesResponse, EdgeIn, GroundingEdge
+)
 from .spectral import build_index, spectral_metrics, spectral_truth_vector, spectral_edge_attribution, spectral_fingerprint
+from . import nli
+import logging
 
-app = FastAPI(title="TCL-Spectral", version="0.3.0")
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+app = FastAPI(title="TCL-Spectral", version="0.4.0")
+
+
+# ============================================================================
+# HEALTH CHECK
+# ============================================================================
+
+@app.get("/health")
+def health():
+    """Health check endpoint."""
+    return {"status": "ok", "version": "0.4.0"}
+
+
+# ============================================================================
+# NLI SCORING ENDPOINTS
+# ============================================================================
+
+@app.post("/nli/score", response_model=NliBatchResponse)
+def nli_score(req: NliBatchRequest):
+    """
+    Score premise-hypothesis pairs using NLI model.
+    Returns entailment, neutral, contradiction probabilities for each pair.
+    
+    This is the core NLI endpoint that the Node.js backend calls
+    instead of trying to run transformers.js locally.
+    """
+    try:
+        pairs = [(p.premise, p.hypothesis) for p in req.pairs]
+        results = nli.score_batch(pairs)
+        
+        scores = []
+        for i, result in enumerate(results):
+            key = req.pairs[i].key if i < len(req.pairs) else None
+            scores.append(NliScore(
+                key=key,
+                entailment=result["entailment"],
+                neutral=result["neutral"],
+                contradiction=result["contradiction"]
+            ))
+        
+        return NliBatchResponse(scores=scores, model=nli._model_name)
+    except Exception as e:
+        logger.error(f"NLI scoring error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/nli/build-edges", response_model=BuildEdgesResponse)
+def build_edges(req: BuildEdgesRequest):
+    """
+    Build graph edges from claims and sources using NLI scoring.
+    
+    This is a convenience endpoint that:
+    1. Scores all claim-claim pairs for support/contradiction
+    2. Scores all claim-source pairs for grounding
+    3. Returns edges ready for spectral analysis
+    
+    The Node.js backend can call this instead of doing NLI locally.
+    """
+    try:
+        claims = [{"id": c.id, "text": c.text} for c in req.claims]
+        sources = [{"id": s.id, "text": s.text} for s in req.sources]
+        
+        result = nli.build_edges_from_claims(
+            claims=claims,
+            sources=sources,
+            support_threshold=req.supportThreshold,
+            contradiction_threshold=req.contradictionThreshold,
+            grounding_threshold=req.groundingThreshold
+        )
+        
+        return BuildEdgesResponse(
+            supports=[EdgeIn(claimA=e["claimA"], claimB=e["claimB"], weight=e["weight"]) 
+                     for e in result["supports"]],
+            contradictions=[EdgeIn(claimA=e["claimA"], claimB=e["claimB"], weight=e["weight"]) 
+                           for e in result["contradictions"]],
+            grounding=[GroundingEdge(**e) for e in result["grounding"]],
+            groundedClaimIds=result["groundedClaimIds"],
+            stats={
+                "claimsCount": len(claims),
+                "sourcesCount": len(sources),
+                "supportsCount": len(result["supports"]),
+                "contradictionsCount": len(result["contradictions"]),
+                "groundingCount": len(result["grounding"]),
+                "groundedClaimsCount": len(result["groundedClaimIds"])
+            }
+        )
+    except Exception as e:
+        logger.error(f"Build edges error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/spectral/score", response_model=SpectralResponse)
 def score(req: SpectralRequest):

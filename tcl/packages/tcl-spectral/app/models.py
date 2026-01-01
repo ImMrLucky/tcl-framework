@@ -61,3 +61,64 @@ class SpectralAnalyzeResponse(BaseModel):
     nodeBlame: Optional[List[float]] = None
     nodeBlameNorm: List[float]  # Added: normalized node blame (0..1)
     fingerprint: Optional[Dict[str, object]] = None
+
+
+# ============================================================================
+# NLI SCORING MODELS
+# ============================================================================
+
+class NliPair(BaseModel):
+    """A premise-hypothesis pair to score."""
+    premise: str
+    hypothesis: str
+    key: Optional[str] = None  # Optional identifier for the pair
+
+
+class NliScore(BaseModel):
+    """NLI score result for a single pair."""
+    key: Optional[str] = None
+    entailment: float
+    neutral: float
+    contradiction: float
+
+
+class NliBatchRequest(BaseModel):
+    """Batch NLI scoring request."""
+    pairs: List[NliPair]
+
+
+class NliBatchResponse(BaseModel):
+    """Batch NLI scoring response."""
+    scores: List[NliScore]
+    model: str = "roberta-large-mnli"
+
+
+class SourceIn(BaseModel):
+    """An evidence source (transcript turn)."""
+    id: str
+    text: str
+
+
+class BuildEdgesRequest(BaseModel):
+    """Request to build graph edges from claims and sources using NLI."""
+    claims: List[ClaimIn]
+    sources: List[SourceIn] = []
+    supportThreshold: float = Field(default=0.5, ge=0.0, le=1.0)
+    contradictionThreshold: float = Field(default=0.5, ge=0.0, le=1.0)
+    groundingThreshold: float = Field(default=0.4, ge=0.0, le=1.0)
+
+
+class GroundingEdge(BaseModel):
+    claimId: str
+    sourceId: str
+    weight: float
+    quote: Optional[str] = None
+
+
+class BuildEdgesResponse(BaseModel):
+    """Response with computed graph edges."""
+    supports: List[EdgeIn]
+    contradictions: List[EdgeIn]
+    grounding: List[GroundingEdge]
+    groundedClaimIds: List[str]
+    stats: Dict[str, int]

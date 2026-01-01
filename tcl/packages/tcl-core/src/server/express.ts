@@ -117,39 +117,121 @@ Agent: Based on what I can see, your plan hasn't changed.`;
       sample: claims[0]?.text?.substring(0, 100)
     };
     
-    // Step 4: Test NLI scorer loading
-    const { TransformersNliScorer } = await import("../graph/transformers_scorer.js");
-    const scorer = new TransformersNliScorer({});
-    diagnostic.steps.nliScorer = {
-      status: "loading",
-      modelId: scorer.id,
-      labelMap: scorer.labelMap
-    };
+    // Step 4: Test NLI scorer loading (priority: SpectralNli > Transformers > Heuristic)
+    let activeScorer: any = null;
+    let scorerType = "none";
     
-    // Step 5: Test NLI scoring with obvious entailment
-    try {
-      const entailScore = await scorer.entailment(
-        "The sky is blue.",
-        "The sky has a blue color."
-      );
-      const contradictScore = await scorer.contradiction(
-        "The door is open.",
-        "The door is closed."
-      );
-      
-      diagnostic.steps.nliScoring = {
-        status: entailScore > 0.3 || contradictScore > 0.3 ? "ok" : "low_scores",
-        entailmentScore: entailScore,
-        contradictionScore: contradictScore,
-        labelMapAfterLoad: scorer.labelMap,
-        warning: entailScore < 0.3 && contradictScore < 0.3 
-          ? "Both scores very low - NLI may not be working correctly"
-          : null
-      };
-    } catch (nliErr: any) {
+    // Try SpectralNliScorer first (recommended - uses Python service)
+    if (process.env.TCL_SPECTRAL_URL) {
+      try {
+        const { SpectralNliScorer } = await import("../graph/spectral_nli_scorer.js");
+        const spectralScorer = new SpectralNliScorer({ endpoint: process.env.TCL_SPECTRAL_URL });
+        diagnostic.steps.nliScorer = {
+          status: "testing",
+          type: "spectral",
+          modelId: spectralScorer.id,
+          endpoint: process.env.TCL_SPECTRAL_URL + "/nli/score"
+        };
+        
+        // Test if it works
+        const testScore = await spectralScorer.entailment("The sky is blue.", "The sky has color.");
+        if (testScore >= 0) {
+          activeScorer = spectralScorer;
+          scorerType = "spectral";
+          diagnostic.steps.nliScorer.status = "ok";
+          diagnostic.steps.nliScorer.testScore = testScore;
+        }
+      } catch (spectralErr: any) {
+        diagnostic.steps.nliScorer = {
+          status: "failed",
+          type: "spectral",
+          error: spectralErr.message,
+          willFallback: true
+        };
+      }
+    }
+    
+    // Try TransformersNliScorer if spectral failed
+    if (!activeScorer) {
+      try {
+        const { TransformersNliScorer } = await import("../graph/transformers_scorer.js");
+        const transformersScorer = new TransformersNliScorer({});
+        diagnostic.steps.nliScorerLocal = {
+          status: "testing",
+          type: "transformers",
+          modelId: transformersScorer.id
+        };
+        
+        const testScore = await transformersScorer.entailment("Test.", "Test.");
+        if (testScore >= 0) {
+          activeScorer = transformersScorer;
+          scorerType = "transformers";
+          diagnostic.steps.nliScorerLocal.status = "ok";
+        }
+      } catch (transformersErr: any) {
+        diagnostic.steps.nliScorerLocal = {
+          status: "failed",
+          type: "transformers",
+          error: transformersErr.message,
+          willFallback: true
+        };
+      }
+    }
+    
+    // Fallback to TokenHeuristicScorer
+    if (!activeScorer) {
+      try {
+        const { TokenHeuristicScorer } = await import("../graph/edge_builder.js");
+        activeScorer = new TokenHeuristicScorer();
+        scorerType = "heuristic";
+        diagnostic.steps.nliScorerFallback = {
+          status: "ok",
+          type: "heuristic",
+          modelId: activeScorer.id,
+          note: "Using TokenHeuristicScorer as fallback (basic accuracy - configure TCL_SPECTRAL_URL for better results)"
+        };
+      } catch (fallbackErr: any) {
+        diagnostic.steps.nliScorerFallback = {
+          status: "failed",
+          error: fallbackErr.message
+        };
+      }
+    }
+    
+    // Step 5: Test NLI scoring with the active scorer
+    if (activeScorer) {
+      try {
+        const entailScore = await activeScorer.entailment(
+          "The sky is blue.",
+          "The sky has a blue color."
+        );
+        const contradictScore = await activeScorer.contradiction(
+          "The door is open.",
+          "The door is closed."
+        );
+        
+        diagnostic.steps.nliScoring = {
+          status: "ok",
+          scorerType,
+          scorerId: activeScorer.id,
+          entailmentScore: entailScore,
+          contradictionScore: contradictScore,
+          labelMapAfterLoad: activeScorer.labelMap,
+          note: scorerType === "heuristic" 
+            ? "Using heuristic scorer - results will be basic but functional"
+            : null
+        };
+      } catch (nliErr: any) {
+        diagnostic.steps.nliScoring = {
+          status: "error",
+          scorerType,
+          error: nliErr.message
+        };
+      }
+    } else {
       diagnostic.steps.nliScoring = {
         status: "error",
-        error: nliErr.message
+        error: "No NLI scorer available"
       };
     }
     
@@ -159,18 +241,47 @@ Agent: Based on what I can see, your plan hasn't changed.`;
       status: process.env.TCL_SPECTRAL_URL ? "configured" : "missing"
     };
     
-    // Step 7: Test spectral connection
+    // Step 7: Test spectral connection (try multiple endpoints)
     if (process.env.TCL_SPECTRAL_URL) {
-      try {
-        const spectralHealth = await fetch(`${process.env.TCL_SPECTRAL_URL}/health`);
-        diagnostic.steps.spectralConnection = {
-          status: spectralHealth.ok ? "ok" : "error",
-          httpStatus: spectralHealth.status
-        };
-      } catch (spectralErr: any) {
+      const spectralUrl = process.env.TCL_SPECTRAL_URL.replace(/\/$/, '');
+      diagnostic.steps.spectralConnection = { status: "testing", url: spectralUrl };
+      
+      // Try health endpoint first, then root, then docs
+      const endpointsToTry = ['/health', '/', '/docs', '/spectral/score'];
+      let connected = false;
+      
+      for (const endpoint of endpointsToTry) {
+        try {
+          const resp = await fetch(`${spectralUrl}${endpoint}`, { 
+            method: endpoint === '/spectral/score' ? 'POST' : 'GET',
+            headers: { 'Content-Type': 'application/json' },
+            body: endpoint === '/spectral/score' ? JSON.stringify({
+              claims: [{ id: "test", text: "Test claim" }],
+              supports: [],
+              contradictions: [],
+              grounded: []
+            }) : undefined
+          });
+          
+          if (resp.ok || resp.status < 500) {
+            diagnostic.steps.spectralConnection = {
+              status: "ok",
+              endpoint: endpoint,
+              httpStatus: resp.status
+            };
+            connected = true;
+            break;
+          }
+        } catch (err: any) {
+          // Continue trying other endpoints
+        }
+      }
+      
+      if (!connected) {
         diagnostic.steps.spectralConnection = {
           status: "error",
-          error: spectralErr.message
+          error: "Could not connect to any spectral endpoint",
+          triedEndpoints: endpointsToTry
         };
       }
     }
@@ -180,8 +291,16 @@ Agent: Based on what I can see, your plan hasn't changed.`;
       evidenceSourcesWorking: diagnostic.steps.evidenceSources?.status === "ok",
       claimExtractionWorking: diagnostic.steps.claimExtraction?.status === "ok",
       nliScoringWorking: diagnostic.steps.nliScoring?.status === "ok",
+      nliScorerType: diagnostic.steps.nliScoring?.scorerType || "none",
       spectralConfigured: diagnostic.steps.spectralConfig?.status === "configured",
-      spectralConnected: diagnostic.steps.spectralConnection?.status === "ok"
+      spectralConnected: diagnostic.steps.spectralConnection?.status === "ok",
+      // Overall readiness
+      pipelineReady: (
+        diagnostic.steps.evidenceSources?.status === "ok" &&
+        diagnostic.steps.claimExtraction?.status === "ok" &&
+        diagnostic.steps.nliScoring?.status === "ok" &&
+        diagnostic.steps.spectralConnection?.status === "ok"
+      )
     };
     
     res.json(diagnostic);

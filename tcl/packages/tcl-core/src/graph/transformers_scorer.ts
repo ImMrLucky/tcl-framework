@@ -115,26 +115,43 @@ export class TransformersNliScorer implements SemanticScorer {
     if (this.model) return this.model;
 
     try {
-      // Set environment variable BEFORE import to force WASM-only mode
-      // This prevents onnxruntime-node from trying to load native bindings
+      // CRITICAL: Set environment variables BEFORE import to force WASM-only mode
+      // This prevents onnxruntime-node native library from being loaded (causes errors in containers)
       if (typeof process !== 'undefined' && process.env) {
+        // Force WASM backend
+        process.env.TRANSFORMERS_BACKEND = 'wasm';
         process.env.USE_WASM = '1';
-        // Prevent onnxruntime-node from being used
+        // Disable native onnxruntime
         process.env.ONNXRUNTIME_EXECUTION_PROVIDERS = '';
+        process.env.ONNX_DISABLE_NATIVE = '1';
       }
       
       // Dynamic import to avoid bundling transformers.js if not used
-      const { pipeline, env } = await import("@xenova/transformers");
+      const transformersModule = await import("@xenova/transformers");
+      const { pipeline, env } = transformersModule;
       
-      // Force WASM backend to avoid native onnxruntime-node dependency
-      // This prevents errors in containers that don't have native libraries
-      if (env && env.backends && env.backends.onnx) {
-        // Disable proxy mode and use WASM directly
-        env.backends.onnx.wasm.proxy = false;
-        env.backends.onnx.wasm.numThreads = 1;
+      // CRITICAL: Force WASM backend configuration BEFORE loading any model
+      // This must be done before pipeline() is called
+      if (env) {
+        // Disable local model check (always download from hub)
+        env.allowLocalModels = false;
+        
+        // Force WASM backend
+        if (env.backends) {
+          // Disable ONNX native backend entirely
+          if (env.backends.onnx) {
+            // Use WASM exclusively
+            env.backends.onnx.wasm = env.backends.onnx.wasm || {};
+            env.backends.onnx.wasm.proxy = false;
+            env.backends.onnx.wasm.numThreads = 1;
+          }
+        }
+        
+        // Set cache directory
+        env.cacheDir = this.cacheDir;
       }
       
-      console.log(`Loading NLI model: ${this.modelName} (this may take a minute on first run)...`);
+      console.log(`Loading NLI model: ${this.modelName} (WASM-only mode, may take a minute on first run)...`);
       
       // For MNLI models (like roberta-large-mnli), use text-classification pipeline
       // MNLI models are specifically trained for Natural Language Inference tasks
