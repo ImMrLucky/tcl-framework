@@ -106,21 +106,24 @@ export class EvaluationResultsComponent implements OnInit {
   }
 
   getSeverity(issue: Issue): 'critical' | 'high' | 'medium' | 'low' {
-    // Use pre-computed severity if available
-    if (issue.severity) {
-      return issue.severity;
+    // Use pre-computed severity if available (handles nested structure)
+    const severity = (issue as any).risk?.severity || issue.severity;
+    if (severity) {
+      return severity;
     }
     
-    // Fallback to computing severity from other fields
-    const nodeBlame = issue.nodeBlameNorm || 0;
+    // Fallback to computing severity from other fields (handles nested structure)
+    const nodeBlame = (issue as any).confidence?.nodeBlameNorm || issue.nodeBlameNorm || 0;
+    const issueType = (issue as any).what?.issueType || issue.issueType;
+    const truthState = (issue as any).what?.truthState || issue.truthState;
     
-    if (issue.issueType === 'POLICY_VIOLATION' && issue.truthState === 'Contradicted') {
+    if (issueType === 'POLICY_VIOLATION' && truthState === 'Contradicted') {
       return 'critical';
     }
-    if (issue.truthState === 'Contradicted' || issue.issueType === 'POLICY_VIOLATION') {
+    if (truthState === 'Contradicted' || issueType === 'POLICY_VIOLATION') {
       return 'high';
     }
-    if (issue.truthState === 'Ungrounded' || issue.issueType === 'POLICY_MISS' || nodeBlame > 0.7) {
+    if (truthState === 'Ungrounded' || issueType === 'POLICY_MISS' || nodeBlame > 0.7) {
       return 'medium';
     }
     if (nodeBlame > 0.3) {
@@ -144,9 +147,10 @@ export class EvaluationResultsComponent implements OnInit {
   }
 
   getClaimText(claimId: string, issue?: Issue): string {
-    // First check if issue has the claim text directly
-    if (issue?.claimText) {
-      return issue.claimText;
+    // First check if issue has the claim text directly (handles nested structure)
+    const claimText = (issue as any)?.what?.claimText || issue?.claimText;
+    if (claimText) {
+      return claimText;
     }
     
     // Try report.inputs.claims
@@ -180,7 +184,8 @@ export class EvaluationResultsComponent implements OnInit {
    * Get evidence location string (e.g., "Call · Line 13")
    */
   getEvidenceLocation(issue: Issue): string {
-    const turnIdx = issue.turnStartIdx ?? issue.primaryEvidence?.turnIdx;
+    // Handle nested structure (issue.where.turnStartIdx)
+    const turnIdx = (issue as any).where?.turnStartIdx ?? issue.turnStartIdx ?? issue.primaryEvidence?.turnIdx;
     if (turnIdx !== undefined && turnIdx !== null) {
       return `Call · Line ${turnIdx + 1}`;
     }
@@ -339,22 +344,24 @@ export class EvaluationResultsComponent implements OnInit {
     };
     
     this.sortedIssues = [...this.issues].sort((a, b) => {
-      // First by truth state
-      const stateA = truthStateOrder[a.truthState] || 99;
-      const stateB = truthStateOrder[b.truthState] || 99;
+      // First by truth state (handles nested structure)
+      const stateA = truthStateOrder[(a as any).what?.truthState || a.truthState] || 99;
+      const stateB = truthStateOrder[(b as any).what?.truthState || b.truthState] || 99;
       if (stateA !== stateB) {
         return stateA - stateB;
       }
       
-      // Then by nodeBlameNorm desc
-      const blameA = a.nodeBlameNorm || 0;
-      const blameB = b.nodeBlameNorm || 0;
+      // Then by nodeBlameNorm desc (handles nested structure)
+      const blameA = (a as any).confidence?.nodeBlameNorm || a.nodeBlameNorm || 0;
+      const blameB = (b as any).confidence?.nodeBlameNorm || b.nodeBlameNorm || 0;
       if (blameA !== blameB) {
         return blameB - blameA;
       }
       
-      // Then by importance desc
-      return (b.importance || 0) - (a.importance || 0);
+      // Then by importance desc (handles nested structure)
+      const importanceA = (a as any).confidence?.importance || a.importance || 0;
+      const importanceB = (b as any).confidence?.importance || b.importance || 0;
+      return importanceB - importanceA;
     });
   }
 
@@ -385,14 +392,19 @@ export class EvaluationResultsComponent implements OnInit {
     
     // If no spectral nodeBlameNorm, try to derive from issues
     if (this.topOffenders.length === 0 && this.issues.length > 0) {
-      // Use issues with highest importance as top offenders
+      // Use issues with highest importance as top offenders (handles nested structure)
       this.topOffenders = [...this.issues]
-        .sort((a, b) => (b.importance || 0) - (a.importance || 0))
+        .sort((a, b) => {
+          const importanceA = (a as any).confidence?.importance || a.importance || 0;
+          const importanceB = (b as any).confidence?.importance || b.importance || 0;
+          return importanceB - importanceA;
+        })
         .slice(0, 5)
         .map(issue => ({
           claimId: issue.claimId,
-          text: issue.claimText || this.getClaimText(issue.claimId, issue),
-          nodeBlameNorm: issue.nodeBlameNorm || issue.importance || 0
+          text: (issue as any).what?.claimText || issue.claimText || this.getClaimText(issue.claimId, issue),
+          nodeBlameNorm: (issue as any).confidence?.nodeBlameNorm || issue.nodeBlameNorm || 
+                         (issue as any).confidence?.importance || issue.importance || 0
         }));
     }
     
@@ -439,11 +451,15 @@ export class EvaluationResultsComponent implements OnInit {
    * Get "Where" text for an issue (turn numbers)
    */
   getWhereText(issue: Issue): string {
-    if (issue.turnStartIdx !== undefined && issue.turnEndIdx !== undefined) {
-      if (issue.turnStartIdx === issue.turnEndIdx) {
-        return `Turn ${issue.turnStartIdx}`;
+    // Handle nested structure (issue.where.turnStartIdx/turnEndIdx)
+    const turnStartIdx = (issue as any).where?.turnStartIdx ?? issue.turnStartIdx;
+    const turnEndIdx = (issue as any).where?.turnEndIdx ?? issue.turnEndIdx;
+    
+    if (turnStartIdx !== undefined && turnEndIdx !== undefined) {
+      if (turnStartIdx === turnEndIdx) {
+        return `Turn ${turnStartIdx}`;
       }
-      return `Turns ${issue.turnStartIdx}–${issue.turnEndIdx}`;
+      return `Turns ${turnStartIdx}–${turnEndIdx}`;
     }
     return 'N/A';
   }

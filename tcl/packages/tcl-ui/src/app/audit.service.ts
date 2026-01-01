@@ -96,29 +96,74 @@ export interface Evaluation {
 
 export interface Issue {
   claimId: string;
-  truthState: 'Contradicted' | 'Supported' | 'Ungrounded' | 'Inconclusive';
-  nodeBlameNorm: number;
-  importance: number;
-  issueType: 'CONTRADICTION' | 'UNSUPPORTED' | 'POLICY_MISS' | 'POLICY_VIOLATION' | 'CIRCULAR';
-  speaker: 'AGENT' | 'CUSTOMER' | 'UNKNOWN' | 'SYSTEM';
+  issueId?: string;
+  status: 'OPEN' | 'ACKNOWLEDGED' | 'RESOLVED' | 'FALSE_POSITIVE';
+  
+  // Nested structure from DefensibleIssue (new format)
+  who?: {
+    speaker: 'AGENT' | 'CUSTOMER' | 'UNKNOWN' | 'SYSTEM';
+    speakerLabel: string;
+  };
+  what?: {
+    claimText: string;
+    claimSummary: string;
+    issueType: 'CONTRADICTION' | 'UNSUPPORTED' | 'POLICY_MISS' | 'POLICY_VIOLATION' | 'CIRCULAR' | 'VAGUE_LANGUAGE' | 'LATE_DISCLAIMER';
+    truthState: 'Contradicted' | 'Supported' | 'Ungrounded' | 'Inconclusive';
+    description: string;
+    whyFlagged: string;
+  };
+  where?: {
+    turnStartIdx?: number;
+    turnEndIdx?: number;
+    timestampStartMs?: number;
+    timestampEndMs?: number;
+    excerpt: string;
+  };
+  risk?: {
+    severity: 'critical' | 'high' | 'medium' | 'low';
+    category: string;
+    explanation: string;
+    policyRuleIds?: string[];
+  };
+  confidence?: {
+    nodeBlameNorm: number;
+    importance: number;
+    nliScore?: number;
+    groundingScore?: number;
+  };
+  conflictsWith?: Array<{
+    claimId: string;
+    relationshipType: 'contradiction' | 'unsupported_by';
+    weight: number;
+    claimText?: string;
+  }>;
+  
+  // Legacy flat fields (for backward compatibility)
+  truthState?: 'Contradicted' | 'Supported' | 'Ungrounded' | 'Inconclusive';
+  nodeBlameNorm?: number;
+  importance?: number;
+  issueType?: 'CONTRADICTION' | 'UNSUPPORTED' | 'POLICY_MISS' | 'POLICY_VIOLATION' | 'CIRCULAR' | 'VAGUE_LANGUAGE' | 'LATE_DISCLAIMER';
+  speaker?: 'AGENT' | 'CUSTOMER' | 'UNKNOWN' | 'SYSTEM';
+  speakerLabel?: string;
   turnStartIdx?: number;
   turnEndIdx?: number;
+  claimText?: string;
+  claimSummary?: string;
+  description?: string;
+  whyFlagged?: string;
+  severity?: 'critical' | 'high' | 'medium' | 'low';
+  riskCategory?: string;
+  riskExplanation?: string;
+  evidenceLocation?: string;
   primaryEvidence?: {
     turnIdx: number;
     speaker: string;
     excerpt: string;
   };
-  relatedEdges: {
+  relatedEdges?: {
     topBadContradictions: any[];
     topBadSupports: any[];
   };
-  status: 'OPEN' | 'ACKNOWLEDGED' | 'RESOLVED' | 'FALSE_POSITIVE';
-  // Additional fields from DefensibleIssue
-  claimText?: string;
-  description?: string;
-  severity?: 'critical' | 'high' | 'medium' | 'low';
-  riskCategory?: string;
-  riskExplanation?: string;
 }
 
 export interface ExportResponse {
