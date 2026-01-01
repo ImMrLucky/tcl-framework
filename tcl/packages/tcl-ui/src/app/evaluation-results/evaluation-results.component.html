@@ -262,7 +262,7 @@
                 <td mat-cell *matCellDef="let issue">
                   <div class="where-text">{{ getWhereText(issue) }}</div>
                   <div class="timestamp-text" *ngIf="issue.primaryEvidence?.turnIdx !== undefined">
-                    Evidence: Turn {{ issue.primaryEvidence.turnIdx }}
+                    Evidence: Turn {{ issue.primaryEvidence?.turnIdx }}
                   </div>
                 </td>
               </ng-container>
