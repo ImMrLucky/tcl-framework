@@ -436,34 +436,21 @@ async function validateOnce(input: ValidateInput, adapter?: LLMAdapter, startTim
           graphHealthDiagnostic
         } as any;
         coherenceScore = null;
-      } else if (!graphIsHealthy && totalEdges === 0) {
-        // GATED: Empty graph produces meaningless spectral results
-        console.error("❌ SPECTRAL GATED: Graph has ZERO edges - spectral analysis would be meaningless.");
-        console.error("   Diagnosis:");
-        console.error(`   - NLI Model: ${scorer.id}`);
-        console.error(`   - Claims: ${evidenceRes.claims.length}`);
-        console.error(`   - Sources: ${sources.length}`);
-        console.error(`   - Possible causes:`);
-        console.error(`     1. NLI label mapping failure (check LABEL_0/1/2 → ENTAILMENT/etc)`);
-        console.error(`     2. Thresholds too high`);
-        console.error(`     3. No transcript sources generated`);
-        console.error(`     4. Claims too dissimilar`);
-        
-        spectral = {
-          spectralSkipped: true,
-          debugReason: "graph_empty_no_edges",
-          graphHealthDiagnostic,
-          coherenceScore: 0,
-          contradictionEnergy: 0,
-          supportEnergy: 0,
-          circularityScore: 0,
-          spectralGap: 0
-        } as any;
-        coherenceScore = null;
       } else {
-        // Graph has edges OR we want to compute truth states for ungrounded claims
+        // ALWAYS run spectral - but surface diagnostics if graph is empty
+        // Empty graphs will still produce results (identifying ungrounded claims)
         if (totalEdges === 0) {
-          console.log("📊 No edges detected, but running Spectral to identify ungrounded claims");
+          console.warn("⚠️ DIAGNOSTIC: Graph has ZERO edges - spectral will run but results may be limited.");
+          console.warn("   This is NOT a silent failure - investigate root cause:");
+          console.warn(`   - NLI Model: ${scorer.id}`);
+          console.warn(`   - Claims: ${evidenceRes.claims.length}`);
+          console.warn(`   - Sources: ${sources.length} (${transcriptSourcesCount} from transcript)`);
+          console.warn(`   - Thresholds: support=${graphHealthDiagnostic.thresholds.support.toFixed(2)}, contradiction=${graphHealthDiagnostic.thresholds.contradiction.toFixed(2)}`);
+          console.warn(`   - Possible causes:`);
+          console.warn(`     1. NLI label mapping failure (check LABEL_0/1/2 → ENTAILMENT/etc)`);
+          console.warn(`     2. Thresholds too high for this content`);
+          console.warn(`     3. No transcript sources generated`);
+          console.warn(`     4. Claims too dissimilar`);
         }
         
         // If no grounding detected, synthetically ground agent claims
