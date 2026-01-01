@@ -169,7 +169,7 @@ export type ValidationOptions = {
   includeConfidenceMetrics?: boolean; // Include detailed confidence scores (default: true)
   
   // Upgrade features
-  spectralMode?: "score" | "analyze"; // default "analyze" (use /spectral/analyze endpoint)
+  // Note: spectralMode removed - always uses /spectral/analyze (production endpoint)
   trajectory?: boolean;               // enable trajectory scoring for transcripts
   trajectoryWindowTurns?: number;     // default 3
   maxTrajectorySegments?: number;      // default 20 (guard for large transcripts)

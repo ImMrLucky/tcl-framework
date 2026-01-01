@@ -118,7 +118,9 @@ async function validateOnce(input: ValidateInput, adapter?: LLMAdapter, startTim
   const validationStartTime = startTime ?? Date.now();
   try {
     const { question, answer, sources: externalSources, options } = input;
-    const spectralEnabled = !!options?.spectral;
+    // Spectral is the CORE VALUE of the app - enabled by default
+    // Only disable if explicitly set to false
+    const spectralEnabled = options?.spectral !== false;
     const spectralServiceUrl = options?.spectralServiceUrl ?? process.env.TCL_SPECTRAL_URL ?? "";
     
     // Configuration for this run
@@ -476,52 +478,25 @@ async function validateOnce(input: ValidateInput, adapter?: LLMAdapter, startTim
         }
         
         try {
-          const spectralMode = options?.spectralMode ?? "analyze"; // Default to "analyze" for new features
-          console.log(`📡 Calling Spectral service at: ${urlToUse} (mode: ${spectralMode})`);
+          // ALWAYS use /spectral/analyze - this is the production endpoint
+          // /spectral/score was the first iteration for testing only
+          console.log(`📡 Calling Spectral service at: ${urlToUse}/spectral/analyze`);
           
-          if (spectralMode === "analyze") {
-            // Use new /spectral/analyze endpoint for truthVector, nodeBlame, etc.
-            try {
-              spectral = await callSpectralAnalyzeService(
-                urlToUse,
-                evidenceRes.claims.map((c) => ({ id: c.id, text: c.text })),
-                graph.supports,
-                uniqueContradictions.map(c => ({ claimA: c.claimA, claimB: c.claimB, weight: c.weight })),
-                groundedForSpectral,
-                {
-                  wSupport: undefined, // Use spectral service defaults
-                  wContradiction: undefined,
-                  wCircularity: undefined,
-                  cycleMaxLen: undefined
-                }
-              );
-              coherenceScore = spectral.coherenceScore;
-              console.log(`✅ Spectral ANALYZE complete. Coherence: ${coherenceScore}, truthVector: ${spectral.truthVector?.length || 0} values`);
-            } catch (analyzeError: any) {
-              console.warn(`⚠️ Spectral ANALYZE failed, falling back to SCORE: ${analyzeError?.message}`);
-              // Fallback to /spectral/score if /analyze fails
-              spectral = await callSpectralService(
-                urlToUse,
-                evidenceRes.claims.map((c) => ({ id: c.id, text: c.text })),
-                graph.supports,
-                uniqueContradictions.map(c => ({ claimA: c.claimA, claimB: c.claimB, weight: c.weight })),
-                groundedForSpectral
-              );
-              coherenceScore = spectral.coherenceScore;
-              console.log(`✅ Spectral SCORE complete. Coherence: ${coherenceScore}`);
+          spectral = await callSpectralAnalyzeService(
+            urlToUse,
+            evidenceRes.claims.map((c) => ({ id: c.id, text: c.text })),
+            graph.supports,
+            uniqueContradictions.map(c => ({ claimA: c.claimA, claimB: c.claimB, weight: c.weight })),
+            groundedForSpectral,
+            {
+              wSupport: undefined, // Use spectral service defaults
+              wContradiction: undefined,
+              wCircularity: undefined,
+              cycleMaxLen: undefined
             }
-          } else {
-            // Use legacy /spectral/score endpoint
-            spectral = await callSpectralService(
-              urlToUse,
-              evidenceRes.claims.map((c) => ({ id: c.id, text: c.text })),
-              graph.supports,
-              uniqueContradictions.map(c => ({ claimA: c.claimA, claimB: c.claimB, weight: c.weight })),
-              groundedForSpectral
-            );
-            coherenceScore = spectral.coherenceScore;
-            console.log(`✅ Spectral SCORE complete. Coherence: ${coherenceScore}`);
-          }
+          );
+          coherenceScore = spectral.coherenceScore;
+          console.log(`✅ Spectral ANALYZE complete. Coherence: ${coherenceScore}, truthVector: ${spectral.truthVector?.length || 0} values`);
         } catch (error: any) {
           console.error("❌ Spectral service error:", error);
           console.error("Error message:", error?.message);
