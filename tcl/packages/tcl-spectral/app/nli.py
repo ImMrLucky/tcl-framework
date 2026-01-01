@@ -15,12 +15,14 @@ logger = logging.getLogger(__name__)
 # Global model instances (lazy loaded)
 _model = None
 _tokenizer = None
-_model_name = "FacebookAI/roberta-large-mnli"
+# Use smaller model to fit in Railway memory constraints (~300MB vs 2GB)
+# cross-encoder/nli-distilroberta-base is specifically trained for NLI
+_model_name = "cross-encoder/nli-distilroberta-base"
 _device = None
 
-# MNLI label mapping for roberta-large-mnli
-# 0 = CONTRADICTION, 1 = NEUTRAL, 2 = ENTAILMENT
-LABEL_MAP = {0: "contradiction", 1: "neutral", 2: "entailment"}
+# MNLI label mapping 
+# For cross-encoder/nli-distilroberta-base: 0 = contradiction, 1 = entailment, 2 = neutral
+LABEL_MAP = {0: "contradiction", 1: "entailment", 2: "neutral"}
 
 
 def get_model_and_tokenizer():
@@ -67,11 +69,12 @@ def score_pair(premise: str, hypothesis: str) -> Dict[str, float]:
         logits = outputs.logits
         probs = F.softmax(logits, dim=-1)[0]
     
-    # Map to labels
+    # Map to labels based on model
+    # cross-encoder/nli-distilroberta-base: 0=contradiction, 1=entailment, 2=neutral
     scores = {
         "contradiction": float(probs[0]),
-        "neutral": float(probs[1]),
-        "entailment": float(probs[2])
+        "entailment": float(probs[1]),
+        "neutral": float(probs[2])
     }
     
     return scores
@@ -114,12 +117,13 @@ def score_batch(pairs: List[Tuple[str, str]]) -> List[Dict[str, float]]:
         probs = F.softmax(logits, dim=-1)
     
     # Convert to list of score dicts
+    # cross-encoder/nli-distilroberta-base: 0=contradiction, 1=entailment, 2=neutral
     all_scores = []
     for i in range(len(pairs)):
         scores = {
             "contradiction": float(probs[i][0]),
-            "neutral": float(probs[i][1]),
-            "entailment": float(probs[i][2])
+            "entailment": float(probs[i][1]),
+            "neutral": float(probs[i][2])
         }
         all_scores.append(scores)
     

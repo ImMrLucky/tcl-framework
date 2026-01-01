@@ -77,7 +77,7 @@ def nli_test():
         
         return {
             "status": "ok",
-            "model": "roberta-large-mnli",
+            "model": "nli-distilroberta-base",
             "tests": {
                 "entailment_test": {
                     "premise": "The sky is blue.",
@@ -141,7 +141,7 @@ def nli_score(req: NliBatchRequest):
                 contradiction=result["contradiction"]
             ))
         
-        return NliBatchResponse(scores=scores, model="roberta-large-mnli")
+        return NliBatchResponse(scores=scores, model="nli-distilroberta-base")
     except Exception as e:
         logger.error(f"NLI scoring error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
