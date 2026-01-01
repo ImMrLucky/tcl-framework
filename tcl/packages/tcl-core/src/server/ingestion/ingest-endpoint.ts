@@ -168,7 +168,7 @@ export function registerIngestEndpoints(app: express.Express) {
           conversation_id: conversationId,
           artifact_type: artifactType,
           content_json: result.normalized,
-          storage_ref: null,
+          storage_ref: `inline:${conversationId}`, // Not stored externally, content is in content_json
         })
         .select("id")
         .single();
