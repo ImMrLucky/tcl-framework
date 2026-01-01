@@ -25,9 +25,11 @@ export interface DefensibleIssue {
   // WHAT: What exactly is the problem?
   what: {
     claimText: string;
-    issueType: "CONTRADICTION" | "UNSUPPORTED" | "CIRCULAR" | "POLICY_VIOLATION" | "POLICY_MISS";
+    claimSummary: string; // Truncated version for table display
+    issueType: "CONTRADICTION" | "UNSUPPORTED" | "CIRCULAR" | "POLICY_VIOLATION" | "POLICY_MISS" | "VAGUE_LANGUAGE" | "LATE_DISCLAIMER";
     truthState: "Contradicted" | "Supported" | "Ungrounded" | "Inconclusive";
-    description: string; // Human-readable explanation
+    description: string; // Short human-readable description
+    whyFlagged: string; // Detailed explanation of why this was flagged
   };
   
   // WHO: Who made the claim?
@@ -509,7 +511,7 @@ function getSeverity(
 }
 
 /**
- * Generate human-readable issue description
+ * Generate human-readable issue description (short summary)
  */
 function generateIssueDescription(
   truthState: string,
@@ -517,23 +519,96 @@ function generateIssueDescription(
   speaker: string,
   conflictsCount: number
 ): string {
-  const speakerLabel = speaker === "AGENT" ? "The agent" : 
-                       speaker === "CUSTOMER" ? "The customer" : "A speaker";
+  const speakerLabel = speaker === "AGENT" ? "Agent" : 
+                       speaker === "CUSTOMER" ? "Customer" : "Speaker";
   
   switch (issueType) {
     case "CONTRADICTION":
-      return `${speakerLabel} made a statement that directly contradicts ${conflictsCount > 1 ? `${conflictsCount} other statements` : 'another statement'} in this conversation.`;
+      return `${speakerLabel} statement contradicts ${conflictsCount > 1 ? `${conflictsCount} other claims` : 'another claim'}`;
     case "UNSUPPORTED":
-      return `${speakerLabel} made a claim that has no supporting evidence or grounding in the available sources.`;
+      return `${speakerLabel} claim has no supporting evidence`;
     case "CIRCULAR":
-      return `This claim is part of a circular reasoning chain where claims mutually support each other without external evidence.`;
+      return `Circular reasoning detected - claims support each other without external evidence`;
     case "POLICY_VIOLATION":
-      return `${speakerLabel} made a statement that violates one or more policy rules.`;
+      return `${speakerLabel} statement violates policy rules`;
     case "POLICY_MISS":
-      return `${speakerLabel} may have missed a required policy disclosure or statement.`;
+      return `Required policy disclosure may be missing`;
     default:
-      return `An inconsistency was detected in this statement.`;
+      return `Inconsistency detected`;
   }
+}
+
+/**
+ * Generate a specific "Why Flagged" explanation that includes conflict details
+ */
+function generateWhyFlagged(
+  issueType: string,
+  speaker: string,
+  claimText: string,
+  conflicts: Array<{ claimId: string; claimText: string; relationshipType: string; edgeWeight: number }>
+): string {
+  const claimSummary = claimText.length > 80 ? claimText.substring(0, 77) + "..." : claimText;
+  
+  if (issueType === "CONTRADICTION" && conflicts.length > 0) {
+    // Find the strongest contradiction
+    const strongestConflict = conflicts
+      .filter(c => c.relationshipType === "contradiction")
+      .sort((a, b) => b.edgeWeight - a.edgeWeight)[0];
+    
+    if (strongestConflict) {
+      const conflictText = strongestConflict.claimText.length > 100 
+        ? strongestConflict.claimText.substring(0, 97) + "..." 
+        : strongestConflict.claimText;
+      return `Directly contradicted by: "${conflictText}"`;
+    }
+    return `Contradicts ${conflicts.length} other statement(s) in the conversation`;
+  }
+  
+  if (issueType === "UNSUPPORTED") {
+    return `No grounding in evidence documents, policy, or verified sources`;
+  }
+  
+  if (issueType === "CIRCULAR") {
+    return `Part of circular reasoning chain - claims mutually support without independent verification`;
+  }
+  
+  if (issueType === "POLICY_VIOLATION") {
+    return `Statement conflicts with established policy guidelines`;
+  }
+  
+  if (issueType === "POLICY_MISS") {
+    return `Required disclosure not provided to customer`;
+  }
+  
+  // Check for vague language patterns
+  const vaguePatterns = [
+    /depends on/i,
+    /it varies/i,
+    /might be/i,
+    /could be/i,
+    /sometimes/i,
+    /usually/i,
+    /in some cases/i
+  ];
+  
+  if (vaguePatterns.some(p => p.test(claimText))) {
+    return `Vague language increases risk of customer misunderstanding`;
+  }
+  
+  // Check for disclaimer patterns appearing late
+  const disclaimerPatterns = [
+    /terms and conditions/i,
+    /service agreement/i,
+    /fine print/i,
+    /details.*agreement/i,
+    /outlined in/i
+  ];
+  
+  if (disclaimerPatterns.some(p => p.test(claimText))) {
+    return `Disclaimer/caveat may appear too late in conversation`;
+  }
+  
+  return `Claim requires verification or supporting evidence`;
 }
 
 /**
@@ -641,8 +716,9 @@ export function buildIssuesList(
       speakerRaw === "Customer" || speakerRaw === "CUSTOMER" ? "CUSTOMER" :
       speakerRaw === "System" || speakerRaw === "SYSTEM" ? "SYSTEM" : "UNKNOWN";
     
-    // Determine issue type
-    let issueType: "CONTRADICTION" | "UNSUPPORTED" | "CIRCULAR" | "POLICY_VIOLATION" | "POLICY_MISS" = "UNSUPPORTED";
+    // Determine issue type - more specific categorization
+    let issueType: "CONTRADICTION" | "UNSUPPORTED" | "CIRCULAR" | "POLICY_VIOLATION" | "POLICY_MISS" | "VAGUE_LANGUAGE" | "LATE_DISCLAIMER" = "UNSUPPORTED";
+    
     if (truthState === "Contradicted") {
       issueType = "CONTRADICTION";
     }
@@ -652,6 +728,25 @@ export function buildIssuesList(
     const cycleMass = spectral.cycleMass || 0;
     if (circularityScore > 30 && cycleMass > 0.1 && truthState === "Ungrounded") {
       issueType = "CIRCULAR";
+    }
+    
+    // Check for vague language patterns (common compliance risks)
+    const vaguePatterns = [
+      /depends on/i, /it varies/i, /might be/i, /could be/i,
+      /sometimes/i, /usually/i, /in some cases/i, /probably/i
+    ];
+    if (vaguePatterns.some(p => p.test(claim.text)) && speaker === "AGENT") {
+      issueType = "VAGUE_LANGUAGE";
+    }
+    
+    // Check for late disclaimers (disclaimer text appearing after main content)
+    const disclaimerPatterns = [
+      /terms and conditions/i, /service agreement/i, /fine print/i,
+      /details.*agreement/i, /outlined in/i, /subject to/i
+    ];
+    const turnIndex = claim.meta?.turnIndex || 0;
+    if (disclaimerPatterns.some(p => p.test(claim.text)) && turnIndex > 5) {
+      issueType = "LATE_DISCLAIMER";
     }
     
     // Find conflicting claims
@@ -713,6 +808,14 @@ export function buildIssuesList(
       if (severity === 'low') severity = 'medium';
     }
     
+    // Generate claim summary (truncated for table display)
+    const claimSummary = claim.text.length > 80 
+      ? '"' + claim.text.substring(0, 77) + '..."'
+      : '"' + claim.text + '"';
+    
+    // Generate "Why Flagged" explanation
+    const whyFlagged = generateWhyFlagged(issueType, speaker, claim.text, conflicts);
+    
     // Build the defensible issue
     const issue: DefensibleIssue = {
       issueId: generateIssueId(claim.id, evaluationId),
@@ -721,9 +824,11 @@ export function buildIssuesList(
       
       what: {
         claimText: claim.text,
+        claimSummary,
         issueType,
         truthState,
-        description: generateIssueDescription(truthState, issueType, speaker, conflicts.length)
+        description: generateIssueDescription(truthState, issueType, speaker, conflicts.length),
+        whyFlagged
       },
       
       who: {

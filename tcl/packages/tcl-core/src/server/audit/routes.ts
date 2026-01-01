@@ -310,40 +310,62 @@ export function setupAuditRoutes(app: express.Application) {
       const rawIssues = (evaluation.report as any)?.issues || [];
       
       // Transform DefensibleIssue format to frontend Issue format
-      const issues = rawIssues.map((issue: any) => {
-        // If already in flat format, return as-is
+      const issues = rawIssues.map((issue: any, index: number) => {
+        // If already in flat format, return as-is with rank
         if (issue.claimId && issue.truthState && !issue.what) {
-          return issue;
+          return { ...issue, rank: index + 1 };
         }
+        
+        // Get turn index for evidence display
+        const turnIdx = issue.where?.turnStartIdx ?? issue.turnStartIdx ?? 0;
+        const speakerForEvidence = issue.who?.speaker || issue.speaker || 'UNKNOWN';
+        
+        // Format evidence location string
+        const evidenceLocation = turnIdx !== undefined && turnIdx !== null
+          ? `Call · Line ${turnIdx + 1}` // +1 for human-readable line numbers
+          : 'N/A';
         
         // Transform from DefensibleIssue to flat Issue format
         return {
+          rank: index + 1,
           claimId: issue.claimId || issue.what?.claimId,
+          claimText: issue.what?.claimText || issue.claimText,
+          claimSummary: issue.what?.claimSummary || (issue.what?.claimText ? 
+            '"' + issue.what.claimText.substring(0, 77) + (issue.what.claimText.length > 77 ? '..."' : '"') : 'N/A'),
           truthState: issue.what?.truthState || issue.truthState || 'Inconclusive',
           nodeBlameNorm: issue.confidence?.nodeBlameNorm ?? issue.nodeBlameNorm ?? 0,
           importance: issue.confidence?.importance ?? issue.importance ?? 0.5,
           issueType: issue.what?.issueType || issue.issueType || 'UNSUPPORTED',
           speaker: issue.who?.speaker || issue.speaker || 'UNKNOWN',
-          turnStartIdx: issue.where?.turnStartIdx ?? issue.turnStartIdx,
-          turnEndIdx: issue.where?.turnEndIdx ?? issue.turnEndIdx,
+          speakerLabel: issue.who?.speakerLabel || 
+                        (speakerForEvidence === 'AGENT' ? 'Agent' : 
+                         speakerForEvidence === 'CUSTOMER' ? 'Customer' : 'Unknown'),
+          turnStartIdx: turnIdx,
+          turnEndIdx: issue.where?.turnEndIdx ?? issue.turnEndIdx ?? turnIdx,
+          evidenceLocation,
+          description: issue.what?.description || issue.description || 'Issue detected',
+          whyFlagged: issue.what?.whyFlagged || issue.whyFlagged || 'Requires verification',
+          severity: issue.risk?.severity || issue.severity || 'low',
+          riskCategory: issue.risk?.category || issue.riskCategory || 'accuracy',
+          riskExplanation: issue.risk?.explanation || issue.riskExplanation || '',
           primaryEvidence: issue.where ? {
-            turnIdx: issue.where.turnStartIdx ?? 0,
-            speaker: issue.who?.speaker || 'UNKNOWN',
+            turnIdx,
+            speaker: speakerForEvidence,
             excerpt: issue.where.excerpt || issue.what?.claimText?.substring(0, 200) || ''
           } : issue.primaryEvidence,
+          conflictsWith: (issue.conflictsWith || []).map((c: any) => ({
+            claimId: c.claimId,
+            claimText: c.claimText || c.claimId,
+            relationshipType: c.relationshipType,
+            weight: c.edgeWeight || c.weight || 0
+          })),
           relatedEdges: {
             topBadContradictions: issue.conflictsWith?.filter((c: any) => c.relationshipType === 'contradiction') || 
                                   issue.relatedEdges?.topBadContradictions || [],
             topBadSupports: issue.conflictsWith?.filter((c: any) => c.relationshipType === 'unsupported_by') ||
                            issue.relatedEdges?.topBadSupports || []
           },
-          status: issue.status || 'OPEN',
-          // Include additional fields for display
-          claimText: issue.what?.claimText || issue.claimText,
-          description: issue.what?.description || issue.description,
-          severity: issue.risk?.severity || issue.severity || 'low',
-          riskCategory: issue.risk?.category || issue.riskCategory,
-          riskExplanation: issue.risk?.explanation || issue.riskExplanation
+          status: issue.status || 'OPEN'
         };
       });
       

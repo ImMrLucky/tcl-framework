@@ -208,21 +208,24 @@
       <div class="main-content">
         <mat-card class="issues-card">
           <mat-card-header>
-            <mat-card-title>Top Claim Issues</mat-card-title>
-            <mat-card-subtitle>Ranked by severity and importance — what's wrong and where</mat-card-subtitle>
+            <mat-card-title>Top Claim Issues (Ranked by Risk)</mat-card-title>
+            <mat-card-subtitle>Actionable findings from conversation analysis</mat-card-subtitle>
           </mat-card-header>
           <mat-card-content>
             <table mat-table [dataSource]="sortedIssues" class="issues-table">
-              <!-- Severity Column -->
+              <!-- Rank Column -->
               <ng-container matColumnDef="severity">
-                <th mat-header-cell *matHeaderCellDef>Severity</th>
-                <td mat-cell *matCellDef="let issue">
-                  <mat-chip 
-                    [style.background-color]="getSeverityColor(getSeverity(issue))" 
-                    [style.color]="'white'"
-                    class="severity-chip">
-                    {{ getSeverityLabel(getSeverity(issue)) }}
-                  </mat-chip>
+                <th mat-header-cell *matHeaderCellDef>Rank</th>
+                <td mat-cell *matCellDef="let issue; let i = index">
+                  <div class="rank-cell">
+                    <span class="rank-number">{{ i + 1 }}</span>
+                    <mat-chip 
+                      [style.background-color]="getSeverityColor(getSeverity(issue))" 
+                      [style.color]="'white'"
+                      class="severity-chip">
+                      {{ getSeverityLabel(getSeverity(issue)) }}
+                    </mat-chip>
+                  </div>
                 </td>
               </ng-container>
 
@@ -230,18 +233,18 @@
               <ng-container matColumnDef="issueType">
                 <th mat-header-cell *matHeaderCellDef>Issue Type</th>
                 <td mat-cell *matCellDef="let issue">
-                  <span [class]="'issue-type-' + (issue.issueType || 'unknown').toLowerCase()">
+                  <span [class]="'issue-type-badge issue-type-' + (issue.issueType || 'unknown').toLowerCase()">
                     {{ getIssueTypeLabel(issue.issueType) }}
                   </span>
                 </td>
               </ng-container>
 
-              <!-- Claim Column -->
+              <!-- Claim Summary Column -->
               <ng-container matColumnDef="claim">
-                <th mat-header-cell *matHeaderCellDef>Claim</th>
+                <th mat-header-cell *matHeaderCellDef>Claim Summary</th>
                 <td mat-cell *matCellDef="let issue">
-                  <div class="claim-text" [matTooltip]="getClaimText(issue.claimId, issue)">
-                    {{ getClaimText(issue.claimId, issue) }}
+                  <div class="claim-summary" [matTooltip]="issue.claimText || getClaimText(issue.claimId, issue)">
+                    {{ issue.claimSummary || getClaimSummary(issue.claimId, issue) }}
                   </div>
                 </td>
               </ng-container>
@@ -250,54 +253,39 @@
               <ng-container matColumnDef="speaker">
                 <th mat-header-cell *matHeaderCellDef>Speaker</th>
                 <td mat-cell *matCellDef="let issue">
-                  <span [class]="'speaker-' + (issue.speaker || 'unknown').toLowerCase()">
-                    {{ issue.speaker || 'Unknown' }}
+                  <span [class]="'speaker-badge speaker-' + (issue.speaker || 'unknown').toLowerCase()">
+                    {{ issue.speakerLabel || issue.speaker || 'Unknown' }}
                   </span>
                 </td>
               </ng-container>
 
-              <!-- Where Column -->
+              <!-- Evidence Location Column -->
               <ng-container matColumnDef="where">
-                <th mat-header-cell *matHeaderCellDef>Where</th>
+                <th mat-header-cell *matHeaderCellDef>Evidence</th>
                 <td mat-cell *matCellDef="let issue">
-                  <div class="where-text">{{ getWhereText(issue) }}</div>
-                  <div class="timestamp-text" *ngIf="issue.primaryEvidence?.turnIdx !== undefined">
-                    Evidence: Turn {{ issue.primaryEvidence?.turnIdx }}
+                  <div class="evidence-location">
+                    {{ issue.evidenceLocation || getEvidenceLocation(issue) }}
                   </div>
                 </td>
               </ng-container>
 
-              <!-- Evidence Column -->
+              <!-- Risk Column (replaces old Evidence column) -->
               <ng-container matColumnDef="evidence">
-                <th mat-header-cell *matHeaderCellDef>Evidence</th>
+                <th mat-header-cell *matHeaderCellDef>Risk</th>
                 <td mat-cell *matCellDef="let issue">
-                  <button
-                    mat-button
-                    color="primary"
-                    size="small"
-                    (click)="openEvidenceViewer(issue)"
-                    *ngIf="issue.primaryEvidence || issue.relatedEdges"
-                  >
-                    <mat-icon>visibility</mat-icon>
-                    Show Evidence
-                  </button>
-                  <span *ngIf="!issue.primaryEvidence && !issue.relatedEdges?.topBadContradictions?.length" class="no-evidence">
-                    No evidence
+                  <span [class]="'risk-badge risk-' + getSeverity(issue)">
+                    {{ getSeverityLabel(getSeverity(issue)) }}
                   </span>
                 </td>
               </ng-container>
 
-              <!-- Importance Column -->
+              <!-- Why Flagged Column (replaces old Importance column) -->
               <ng-container matColumnDef="importance">
-                <th mat-header-cell *matHeaderCellDef>Importance</th>
+                <th mat-header-cell *matHeaderCellDef>Why Flagged</th>
                 <td mat-cell *matCellDef="let issue">
-                  <div class="importance-value">{{ issue.importance?.toFixed(3) || 'N/A' }}</div>
-                  <mat-progress-bar 
-                    mode="determinate" 
-                    [value]="(issue.importance || 0) * 100"
-                    [color]="issue.importance && issue.importance > 0.7 ? 'warn' : 'primary'"
-                    class="importance-bar">
-                  </mat-progress-bar>
+                  <div class="why-flagged" [matTooltip]="issue.whyFlagged || issue.description || 'Issue detected'">
+                    {{ issue.whyFlagged || issue.description || 'Issue detected' }}
+                  </div>
                 </td>
               </ng-container>
 
@@ -306,7 +294,7 @@
                 <th mat-header-cell *matHeaderCellDef>Status</th>
                 <td mat-cell *matCellDef="let issue">
                   <mat-select 
-                    [value]="issue.status" 
+                    [value]="issue.status || 'OPEN'" 
                     (selectionChange)="updateStatus(issue, $event.value)"
                     class="status-select">
                     <mat-option value="OPEN">Open</mat-option>
@@ -319,25 +307,28 @@
 
               <!-- Actions Column -->
               <ng-container matColumnDef="actions">
-                <th mat-header-cell *matHeaderCellDef>Actions</th>
+                <th mat-header-cell *matHeaderCellDef>Action</th>
                 <td mat-cell *matCellDef="let issue">
-                  <button
-                    mat-icon-button
-                    [matMenuTriggerFor]="actionsMenu"
-                    matTooltip="Actions"
-                  >
-                    <mat-icon>more_vert</mat-icon>
-                  </button>
-                  <mat-menu #actionsMenu="matMenu">
-                    <button mat-menu-item (click)="exportIssuePDF(issue.claimId)">
-                      <mat-icon>picture_as_pdf</mat-icon>
-                      <span>Export Issue PDF</span>
+                  <div class="action-buttons">
+                    <button
+                      mat-button
+                      color="primary"
+                      class="action-link"
+                      (click)="openEvidenceViewer(issue)"
+                      matTooltip="View evidence and context"
+                    >
+                      View evidence
                     </button>
-                    <button mat-menu-item (click)="openEvidenceViewer(issue)">
-                      <mat-icon>visibility</mat-icon>
-                      <span>View Evidence</span>
+                    <span class="action-separator">·</span>
+                    <button
+                      mat-button
+                      class="action-link"
+                      (click)="exportIssuePDF(issue.claimId)"
+                      matTooltip="Export this issue as PDF"
+                    >
+                      Export
                     </button>
-                  </mat-menu>
+                  </div>
                 </td>
               </ng-container>
 

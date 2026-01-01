@@ -165,6 +165,28 @@ export class EvaluationResultsComponent implements OnInit {
     return claimId;
   }
 
+  /**
+   * Get claim summary (truncated for table display)
+   */
+  getClaimSummary(claimId: string, issue?: Issue): string {
+    const fullText = this.getClaimText(claimId, issue);
+    if (fullText.length > 80) {
+      return '"' + fullText.substring(0, 77) + '..."';
+    }
+    return '"' + fullText + '"';
+  }
+
+  /**
+   * Get evidence location string (e.g., "Call · Line 13")
+   */
+  getEvidenceLocation(issue: Issue): string {
+    const turnIdx = issue.turnStartIdx ?? issue.primaryEvidence?.turnIdx;
+    if (turnIdx !== undefined && turnIdx !== null) {
+      return `Call · Line ${turnIdx + 1}`;
+    }
+    return 'N/A';
+  }
+
   async openEvidenceViewer(issue: Issue) {
     const claim = this.evaluation?.report?.inputs?.claims?.find((c: any) => c.id === issue.claimId);
     const conversationId = this.evaluation?.conversation_id;
@@ -467,9 +489,12 @@ export class EvaluationResultsComponent implements OnInit {
     if (!issueType) return 'Unknown';
     const labels: Record<string, string> = {
       'CONTRADICTION': 'Contradiction',
-      'UNSUPPORTED': 'Unsupported',
+      'UNSUPPORTED': 'Ungrounded Claim',
+      'CIRCULAR': 'Circular Reasoning',
       'POLICY_MISS': 'Policy Miss',
-      'POLICY_VIOLATION': 'Policy Violation'
+      'POLICY_VIOLATION': 'Policy Violation',
+      'VAGUE_LANGUAGE': 'Policy Ambiguity',
+      'LATE_DISCLAIMER': 'Late Disclaimer'
     };
     return labels[issueType] || issueType;
   }
