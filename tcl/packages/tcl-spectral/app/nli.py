@@ -4,36 +4,43 @@ This module provides high-quality entailment/contradiction/neutral scoring
 for claim pairs, which feeds into the spectral analysis graph.
 """
 
-from transformers import pipeline, AutoModelForSequenceClassification, AutoTokenizer
+from transformers import AutoModelForSequenceClassification, AutoTokenizer
 import torch
+import torch.nn.functional as F
 from typing import List, Tuple, Dict, Optional
 import logging
 
 logger = logging.getLogger(__name__)
 
-# Global model instance (lazy loaded)
-_nli_pipeline = None
-_model_name = "roberta-large-mnli"  # Best for NLI tasks
+# Global model instances (lazy loaded)
+_model = None
+_tokenizer = None
+_model_name = "FacebookAI/roberta-large-mnli"
+_device = None
 
-def get_nli_pipeline():
-    """Lazy load the NLI pipeline (downloads model on first call)."""
-    global _nli_pipeline
-    if _nli_pipeline is None:
+# MNLI label mapping for roberta-large-mnli
+# 0 = CONTRADICTION, 1 = NEUTRAL, 2 = ENTAILMENT
+LABEL_MAP = {0: "contradiction", 1: "neutral", 2: "entailment"}
+
+
+def get_model_and_tokenizer():
+    """Lazy load the NLI model and tokenizer."""
+    global _model, _tokenizer, _device
+    
+    if _model is None:
         logger.info(f"Loading NLI model: {_model_name}...")
         try:
-            # Use GPU if available
-            device = 0 if torch.cuda.is_available() else -1
-            _nli_pipeline = pipeline(
-                "text-classification",
-                model=f"FacebookAI/{_model_name}",
-                device=device,
-                top_k=None  # Return all labels with scores
-            )
-            logger.info(f"NLI model loaded successfully (device: {'GPU' if device == 0 else 'CPU'})")
+            _device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+            _tokenizer = AutoTokenizer.from_pretrained(_model_name)
+            _model = AutoModelForSequenceClassification.from_pretrained(_model_name)
+            _model.to(_device)
+            _model.eval()
+            logger.info(f"NLI model loaded successfully (device: {_device})")
         except Exception as e:
             logger.error(f"Failed to load NLI model: {e}")
             raise
-    return _nli_pipeline
+    
+    return _model, _tokenizer, _device
 
 
 def score_pair(premise: str, hypothesis: str) -> Dict[str, float]:
@@ -41,36 +48,31 @@ def score_pair(premise: str, hypothesis: str) -> Dict[str, float]:
     Score a single premise-hypothesis pair.
     Returns dict with 'entailment', 'neutral', 'contradiction' probabilities.
     """
-    pipe = get_nli_pipeline()
+    model, tokenizer, device = get_model_and_tokenizer()
     
-    # roberta-large-mnli expects: "premise </s></s> hypothesis"
-    # But pipeline handles this automatically when using text pairs
-    result = pipe({"text": premise, "text_pair": hypothesis})
+    # Tokenize the premise-hypothesis pair
+    inputs = tokenizer(
+        premise, 
+        hypothesis, 
+        return_tensors="pt", 
+        truncation=True, 
+        max_length=512,
+        padding=True
+    )
+    inputs = {k: v.to(device) for k, v in inputs.items()}
     
-    # Convert result to normalized dict
-    scores = {"entailment": 0.0, "neutral": 0.0, "contradiction": 0.0}
+    # Get model predictions
+    with torch.no_grad():
+        outputs = model(**inputs)
+        logits = outputs.logits
+        probs = F.softmax(logits, dim=-1)[0]
     
-    if isinstance(result, list):
-        for item in result:
-            if isinstance(item, list):
-                for subitem in item:
-                    label = subitem.get("label", "").lower()
-                    score = subitem.get("score", 0.0)
-                    if "entail" in label:
-                        scores["entailment"] = score
-                    elif "contrad" in label:
-                        scores["contradiction"] = score
-                    elif "neutral" in label:
-                        scores["neutral"] = score
-            else:
-                label = item.get("label", "").lower()
-                score = item.get("score", 0.0)
-                if "entail" in label:
-                    scores["entailment"] = score
-                elif "contrad" in label:
-                    scores["contradiction"] = score
-                elif "neutral" in label:
-                    scores["neutral"] = score
+    # Map to labels
+    scores = {
+        "contradiction": float(probs[0]),
+        "neutral": float(probs[1]),
+        "entailment": float(probs[2])
+    }
     
     return scores
 
@@ -89,34 +91,36 @@ def score_batch(pairs: List[Tuple[str, str]]) -> List[Dict[str, float]]:
     if not pairs:
         return []
     
-    pipe = get_nli_pipeline()
+    model, tokenizer, device = get_model_and_tokenizer()
     
-    # Format for pipeline batch processing
-    inputs = [{"text": p, "text_pair": h} for p, h in pairs]
+    # Tokenize all pairs at once
+    premises = [p for p, h in pairs]
+    hypotheses = [h for p, h in pairs]
     
-    try:
-        results = pipe(inputs, batch_size=min(32, len(inputs)))
-    except Exception as e:
-        logger.error(f"Batch NLI scoring failed: {e}")
-        # Fallback to individual scoring
-        return [score_pair(p, h) for p, h in pairs]
+    inputs = tokenizer(
+        premises,
+        hypotheses,
+        return_tensors="pt",
+        truncation=True,
+        max_length=512,
+        padding=True
+    )
+    inputs = {k: v.to(device) for k, v in inputs.items()}
     
-    # Convert results
+    # Get model predictions
+    with torch.no_grad():
+        outputs = model(**inputs)
+        logits = outputs.logits
+        probs = F.softmax(logits, dim=-1)
+    
+    # Convert to list of score dicts
     all_scores = []
-    for result in results:
-        scores = {"entailment": 0.0, "neutral": 0.0, "contradiction": 0.0}
-        
-        if isinstance(result, list):
-            for item in result:
-                label = item.get("label", "").lower()
-                score = item.get("score", 0.0)
-                if "entail" in label:
-                    scores["entailment"] = score
-                elif "contrad" in label:
-                    scores["contradiction"] = score
-                elif "neutral" in label:
-                    scores["neutral"] = score
-        
+    for i in range(len(pairs)):
+        scores = {
+            "contradiction": float(probs[i][0]),
+            "neutral": float(probs[i][1]),
+            "entailment": float(probs[i][2])
+        }
         all_scores.append(scores)
     
     return all_scores

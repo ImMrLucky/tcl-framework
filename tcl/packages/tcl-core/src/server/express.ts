@@ -133,13 +133,17 @@ Agent: Based on what I can see, your plan hasn't changed.`;
           endpoint: process.env.TCL_SPECTRAL_URL + "/nli/score"
         };
         
-        // Test if it works
-        const testScore = await spectralScorer.entailment("The sky is blue.", "The sky has color.");
-        if (testScore >= 0) {
+        // Test if it works - score should be > 0.3 for obvious entailment
+        const testScore = await spectralScorer.entailment("The sky is blue.", "The sky has a blue color.");
+        diagnostic.steps.nliScorer.testScore = testScore;
+        
+        if (testScore > 0.3) {
           activeScorer = spectralScorer;
           scorerType = "spectral";
           diagnostic.steps.nliScorer.status = "ok";
-          diagnostic.steps.nliScorer.testScore = testScore;
+        } else {
+          diagnostic.steps.nliScorer.status = "low_score";
+          diagnostic.steps.nliScorer.warning = `Entailment score ${testScore} is too low for obvious test case (expected > 0.3)`;
         }
       } catch (spectralErr: any) {
         diagnostic.steps.nliScorer = {

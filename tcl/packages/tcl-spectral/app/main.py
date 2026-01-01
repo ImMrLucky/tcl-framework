@@ -24,6 +24,56 @@ def health():
     return {"status": "ok", "version": "0.4.0"}
 
 
+@app.get("/nli/test")
+def nli_test():
+    """
+    Quick test of the NLI model.
+    Returns entailment/contradiction scores for a known test case.
+    """
+    try:
+        # Test case: obvious entailment
+        result1 = nli.score_pair("The sky is blue.", "The sky has a blue color.")
+        
+        # Test case: obvious contradiction
+        result2 = nli.score_pair("The door is open.", "The door is closed.")
+        
+        # Test case: neutral
+        result3 = nli.score_pair("The cat is on the mat.", "It is raining outside.")
+        
+        return {
+            "status": "ok",
+            "model": "roberta-large-mnli",
+            "tests": {
+                "entailment_test": {
+                    "premise": "The sky is blue.",
+                    "hypothesis": "The sky has a blue color.",
+                    "scores": result1,
+                    "expected": "entailment should be high (>0.8)"
+                },
+                "contradiction_test": {
+                    "premise": "The door is open.",
+                    "hypothesis": "The door is closed.",
+                    "scores": result2,
+                    "expected": "contradiction should be high (>0.8)"
+                },
+                "neutral_test": {
+                    "premise": "The cat is on the mat.",
+                    "hypothesis": "It is raining outside.",
+                    "scores": result3,
+                    "expected": "neutral should be high (>0.5)"
+                }
+            }
+        }
+    except Exception as e:
+        logger.error(f"NLI test error: {e}")
+        import traceback
+        return {
+            "status": "error",
+            "error": str(e),
+            "traceback": traceback.format_exc()
+        }
+
+
 # ============================================================================
 # NLI SCORING ENDPOINTS
 # ============================================================================
@@ -51,7 +101,7 @@ def nli_score(req: NliBatchRequest):
                 contradiction=result["contradiction"]
             ))
         
-        return NliBatchResponse(scores=scores, model=nli._model_name)
+        return NliBatchResponse(scores=scores, model="roberta-large-mnli")
     except Exception as e:
         logger.error(f"NLI scoring error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
