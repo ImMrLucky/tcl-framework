@@ -1,6 +1,6 @@
 import { Injectable } from '@angular/core';
 import { HttpInterceptor, HttpRequest, HttpHandler, HttpEvent, HttpErrorResponse } from '@angular/common/http';
-import { Observable, from, throwError } from 'rxjs';
+import { Observable, from, throwError, of } from 'rxjs';
 import { catchError, switchMap, timeout } from 'rxjs/operators';
 import { AuthService } from './auth.service';
 
@@ -34,7 +34,16 @@ export class AuthInterceptor implements HttpInterceptor {
 
     // For authenticated endpoints, get the token and add it to the request
     // Use from() to convert Promise to Observable, then switchMap to add header
-    return from(this.authService.getAccessToken()).pipe(
+    // Wrap token retrieval in its own error handling to NOT catch HTTP errors
+    return from(
+      this.authService.getAccessToken()
+        .then(token => token)
+        .catch(err => {
+          // Token retrieval failed - return null to proceed without token
+          console.warn('Token retrieval failed:', err?.message || err);
+          return null;
+        })
+    ).pipe(
       // Add timeout to prevent hanging if getAccessToken takes too long
       timeout(5000),
       switchMap(token => {
@@ -51,13 +60,18 @@ export class AuthInterceptor implements HttpInterceptor {
         }
         // If no token, still proceed - backend will return error if needed
         
+        // Return the actual HTTP request - let HTTP errors propagate naturally
         return next.handle(authReq);
       }),
       catchError((error) => {
-        // If token retrieval fails or times out, proceed without token
-        // Let the backend return appropriate error if auth is required
-        console.warn('Token retrieval failed, proceeding without auth:', error.message || error);
-        return next.handle(req);
+        // This only catches timeout errors from the token retrieval timeout
+        // NOT HTTP errors from the actual request
+        if (error.name === 'TimeoutError') {
+          console.warn('Token retrieval timed out, proceeding without auth');
+          return next.handle(req);
+        }
+        // Re-throw all other errors (including HTTP errors) - don't retry!
+        return throwError(() => error);
       })
     );
   }

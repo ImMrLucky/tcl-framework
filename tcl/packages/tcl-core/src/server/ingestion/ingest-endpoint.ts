@@ -183,7 +183,11 @@ export function registerIngestEndpoints(app: express.Express) {
       
     } catch (e: any) {
       console.error("Ingest error:", e);
-      res.status(500).json({ error: e.message || "Ingestion failed" });
+      console.error("Ingest error stack:", e.stack);
+      res.status(500).json({ 
+        error: e.message || "Ingestion failed",
+        details: process.env.NODE_ENV !== 'production' ? e.stack : undefined
+      });
     }
   });
   
