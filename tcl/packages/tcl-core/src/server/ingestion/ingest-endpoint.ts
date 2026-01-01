@@ -112,13 +112,20 @@ export function registerIngestEndpoints(app: express.Express) {
       let conversationId = body.conversationId;
       
       if (!conversationId) {
+        // Build the raw text from normalized turns
+        const rawText = result.normalized.turns
+          .map(t => `${t.speakerLabel}: ${t.text}`)
+          .join("\n");
+        
         const { data: conv, error: convError } = await supabaseAdmin
           .from("conversations")
           .insert({
             org_id: context.orgId,
-            project_id: context.projectId,
+            project_id: context.projectId || null,
+            env: context.env || "sandbox",
             title: body.title || `Ingested: ${body.filename}`,
-            status: "active",
+            content: rawText, // Required field
+            raw_text: rawText, // Also store in raw_text if column exists
             channel: result.normalized.channel,
             metadata: {
               sourceFormat: result.normalized.sourceFormat,
@@ -130,7 +137,11 @@ export function registerIngestEndpoints(app: express.Express) {
         
         if (convError) {
           console.error("Failed to create conversation:", convError);
-          return res.status(500).json({ error: "Failed to create conversation" });
+          console.error("Conversation insert error details:", JSON.stringify(convError));
+          return res.status(500).json({ 
+            error: "Failed to create conversation",
+            details: convError.message || convError.code
+          });
         }
         
         conversationId = conv.id;
