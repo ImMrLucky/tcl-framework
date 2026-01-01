@@ -380,7 +380,7 @@ export async function buildClaimGraph(
   let filteredBelowGrounding = 0;
 
   // -----------------------------
-  // Grounding (claim -> sources)
+  // Grounding (source -> claim: does source ENTAIL claim?)
   // -----------------------------
   if (sources?.length) {
     // batch score grounding where possible
@@ -390,7 +390,9 @@ export async function buildClaimGraph(
       for (const c of claims) {
         for (const s of sources) {
           const key = cache.makeKey("gnd", c.text, s.text);
-          if (!cache.get(key)) pairs.push({ task: "grounding", a: c.text, b: s.text, key });
+          // For grounding: a=source (premise), b=claim (hypothesis)
+          // We check if source ENTAILS claim
+          if (!cache.get(key)) pairs.push({ task: "grounding", a: s.text, b: c.text, key });
         }
       }
       const scoreBatchFn = (scorer as any).scoreBatch as (pairs: BatchPair[]) => Promise<BatchScore[]>;

@@ -20,7 +20,7 @@ interface NliBatchResponse {
 }
 
 export class SpectralNliScorer implements SemanticScorer {
-  id = "spectral-nli-roberta-large-mnli";
+  id = "spectral-nli-distilroberta-base";
   private endpoint: string;
   private timeoutMs: number;
 
@@ -87,9 +87,9 @@ export class SpectralNliScorer implements SemanticScorer {
             score = nliScore.contradiction;
             break;
           case "grounding":
-            // For grounding, we want entailment (source entails claim)
+            // For grounding, we want entailment (source=a entails claim=b)
             score = nliScore.entailment;
-            quote = pair.b.substring(0, 200); // The source text
+            quote = pair.a.substring(0, 200); // The source text (premise)
             break;
           default:
             score = 0;
