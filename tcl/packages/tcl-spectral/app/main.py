@@ -5,13 +5,28 @@ from .models import (
     BuildEdgesRequest, BuildEdgesResponse, EdgeIn, GroundingEdge
 )
 from .spectral import build_index, spectral_metrics, spectral_truth_vector, spectral_edge_attribution, spectral_fingerprint
-from . import nli
 import logging
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 app = FastAPI(title="TCL-Spectral", version="0.4.0")
+
+# Lazy import NLI to allow app to start even if torch fails
+nli = None
+nli_error = None
+
+def get_nli():
+    global nli, nli_error
+    if nli is None and nli_error is None:
+        try:
+            from . import nli as nli_module
+            nli = nli_module
+            logger.info("NLI module loaded successfully")
+        except Exception as e:
+            nli_error = str(e)
+            logger.error(f"Failed to load NLI module: {e}")
+    return nli, nli_error
 
 
 # ============================================================================
@@ -21,7 +36,13 @@ app = FastAPI(title="TCL-Spectral", version="0.4.0")
 @app.get("/health")
 def health():
     """Health check endpoint."""
-    return {"status": "ok", "version": "0.4.0"}
+    nli_module, error = get_nli()
+    return {
+        "status": "ok", 
+        "version": "0.4.1",
+        "nli_available": nli_module is not None,
+        "nli_error": error
+    }
 
 
 @app.get("/nli/test")
@@ -30,15 +51,29 @@ def nli_test():
     Quick test of the NLI model.
     Returns entailment/contradiction scores for a known test case.
     """
+    nli_module, error = get_nli()
+    
+    if error:
+        return {
+            "status": "error",
+            "error": f"NLI module failed to load: {error}"
+        }
+    
+    if nli_module is None:
+        return {
+            "status": "error", 
+            "error": "NLI module not loaded"
+        }
+    
     try:
         # Test case: obvious entailment
-        result1 = nli.score_pair("The sky is blue.", "The sky has a blue color.")
+        result1 = nli_module.score_pair("The sky is blue.", "The sky has a blue color.")
         
         # Test case: obvious contradiction
-        result2 = nli.score_pair("The door is open.", "The door is closed.")
+        result2 = nli_module.score_pair("The door is open.", "The door is closed.")
         
         # Test case: neutral
-        result3 = nli.score_pair("The cat is on the mat.", "It is raining outside.")
+        result3 = nli_module.score_pair("The cat is on the mat.", "It is raining outside.")
         
         return {
             "status": "ok",
@@ -87,9 +122,14 @@ def nli_score(req: NliBatchRequest):
     This is the core NLI endpoint that the Node.js backend calls
     instead of trying to run transformers.js locally.
     """
+    nli_module, error = get_nli()
+    
+    if error or nli_module is None:
+        raise HTTPException(status_code=500, detail=f"NLI module not available: {error}")
+    
     try:
         pairs = [(p.premise, p.hypothesis) for p in req.pairs]
-        results = nli.score_batch(pairs)
+        results = nli_module.score_batch(pairs)
         
         scores = []
         for i, result in enumerate(results):
@@ -119,11 +159,16 @@ def build_edges(req: BuildEdgesRequest):
     
     The Node.js backend can call this instead of doing NLI locally.
     """
+    nli_module, error = get_nli()
+    
+    if error or nli_module is None:
+        raise HTTPException(status_code=500, detail=f"NLI module not available: {error}")
+    
     try:
         claims = [{"id": c.id, "text": c.text} for c in req.claims]
         sources = [{"id": s.id, "text": s.text} for s in req.sources]
         
-        result = nli.build_edges_from_claims(
+        result = nli_module.build_edges_from_claims(
             claims=claims,
             sources=sources,
             support_threshold=req.supportThreshold,
