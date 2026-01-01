@@ -71,6 +71,128 @@ app.get("/health", (req, res) => {
   res.json({ status: "ok", service: "tcl-core" });
 });
 
+// Diagnostic endpoint - test the entire NLI + Spectral pipeline
+app.get("/diagnostic", async (req, res) => {
+  const diagnostic: any = {
+    timestamp: new Date().toISOString(),
+    status: "running",
+    steps: {}
+  };
+  
+  try {
+    // Step 1: Check modules loaded
+    diagnostic.steps.modulesLoaded = {
+      validate: !!validate,
+      orchestrator: "pending"
+    };
+    
+    if (!validate) {
+      await loadModules();
+    }
+    
+    diagnostic.steps.modulesLoaded.validate = !!validate;
+    diagnostic.steps.modulesLoaded.orchestrator = !!validate ? "ok" : "failed";
+    
+    // Step 2: Test evidence source generation
+    const testTranscript = `Agent: Thank you for calling. How can I help you today?
+Customer: Hi, I'm calling about my bill. It's higher than expected.
+Agent: I understand. Let me look into that for you.
+Customer: I was told my rate wouldn't change.
+Agent: Based on what I can see, your plan hasn't changed.`;
+    
+    const { generateSourcesFromRawTranscript } = await import("../evidence_sources.js");
+    const sources = generateSourcesFromRawTranscript(testTranscript, "test");
+    diagnostic.steps.evidenceSources = {
+      status: sources.length > 0 ? "ok" : "failed",
+      count: sources.length,
+      sample: sources[0]?.text?.substring(0, 100)
+    };
+    
+    // Step 3: Test claim extraction
+    const { extractClaims } = await import("../claim_extractor.js");
+    const claims = extractClaims(testTranscript);
+    diagnostic.steps.claimExtraction = {
+      status: claims.length > 0 ? "ok" : "failed",
+      count: claims.length,
+      sample: claims[0]?.text?.substring(0, 100)
+    };
+    
+    // Step 4: Test NLI scorer loading
+    const { TransformersNliScorer } = await import("../graph/transformers_scorer.js");
+    const scorer = new TransformersNliScorer({});
+    diagnostic.steps.nliScorer = {
+      status: "loading",
+      modelId: scorer.id,
+      labelMap: scorer.labelMap
+    };
+    
+    // Step 5: Test NLI scoring with obvious entailment
+    try {
+      const entailScore = await scorer.entailment(
+        "The sky is blue.",
+        "The sky has a blue color."
+      );
+      const contradictScore = await scorer.contradiction(
+        "The door is open.",
+        "The door is closed."
+      );
+      
+      diagnostic.steps.nliScoring = {
+        status: entailScore > 0.3 || contradictScore > 0.3 ? "ok" : "low_scores",
+        entailmentScore: entailScore,
+        contradictionScore: contradictScore,
+        labelMapAfterLoad: scorer.labelMap,
+        warning: entailScore < 0.3 && contradictScore < 0.3 
+          ? "Both scores very low - NLI may not be working correctly"
+          : null
+      };
+    } catch (nliErr: any) {
+      diagnostic.steps.nliScoring = {
+        status: "error",
+        error: nliErr.message
+      };
+    }
+    
+    // Step 6: Check spectral URL
+    diagnostic.steps.spectralConfig = {
+      url: process.env.TCL_SPECTRAL_URL || "NOT_SET",
+      status: process.env.TCL_SPECTRAL_URL ? "configured" : "missing"
+    };
+    
+    // Step 7: Test spectral connection
+    if (process.env.TCL_SPECTRAL_URL) {
+      try {
+        const spectralHealth = await fetch(`${process.env.TCL_SPECTRAL_URL}/health`);
+        diagnostic.steps.spectralConnection = {
+          status: spectralHealth.ok ? "ok" : "error",
+          httpStatus: spectralHealth.status
+        };
+      } catch (spectralErr: any) {
+        diagnostic.steps.spectralConnection = {
+          status: "error",
+          error: spectralErr.message
+        };
+      }
+    }
+    
+    diagnostic.status = "complete";
+    diagnostic.summary = {
+      evidenceSourcesWorking: diagnostic.steps.evidenceSources?.status === "ok",
+      claimExtractionWorking: diagnostic.steps.claimExtraction?.status === "ok",
+      nliScoringWorking: diagnostic.steps.nliScoring?.status === "ok",
+      spectralConfigured: diagnostic.steps.spectralConfig?.status === "configured",
+      spectralConnected: diagnostic.steps.spectralConnection?.status === "ok"
+    };
+    
+    res.json(diagnostic);
+  } catch (err: any) {
+    diagnostic.status = "error";
+    diagnostic.error = err.message;
+    diagnostic.stack = err.stack;
+    res.status(500).json(diagnostic);
+  }
+});
+
 // Lazy load these to avoid startup crashes
 let validate: any;
 let OpenAIAdapter: any;
@@ -175,6 +297,58 @@ app.post("/validate", async (req, res) => {
     const out = await validate(input);
     const latency = Date.now() - startTime;
     console.log("Validation complete");
+    
+    // ========================================================================
+    // DIAGNOSTIC LOGGING - Trace the full pipeline
+    // ========================================================================
+    console.log("\n========== PIPELINE DIAGNOSTIC ==========");
+    console.log("1️⃣ CLAIMS:", {
+      count: out.report?.claims?.length || 0,
+      sample: out.report?.claims?.[0]?.text?.substring(0, 60)
+    });
+    
+    console.log("2️⃣ GRAPH:", {
+      supports: out.report?.graph?.supports?.length || 0,
+      contradictions: out.report?.graph?.contradictions?.length || 0,
+      grounding: out.report?.graph?.grounding?.length || 0,
+      debug: out.report?.graph?.debug ? {
+        pairsGenerated: out.report.graph.debug.pairsGenerated,
+        pairsScored: out.report.graph.debug.pairsScored,
+        scorerId: out.report.graph.debug.model?.scorerId,
+        labelMap: out.report.graph.debug.model?.labelMap,
+        reasonIfEmpty: out.report.graph.debug.reasonIfEmptyGraph
+      } : "no debug info"
+    });
+    
+    console.log("3️⃣ SPECTRAL:", {
+      skipped: out.report?.spectral?.spectralSkipped,
+      debugReason: out.report?.spectral?.debugReason,
+      coherenceScore: out.report?.spectral?.coherenceScore,
+      truthVectorLength: out.report?.spectral?.truthVector?.length || 0,
+      truthStatesLength: out.report?.spectral?.truthStates?.length || 0,
+      nodeBlameNormLength: out.report?.spectral?.nodeBlameNorm?.length || 0,
+      sampleTruthStates: out.report?.spectral?.truthStates?.slice(0, 3),
+      sampleNodeBlame: out.report?.spectral?.nodeBlameNorm?.slice(0, 3),
+      topBadContradictions: out.report?.spectral?.topBadContradictions?.length || 0,
+      topBadSupports: out.report?.spectral?.topBadSupports?.length || 0
+    });
+    
+    console.log("4️⃣ DESTRUCTIVE CLAIMS:", {
+      count: out.report?.destructiveClaims?.length || 0,
+      sample: out.report?.destructiveClaims?.[0] ? {
+        claimId: out.report.destructiveClaims[0].claimId,
+        importance: out.report.destructiveClaims[0].importance,
+        truthState: out.report.destructiveClaims[0].truthState
+      } : "none"
+    });
+    
+    console.log("5️⃣ MANIFEST:", out.report?.manifest ? {
+      inputHash: out.report.manifest.inputHash,
+      nliModelId: out.report.manifest.nliModelId,
+      transcriptSourcesCount: out.report.manifest.transcriptSourcesCount,
+      graphHealth: out.report.manifest.graphHealth
+    } : "no manifest");
+    console.log("==========================================\n");
 
     // Build issues list from spectral output if available
     // Also build issues from destructive claims even if spectral was skipped
@@ -210,11 +384,30 @@ app.post("/validate", async (req, res) => {
               coherenceScore: null 
             });
         
+        console.log("6️⃣ BUILDING ISSUES with spectral data:", {
+          hasSpectral: !out.report.spectral?.spectralSkipped,
+          truthStatesCount: spectralData.truthStates?.length || 0,
+          nodeBlameCount: spectralData.nodeBlameNorm?.length || 0,
+          destructiveCount: out.report.destructiveClaims?.length || 0
+        });
+        
         issues = buildIssuesList(
           spectralData,
           claimsForIssues,
           out.report.destructiveClaims
         );
+        
+        console.log("7️⃣ ISSUES BUILT:", {
+          count: issues.length,
+          sample: issues[0] ? {
+            claimId: issues[0].claimId,
+            issueType: issues[0].what?.issueType || issues[0].issueType,
+            truthState: issues[0].what?.truthState || issues[0].truthState,
+            importance: issues[0].confidence?.importance || issues[0].importance,
+            nodeBlameNorm: issues[0].confidence?.nodeBlameNorm || issues[0].nodeBlameNorm
+          } : "none"
+        });
+        
         console.log(`Built ${issues.length} issues (spectral available: ${!out.report.spectral?.spectralSkipped})`);
       } catch (issueErr: any) {
         console.warn('Failed to build issues list:', issueErr.message);
