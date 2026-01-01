@@ -163,47 +163,49 @@
           </ng-container>
 
           <!-- Preview Section -->
-          <div *ngIf="showPreview && previewData?.preview" class="preview-section">
-            <h3>
-              <mat-icon>preview</mat-icon>
-              Normalization Preview
-            </h3>
-            
-            <div class="preview-stats">
-              <div class="stat">
-                <span class="stat-value">{{ previewData.preview.turnsCount }}</span>
-                <span class="stat-label">Turns</span>
+          <ng-container *ngIf="showPreview && previewData?.preview as preview">
+            <div class="preview-section">
+              <h3>
+                <mat-icon>preview</mat-icon>
+                Normalization Preview
+              </h3>
+              
+              <div class="preview-stats">
+                <div class="stat">
+                  <span class="stat-value">{{ preview.turnsCount }}</span>
+                  <span class="stat-label">Turns</span>
+                </div>
+                <div class="stat">
+                  <span class="stat-value">{{ preview.participantsCount }}</span>
+                  <span class="stat-label">Participants</span>
+                </div>
               </div>
-              <div class="stat">
-                <span class="stat-value">{{ previewData.preview.participantsCount }}</span>
-                <span class="stat-label">Participants</span>
-              </div>
-            </div>
 
-            <div class="preview-participants">
-              <h4>Detected Speakers</h4>
-              <div class="participant-chips">
-                <mat-chip *ngFor="let p of previewData.preview.participants" 
-                          [class]="'role-' + p.role">
-                  {{ p.displayName }} ({{ p.role }})
-                </mat-chip>
+              <div class="preview-participants">
+                <h4>Detected Speakers</h4>
+                <div class="participant-chips">
+                  <mat-chip *ngFor="let p of preview.participants" 
+                            [class]="'role-' + p.role">
+                    {{ p.displayName }} ({{ p.role }})
+                  </mat-chip>
+                </div>
+              </div>
+
+              <div class="preview-turns" *ngIf="preview.sampleTurns && preview.sampleTurns.length > 0">
+                <h4>Sample Turns</h4>
+                <div class="sample-turn" *ngFor="let turn of preview.sampleTurns">
+                  <span class="turn-index">{{ turn.turnIndex + 1 }}.</span>
+                  <span class="turn-speaker" [class]="'role-' + turn.role">{{ turn.speakerLabel }}</span>
+                  <span class="turn-text">{{ turn.text }}</span>
+                </div>
+              </div>
+
+              <div *ngIf="previewData?.warnings && previewData!.warnings!.length > 0" class="preview-warnings">
+                <mat-icon>warning</mat-icon>
+                <span>{{ previewData!.warnings!.length }} warning(s): {{ previewData!.warnings![0] }}</span>
               </div>
             </div>
-
-            <div class="preview-turns" *ngIf="previewData.preview.sampleTurns.length > 0">
-              <h4>Sample Turns</h4>
-              <div class="sample-turn" *ngFor="let turn of previewData.preview.sampleTurns">
-                <span class="turn-index">{{ turn.turnIndex + 1 }}.</span>
-                <span class="turn-speaker" [class]="'role-' + turn.role">{{ turn.speakerLabel }}</span>
-                <span class="turn-text">{{ turn.text }}</span>
-              </div>
-            </div>
-
-            <div *ngIf="previewData.warnings && previewData.warnings.length > 0" class="preview-warnings">
-              <mat-icon>warning</mat-icon>
-              <span>{{ previewData.warnings.length }} warning(s): {{ previewData.warnings[0] }}</span>
-            </div>
-          </div>
+          </ng-container>
 
           <div *ngIf="previewLoading" class="preview-loading">
             <mat-spinner diameter="24"></mat-spinner>
