@@ -28,6 +28,7 @@ import { setupIntegrationRoutes } from "./integrations/routes.js";
 import { setupAuditRoutes } from "./audit/routes.js";
 import { buildIssuesList } from "./audit/reproducibility.js";
 import { getOrgContext } from "./auth-context.js";
+import { registerIngestEndpoints } from "./ingestion/ingest-endpoint.js";
 
 const app = express();
 
@@ -1495,6 +1496,11 @@ setupIntegrationRoutes(app);
 console.log("Registering audit routes...");
 setupAuditRoutes(app);
 console.log("Audit routes registered successfully");
+
+// Setup ingestion routes (normalization pipeline)
+console.log("Registering ingestion routes...");
+registerIngestEndpoints(app);
+console.log("Ingestion routes registered successfully");
 
 // Railway sets PORT automatically, but we default to 8787
 const port = Number(process.env.PORT || 8787);
