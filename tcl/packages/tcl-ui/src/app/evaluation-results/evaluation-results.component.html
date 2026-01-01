@@ -230,7 +230,7 @@
               <ng-container matColumnDef="issueType">
                 <th mat-header-cell *matHeaderCellDef>Issue Type</th>
                 <td mat-cell *matCellDef="let issue">
-                  <span [class]="'issue-type-' + issue.issueType.toLowerCase()">
+                  <span [class]="'issue-type-' + (issue.issueType || 'unknown').toLowerCase()">
                     {{ getIssueTypeLabel(issue.issueType) }}
                   </span>
                 </td>
@@ -250,8 +250,8 @@
               <ng-container matColumnDef="speaker">
                 <th mat-header-cell *matHeaderCellDef>Speaker</th>
                 <td mat-cell *matCellDef="let issue">
-                  <span [class]="'speaker-' + issue.speaker.toLowerCase()">
-                    {{ issue.speaker }}
+                  <span [class]="'speaker-' + (issue.speaker || 'unknown').toLowerCase()">
+                    {{ issue.speaker || 'Unknown' }}
                   </span>
                 </td>
               </ng-container>
@@ -367,10 +367,10 @@
                   <div class="offender-blame">
                     <mat-progress-bar 
                       mode="determinate" 
-                      [value]="offender.nodeBlameNorm * 100"
+                      [value]="(offender.nodeBlameNorm ?? 0) * 100"
                       color="warn">
                     </mat-progress-bar>
-                    <span class="blame-value">{{ offender.nodeBlameNorm.toFixed(3) }}</span>
+                    <span class="blame-value">{{ (offender.nodeBlameNorm ?? 0).toFixed(3) }}</span>
                   </div>
                 </div>
               </div>
@@ -394,10 +394,10 @@
               <h4>Top Contradictions</h4>
               <ul class="edge-list">
                 <li *ngFor="let edge of topContradictions">
-                  <span class="claim-link">{{ edge.claimAId }}</span>
+                  <span class="claim-link">{{ edge.claimAId || 'N/A' }}</span>
                   ↔
-                  <span class="claim-link">{{ edge.claimBId }}</span>
-                  <span class="edge-weight">({{ edge.weight.toFixed(3) }})</span>
+                  <span class="claim-link">{{ edge.claimBId || 'N/A' }}</span>
+                  <span class="edge-weight">({{ (edge.weight ?? 0).toFixed(3) }})</span>
                 </li>
               </ul>
             </div>
@@ -405,10 +405,10 @@
               <h4>Top Supports</h4>
               <ul class="edge-list">
                 <li *ngFor="let edge of topSupports">
-                  <span class="claim-link">{{ edge.claimAId }}</span>
-                  ↔
-                  <span class="claim-link">{{ edge.claimBId }}</span>
-                  <span class="edge-weight">({{ edge.weight.toFixed(3) }})</span>
+                  <span class="claim-link">{{ edge.claimAId || 'N/A' }}</span>
+                  →
+                  <span class="claim-link">{{ edge.claimBId || 'N/A' }}</span>
+                  <span class="edge-weight">({{ (edge.weight ?? 0).toFixed(3) }})</span>
                 </li>
               </ul>
             </div>

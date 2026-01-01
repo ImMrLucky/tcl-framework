@@ -463,7 +463,8 @@ export class EvaluationResultsComponent implements OnInit {
   /**
    * Get issue type label
    */
-  getIssueTypeLabel(issueType: string): string {
+  getIssueTypeLabel(issueType: string | undefined | null): string {
+    if (!issueType) return 'Unknown';
     const labels: Record<string, string> = {
       'CONTRADICTION': 'Contradiction',
       'UNSUPPORTED': 'Unsupported',
