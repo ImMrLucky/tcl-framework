@@ -1,0 +1,64 @@
+{
+  "conversationId": "conv-001",
+  "title": "Support Call - Duplicate Charge",
+  "channel": "call",
+  "startTime": "2024-01-15T10:00:00Z",
+  "turns": [
+    {
+      "speaker": "Agent",
+      "text": "Thank you for calling ProtectQA support. My name is Sarah. How can I help you today?",
+      "startTime": 1000
+    },
+    {
+      "speaker": "Customer",
+      "text": "Hi Sarah, I'm calling about my account. I was charged twice for my subscription.",
+      "startTime": 8000
+    },
+    {
+      "speaker": "Agent",
+      "text": "I'm sorry to hear that. Let me look into your account right away. Can you please provide your account number?",
+      "startTime": 15000
+    },
+    {
+      "speaker": "Customer",
+      "text": "Sure, it's 12345678.",
+      "startTime": 25000
+    },
+    {
+      "speaker": "Agent",
+      "text": "Thank you. I can see the duplicate charge here. You were charged $29.99 twice on January 15th.",
+      "startTime": 32000
+    },
+    {
+      "speaker": "Customer",
+      "text": "Yes, exactly. Can you refund the extra charge?",
+      "startTime": 45000
+    },
+    {
+      "speaker": "Agent",
+      "text": "Absolutely. I'll process the refund right now. It should appear in your account within 3-5 business days.",
+      "startTime": 52000
+    },
+    {
+      "speaker": "Customer",
+      "text": "That's great. Thank you so much for your help.",
+      "startTime": 65000
+    },
+    {
+      "speaker": "Agent",
+      "text": "You're welcome! Is there anything else I can help you with today?",
+      "startTime": 72000
+    },
+    {
+      "speaker": "Customer",
+      "text": "No, that's all. Have a great day!",
+      "startTime": 80000
+    },
+    {
+      "speaker": "Agent",
+      "text": "Thank you for calling. Goodbye!",
+      "startTime": 85000
+    }
+  ]
+}
+

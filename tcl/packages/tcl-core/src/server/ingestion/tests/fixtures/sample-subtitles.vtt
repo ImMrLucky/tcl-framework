@@ -1,0 +1,35 @@
+WEBVTT
+
+00:00:01.000 --> 00:00:07.000
+<v Agent>Thank you for calling ProtectQA support. My name is Sarah. How can I help you today?
+
+00:00:08.000 --> 00:00:14.000
+<v Customer>Hi Sarah, I'm calling about my account. I was charged twice for my subscription.
+
+00:00:15.000 --> 00:00:24.000
+<v Agent>I'm sorry to hear that. Let me look into your account right away. Can you please provide your account number?
+
+00:00:25.000 --> 00:00:31.000
+<v Customer>Sure, it's 12345678.
+
+00:00:32.000 --> 00:00:44.000
+<v Agent>Thank you. I can see the duplicate charge here. You were charged $29.99 twice on January 15th.
+
+00:00:45.000 --> 00:00:51.000
+<v Customer>Yes, exactly. Can you refund the extra charge?
+
+00:00:52.000 --> 00:01:04.000
+<v Agent>Absolutely. I'll process the refund right now. It should appear in your account within 3-5 business days.
+
+00:01:05.000 --> 00:01:11.000
+<v Customer>That's great. Thank you so much for your help.
+
+00:01:12.000 --> 00:01:19.000
+<v Agent>You're welcome! Is there anything else I can help you with today?
+
+00:01:20.000 --> 00:01:24.000
+<v Customer>No, that's all. Have a great day!
+
+00:01:25.000 --> 00:01:30.000
+<v Agent>Thank you for calling. Goodbye!
+

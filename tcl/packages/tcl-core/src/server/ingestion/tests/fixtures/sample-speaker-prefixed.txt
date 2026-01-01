@@ -1,0 +1,12 @@
+Agent: Thank you for calling ProtectQA support. My name is Sarah. How can I help you today?
+Customer: Hi Sarah, I'm calling about my account. I was charged twice for my subscription.
+Agent: I'm sorry to hear that. Let me look into your account right away. Can you please provide your account number?
+Customer: Sure, it's 12345678.
+Agent: Thank you. I can see the duplicate charge here. You were charged $29.99 twice on January 15th.
+Customer: Yes, exactly. Can you refund the extra charge?
+Agent: Absolutely. I'll process the refund right now. It should appear in your account within 3-5 business days.
+Customer: That's great. Thank you so much for your help.
+Agent: You're welcome! Is there anything else I can help you with today?
+Customer: No, that's all. Have a great day!
+Agent: Thank you for calling. Goodbye!
+

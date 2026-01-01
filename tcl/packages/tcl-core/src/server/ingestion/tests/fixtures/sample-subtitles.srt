@@ -1,0 +1,44 @@
+1
+00:00:01,000 --> 00:00:07,000
+Agent: Thank you for calling ProtectQA support. My name is Sarah. How can I help you today?
+
+2
+00:00:08,000 --> 00:00:14,000
+Customer: Hi Sarah, I'm calling about my account. I was charged twice for my subscription.
+
+3
+00:00:15,000 --> 00:00:24,000
+Agent: I'm sorry to hear that. Let me look into your account right away. Can you please provide your account number?
+
+4
+00:00:25,000 --> 00:00:31,000
+Customer: Sure, it's 12345678.
+
+5
+00:00:32,000 --> 00:00:44,000
+Agent: Thank you. I can see the duplicate charge here. You were charged $29.99 twice on January 15th.
+
+6
+00:00:45,000 --> 00:00:51,000
+Customer: Yes, exactly. Can you refund the extra charge?
+
+7
+00:00:52,000 --> 00:01:04,000
+Agent: Absolutely. I'll process the refund right now. It should appear in your account within 3-5 business days.
+
+8
+00:01:05,000 --> 00:01:11,000
+Customer: That's great. Thank you so much for your help.
+
+9
+00:01:12,000 --> 00:01:19,000
+Agent: You're welcome! Is there anything else I can help you with today?
+
+10
+00:01:20,000 --> 00:01:24,000
+Customer: No, that's all. Have a great day!
+
+11
+00:01:25,000 --> 00:01:30,000
+Agent: Thank you for calling. Goodbye!
+

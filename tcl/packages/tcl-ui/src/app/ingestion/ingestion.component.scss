@@ -87,3 +87,229 @@
   font-weight: 500;
 }
 
+/* Mode Toggle */
+.mode-toggle {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 16px;
+  
+  button {
+    flex: 1;
+  }
+}
+
+/* File Type Chip */
+.file-type-chip {
+  margin-left: 8px;
+  font-size: 0.7rem;
+}
+
+/* Linking Mode Styles */
+.linking-section {
+  margin: 20px 0;
+}
+
+.link-file-row {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.link-file-box {
+  flex: 1;
+  padding: 24px;
+  background: #f9f9f9;
+  border-radius: 8px;
+  text-align: center;
+  border: 2px dashed #ccc;
+  transition: border-color 0.2s;
+
+  &:hover {
+    border-color: #1976d2;
+  }
+
+  .file-icon {
+    font-size: 48px;
+    width: 48px;
+    height: 48px;
+    color: #666;
+    margin-bottom: 8px;
+  }
+
+  h4 {
+    margin: 8px 0;
+    color: #333;
+  }
+
+  .file-hint {
+    font-size: 0.75rem;
+    color: #888;
+    margin-top: 8px;
+  }
+}
+
+.link-arrow {
+  display: flex;
+  align-items: center;
+  
+  mat-icon {
+    font-size: 32px;
+    width: 32px;
+    height: 32px;
+    color: #1976d2;
+  }
+}
+
+/* Preview Section */
+.preview-section {
+  margin: 24px 0;
+  padding: 20px;
+  background: #f5f7fa;
+  border-radius: 8px;
+  border: 1px solid #e0e0e0;
+
+  h3 {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin: 0 0 16px 0;
+    font-size: 1rem;
+    color: #333;
+  }
+}
+
+.preview-stats {
+  display: flex;
+  gap: 24px;
+  margin-bottom: 16px;
+
+  .stat {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 12px 24px;
+    background: white;
+    border-radius: 8px;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+
+    .stat-value {
+      font-size: 1.5rem;
+      font-weight: 700;
+      color: #1976d2;
+    }
+
+    .stat-label {
+      font-size: 0.75rem;
+      color: #666;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+  }
+}
+
+.preview-participants {
+  margin-bottom: 16px;
+
+  h4 {
+    font-size: 0.875rem;
+    color: #555;
+    margin: 0 0 8px 0;
+  }
+
+  .participant-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+}
+
+/* Role-based colors */
+.role-agent {
+  background-color: #e3f2fd !important;
+  color: #1565c0 !important;
+}
+
+.role-customer {
+  background-color: #e8f5e9 !important;
+  color: #2e7d32 !important;
+}
+
+.role-supervisor {
+  background-color: #fff3e0 !important;
+  color: #e65100 !important;
+}
+
+.role-bot {
+  background-color: #f3e5f5 !important;
+  color: #7b1fa2 !important;
+}
+
+.role-unknown {
+  background-color: #eceff1 !important;
+  color: #607d8b !important;
+}
+
+.preview-turns {
+  h4 {
+    font-size: 0.875rem;
+    color: #555;
+    margin: 0 0 8px 0;
+  }
+
+  .sample-turn {
+    display: flex;
+    gap: 8px;
+    padding: 8px 12px;
+    background: white;
+    border-radius: 4px;
+    margin-bottom: 4px;
+    font-size: 0.875rem;
+
+    .turn-index {
+      color: #999;
+      min-width: 24px;
+    }
+
+    .turn-speaker {
+      font-weight: 600;
+      min-width: 80px;
+      padding: 2px 8px;
+      border-radius: 4px;
+      text-align: center;
+      font-size: 0.8rem;
+    }
+
+    .turn-text {
+      color: #333;
+      flex: 1;
+    }
+  }
+}
+
+.preview-warnings {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px;
+  background: #fff3e0;
+  border-radius: 4px;
+  color: #e65100;
+  font-size: 0.875rem;
+  margin-top: 16px;
+
+  mat-icon {
+    font-size: 20px;
+    width: 20px;
+    height: 20px;
+  }
+}
+
+.preview-loading {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 16px;
+  color: #666;
+  font-size: 0.875rem;
+}
+

@@ -10,6 +10,9 @@ import { MatIconModule } from '@angular/material/icon';
 import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
 import { MatSelectModule } from '@angular/material/select';
 import { MatSnackBar, MatSnackBarModule } from '@angular/material/snack-bar';
+import { MatTabsModule } from '@angular/material/tabs';
+import { MatTableModule } from '@angular/material/table';
+import { MatChipsModule } from '@angular/material/chips';
 import { AppHeaderComponent } from '../shared/app-header.component';
 import { AuditService } from '../audit.service';
 import { TclService } from '../tcl.service';
@@ -17,18 +20,35 @@ import { AuthService } from '../auth.service';
 import { HttpClient } from '@angular/common/http';
 import { firstValueFrom } from 'rxjs';
 
-// Note: extractClaims is used client-side for now
-// In production, this should be done server-side via an API endpoint
-type Claim = {
-  id: string;
+// Normalized turn from backend
+interface NormalizedTurn {
+  turnIndex: number;
+  participantId: string;
+  role: 'agent' | 'customer' | 'supervisor' | 'bot' | 'unknown';
+  speakerLabel: string;
   text: string;
-  confidence: number;
-  evidence: any[];
-  meta?: {
-    speaker?: 'Agent' | 'Customer' | 'Other';
-    turnIndex?: number;
+  startTimeMs?: number;
+  lineStart?: number;
+  meta?: any;
+}
+
+// Preview response from /api/ingest/preview
+interface IngestPreview {
+  success: boolean;
+  warnings?: string[];
+  preview?: {
+    turnsCount: number;
+    participantsCount: number;
+    participants: Array<{ displayName: string; role: string }>;
+    sampleTurns: Array<{
+      turnIndex: number;
+      speakerLabel: string;
+      role: string;
+      text: string;
+    }>;
   };
-};
+  normalized?: any;
+}
 
 @Component({
   selector: 'app-ingestion',
@@ -44,6 +64,9 @@ type Claim = {
     MatProgressSpinnerModule,
     MatSelectModule,
     MatSnackBarModule,
+    MatTabsModule,
+    MatTableModule,
+    MatChipsModule,
     AppHeaderComponent
   ],
   templateUrl: './ingestion.component.html',
@@ -58,7 +81,25 @@ export class IngestionComponent implements OnInit {
   selectedFile: File | null = null;
   selectedFileName = '';
   isAudioFile = false;
+  isSubtitleFile = false;
   transcriptionInProgress = false;
+  
+  // Preview state
+  showPreview = false;
+  previewData: IngestPreview | null = null;
+  previewLoading = false;
+  
+  // Audio + transcript linking
+  audioFile: File | null = null;
+  audioFileName = '';
+  transcriptFile: File | null = null;
+  transcriptFileName = '';
+  linkingMode = false;
+
+  // Supported formats
+  readonly audioExtensions = ['.wav', '.mp3', '.flac', '.m4a', '.ogg', '.opus', '.aac'];
+  readonly subtitleExtensions = ['.vtt', '.srt'];
+  readonly textExtensions = ['.txt', '.csv', '.json', '.vtt', '.srt'];
 
   constructor(
     private auditService: AuditService,
@@ -73,6 +114,13 @@ export class IngestionComponent implements OnInit {
     // Component initialization
   }
 
+  /**
+   * Get file extension
+   */
+  private getFileExtension(filename: string): string {
+    return '.' + (filename.split('.').pop()?.toLowerCase() || '');
+  }
+
   async onFileSelected(event: Event) {
     const input = event.target as HTMLInputElement;
     if (input.files && input.files.length > 0) {
@@ -80,21 +128,29 @@ export class IngestionComponent implements OnInit {
       this.selectedFile = file;
       this.selectedFileName = file.name;
       
-      // Check if it's an audio file
-      const audioExtensions = ['.wav', '.mp3', '.flac', '.m4a', '.ogg', '.opus', '.aac'];
-      const fileExt = '.' + file.name.split('.').pop()?.toLowerCase();
-      this.isAudioFile = audioExtensions.includes(fileExt);
+      const fileExt = this.getFileExtension(file.name);
+      this.isAudioFile = this.audioExtensions.includes(fileExt);
+      this.isSubtitleFile = this.subtitleExtensions.includes(fileExt);
+      
+      // Reset preview
+      this.showPreview = false;
+      this.previewData = null;
       
       if (this.isAudioFile) {
         // For audio files, we'll transcribe on submit
         this.transcript = '';
         this.snackBar.open('Audio file selected. Transcription will occur when you submit.', 'Close', { duration: 4000 });
       } else {
-        // For text files, read directly
+        // For text/subtitle files, read and preview
         try {
           const text = await file.text();
           this.transcript = text;
           this.snackBar.open('File loaded successfully', 'Close', { duration: 3000 });
+          
+          // Auto-preview for supported formats
+          if (this.textExtensions.includes(fileExt)) {
+            await this.previewNormalization();
+          }
         } catch (error: any) {
           this.errorMessage = `Failed to read file: ${error.message}`;
           this.snackBar.open(this.errorMessage, 'Close', { duration: 5000 });
@@ -103,11 +159,111 @@ export class IngestionComponent implements OnInit {
     }
   }
 
+  /**
+   * Handle audio file selection for linking mode
+   */
+  async onAudioFileSelected(event: Event) {
+    const input = event.target as HTMLInputElement;
+    if (input.files && input.files.length > 0) {
+      const file = input.files[0];
+      const fileExt = this.getFileExtension(file.name);
+      
+      if (this.audioExtensions.includes(fileExt)) {
+        this.audioFile = file;
+        this.audioFileName = file.name;
+        this.snackBar.open('Audio file selected for linking', 'Close', { duration: 3000 });
+      } else {
+        this.snackBar.open('Please select a valid audio file', 'Close', { duration: 3000 });
+      }
+    }
+  }
+
+  /**
+   * Handle transcript file selection for linking mode
+   */
+  async onTranscriptFileSelected(event: Event) {
+    const input = event.target as HTMLInputElement;
+    if (input.files && input.files.length > 0) {
+      const file = input.files[0];
+      const fileExt = this.getFileExtension(file.name);
+      
+      if (this.textExtensions.includes(fileExt)) {
+        this.transcriptFile = file;
+        this.transcriptFileName = file.name;
+        
+        // Read and preview
+        const text = await file.text();
+        this.transcript = text;
+        await this.previewNormalization();
+        
+        this.snackBar.open('Transcript file loaded for linking', 'Close', { duration: 3000 });
+      } else {
+        this.snackBar.open('Please select a valid transcript file', 'Close', { duration: 3000 });
+      }
+    }
+  }
+
+  /**
+   * Preview normalization without saving
+   */
+  async previewNormalization() {
+    if (!this.transcript && !this.selectedFile) return;
+    
+    this.previewLoading = true;
+    
+    try {
+      const apiUrl = this.auditService.getApiBaseUrl();
+      const content = this.transcript;
+      const filename = this.selectedFileName || 'transcript.txt';
+      
+      // Convert to base64 for API
+      const base64Content = btoa(unescape(encodeURIComponent(content)));
+      
+      const result = await firstValueFrom(
+        this.http.post<IngestPreview>(`${apiUrl}/ingest/preview`, {
+          content: base64Content,
+          filename
+        })
+      );
+      
+      this.previewData = result;
+      this.showPreview = true;
+      
+      if (result.warnings && result.warnings.length > 0) {
+        this.snackBar.open(`Preview ready (${result.warnings.length} warnings)`, 'Close', { duration: 3000 });
+      }
+    } catch (error: any) {
+      console.error('Preview error:', error);
+      // Don't show error for preview failures, just hide preview
+      this.showPreview = false;
+    } finally {
+      this.previewLoading = false;
+    }
+  }
+
+  /**
+   * Toggle linking mode
+   */
+  toggleLinkingMode() {
+    this.linkingMode = !this.linkingMode;
+    if (!this.linkingMode) {
+      this.audioFile = null;
+      this.audioFileName = '';
+      this.transcriptFile = null;
+      this.transcriptFileName = '';
+    }
+  }
+
   async onSubmit() {
+    // Handle linking mode separately
+    if (this.linkingMode) {
+      await this.submitLinkedFiles();
+      return;
+    }
+    
     // If audio file is selected, transcribe it first
     if (this.isAudioFile && this.selectedFile) {
       await this.transcribeAudio();
-      // If transcription failed, transcribeAudio will have shown an error
       if (!this.transcript || this.transcript.trim().length === 0) {
         return;
       }
@@ -123,69 +279,68 @@ export class IngestionComponent implements OnInit {
     this.errorMessage = '';
 
     try {
-      // Step 1: Create conversation using new REST endpoint
-      const createResponse = await firstValueFrom(
-        this.auditService.createConversation({
-          title: this.title || this.selectedFileName || undefined,
-          content: this.transcript,
-          metadata: {
-            channel: this.channel,
-            source_file: this.selectedFileName || null,
-            is_audio: this.isAudioFile
-          }
+      const apiUrl = this.auditService.getApiBaseUrl();
+      const filename = this.selectedFileName || 'transcript.txt';
+      
+      // Step 1: Use new /api/ingest endpoint for normalization
+      const base64Content = btoa(unescape(encodeURIComponent(this.transcript)));
+      
+      const ingestResponse = await firstValueFrom(
+        this.http.post<{
+          success: boolean;
+          conversationId?: string;
+          artifactId?: string;
+          normalized?: any;
+          warnings?: string[];
+          error?: string;
+        }>(`${apiUrl}/ingest`, {
+          content: base64Content,
+          filename,
+          title: this.title || filename,
+          runEvaluation: false // We'll run evaluation separately
         })
       );
 
-      if (!createResponse || !createResponse.conversation) {
-        throw new Error('Failed to create conversation');
+      if (!ingestResponse.success || !ingestResponse.conversationId) {
+        throw new Error(ingestResponse.error || 'Failed to ingest file');
       }
 
-      const conversationId = createResponse.conversation.id;
+      const conversationId = ingestResponse.conversationId;
+      const artifactId = ingestResponse.artifactId;
 
-      // Step 2: Extract claims from transcript
-      // Note: We're using the extractClaims function directly here
-      // In a real implementation, you might want to call an API endpoint
-      // that does this server-side, but for now we'll do it client-side
-      const claims = this.extractClaimsFromTranscript(this.transcript);
-
-      if (claims.length === 0) {
-        throw new Error('No claims extracted from transcript');
+      // Show normalization warnings if any
+      if (ingestResponse.warnings && ingestResponse.warnings.length > 0) {
+        console.warn('Normalization warnings:', ingestResponse.warnings);
       }
 
-      // Step 3: Trigger evaluation using /validate endpoint with conversation_id
-      // Using HttpClient so the interceptor adds the Authorization header
-      const apiUrl = this.auditService.getApiBaseUrl();
+      // Step 2: Run evaluation with /validate endpoint
+      // The normalized data is now stored, pass artifact reference
       const evaluationData = await firstValueFrom(
         this.http.post<any>(`${apiUrl}/validate`, {
           question: this.transcript,
           answer: '',
           sources: [],
           options: {
-            spectral: true,  // Enable spectral analysis
-            spectralMode: 'analyze',  // Use full analyze mode for truthVector, issues, etc.
+            spectral: true,
+            spectralMode: 'analyze',
             includeConfidenceMetrics: true,
-            includeSuggestions: true
+            includeSuggestions: true,
+            artifactId // Pass artifact ID for evidence linking
           },
           conversation_id: conversationId
         })
       );
       
-      // Step 3: Get the evaluation ID from the response or fetch it from conversation
-      // The evaluation should be linked to the conversation now
-      // We'll navigate to the conversation evaluations page
-      // First, wait a moment for the evaluation to be saved
-      await new Promise(resolve => setTimeout(resolve, 1000));
+      // Step 3: Navigate to evaluation results
+      await new Promise(resolve => setTimeout(resolve, 500));
       
-      // Get evaluations for this conversation
       const evaluationsResponse = await firstValueFrom(
         this.auditService.getConversationEvaluations(conversationId, { limit: 1 })
       );
       
-      if (evaluationsResponse && evaluationsResponse.evaluations && evaluationsResponse.evaluations.length > 0) {
-        // Navigate to the most recent evaluation
+      if (evaluationsResponse?.evaluations?.length > 0) {
         this.router.navigate(['/evaluations', evaluationsResponse.evaluations[0].id]);
       } else {
-        // Fallback: navigate to conversation page
         this.router.navigate(['/conversations', conversationId]);
       }
     } catch (error: any) {
@@ -198,61 +353,106 @@ export class IngestionComponent implements OnInit {
   }
 
   /**
-   * Extract claims from transcript text
-   * This is a simplified client-side extraction
-   * In production, this should be done server-side via an API endpoint
+   * Submit linked audio + transcript files
    */
-  private extractClaimsFromTranscript(text: string): Claim[] {
-    // Use the same logic as the backend claim extractor
-    const lines = text.split(/\n+/).map(l => l.trim()).filter(Boolean);
-    const claims: Claim[] = [];
-    let claimIdx = 1;
-    let turnIdx = 0;
-
-    for (const ln of lines) {
-      let speaker: 'Agent' | 'Customer' | 'Other' = 'Other';
-      let body = ln;
-
-      if (/^agent:/i.test(ln)) {
-        speaker = 'Agent';
-        body = ln.replace(/^agent:\s*/i, '');
-      } else if (/^customer:/i.test(ln)) {
-        speaker = 'Customer';
-        body = ln.replace(/^customer:\s*/i, '');
-      } else if (/^(rep|caller):/i.test(ln)) {
-        speaker = 'Agent';
-        body = ln.replace(/^(rep|caller):\s*/i, '');
-      }
-
-      if (body.length > 0) {
-        // Split into sentences
-        const sentences = body
-          .replace(/\s+/g, ' ')
-          .split(/(?<=[.!?])\s+/)
-          .map(s => s.trim())
-          .filter(s => s.length > 0 && s.length >= 10); // Skip very short sentences
-
-        for (const sentence of sentences) {
-          // Skip filler phrases
-          const fillerPatterns = /^(thanks|thank you|okay|ok|yes|no|sure|alright|uh|um|hmm)/i;
-          if (fillerPatterns.test(sentence.trim()) && sentence.length < 30) continue;
-
-          claims.push({
-            id: `c${claimIdx++}`,
-            text: sentence,
-            confidence: 0.75,
-            evidence: [],
-            meta: {
-              speaker,
-              turnIndex: turnIdx
-            }
-          });
-        }
-        turnIdx++;
-      }
+  async submitLinkedFiles() {
+    if (!this.audioFile || !this.transcriptFile) {
+      this.errorMessage = 'Please select both an audio file and a transcript file';
+      this.snackBar.open(this.errorMessage, 'Close', { duration: 3000 });
+      return;
     }
 
-    return claims;
+    this.loading = true;
+    this.errorMessage = '';
+
+    try {
+      const apiUrl = this.auditService.getApiBaseUrl();
+      
+      // Step 1: Ingest transcript first
+      const transcriptContent = await this.transcriptFile.text();
+      const base64Content = btoa(unescape(encodeURIComponent(transcriptContent)));
+      
+      const transcriptResponse = await firstValueFrom(
+        this.http.post<{
+          success: boolean;
+          conversationId?: string;
+          artifactId?: string;
+          error?: string;
+        }>(`${apiUrl}/ingest`, {
+          content: base64Content,
+          filename: this.transcriptFileName,
+          title: this.title || `Linked: ${this.audioFileName}`,
+          runEvaluation: false
+        })
+      );
+
+      if (!transcriptResponse.success || !transcriptResponse.conversationId) {
+        throw new Error(transcriptResponse.error || 'Failed to ingest transcript');
+      }
+
+      const conversationId = transcriptResponse.conversationId;
+
+      // Step 2: Link audio file to the same conversation
+      const audioFormData = new FormData();
+      audioFormData.append('audio', this.audioFile);
+      audioFormData.append('filename', this.audioFileName);
+      audioFormData.append('conversationId', conversationId);
+      audioFormData.append('linkToTranscript', 'true');
+
+      // Store audio metadata (not the full file for now)
+      const audioArrayBuffer = await this.audioFile.arrayBuffer();
+      const audioBase64 = btoa(
+        new Uint8Array(audioArrayBuffer.slice(0, 1000)) // Just header for metadata
+          .reduce((data, byte) => data + String.fromCharCode(byte), '')
+      );
+
+      await firstValueFrom(
+        this.http.post<any>(`${apiUrl}/ingest`, {
+          content: audioBase64,
+          filename: this.audioFileName,
+          conversationId, // Link to existing conversation
+          title: this.title || this.audioFileName,
+          runEvaluation: false
+        })
+      );
+
+      this.snackBar.open('Audio and transcript linked successfully', 'Close', { duration: 3000 });
+
+      // Step 3: Run evaluation
+      await firstValueFrom(
+        this.http.post<any>(`${apiUrl}/validate`, {
+          question: transcriptContent,
+          answer: '',
+          sources: [],
+          options: {
+            spectral: true,
+            spectralMode: 'analyze',
+            includeConfidenceMetrics: true,
+            includeSuggestions: true
+          },
+          conversation_id: conversationId
+        })
+      );
+
+      // Navigate to results
+      await new Promise(resolve => setTimeout(resolve, 500));
+      
+      const evaluationsResponse = await firstValueFrom(
+        this.auditService.getConversationEvaluations(conversationId, { limit: 1 })
+      );
+      
+      if (evaluationsResponse?.evaluations?.length > 0) {
+        this.router.navigate(['/evaluations', evaluationsResponse.evaluations[0].id]);
+      } else {
+        this.router.navigate(['/conversations', conversationId]);
+      }
+    } catch (error: any) {
+      console.error('Linking error:', error);
+      this.errorMessage = error.error?.error || error.message || 'Failed to link files';
+      this.snackBar.open(this.errorMessage, 'Close', { duration: 5000 });
+    } finally {
+      this.loading = false;
+    }
   }
 
   /**

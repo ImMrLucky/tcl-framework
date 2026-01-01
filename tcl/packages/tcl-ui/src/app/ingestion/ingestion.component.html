@@ -6,12 +6,35 @@
   </app-header>
 
   <div class="container">
+    <!-- Mode Toggle -->
+    <div class="mode-toggle">
+      <button 
+        mat-stroked-button 
+        [color]="!linkingMode ? 'primary' : undefined"
+        (click)="linkingMode = false"
+      >
+        <mat-icon>description</mat-icon>
+        Single File
+      </button>
+      <button 
+        mat-stroked-button 
+        [color]="linkingMode ? 'primary' : undefined"
+        (click)="linkingMode = true"
+      >
+        <mat-icon>link</mat-icon>
+        Audio + Transcript
+      </button>
+    </div>
+
     <mat-card class="ingestion-card">
       <mat-card-header>
         <mat-card-title>
-          <mat-icon>upload_file</mat-icon>
-          Conversation Input
+          <mat-icon>{{ linkingMode ? 'link' : 'upload_file' }}</mat-icon>
+          {{ linkingMode ? 'Link Audio with Transcript' : 'Conversation Input' }}
         </mat-card-title>
+        <mat-card-subtitle *ngIf="linkingMode">
+          Upload an audio recording and its corresponding transcript
+        </mat-card-subtitle>
       </mat-card-header>
       <mat-card-content>
         <form (ngSubmit)="onSubmit(); $event.preventDefault()" #ingestionForm="ngForm">
@@ -34,47 +57,157 @@
             </mat-form-field>
           </div>
 
-          <div class="form-row">
-            <mat-form-field appearance="outline" class="full-width">
-              <mat-label>Transcript</mat-label>
-              <textarea
-                matInput
-                [(ngModel)]="transcript"
-                name="transcript"
-                rows="15"
-                [placeholder]="isAudioFile ? 'Audio file selected - transcript will be generated automatically' : 'Paste transcript here... (Agent: ... Customer: ...)'"
-                [required]="!isAudioFile"
-              ></textarea>
-              <mat-hint *ngIf="!isAudioFile">Enter the full conversation transcript. Format: Agent: ... Customer: ...</mat-hint>
-              <mat-hint *ngIf="isAudioFile">Upload an audio file above and click 'Transcribe & Analyze' to generate the transcript automatically.</mat-hint>
-            </mat-form-field>
+          <!-- Single File Mode -->
+          <ng-container *ngIf="!linkingMode">
+            <div class="form-row">
+              <mat-form-field appearance="outline" class="full-width">
+                <mat-label>Transcript</mat-label>
+                <textarea
+                  matInput
+                  [(ngModel)]="transcript"
+                  name="transcript"
+                  rows="12"
+                  [placeholder]="isAudioFile ? 'Audio file selected - transcript will be generated automatically' : 'Paste transcript here... (Agent: ... Customer: ...)'"
+                  [required]="!isAudioFile"
+                ></textarea>
+                <mat-hint *ngIf="!isAudioFile && !isSubtitleFile">Format: Agent: ... Customer: ... (or upload TXT/CSV/JSON/VTT/SRT)</mat-hint>
+                <mat-hint *ngIf="isSubtitleFile">Subtitle file detected - will be parsed with timestamps</mat-hint>
+                <mat-hint *ngIf="isAudioFile">Audio will be transcribed automatically when you submit</mat-hint>
+              </mat-form-field>
+            </div>
+
+            <div class="file-upload-section">
+              <input
+                type="file"
+                #fileInput
+                (change)="onFileSelected($event)"
+                accept=".txt,.csv,.json,.vtt,.srt,.wav,.mp3,.flac,.m4a,.ogg,.opus,.aac"
+                style="display: none"
+              />
+              <button
+                mat-stroked-button
+                type="button"
+                (click)="fileInput.click()"
+                [disabled]="loading"
+              >
+                <mat-icon>upload</mat-icon>
+                Upload File
+              </button>
+              <div class="file-formats-hint">
+                <strong>Text:</strong> .txt, .csv, .json &nbsp;|&nbsp;
+                <strong>Subtitles:</strong> .vtt, .srt &nbsp;|&nbsp;
+                <strong>Audio:</strong> .wav, .mp3, .flac, .m4a, .ogg, .opus
+              </div>
+              <div *ngIf="selectedFileName" class="selected-file">
+                <mat-icon>{{ isAudioFile ? 'audiotrack' : (isSubtitleFile ? 'subtitles' : 'insert_drive_file') }}</mat-icon>
+                {{ selectedFileName }}
+                <mat-chip *ngIf="isAudioFile" class="file-type-chip">Audio</mat-chip>
+                <mat-chip *ngIf="isSubtitleFile" class="file-type-chip">Subtitle</mat-chip>
+              </div>
+            </div>
+          </ng-container>
+
+          <!-- Linking Mode: Audio + Transcript -->
+          <ng-container *ngIf="linkingMode">
+            <div class="linking-section">
+              <div class="link-file-row">
+                <div class="link-file-box">
+                  <mat-icon class="file-icon">audiotrack</mat-icon>
+                  <h4>Audio File</h4>
+                  <input
+                    type="file"
+                    #audioFileInput
+                    (change)="onAudioFileSelected($event)"
+                    accept=".wav,.mp3,.flac,.m4a,.ogg,.opus,.aac"
+                    style="display: none"
+                  />
+                  <button
+                    mat-stroked-button
+                    type="button"
+                    (click)="audioFileInput.click()"
+                    [disabled]="loading"
+                  >
+                    <mat-icon>upload</mat-icon>
+                    {{ audioFileName || 'Select Audio' }}
+                  </button>
+                  <div class="file-hint">.wav, .mp3, .flac, .m4a, .ogg, .opus</div>
+                </div>
+
+                <div class="link-arrow">
+                  <mat-icon>link</mat-icon>
+                </div>
+
+                <div class="link-file-box">
+                  <mat-icon class="file-icon">description</mat-icon>
+                  <h4>Transcript File</h4>
+                  <input
+                    type="file"
+                    #transcriptFileInput
+                    (change)="onTranscriptFileSelected($event)"
+                    accept=".txt,.csv,.json,.vtt,.srt"
+                    style="display: none"
+                  />
+                  <button
+                    mat-stroked-button
+                    type="button"
+                    (click)="transcriptFileInput.click()"
+                    [disabled]="loading"
+                  >
+                    <mat-icon>upload</mat-icon>
+                    {{ transcriptFileName || 'Select Transcript' }}
+                  </button>
+                  <div class="file-hint">.txt, .csv, .json, .vtt, .srt</div>
+                </div>
+              </div>
+            </div>
+          </ng-container>
+
+          <!-- Preview Section -->
+          <div *ngIf="showPreview && previewData?.preview" class="preview-section">
+            <h3>
+              <mat-icon>preview</mat-icon>
+              Normalization Preview
+            </h3>
+            
+            <div class="preview-stats">
+              <div class="stat">
+                <span class="stat-value">{{ previewData.preview.turnsCount }}</span>
+                <span class="stat-label">Turns</span>
+              </div>
+              <div class="stat">
+                <span class="stat-value">{{ previewData.preview.participantsCount }}</span>
+                <span class="stat-label">Participants</span>
+              </div>
+            </div>
+
+            <div class="preview-participants">
+              <h4>Detected Speakers</h4>
+              <div class="participant-chips">
+                <mat-chip *ngFor="let p of previewData.preview.participants" 
+                          [class]="'role-' + p.role">
+                  {{ p.displayName }} ({{ p.role }})
+                </mat-chip>
+              </div>
+            </div>
+
+            <div class="preview-turns" *ngIf="previewData.preview.sampleTurns.length > 0">
+              <h4>Sample Turns</h4>
+              <div class="sample-turn" *ngFor="let turn of previewData.preview.sampleTurns">
+                <span class="turn-index">{{ turn.turnIndex + 1 }}.</span>
+                <span class="turn-speaker" [class]="'role-' + turn.role">{{ turn.speakerLabel }}</span>
+                <span class="turn-text">{{ turn.text }}</span>
+              </div>
+            </div>
+
+            <div *ngIf="previewData.warnings && previewData.warnings.length > 0" class="preview-warnings">
+              <mat-icon>warning</mat-icon>
+              <span>{{ previewData.warnings.length }} warning(s): {{ previewData.warnings[0] }}</span>
+            </div>
           </div>
 
-          <div class="file-upload-section">
-            <input
-              type="file"
-              #fileInput
-              (change)="onFileSelected($event)"
-              accept=".txt,.csv,.json,.wav,.mp3,.flac,.m4a"
-              style="display: none"
-            />
-            <button
-              mat-stroked-button
-              type="button"
-              (click)="fileInput.click()"
-              [disabled]="loading"
-            >
-              <mat-icon>upload</mat-icon>
-              Upload File
-            </button>
-            <div class="file-formats-hint">
-              Supported formats: .txt, .csv, .json, .wav, .mp3, .flac, .m4a
-            </div>
-            <div *ngIf="selectedFileName" class="selected-file">
-              <mat-icon>insert_drive_file</mat-icon>
-              {{ selectedFileName }}
-              <span *ngIf="isAudioFile" class="audio-indicator">(Audio - will be transcribed)</span>
-            </div>
+          <div *ngIf="previewLoading" class="preview-loading">
+            <mat-spinner diameter="24"></mat-spinner>
+            <span>Analyzing file structure...</span>
           </div>
 
           <div *ngIf="errorMessage" class="error-message">
@@ -92,12 +225,14 @@
               mat-raised-button
               color="primary"
               type="submit"
-              [disabled]="loading || transcriptionInProgress || (!transcript || transcript.trim().length === 0) && !isAudioFile"
+              [disabled]="loading || transcriptionInProgress || (linkingMode ? (!audioFile || !transcriptFile) : ((!transcript || transcript.trim().length === 0) && !isAudioFile))"
             >
               <mat-spinner *ngIf="loading" diameter="20" class="inline-spinner"></mat-spinner>
               <mat-icon *ngIf="!loading && !transcriptionInProgress">play_arrow</mat-icon>
               <span *ngIf="transcriptionInProgress">Transcribing...</span>
-              <span *ngIf="!transcriptionInProgress">{{ loading ? 'Processing...' : (isAudioFile && !transcript ? 'Transcribe & Analyze' : 'Run Analysis') }}</span>
+              <span *ngIf="!transcriptionInProgress">
+                {{ loading ? 'Processing...' : (isAudioFile && !transcript ? 'Transcribe & Analyze' : 'Run Analysis') }}
+              </span>
             </button>
           </div>
         </form>
@@ -105,4 +240,3 @@
     </mat-card>
   </div>
 </div>
-

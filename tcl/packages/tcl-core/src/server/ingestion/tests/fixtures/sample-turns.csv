@@ -1,0 +1,13 @@
+speaker,text,timestamp
+Agent,"Thank you for calling ProtectQA support. My name is Sarah. How can I help you today?",00:00:01
+Customer,"Hi Sarah, I'm calling about my account. I was charged twice for my subscription.",00:00:08
+Agent,"I'm sorry to hear that. Let me look into your account right away. Can you please provide your account number?",00:00:15
+Customer,"Sure, it's 12345678.",00:00:25
+Agent,"Thank you. I can see the duplicate charge here. You were charged $29.99 twice on January 15th.",00:00:32
+Customer,"Yes, exactly. Can you refund the extra charge?",00:00:45
+Agent,"Absolutely. I'll process the refund right now. It should appear in your account within 3-5 business days.",00:00:52
+Customer,"That's great. Thank you so much for your help.",00:01:05
+Agent,"You're welcome! Is there anything else I can help you with today?",00:01:12
+Customer,"No, that's all. Have a great day!",00:01:20
+Agent,"Thank you for calling. Goodbye!",00:01:25
+
