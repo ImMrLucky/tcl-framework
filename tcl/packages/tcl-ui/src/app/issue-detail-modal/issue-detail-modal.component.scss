@@ -198,6 +198,31 @@
   color: #78350f;
 }
 
+.empty-state {
+  text-align: center;
+  padding: 40px 24px;
+  color: #9ca3af;
+}
+
+.empty-state mat-icon {
+  font-size: 48px;
+  width: 48px;
+  height: 48px;
+  margin-bottom: 16px;
+  opacity: 0.5;
+}
+
+.empty-state p {
+  margin: 8px 0;
+  color: #6b7280;
+}
+
+.empty-hint {
+  font-size: 0.85rem;
+  color: #9ca3af;
+  font-style: italic;
+}
+
 .footer-info {
   padding: 20px 24px;
   border-top: 1px solid #e5e7eb;

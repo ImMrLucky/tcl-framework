@@ -65,7 +65,12 @@ export class IssueDetailModalComponent {
   constructor(
     public dialogRef: MatDialogRef<IssueDetailModalComponent>,
     @Inject(MAT_DIALOG_DATA) public issue: ClusteredIssue
-  ) {}
+  ) {
+    // Debug: log the issue data to see what we're receiving
+    console.log('IssueDetailModal - Received issue data:', issue);
+    console.log('IssueDetailModal - primaryEvidence:', issue?.primaryEvidence);
+    console.log('IssueDetailModal - metrics:', issue?.metrics);
+  }
 
   getSeverityColor(severity: string): string {
     switch (severity?.toUpperCase()) {
@@ -121,6 +126,16 @@ export class IssueDetailModalComponent {
 
   close(): void {
     this.dialogRef.close();
+  }
+
+  // Helper to check if evidence exists
+  hasEvidence(): boolean {
+    return !!(this.issue?.primaryEvidence && this.issue.primaryEvidence.length > 0);
+  }
+
+  // Helper to check if metrics exist
+  hasMetrics(): boolean {
+    return !!this.issue?.metrics;
   }
 }
 

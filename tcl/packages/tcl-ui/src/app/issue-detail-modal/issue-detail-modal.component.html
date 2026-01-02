@@ -50,17 +50,26 @@
       <!-- Evidence Tab -->
       <mat-tab label="Evidence">
         <div class="tab-content">
-          <div class="evidence-list">
+          <div class="evidence-list" *ngIf="issue?.primaryEvidence && issue.primaryEvidence.length > 0">
             <div class="evidence-item" *ngFor="let ev of issue.primaryEvidence">
               <div class="evidence-speaker">
-                <span [class]="'speaker-badge speaker-' + ev.speaker.toLowerCase()">{{ ev.speaker }}</span>
-                <span class="turn-info">Turn {{ ev.turnIndex + 1 }}</span>
-                <span class="timestamp" *ngIf="ev.timestampMs">
+                <span [class]="'speaker-badge speaker-' + (ev?.speaker || 'unknown').toLowerCase()">
+                  {{ ev?.speaker || 'Unknown' }}
+                </span>
+                <span class="turn-info" *ngIf="ev?.turnIndex !== undefined">
+                  Turn {{ ev.turnIndex + 1 }}
+                </span>
+                <span class="timestamp" *ngIf="ev?.timestampMs">
                   {{ ev.timestampMs / 1000 | number:'1.1-1' }}s
                 </span>
               </div>
-              <blockquote class="evidence-quote">"{{ ev.quote }}"</blockquote>
+              <blockquote class="evidence-quote">"{{ ev?.quote || 'No quote available' }}"</blockquote>
             </div>
+          </div>
+          <div class="empty-state" *ngIf="!issue?.primaryEvidence || issue.primaryEvidence.length === 0">
+            <mat-icon>info</mat-icon>
+            <p>No evidence data available for this issue.</p>
+            <p class="empty-hint">Evidence may not have been generated during analysis.</p>
           </div>
         </div>
       </mat-tab>
@@ -68,45 +77,50 @@
       <!-- Metrics Tab -->
       <mat-tab label="Metrics">
         <div class="tab-content">
-          <div class="metrics-detail">
+          <div class="metrics-detail" *ngIf="issue?.metrics">
             <div class="metric-row">
               <span class="metric-name">Risk Score</span>
-              <span class="metric-value">{{ issue.metrics.riskScore }}</span>
+              <span class="metric-value">{{ issue.metrics?.riskScore ?? 'N/A' }}</span>
             </div>
             <div class="metric-row">
               <span class="metric-name">Contradiction Mass</span>
-              <span class="metric-value">{{ issue.metrics.contradictionMass.toFixed(2) }}</span>
+              <span class="metric-value">{{ issue.metrics?.contradictionMass !== undefined ? issue.metrics.contradictionMass.toFixed(2) : 'N/A' }}</span>
             </div>
             <div class="metric-row">
               <span class="metric-name">Support Mass</span>
-              <span class="metric-value">{{ issue.metrics.supportMass.toFixed(2) }}</span>
+              <span class="metric-value">{{ issue.metrics?.supportMass !== undefined ? issue.metrics.supportMass.toFixed(2) : 'N/A' }}</span>
             </div>
             <div class="metric-row">
               <span class="metric-name">Grounding Mass</span>
-              <span class="metric-value">{{ issue.metrics.groundingMass.toFixed(2) }}</span>
+              <span class="metric-value">{{ issue.metrics?.groundingMass !== undefined ? issue.metrics.groundingMass.toFixed(2) : 'N/A' }}</span>
             </div>
             <div class="metric-row">
               <span class="metric-name">Claims Involved</span>
-              <span class="metric-value">{{ issue.metrics.claimCount }}</span>
+              <span class="metric-value">{{ issue.metrics?.claimCount ?? 'N/A' }}</span>
             </div>
             <div class="metric-row">
               <span class="metric-name">Turn Span</span>
-              <span class="metric-value">{{ issue.metrics.turnSpan }}</span>
+              <span class="metric-value">{{ issue.metrics?.turnSpan ?? 'N/A' }}</span>
             </div>
             <div class="metric-row">
               <span class="metric-name">Centrality</span>
-              <span class="metric-value">{{ issue.metrics.centrality.toFixed(3) }}</span>
+              <span class="metric-value">{{ issue.metrics?.centrality !== undefined ? issue.metrics.centrality.toFixed(3) : 'N/A' }}</span>
             </div>
             <div class="metric-row">
               <span class="metric-name">Rank</span>
-              <span class="metric-value">#{{ issue.metrics.rank }}</span>
+              <span class="metric-value">#{{ issue.metrics?.rank ?? 'N/A' }}</span>
             </div>
-            <div class="drivers-section">
+            <div class="drivers-section" *ngIf="issue.metrics?.drivers && issue.metrics.drivers.length > 0">
               <h4>Risk Drivers</h4>
               <ul>
                 <li *ngFor="let driver of issue.metrics.drivers">{{ driver }}</li>
               </ul>
             </div>
+          </div>
+          <div class="empty-state" *ngIf="!issue?.metrics">
+            <mat-icon>info</mat-icon>
+            <p>No metrics data available for this issue.</p>
+            <p class="empty-hint">Metrics may not have been computed during analysis.</p>
           </div>
         </div>
       </mat-tab>
