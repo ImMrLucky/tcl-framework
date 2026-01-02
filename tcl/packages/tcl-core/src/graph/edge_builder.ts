@@ -402,6 +402,9 @@ export async function buildClaimGraph(
       });
     }
 
+    // Diagnostic: track max scores per claim
+    const groundingDiagnostic: Array<{ claimText: string; maxScore: number; passed: boolean }> = [];
+    
     for (const c of claims) {
       const scored: Array<{ sid: string; sc: number; quote?: string }> = [];
       for (const s of sources) {
@@ -417,15 +420,35 @@ export async function buildClaimGraph(
       }
       scored.sort((a, b) => b.sc - a.sc);
       const top = scored.slice(0, Math.max(1, topGroundingK));
+      
+      const maxScore = top[0]?.sc || 0;
+      let passed = false;
+      
       for (const t of top) {
         if (t.sc >= tGnd) {
           grounding.push({ claimId: c.id, sourceId: t.sid, weight: clamp01(t.sc), quote: t.quote });
           groundedClaimIds.push(c.id);
+          passed = true;
         } else {
           filteredBelowGrounding++;
         }
       }
+      
+      groundingDiagnostic.push({
+        claimText: c.text.substring(0, 50),
+        maxScore: maxScore,
+        passed
+      });
     }
+    
+    // Log grounding diagnostic (first 5 and summary)
+    console.log(`📊 GROUNDING DIAGNOSTIC (threshold=${tGnd}):`);
+    console.log(`   Sample scores:`, groundingDiagnostic.slice(0, 5).map(d => 
+      `"${d.claimText}..." → ${d.maxScore.toFixed(3)} ${d.passed ? '✓' : '✗'}`
+    ));
+    const passedCount = groundingDiagnostic.filter(d => d.passed).length;
+    const avgMaxScore = groundingDiagnostic.reduce((a, d) => a + d.maxScore, 0) / groundingDiagnostic.length;
+    console.log(`   Total: ${passedCount}/${groundingDiagnostic.length} passed, avg max score: ${avgMaxScore.toFixed(3)}`);
   }
 
   // -----------------------------
