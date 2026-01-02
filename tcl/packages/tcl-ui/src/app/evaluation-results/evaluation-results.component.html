@@ -26,13 +26,26 @@
         <mat-icon>download</mat-icon>
       </button>
       <mat-menu #exportMenu="matMenu">
-        <button mat-menu-item (click)="exportClaimsCSV()">
+        <button mat-menu-item (click)="exportHTML()">
+          <mat-icon>picture_as_pdf</mat-icon>
+          <span>Export Report (HTML/PDF)</span>
+        </button>
+        <button mat-menu-item (click)="exportIssuesCSV()">
           <mat-icon>table_chart</mat-icon>
-          <span>Export Claims CSV</span>
+          <span>Export Issues CSV</span>
+        </button>
+        <button mat-menu-item (click)="exportIssuesJSON()">
+          <mat-icon>code</mat-icon>
+          <span>Export Issues JSON</span>
+        </button>
+        <mat-divider></mat-divider>
+        <button mat-menu-item (click)="exportClaimsCSV()">
+          <mat-icon>list_alt</mat-icon>
+          <span>Export Claims CSV (Legacy)</span>
         </button>
         <button mat-menu-item (click)="exportRunJSON()">
-          <mat-icon>code</mat-icon>
-          <span>Export Run JSON</span>
+          <mat-icon>data_object</mat-icon>
+          <span>Export Full Run JSON</span>
         </button>
         <mat-divider></mat-divider>
         <button mat-menu-item (click)="deleteEvaluation()" class="delete-action">
@@ -66,17 +79,55 @@
       </button>
     </div>
 
-    <!-- A) Audit Summary (Top of Page) -->
-    <mat-card class="audit-summary-card">
+    <!-- A) Executive Summary (Manager-grade) -->
+    <mat-card class="audit-summary-card executive-summary">
       <mat-card-header>
         <mat-card-title>
-          <mat-icon>assessment</mat-icon>
-          Audit Summary
+          <mat-icon>dashboard</mat-icon>
+          Executive Summary
         </mat-card-title>
-        <mat-card-subtitle>Executive overview — what compliance needs to know</mat-card-subtitle>
+        <mat-card-subtitle>What compliance needs to know at a glance</mat-card-subtitle>
       </mat-card-header>
       <mat-card-content>
-        <div class="audit-summary-grid">
+        <!-- NEW: Issue Summary Grid -->
+        <div class="executive-grid" *ngIf="issueSummary">
+          <div class="exec-metric total">
+            <div class="exec-value">{{ issueSummary.totalIssues }}</div>
+            <div class="exec-label">Total Issues</div>
+          </div>
+          <div class="exec-metric critical" *ngIf="issueSummary.bySeverity.CRITICAL > 0">
+            <div class="exec-value">{{ issueSummary.bySeverity.CRITICAL }}</div>
+            <div class="exec-label">Critical</div>
+          </div>
+          <div class="exec-metric high">
+            <div class="exec-value">{{ issueSummary.bySeverity.HIGH + issueSummary.bySeverity.CRITICAL }}</div>
+            <div class="exec-label">High/Critical</div>
+          </div>
+          <div class="exec-metric medium">
+            <div class="exec-value">{{ issueSummary.bySeverity.MEDIUM }}</div>
+            <div class="exec-label">Medium</div>
+          </div>
+          <div class="exec-metric low">
+            <div class="exec-value">{{ issueSummary.bySeverity.LOW }}</div>
+            <div class="exec-label">Low</div>
+          </div>
+          <div class="exec-metric audit-status" [class.ready]="issueSummary.auditReady">
+            <mat-icon>{{ issueSummary.auditReady ? 'verified' : 'pending' }}</mat-icon>
+            <div class="exec-label">{{ issueSummary.auditReady ? 'Audit Ready' : 'Pending' }}</div>
+          </div>
+        </div>
+
+        <!-- Primary Risk Categories -->
+        <div class="risk-categories" *ngIf="issueSummary?.primaryRiskCategories?.length">
+          <span class="category-label">Primary Risk Areas:</span>
+          <span class="category-chip" *ngFor="let cat of issueSummary.primaryRiskCategories">
+            <mat-icon class="category-icon">{{ getCategoryIcon(cat) }}</mat-icon>
+            {{ getCategoryLabel(cat) }}
+          </span>
+        </div>
+
+        <!-- Fallback to old summary if no issue analysis -->
+        <div class="audit-summary-grid" *ngIf="!issueSummary">
           <div class="summary-metric">
             <div class="metric-label">Coherence Score</div>
             <div class="metric-value-large" [class.no-data]="getSpectralScores().coherenceScore === undefined">
@@ -204,9 +255,184 @@
     </mat-card>
 
     <div class="main-layout">
-      <!-- B) Top Issues Table (Main Content) -->
+      <!-- B) Issues Section with Toggle -->
       <div class="main-content">
-        <mat-card class="issues-card">
+        <!-- View Toggle -->
+        <div class="view-toggle" *ngIf="clusteredIssues.length > 0">
+          <button mat-button [class.active]="showClusteredView" (click)="showClusteredView = true">
+            <mat-icon>category</mat-icon>
+            Problem Statements ({{ clusteredIssues.length }})
+          </button>
+          <button mat-button [class.active]="!showClusteredView" (click)="showClusteredView = false">
+            <mat-icon>list</mat-icon>
+            Per-Claim Issues ({{ issues.length }})
+          </button>
+        </div>
+
+        <!-- NEW: Clustered Issues View (Manager-grade) -->
+        <mat-card class="issues-card clustered-issues" *ngIf="showClusteredView && clusteredIssues.length > 0">
+          <mat-card-header>
+            <mat-card-title>
+              <mat-icon>assignment</mat-icon>
+              Problem Statements (Ranked by Risk)
+            </mat-card-title>
+            <mat-card-subtitle>Actionable issues grouped by topic — what managers need to review</mat-card-subtitle>
+          </mat-card-header>
+          <mat-card-content>
+            <div class="clustered-issues-list">
+              <div 
+                class="clustered-issue-card" 
+                *ngFor="let issue of clusteredIssues; let i = index"
+                (click)="selectClusteredIssue(issue)"
+                [class.selected]="selectedClusteredIssue?.id === issue.id"
+              >
+                <div class="issue-rank">#{{ i + 1 }}</div>
+                <div 
+                  class="issue-severity-badge"
+                  [style.background-color]="getClusteredSeverityBgColor(issue.severity)"
+                  [style.color]="getClusteredSeverityColor(issue.severity)"
+                >
+                  {{ issue.severity }}
+                </div>
+                <div class="issue-main">
+                  <div class="issue-title">{{ issue.title }}</div>
+                  <div class="issue-problem">{{ issue.problemStatement }}</div>
+                  <div class="issue-meta">
+                    <span class="issue-category">
+                      <mat-icon>{{ getCategoryIcon(issue.category) }}</mat-icon>
+                      {{ getCategoryLabel(issue.category) }}
+                    </span>
+                    <span class="issue-confidence">Confidence: {{ issue.confidence }}</span>
+                    <span class="issue-claims">{{ issue.metrics.claimCount }} claims</span>
+                  </div>
+                </div>
+                <div class="issue-risk-score">
+                  <div class="risk-value">{{ issue.metrics.riskScore }}</div>
+                  <div class="risk-label">Risk</div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Empty state -->
+            <div class="empty-state" *ngIf="clusteredIssues.length === 0">
+              <mat-icon>check_circle</mat-icon>
+              <p>No significant issues detected</p>
+            </div>
+          </mat-card-content>
+        </mat-card>
+
+        <!-- Selected Issue Detail Panel -->
+        <mat-card class="issue-detail-panel" *ngIf="selectedClusteredIssue">
+          <mat-card-header>
+            <mat-card-title>
+              <span 
+                class="detail-severity"
+                [style.background-color]="getClusteredSeverityBgColor(selectedClusteredIssue.severity)"
+                [style.color]="getClusteredSeverityColor(selectedClusteredIssue.severity)"
+              >{{ selectedClusteredIssue.severity }}</span>
+              {{ selectedClusteredIssue.title }}
+            </mat-card-title>
+            <button mat-icon-button (click)="closeClusteredIssueDetail()" class="close-btn">
+              <mat-icon>close</mat-icon>
+            </button>
+          </mat-card-header>
+          <mat-card-content>
+            <mat-tab-group>
+              <!-- Overview Tab -->
+              <mat-tab label="Overview">
+                <div class="detail-section">
+                  <h4>Problem Statement</h4>
+                  <p>{{ selectedClusteredIssue.problemStatement }}</p>
+                </div>
+                <div class="detail-section">
+                  <h4>Why This Is Wrong</h4>
+                  <ul>
+                    <li *ngFor="let reason of selectedClusteredIssue.whyWrong">{{ reason }}</li>
+                  </ul>
+                </div>
+                <div class="detail-section">
+                  <h4>Impact</h4>
+                  <p>{{ selectedClusteredIssue.impact }}</p>
+                </div>
+                <div class="detail-section">
+                  <h4>Recommended Action</h4>
+                  <ul>
+                    <li *ngFor="let action of selectedClusteredIssue.recommendedAction">{{ action }}</li>
+                  </ul>
+                </div>
+                <div class="detail-section confidence">
+                  <h4>Confidence: {{ selectedClusteredIssue.confidence }}</h4>
+                  <p>{{ selectedClusteredIssue.confidenceExplanation }}</p>
+                </div>
+              </mat-tab>
+
+              <!-- Evidence Tab -->
+              <mat-tab label="Evidence">
+                <div class="evidence-list">
+                  <div class="evidence-item" *ngFor="let ev of selectedClusteredIssue.primaryEvidence">
+                    <div class="evidence-speaker">
+                      <span [class]="'speaker-badge speaker-' + ev.speaker.toLowerCase()">{{ ev.speaker }}</span>
+                      <span class="turn-info">Turn {{ ev.turnIndex + 1 }}</span>
+                    </div>
+                    <blockquote class="evidence-quote">"{{ ev.quote }}"</blockquote>
+                  </div>
+                </div>
+              </mat-tab>
+
+              <!-- Metrics Tab -->
+              <mat-tab label="Metrics">
+                <div class="metrics-detail">
+                  <div class="metric-row">
+                    <span class="metric-name">Risk Score</span>
+                    <span class="metric-value">{{ selectedClusteredIssue.metrics.riskScore }}</span>
+                  </div>
+                  <div class="metric-row">
+                    <span class="metric-name">Contradiction Mass</span>
+                    <span class="metric-value">{{ selectedClusteredIssue.metrics.contradictionMass.toFixed(2) }}</span>
+                  </div>
+                  <div class="metric-row">
+                    <span class="metric-name">Support Mass</span>
+                    <span class="metric-value">{{ selectedClusteredIssue.metrics.supportMass.toFixed(2) }}</span>
+                  </div>
+                  <div class="metric-row">
+                    <span class="metric-name">Grounding Mass</span>
+                    <span class="metric-value">{{ selectedClusteredIssue.metrics.groundingMass.toFixed(2) }}</span>
+                  </div>
+                  <div class="metric-row">
+                    <span class="metric-name">Claims Involved</span>
+                    <span class="metric-value">{{ selectedClusteredIssue.metrics.claimCount }}</span>
+                  </div>
+                  <div class="metric-row">
+                    <span class="metric-name">Turn Span</span>
+                    <span class="metric-value">{{ selectedClusteredIssue.metrics.turnSpan }}</span>
+                  </div>
+                  <div class="drivers-section">
+                    <h4>Risk Drivers</h4>
+                    <ul>
+                      <li *ngFor="let driver of selectedClusteredIssue.metrics.drivers">{{ driver }}</li>
+                    </ul>
+                  </div>
+                </div>
+              </mat-tab>
+            </mat-tab-group>
+
+            <!-- Tags -->
+            <div class="issue-tags" *ngIf="selectedClusteredIssue.tags?.length">
+              <mat-chip *ngFor="let tag of selectedClusteredIssue.tags">{{ tag }}</mat-chip>
+            </div>
+
+            <!-- Flags -->
+            <div class="issue-flags" *ngIf="selectedClusteredIssue.flags">
+              <mat-chip *ngIf="selectedClusteredIssue.flags.sensitiveData" color="warn">Sensitive Data</mat-chip>
+              <mat-chip *ngIf="selectedClusteredIssue.flags.financialImpact" color="accent">Financial Impact</mat-chip>
+              <mat-chip *ngIf="selectedClusteredIssue.flags.policyConflict" color="warn">Policy Conflict</mat-chip>
+              <mat-chip *ngIf="selectedClusteredIssue.flags.regulatoryRisk" color="warn">Regulatory Risk</mat-chip>
+            </div>
+          </mat-card-content>
+        </mat-card>
+
+        <!-- Original Per-Claim Issues Table (when toggled) -->
+        <mat-card class="issues-card" *ngIf="!showClusteredView || clusteredIssues.length === 0">
           <mat-card-header>
             <mat-card-title>Top Claim Issues (Ranked by Risk)</mat-card-title>
             <mat-card-subtitle>Actionable findings from conversation analysis</mat-card-subtitle>

@@ -27,6 +27,7 @@ import {
 import { setupIntegrationRoutes } from "./integrations/routes.js";
 import { setupAuditRoutes } from "./audit/routes.js";
 import { buildIssuesList } from "./audit/reproducibility.js";
+import { analyzeForIssues, exportAsJSON, exportAsCSV, exportAsHTML, type IssueAnalysisOutput } from "../issues/index.js";
 import { getOrgContext } from "./auth-context.js";
 import { registerIngestEndpoints } from "./ingestion/ingest-endpoint.js";
 
@@ -728,6 +729,55 @@ app.post("/validate", async (req, res) => {
         });
         
         console.log(`Built ${issues.length} issues (spectral available: ${!out.report.spectral?.spectralSkipped})`);
+        
+        // NEW: Generate CLUSTERED issues using the manager-grade issue analyzer
+        // This groups claims into problem statements with proper risk scoring
+        try {
+          const issueAnalysis = analyzeForIssues({
+            transcript: text || "",
+            claims: claimsForIssues,
+            edges: {
+              contradictions: graphContradictions.map((c: any) => ({
+                claimA: c.claimA,
+                claimB: c.claimB,
+                weight: c.weight || 1,
+                reason: c.reason || "Contradiction detected"
+              })),
+              supports: graphSupports.map((s: any) => ({
+                claimA: s.claimA,
+                claimB: s.claimB,
+                weight: s.weight || 1
+              })),
+              grounding: graphGrounding.map((g: any) => ({
+                claimId: g.claimId,
+                sourceId: g.sourceId || g.evidenceId,
+                weight: g.weight || 1,
+                quote: g.quote
+              }))
+            }
+          });
+          
+          // Store the clustered issues analysis alongside the per-claim issues
+          (out.report as any).issueAnalysis = {
+            summary: issueAnalysis.summary,
+            clusteredIssues: issueAnalysis.issues,
+            reproducibility: issueAnalysis.reproducibility,
+            processingTimeMs: issueAnalysis.processingTimeMs
+          };
+          
+          console.log("8️⃣ CLUSTERED ISSUES (Manager-grade):", {
+            totalIssues: issueAnalysis.summary.totalIssues,
+            bySeverity: issueAnalysis.summary.bySeverity,
+            primaryCategories: issueAnalysis.summary.primaryRiskCategories,
+            topIssue: issueAnalysis.issues[0] ? {
+              title: issueAnalysis.issues[0].title,
+              severity: issueAnalysis.issues[0].severity,
+              riskScore: issueAnalysis.issues[0].metrics.riskScore
+            } : "none"
+          });
+        } catch (clusterErr: any) {
+          console.warn('Failed to generate clustered issues:', clusterErr.message);
+        }
       } catch (issueErr: any) {
         console.warn('Failed to build issues list:', issueErr.message);
       }
@@ -1655,6 +1705,243 @@ app.patch("/evaluations/:evaluationId/issues/:issueId", async (req, res) => {
     res.status(500).json({ 
       error: e?.message ?? "unknown error"
     });
+  }
+});
+
+// ============================================================================
+// ISSUE EXPORT ENDPOINTS
+// ============================================================================
+
+// Export evaluation issues as JSON
+app.get("/evaluations/:evaluationId/export/json", async (req, res) => {
+  try {
+    const { evaluationId } = req.params;
+    const context = await getOrgContext(req);
+    
+    if (!context || context.error) {
+      return res.status(401).json({ error: context?.error || "Authorization required" });
+    }
+    
+    if (!supabaseAdmin) {
+      return res.status(503).json({ error: "Supabase not configured" });
+    }
+    
+    const { data: evaluation, error: evalError } = await supabaseAdmin
+      .from('evaluations')
+      .select('id, org_id, report')
+      .eq('id', evaluationId)
+      .eq('org_id', context.orgId)
+      .maybeSingle();
+    
+    if (evalError) {
+      return res.status(500).json({ error: evalError.message });
+    }
+    
+    if (!evaluation) {
+      return res.status(404).json({ error: "Evaluation not found" });
+    }
+    
+    const report = evaluation.report as any;
+    const issueAnalysis = report?.issueAnalysis;
+    
+    if (issueAnalysis) {
+      // Use the new clustered issue analysis
+      const output: IssueAnalysisOutput = {
+        summary: issueAnalysis.summary,
+        issues: issueAnalysis.clusteredIssues,
+        claims: report.claims?.map((c: any) => ({
+          id: c.id,
+          speaker: c.meta?.speaker || "UNKNOWN",
+          text: c.text,
+          turnIndex: c.meta?.turnIndex || 0,
+          topics: c.topicTags || []
+        })) || [],
+        edges: (report.graph?.contradictions || []).map((c: any, i: number) => ({
+          id: `edge_${i}`,
+          type: "CONTRADICTION",
+          fromClaimId: c.claimA,
+          toClaimId: c.claimB,
+          score: c.weight || 1,
+          rationale: "Contradiction"
+        })).concat((report.graph?.supports || []).map((s: any, i: number) => ({
+          id: `edge_support_${i}`,
+          type: "SUPPORT",
+          fromClaimId: s.claimA,
+          toClaimId: s.claimB,
+          score: s.weight || 1,
+          rationale: "Support"
+        }))),
+        reproducibility: issueAnalysis.reproducibility,
+        processingTimeMs: issueAnalysis.processingTimeMs || 0
+      };
+      
+      res.setHeader('Content-Type', 'application/json');
+      res.setHeader('Content-Disposition', `attachment; filename="evaluation-${evaluationId}.json"`);
+      return res.send(exportAsJSON(output));
+    }
+    
+    // Fallback: export raw report
+    res.setHeader('Content-Type', 'application/json');
+    res.setHeader('Content-Disposition', `attachment; filename="evaluation-${evaluationId}.json"`);
+    res.json(report);
+  } catch (e: any) {
+    console.error("Export JSON error:", e);
+    res.status(500).json({ error: e?.message ?? "unknown error" });
+  }
+});
+
+// Export evaluation issues as CSV
+app.get("/evaluations/:evaluationId/export/csv", async (req, res) => {
+  try {
+    const { evaluationId } = req.params;
+    const context = await getOrgContext(req);
+    
+    if (!context || context.error) {
+      return res.status(401).json({ error: context?.error || "Authorization required" });
+    }
+    
+    if (!supabaseAdmin) {
+      return res.status(503).json({ error: "Supabase not configured" });
+    }
+    
+    const { data: evaluation, error: evalError } = await supabaseAdmin
+      .from('evaluations')
+      .select('id, org_id, report')
+      .eq('id', evaluationId)
+      .eq('org_id', context.orgId)
+      .maybeSingle();
+    
+    if (evalError) {
+      return res.status(500).json({ error: evalError.message });
+    }
+    
+    if (!evaluation) {
+      return res.status(404).json({ error: "Evaluation not found" });
+    }
+    
+    const report = evaluation.report as any;
+    const issueAnalysis = report?.issueAnalysis;
+    
+    if (issueAnalysis) {
+      const output: IssueAnalysisOutput = {
+        summary: issueAnalysis.summary,
+        issues: issueAnalysis.clusteredIssues,
+        claims: [],
+        edges: [],
+        reproducibility: issueAnalysis.reproducibility,
+        processingTimeMs: issueAnalysis.processingTimeMs || 0
+      };
+      
+      res.setHeader('Content-Type', 'text/csv');
+      res.setHeader('Content-Disposition', `attachment; filename="evaluation-${evaluationId}.csv"`);
+      return res.send(exportAsCSV(output));
+    }
+    
+    // Fallback: generate CSV from raw issues
+    const issues = report?.issues || [];
+    const headers = ["claimId", "severity", "issueType", "claimText", "speaker", "status"];
+    const rows = issues.map((i: any) => [
+      i.claimId,
+      i.risk?.severity || i.severity || "unknown",
+      i.what?.issueType || i.issueType || "unknown",
+      `"${(i.what?.claimText || i.claimText || "").replace(/"/g, '""')}"`,
+      i.who?.speaker || i.speaker || "unknown",
+      i.status || "OPEN"
+    ]);
+    
+    res.setHeader('Content-Type', 'text/csv');
+    res.setHeader('Content-Disposition', `attachment; filename="evaluation-${evaluationId}.csv"`);
+    res.send([headers.join(","), ...rows.map((r: string[]) => r.join(","))].join("\n"));
+  } catch (e: any) {
+    console.error("Export CSV error:", e);
+    res.status(500).json({ error: e?.message ?? "unknown error" });
+  }
+});
+
+// Export evaluation as HTML report (printable/PDF-ready)
+app.get("/evaluations/:evaluationId/export/html", async (req, res) => {
+  try {
+    const { evaluationId } = req.params;
+    const context = await getOrgContext(req);
+    
+    if (!context || context.error) {
+      return res.status(401).json({ error: context?.error || "Authorization required" });
+    }
+    
+    if (!supabaseAdmin) {
+      return res.status(503).json({ error: "Supabase not configured" });
+    }
+    
+    const { data: evaluation, error: evalError } = await supabaseAdmin
+      .from('evaluations')
+      .select('id, org_id, report')
+      .eq('id', evaluationId)
+      .eq('org_id', context.orgId)
+      .maybeSingle();
+    
+    if (evalError) {
+      return res.status(500).json({ error: evalError.message });
+    }
+    
+    if (!evaluation) {
+      return res.status(404).json({ error: "Evaluation not found" });
+    }
+    
+    const report = evaluation.report as any;
+    const issueAnalysis = report?.issueAnalysis;
+    
+    if (issueAnalysis) {
+      const output: IssueAnalysisOutput = {
+        summary: issueAnalysis.summary,
+        issues: issueAnalysis.clusteredIssues,
+        claims: [],
+        edges: [],
+        reproducibility: issueAnalysis.reproducibility,
+        processingTimeMs: issueAnalysis.processingTimeMs || 0
+      };
+      
+      res.setHeader('Content-Type', 'text/html');
+      res.setHeader('Content-Disposition', `attachment; filename="evaluation-${evaluationId}.html"`);
+      return res.send(exportAsHTML(output));
+    }
+    
+    // Fallback: generate simple HTML from raw issues
+    const issues = report?.issues || [];
+    const html = `<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Evaluation Report - ${evaluationId}</title>
+  <style>
+    body { font-family: sans-serif; max-width: 800px; margin: 0 auto; padding: 20px; }
+    .issue { border: 1px solid #ddd; padding: 15px; margin: 10px 0; border-radius: 5px; }
+    .severity-critical { border-left: 4px solid #991b1b; }
+    .severity-high { border-left: 4px solid #ea580c; }
+    .severity-medium { border-left: 4px solid #2563eb; }
+    .severity-low { border-left: 4px solid #16a34a; }
+  </style>
+</head>
+<body>
+  <h1>Evaluation Report</h1>
+  <p>ID: ${evaluationId}</p>
+  <p>Total Issues: ${issues.length}</p>
+  ${issues.map((i: any, idx: number) => `
+    <div class="issue severity-${(i.risk?.severity || i.severity || 'medium').toLowerCase()}">
+      <h3>#${idx + 1}: ${i.what?.issueType || i.issueType || 'Issue'}</h3>
+      <p><strong>Speaker:</strong> ${i.who?.speaker || i.speaker || 'Unknown'}</p>
+      <p><strong>Claim:</strong> ${i.what?.claimText || i.claimText || 'N/A'}</p>
+      <p><strong>Status:</strong> ${i.status || 'OPEN'}</p>
+    </div>
+  `).join('')}
+</body>
+</html>`;
+    
+    res.setHeader('Content-Type', 'text/html');
+    res.setHeader('Content-Disposition', `attachment; filename="evaluation-${evaluationId}.html"`);
+    res.send(html);
+  } catch (e: any) {
+    console.error("Export HTML error:", e);
+    res.status(500).json({ error: e?.message ?? "unknown error" });
   }
 });
 

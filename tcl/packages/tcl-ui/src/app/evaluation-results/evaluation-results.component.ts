@@ -15,6 +15,7 @@ import { MatSelectModule } from '@angular/material/select';
 import { MatProgressBarModule } from '@angular/material/progress-bar';
 import { MatExpansionModule } from '@angular/material/expansion';
 import { MatDividerModule } from '@angular/material/divider';
+import { MatTabsModule } from '@angular/material/tabs';
 import { AppHeaderComponent } from '../shared/app-header.component';
 import { AuditService, Evaluation, Issue } from '../audit.service';
 import { EvidenceViewerComponent } from '../evidence-viewer/evidence-viewer.component';
@@ -40,11 +41,59 @@ import { SensitiveActionService } from '../sensitive-action.service';
     MatProgressBarModule,
     MatExpansionModule,
     MatDividerModule,
+    MatTabsModule,
     AppHeaderComponent
   ],
   templateUrl: './evaluation-results.component.html',
   styleUrls: ['./evaluation-results.component.scss']
 })
+// New clustered issue types (manager-grade)
+interface ClusteredIssue {
+  id: string;
+  title: string;
+  category: string;
+  severity: 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL';
+  confidence: 'LOW' | 'MEDIUM' | 'HIGH';
+  problemStatement: string;
+  whyWrong: string[];
+  impact: string;
+  recommendedAction: string[];
+  confidenceExplanation: string;
+  primaryEvidence: Array<{
+    speaker: string;
+    quote: string;
+    turnIndex: number;
+    timestampMs?: number;
+    claimId: string;
+  }>;
+  metrics: {
+    contradictionMass: number;
+    supportMass: number;
+    groundingMass: number;
+    centrality: number;
+    claimCount: number;
+    turnSpan: number;
+    riskScore: number;
+    rank: number;
+    drivers: string[];
+  };
+  tags: string[];
+  flags?: {
+    sensitiveData?: boolean;
+    financialImpact?: boolean;
+    policyConflict?: boolean;
+    regulatoryRisk?: boolean;
+  };
+}
+
+interface IssueSummary {
+  totalIssues: number;
+  bySeverity: { LOW: number; MEDIUM: number; HIGH: number; CRITICAL: number };
+  byCategory: Record<string, number>;
+  primaryRiskCategories: string[];
+  auditReady: boolean;
+}
+
 export class EvaluationResultsComponent implements OnInit {
   evaluationId: string = '';
   evaluation: Evaluation | null = null;
@@ -58,6 +107,12 @@ export class EvaluationResultsComponent implements OnInit {
   topOffenders: Array<{ claimId: string; text: string; nodeBlameNorm: number }> = [];
   topContradictions: Array<{ claimAId: string; claimBId: string; weight: number }> = [];
   topSupports: Array<{ claimAId: string; claimBId: string; weight: number }> = [];
+  
+  // NEW: Manager-grade clustered issues
+  clusteredIssues: ClusteredIssue[] = [];
+  issueSummary: IssueSummary | null = null;
+  showClusteredView = true; // Toggle between clustered and per-claim view
+  selectedClusteredIssue: ClusteredIssue | null = null;
 
   constructor(
     private route: ActivatedRoute,
@@ -95,6 +150,17 @@ export class EvaluationResultsComponent implements OnInit {
         this.issues = issuesResponse.issues;
         this.sortAndProcessIssues();
         this.extractTopOffenders();
+      }
+      
+      // Load clustered issues (manager-grade) from report
+      const issueAnalysis = (this.evaluation?.report as any)?.issueAnalysis;
+      if (issueAnalysis) {
+        this.clusteredIssues = issueAnalysis.clusteredIssues || [];
+        this.issueSummary = issueAnalysis.summary || null;
+        console.log('📊 Loaded clustered issues:', {
+          count: this.clusteredIssues.length,
+          summary: this.issueSummary
+        });
       }
     } catch (error: any) {
       console.error('Load evaluation error:', error);
@@ -261,6 +327,89 @@ export class EvaluationResultsComponent implements OnInit {
     } catch (error: any) {
       this.snackBar.open('Failed to export PDF: ' + (error.error?.error || error.message), 'Close', { duration: 5000 });
     }
+  }
+
+  // ============================================================================
+  // CLUSTERED ISSUES (Manager-grade)
+  // ============================================================================
+
+  toggleView() {
+    this.showClusteredView = !this.showClusteredView;
+  }
+
+  selectClusteredIssue(issue: ClusteredIssue) {
+    this.selectedClusteredIssue = issue;
+  }
+
+  closeClusteredIssueDetail() {
+    this.selectedClusteredIssue = null;
+  }
+
+  getClusteredSeverityColor(severity: string): string {
+    switch (severity?.toUpperCase()) {
+      case 'CRITICAL': return '#991b1b';
+      case 'HIGH': return '#ea580c';
+      case 'MEDIUM': return '#2563eb';
+      case 'LOW': return '#16a34a';
+      default: return '#6b7280';
+    }
+  }
+
+  getClusteredSeverityBgColor(severity: string): string {
+    switch (severity?.toUpperCase()) {
+      case 'CRITICAL': return '#fee2e2';
+      case 'HIGH': return '#fef3c7';
+      case 'MEDIUM': return '#e0e7ff';
+      case 'LOW': return '#d1fae5';
+      default: return '#f3f4f6';
+    }
+  }
+
+  getCategoryLabel(category: string): string {
+    const labels: Record<string, string> = {
+      'BILLING': 'Billing',
+      'DISCLOSURE': 'Disclosure',
+      'MISREPRESENTATION': 'Misrepresentation',
+      'PRIVACY': 'Privacy',
+      'SECURITY': 'Security',
+      'PROCESS': 'Process',
+      'CUSTOMER_HARM': 'Customer Harm',
+      'REGULATORY': 'Regulatory',
+      'PROMISE_BREACH': 'Promise Breach',
+      'OTHER': 'Other'
+    };
+    return labels[category] || category;
+  }
+
+  getCategoryIcon(category: string): string {
+    const icons: Record<string, string> = {
+      'BILLING': 'payments',
+      'DISCLOSURE': 'visibility_off',
+      'MISREPRESENTATION': 'warning',
+      'PRIVACY': 'lock',
+      'SECURITY': 'security',
+      'PROCESS': 'account_tree',
+      'CUSTOMER_HARM': 'person_off',
+      'REGULATORY': 'gavel',
+      'PROMISE_BREACH': 'handshake',
+      'OTHER': 'help_outline'
+    };
+    return icons[category] || 'help_outline';
+  }
+
+  exportHTML() {
+    // Trigger HTML export download
+    window.open(`/api/evaluations/${this.evaluationId}/export/html`, '_blank');
+  }
+
+  exportIssuesCSV() {
+    // Trigger CSV export download
+    window.open(`/api/evaluations/${this.evaluationId}/export/csv`, '_blank');
+  }
+
+  exportIssuesJSON() {
+    // Trigger JSON export download
+    window.open(`/api/evaluations/${this.evaluationId}/export/json`, '_blank');
   }
 
   getSpectralScores() {

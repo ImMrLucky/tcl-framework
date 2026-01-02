@@ -538,3 +538,391 @@
   width: 48px;
   height: 48px;
 }
+
+/* ============================================================================
+   EXECUTIVE SUMMARY & CLUSTERED ISSUES (Manager-grade UI)
+   ============================================================================ */
+
+.executive-summary {
+  background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+  color: white;
+}
+
+.executive-summary mat-card-title,
+.executive-summary mat-card-subtitle {
+  color: white !important;
+}
+
+.executive-summary mat-card-subtitle {
+  opacity: 0.8;
+}
+
+.executive-grid {
+  display: flex;
+  gap: 24px;
+  flex-wrap: wrap;
+  margin-bottom: 20px;
+}
+
+.exec-metric {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 16px 24px;
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 12px;
+  min-width: 100px;
+}
+
+.exec-metric.total {
+  background: rgba(255, 255, 255, 0.15);
+}
+
+.exec-metric.critical {
+  background: rgba(220, 38, 38, 0.3);
+}
+
+.exec-metric.high {
+  background: rgba(234, 88, 12, 0.3);
+}
+
+.exec-metric.medium {
+  background: rgba(37, 99, 235, 0.3);
+}
+
+.exec-metric.low {
+  background: rgba(22, 163, 74, 0.3);
+}
+
+.exec-metric.audit-status {
+  flex-direction: row;
+  gap: 8px;
+}
+
+.exec-metric.audit-status.ready {
+  background: rgba(22, 163, 74, 0.3);
+}
+
+.exec-value {
+  font-size: 2.5rem;
+  font-weight: bold;
+  line-height: 1;
+}
+
+.exec-label {
+  font-size: 0.85rem;
+  opacity: 0.8;
+  margin-top: 4px;
+}
+
+.risk-categories {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.category-label {
+  font-size: 0.9rem;
+  opacity: 0.8;
+}
+
+.category-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  background: rgba(255, 255, 255, 0.15);
+  border-radius: 20px;
+  font-size: 0.85rem;
+}
+
+.category-icon {
+  font-size: 16px;
+  width: 16px;
+  height: 16px;
+}
+
+/* View Toggle */
+.view-toggle {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+.view-toggle button {
+  opacity: 0.6;
+  transition: opacity 0.2s;
+}
+
+.view-toggle button.active {
+  opacity: 1;
+  background: rgba(25, 118, 210, 0.1);
+}
+
+/* Clustered Issues List */
+.clustered-issues-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.clustered-issue-card {
+  display: flex;
+  align-items: flex-start;
+  gap: 16px;
+  padding: 16px;
+  background: #f9fafb;
+  border-radius: 12px;
+  cursor: pointer;
+  transition: all 0.2s;
+  border: 2px solid transparent;
+}
+
+.clustered-issue-card:hover {
+  background: #f3f4f6;
+  border-color: #e5e7eb;
+}
+
+.clustered-issue-card.selected {
+  border-color: #2563eb;
+  background: #eff6ff;
+}
+
+.issue-rank {
+  font-size: 1.25rem;
+  font-weight: bold;
+  color: #9ca3af;
+  min-width: 32px;
+}
+
+.issue-severity-badge {
+  padding: 4px 10px;
+  border-radius: 6px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.5px;
+  min-width: 70px;
+  text-align: center;
+}
+
+.issue-main {
+  flex: 1;
+}
+
+.issue-title {
+  font-size: 1rem;
+  font-weight: 600;
+  color: #1f2937;
+  margin-bottom: 4px;
+}
+
+.issue-problem {
+  font-size: 0.9rem;
+  color: #4b5563;
+  line-height: 1.4;
+  margin-bottom: 8px;
+}
+
+.issue-meta {
+  display: flex;
+  gap: 16px;
+  font-size: 0.8rem;
+  color: #6b7280;
+}
+
+.issue-category {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.issue-category mat-icon {
+  font-size: 14px;
+  width: 14px;
+  height: 14px;
+}
+
+.issue-risk-score {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 8px 12px;
+  background: white;
+  border-radius: 8px;
+  min-width: 50px;
+}
+
+.risk-value {
+  font-size: 1.5rem;
+  font-weight: bold;
+  color: #1f2937;
+}
+
+.risk-label {
+  font-size: 0.7rem;
+  color: #9ca3af;
+  text-transform: uppercase;
+}
+
+/* Issue Detail Panel */
+.issue-detail-panel {
+  margin-top: 20px;
+  border-left: 4px solid #2563eb;
+}
+
+.issue-detail-panel mat-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.issue-detail-panel .close-btn {
+  margin-left: auto;
+}
+
+.detail-severity {
+  padding: 4px 10px;
+  border-radius: 6px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  margin-right: 12px;
+}
+
+.detail-section {
+  margin-bottom: 24px;
+}
+
+.detail-section h4 {
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: #374151;
+  margin: 0 0 8px 0;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.detail-section p {
+  color: #4b5563;
+  line-height: 1.6;
+  margin: 0;
+}
+
+.detail-section ul {
+  margin: 0;
+  padding-left: 20px;
+  color: #4b5563;
+}
+
+.detail-section ul li {
+  margin-bottom: 6px;
+}
+
+.detail-section.confidence {
+  background: #f9fafb;
+  padding: 16px;
+  border-radius: 8px;
+}
+
+/* Evidence List in Detail */
+.evidence-list {
+  padding: 16px 0;
+}
+
+.evidence-item {
+  margin-bottom: 16px;
+  padding-bottom: 16px;
+  border-bottom: 1px solid #e5e7eb;
+}
+
+.evidence-item:last-child {
+  border-bottom: none;
+}
+
+.evidence-speaker {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.turn-info {
+  font-size: 0.8rem;
+  color: #9ca3af;
+}
+
+.evidence-quote {
+  margin: 0;
+  padding: 12px 16px;
+  background: #f9fafb;
+  border-left: 3px solid #2563eb;
+  font-style: italic;
+  color: #374151;
+}
+
+/* Metrics Detail */
+.metrics-detail {
+  padding: 16px 0;
+}
+
+.metric-row {
+  display: flex;
+  justify-content: space-between;
+  padding: 8px 0;
+  border-bottom: 1px solid #f3f4f6;
+}
+
+.metric-name {
+  color: #6b7280;
+}
+
+.metric-value {
+  font-weight: 600;
+  color: #1f2937;
+}
+
+.drivers-section {
+  margin-top: 16px;
+  padding: 16px;
+  background: #fef3c7;
+  border-radius: 8px;
+}
+
+.drivers-section h4 {
+  margin: 0 0 8px 0;
+  color: #92400e;
+}
+
+.drivers-section ul {
+  margin: 0;
+  padding-left: 20px;
+}
+
+.drivers-section li {
+  color: #78350f;
+}
+
+/* Issue Tags and Flags */
+.issue-tags,
+.issue-flags {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 16px;
+  padding-top: 16px;
+  border-top: 1px solid #e5e7eb;
+}
+
+/* Empty State */
+.empty-state {
+  text-align: center;
+  padding: 40px;
+  color: #9ca3af;
+}
+
+.empty-state mat-icon {
+  font-size: 48px;
+  width: 48px;
+  height: 48px;
+  margin-bottom: 16px;
+}
