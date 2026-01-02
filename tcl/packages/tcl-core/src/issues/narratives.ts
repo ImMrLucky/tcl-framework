@@ -5,7 +5,7 @@
  * All values come from config - NO HARD-CODED calculations.
  */
 
-import type { Claim } from '../../types.js';
+import type { Claim } from '../types.js';
 import type { IssueNarrative } from './types.js';
 import type { Edge } from './types.js';
 import { extractQuote, extractQuotes, type QuoteExtraction } from './quotes.js';
@@ -189,7 +189,7 @@ function determineCategory(
   for (const claim of claims) {
     const lowerText = claim.text.toLowerCase();
     for (const [keyword, subcat] of Object.entries(taxonomy.subcategoryMapping)) {
-      if (lowerText.includes(keyword)) {
+      if (lowerText.includes(keyword) && typeof subcat === 'string') {
         allTopics.add(subcat);
       }
     }
@@ -414,7 +414,7 @@ function generateNarrativeText(
   const whyWrong = template.whyWrong.map((w: string) => renderTemplate(w, vars));
   const whyItMatters = template.whyItMatters.map((w: string) => renderTemplate(w, vars));
   const recommendedActions = template.recommendedActions.map((a: any) => ({
-    type: a.type,
+    type: a.type as "COACHING" | "PROCESS" | "COMPLIANCE" | "SYSTEM_FIX",
     action: renderTemplate(a.action, vars)
   }));
   

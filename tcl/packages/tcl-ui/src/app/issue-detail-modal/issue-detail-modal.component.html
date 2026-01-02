@@ -12,7 +12,7 @@
       <span class="issue-category" *ngIf="issue.category">
         <mat-icon>{{ getCategoryIcon(issue.category) }}</mat-icon>
         {{ getCategoryLabel(issue.category) }}
-        <span *ngIf="isNarrative && (issue as any).subcategory"> · {{ (issue as any).subcategory }}</span>
+        <span *ngIf="getSubcategory()"> · {{ getSubcategory() }}</span>
       </span>
     </div>
     <button mat-icon-button (click)="close()" class="close-button">
@@ -46,7 +46,7 @@
             <h4>Recommended Actions</h4>
             <ul>
               <li *ngFor="let action of getRecommendedActions()">
-                <strong *ngIf="isNarrative">{{ action.type }}:</strong> {{ isNarrative ? action.action : action }}
+                <strong>{{ action.type }}:</strong> {{ action.action }}
               </li>
             </ul>
           </div>

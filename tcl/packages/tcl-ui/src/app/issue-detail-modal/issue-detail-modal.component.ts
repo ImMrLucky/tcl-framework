@@ -330,8 +330,16 @@ export class IssueDetailModalComponent {
     }
   }
 
-  // Helper to get recommended actions
-  getRecommendedActions(): Array<{ type: string; action: string }> | string[] {
+  // Helper to get subcategory
+  getSubcategory(): string | null {
+    if (this.isNarrative) {
+      return (this.issue as IssueNarrative).subcategory || null;
+    }
+    return null;
+  }
+
+  // Helper to get recommended actions (normalized to consistent format)
+  getRecommendedActions(): Array<{ type: string; action: string }> {
     if (this.isNarrative) {
       return (this.issue as IssueNarrative).recommendedActions;
     } else {

@@ -4,7 +4,7 @@
  * CRITICAL: Quotes must be EXACT (not truncated) for audit defensibility.
  */
 
-import type { Claim } from '../../types.js';
+import type { Claim } from '../types.js';
 import type { EvidenceSnippet } from './types.js';
 
 export interface QuoteExtraction {
@@ -61,7 +61,7 @@ export function extractQuote(claim: Claim, claimIndex: number): QuoteExtraction 
   // Check for external evidence references
   let evidenceRef: { type:"Call"|"Policy"|"KB"; ref: string; } | undefined;
   if (claim.evidence && claim.evidence.length > 0) {
-    const externalEvidence = claim.evidence.find(e => e.source_id && !e.source_id.startsWith('turn_'));
+    const externalEvidence = claim.evidence.find((e: any) => e.source_id && !e.source_id.startsWith('turn_'));
     if (externalEvidence) {
       if (externalEvidence.source_id.includes('policy') || externalEvidence.source_id.includes('Policy')) {
         evidenceRef = { type: 'Policy', ref: externalEvidence.source_id };

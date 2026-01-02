@@ -201,8 +201,7 @@ async function validateOnce(input: ValidateInput, adapter?: LLMAdapter, startTim
         ? Math.round((consistencyScore + finalCoherence) / 2)
         : consistencyScore;
       
-      // Generate reproducibility metadata
-      const transcript = answer || question;
+      // Generate reproducibility metadata (reuse transcript from above)
       const reproMetadata = generateReproducibilityMetadata(transcript);
       
       // Build manifest with full reproducibility
@@ -812,9 +811,14 @@ async function validateOnce(input: ValidateInput, adapter?: LLMAdapter, startTim
         )
       : undefined;
 
+    // Generate reproducibility metadata
+    const transcriptForRepro = answer || question;
+    const reproMetadata = generateReproducibilityMetadata(transcriptForRepro);
+    
     // Build run manifest for audit
     const runManifest: RunManifest = {
-      inputHash: generateInputHash(question, answer),
+      inputHash: reproMetadata.inputHash,
+      configHash: reproMetadata.configHash,
       artifactId,
       claimExtractorVersion: "v1.0.0", // TODO: Extract from package.json
       nliModelId: scorer.id,
@@ -826,7 +830,9 @@ async function validateOnce(input: ValidateInput, adapter?: LLMAdapter, startTim
       embeddingModel: "simple-ngram-v1", // Our built-in embedding
       retrievalK,
       spectralEngineVersion: spectralEnabled && spectral && !spectral.spectralSkipped ? "v1.0.0" : undefined,
-      codeVersion: engineVersion,
+      codeVersion: reproMetadata.codeVersion,
+      engineVersion: reproMetadata.engineVersion,
+      modelFingerprint: reproMetadata.modelFingerprint,
       createdAt: new Date().toISOString(),
       transcriptSourcesCount,
       graphHealth: {
