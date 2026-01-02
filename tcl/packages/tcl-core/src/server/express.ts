@@ -316,6 +316,139 @@ Agent: Based on what I can see, your plan hasn't changed.`;
   }
 });
 
+// Edge builder test endpoint - tests batch NLI scoring and edge creation
+app.get("/edge-test", async (req, res) => {
+  const result: any = {
+    timestamp: new Date().toISOString(),
+    steps: {}
+  };
+  
+  try {
+    // Test transcript with known grounding relationship
+    const testTranscript = `Agent: Your plan allows you to cancel at any time without a fee.
+Customer: That's great to hear.
+Agent: However, there may be an early termination charge if you cancel during the promotional period.
+Customer: Wait, that contradicts what you just said about no fees.`;
+    
+    // Step 1: Generate sources
+    const { generateSourcesFromRawTranscript } = await import("../evidence_sources.js");
+    const sources = generateSourcesFromRawTranscript(testTranscript, "test-edge");
+    result.steps.sources = {
+      count: sources.length,
+      texts: sources.map(s => s.text.substring(0, 80) + "...")
+    };
+    
+    // Step 2: Extract claims
+    const { extractClaims } = await import("../claim_extractor.js");
+    const claims = extractClaims(testTranscript);
+    result.steps.claims = {
+      count: claims.length,
+      texts: claims.map(c => c.text.substring(0, 80) + "...")
+    };
+    
+    // Step 3: Create scorer
+    const { SpectralNliScorer } = await import("../graph/spectral_nli_scorer.js");
+    const spectralUrl = process.env.TCL_SPECTRAL_URL || "";
+    const scorer = new SpectralNliScorer({ endpoint: spectralUrl });
+    result.steps.scorer = {
+      id: scorer.id,
+      endpoint: spectralUrl + "/nli/score"
+    };
+    
+    // Step 4: Manually test batch scoring for grounding
+    const groundingPairs = [];
+    for (const claim of claims) {
+      for (const source of sources) {
+        groundingPairs.push({
+          task: "grounding" as const,
+          a: source.text, // source as premise
+          b: claim.text,  // claim as hypothesis
+          key: `gnd_${claim.id}_${source.id}`
+        });
+      }
+    }
+    
+    result.steps.groundingPairs = {
+      count: groundingPairs.length,
+      samplePairs: groundingPairs.slice(0, 3).map(p => ({
+        task: p.task,
+        premise: p.a.substring(0, 60) + "...",
+        hypothesis: p.b.substring(0, 60) + "..."
+      }))
+    };
+    
+    // Step 5: Call scoreBatch directly
+    const batchScores = await scorer.scoreBatch(groundingPairs);
+    result.steps.batchScoring = {
+      scoresReturned: batchScores.length,
+      sampleScores: batchScores.slice(0, 5).map((s, i) => ({
+        key: s.key?.substring(0, 30) + "...",
+        score: s.score?.toFixed(4),
+        pair: groundingPairs[i] ? {
+          premise: groundingPairs[i].a.substring(0, 40),
+          hypothesis: groundingPairs[i].b.substring(0, 40)
+        } : null
+      })),
+      distribution: {
+        high: batchScores.filter(s => s.score >= 0.5).length,
+        medium: batchScores.filter(s => s.score >= 0.25 && s.score < 0.5).length,
+        low: batchScores.filter(s => s.score < 0.25).length
+      },
+      stats: {
+        max: Math.max(...batchScores.map(s => s.score)),
+        min: Math.min(...batchScores.map(s => s.score)),
+        avg: batchScores.reduce((a, b) => a + b.score, 0) / batchScores.length
+      }
+    };
+    
+    // Step 6: Count how many would pass threshold
+    const threshold = 0.25;
+    const passingEdges = batchScores.filter(s => s.score >= threshold);
+    result.steps.edgeCreation = {
+      threshold,
+      passingCount: passingEdges.length,
+      failingCount: batchScores.length - passingEdges.length,
+      passingScores: passingEdges.slice(0, 5).map(s => s.score.toFixed(4))
+    };
+    
+    // Step 7: Now test full buildClaimGraph
+    const { buildClaimGraph } = await import("../graph/edge_builder.js");
+    const graph = await buildClaimGraph(claims, sources, {
+      scorer,
+      supportThreshold: 0.25,
+      contradictionThreshold: 0.35,
+      groundingThreshold: 0.25,
+      maxPairwiseEdges: 200,
+      batchSize: 32,
+      cache: { enabled: false } // Disable cache for testing
+    });
+    
+    result.steps.graphBuild = {
+      supports: graph.supports.length,
+      contradictions: graph.contradictions.length,
+      grounding: graph.grounding.length,
+      groundedClaimIds: graph.groundedClaimIds,
+      debug: graph.debug
+    };
+    
+    result.status = "complete";
+    result.summary = {
+      claimsExtracted: claims.length,
+      sourcesGenerated: sources.length,
+      pairsScored: batchScores.length,
+      edgesCreated: graph.supports.length + graph.contradictions.length + graph.grounding.length,
+      graphHealthy: graph.supports.length + graph.contradictions.length + graph.grounding.length > 0
+    };
+    
+    res.json(result);
+  } catch (err: any) {
+    result.status = "error";
+    result.error = err.message;
+    result.stack = err.stack;
+    res.status(500).json(result);
+  }
+});
+
 // Lazy load these to avoid startup crashes
 let validate: any;
 let OpenAIAdapter: any;
