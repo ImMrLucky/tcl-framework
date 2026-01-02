@@ -92,35 +92,35 @@
         <!-- NEW: Issue Summary Grid -->
         <div class="executive-grid" *ngIf="issueSummary">
           <div class="exec-metric total">
-            <div class="exec-value">{{ issueSummary.totalIssues }}</div>
+            <div class="exec-value">{{ issueSummary?.totalIssues || 0 }}</div>
             <div class="exec-label">Total Issues</div>
           </div>
-          <div class="exec-metric critical" *ngIf="issueSummary.bySeverity.CRITICAL > 0">
-            <div class="exec-value">{{ issueSummary.bySeverity.CRITICAL }}</div>
+          <div class="exec-metric critical" *ngIf="(issueSummary?.bySeverity?.CRITICAL || 0) > 0">
+            <div class="exec-value">{{ issueSummary?.bySeverity?.CRITICAL || 0 }}</div>
             <div class="exec-label">Critical</div>
           </div>
           <div class="exec-metric high">
-            <div class="exec-value">{{ issueSummary.bySeverity.HIGH + issueSummary.bySeverity.CRITICAL }}</div>
+            <div class="exec-value">{{ (issueSummary?.bySeverity?.HIGH || 0) + (issueSummary?.bySeverity?.CRITICAL || 0) }}</div>
             <div class="exec-label">High/Critical</div>
           </div>
           <div class="exec-metric medium">
-            <div class="exec-value">{{ issueSummary.bySeverity.MEDIUM }}</div>
+            <div class="exec-value">{{ issueSummary?.bySeverity?.MEDIUM || 0 }}</div>
             <div class="exec-label">Medium</div>
           </div>
           <div class="exec-metric low">
-            <div class="exec-value">{{ issueSummary.bySeverity.LOW }}</div>
+            <div class="exec-value">{{ issueSummary?.bySeverity?.LOW || 0 }}</div>
             <div class="exec-label">Low</div>
           </div>
-          <div class="exec-metric audit-status" [class.ready]="issueSummary.auditReady">
-            <mat-icon>{{ issueSummary.auditReady ? 'verified' : 'pending' }}</mat-icon>
-            <div class="exec-label">{{ issueSummary.auditReady ? 'Audit Ready' : 'Pending' }}</div>
+          <div class="exec-metric audit-status" [class.ready]="issueSummary?.auditReady">
+            <mat-icon>{{ issueSummary?.auditReady ? 'verified' : 'pending' }}</mat-icon>
+            <div class="exec-label">{{ issueSummary?.auditReady ? 'Audit Ready' : 'Pending' }}</div>
           </div>
         </div>
 
         <!-- Primary Risk Categories -->
         <div class="risk-categories" *ngIf="issueSummary?.primaryRiskCategories?.length">
           <span class="category-label">Primary Risk Areas:</span>
-          <span class="category-chip" *ngFor="let cat of issueSummary.primaryRiskCategories">
+          <span class="category-chip" *ngFor="let cat of issueSummary?.primaryRiskCategories || []">
             <mat-icon class="category-icon">{{ getCategoryIcon(cat) }}</mat-icon>
             {{ getCategoryLabel(cat) }}
           </span>
