@@ -36,6 +36,12 @@ export interface ScoringConfig {
     wPromiseRisk: number;
     /** Weight for direct contradictions vs topic_mismatch */
     wDirectContradiction: number;
+    /** Weights for issue composite scoring (risk + impact + fixability) */
+    issueComposite: {
+      risk: number;
+      impact: number;
+      fixability: number;
+    };
   };
 
   // ============================================================================
@@ -95,6 +101,11 @@ export const DEFAULT_SCORING_CONFIG: ScoringConfig = {
     wUnverified: 0.20,
     wPromiseRisk: 0.30,
     wDirectContradiction: 1.0, // Full weight for direct contradictions
+    issueComposite: {
+      risk: 0.5,
+      impact: 0.3,
+      fixability: 0.2,
+    },
   },
 
   review: {

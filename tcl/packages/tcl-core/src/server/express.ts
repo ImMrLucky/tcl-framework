@@ -28,6 +28,7 @@ import { setupIntegrationRoutes } from "./integrations/routes.js";
 import { setupAuditRoutes } from "./audit/routes.js";
 import { buildIssuesList } from "./audit/reproducibility.js";
 import { analyzeForIssues, exportAsJSON, exportAsCSV, exportAsHTML, type IssueAnalysisOutput } from "../issues/index.js";
+import { buildIssueNarratives } from "../analysis/issue-narratives.js";
 import { getOrgContext } from "./auth-context.js";
 import { registerIngestEndpoints } from "./ingestion/ingest-endpoint.js";
 
@@ -798,6 +799,65 @@ app.post("/validate", async (req, res) => {
             });
           } else {
             console.log("8️⃣ CLUSTERED ISSUES: Skipped (no claims or edges available)");
+          }
+          
+          // NEW: Generate QA-Manager Grade Issue Narratives
+          try {
+            if (claimsForIssues.length > 0 && (graphContradictions.length > 0 || graphSupports.length > 0 || graphGrounding.length > 0)) {
+              const transcript = (input.answer && input.answer.trim().length > 0) ? input.answer : input.question;
+              
+              const narrativesResult = buildIssueNarratives({
+                claims: claimsForIssues.map((c: any) => ({
+                  id: c.id,
+                  text: c.text,
+                  confidence: c.confidence || 0,
+                  evidence: c.evidence || [],
+                  claimKind: c.claimKind,
+                  grounding: c.grounding,
+                  verification: c.verification,
+                  consistency: c.consistency,
+                  confidenceMetrics: c.confidenceMetrics,
+                  meta: c.meta,
+                  truthState: c.truthState,
+                })),
+                contradictions: graphContradictions,
+                supports: graphSupports,
+                grounding: graphGrounding.map((g: any) => ({
+                  claimId: g.claimId || g.claimA,
+                  sourceId: g.sourceId || g.evidenceId || g.claimB,
+                  weight: g.weight || 1,
+                  quote: g.quote,
+                })),
+                spectral: out.report?.spectral,
+                destructiveClaims: out.report?.destructiveClaims,
+                transcript: transcript || "",
+              });
+              
+              // Store issue narratives in report
+              (out.report as any).issueNarratives = {
+                narratives: narrativesResult.narratives,
+                summary: narrativesResult.summary,
+              };
+              
+              console.log("9️⃣ ISSUE NARRATIVES (QA-Manager Grade):", {
+                totalNarratives: narrativesResult.narratives.length,
+                bySeverity: narrativesResult.summary.bySeverity,
+                topCategories: narrativesResult.summary.topCategories,
+                topNarrative: narrativesResult.narratives[0] ? {
+                  title: narrativesResult.narratives[0].title,
+                  severity: narrativesResult.narratives[0].severity,
+                  category: narrativesResult.narratives[0].category,
+                  compositeScore: narrativesResult.narratives[0].scoring.compositeScore,
+                } : "none"
+              });
+            } else {
+              console.log("9️⃣ ISSUE NARRATIVES: Skipped (no claims or edges available)");
+            }
+          } catch (narrativeErr: any) {
+            // Log error but don't break the main flow
+            console.error('Failed to generate issue narratives:', narrativeErr);
+            console.error('Error stack:', narrativeErr.stack);
+            // Don't throw - this is optional functionality
           }
         } catch (clusterErr: any) {
           // Log error but don't break the main flow

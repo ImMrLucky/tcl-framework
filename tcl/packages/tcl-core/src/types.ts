@@ -60,6 +60,87 @@ export type Claim = {
     speaker?: string; // "Agent" | "Customer" | "Other"
     turnIndex?: number;
   };
+  
+  // NEW: QA-Manager Grade fields
+  truthState?: "Supported" | "Contradicted" | "Ungrounded" | "Inconclusive";
+  whyFlagged?: {
+    reasons: string[];
+    evidence: Array<{ source_id: string; quote?: string; span?: string }>;
+    conflictsWith: Array<{ claimId: string; score: number }>;
+    missingEvidence: boolean;
+  };
+  suggestedRewrite?: string; // Optional agent coaching suggestion
+};
+
+// ============================================================================
+// ISSUE NARRATIVE - QA-Manager Grade Findings
+// ============================================================================
+
+export type EvidenceQuote = {
+  quoteId: string;
+  claimId: string;
+  speaker: "Agent" | "Customer" | "System";
+  turnIndex: number;
+  lineSpan?: [number, number];
+  text: string; // Exact quote (not truncated)
+  evidenceRef?: {
+    type: "Call" | "Policy" | "KB";
+    ref: string;
+  };
+};
+
+export type ContradictionPair = {
+  claimAId: string;
+  claimBId: string;
+  score: number;
+  explanation: string; // Auto-generated: "These cannot both be true because…"
+  quoteIds: [string, string]; // References into evidenceQuotes
+};
+
+export type IssueNarrative = {
+  issueId: string;
+  category: string; // e.g., "BILLING"
+  subcategory?: string; // e.g., "Cancellation Fees"
+  title: string; // Human-friendly (no "discrepancy about X and Y")
+  severity: "LOW" | "MEDIUM" | "HIGH" | "CRITICAL";
+  confidence: "LOW" | "MEDIUM" | "HIGH";
+  status: "OPEN" | "RESOLVED" | "DISMISSED";
+  
+  scope: {
+    turnRange: [number, number];
+    claimIds: string[];
+    speakerFocus: "AGENT" | "SYSTEM" | "CUSTOMER"; // Default "AGENT"
+  };
+  
+  whatIsWrong: string; // 1–3 sentences, specific
+  whyWrong: string[]; // Bullet reasons (policy/logic)
+  whyItMatters: string[]; // Business impact bullets
+  
+  recommendedActions: Array<{
+    type: "COACHING" | "PROCESS" | "COMPLIANCE" | "SYSTEM_FIX";
+    action: string;
+  }>;
+  
+  evidenceQuotes: EvidenceQuote[];
+  contradictionPairs?: ContradictionPair[];
+  
+  traceability: {
+    topEdges: Array<{
+      type: "support" | "contradiction" | "grounding";
+      fromClaimId: string;
+      toClaimId: string;
+      weight: number;
+      reason?: string;
+    }>;
+  };
+  
+  scoring: {
+    riskScore: number; // 0–100 (configurable mapping)
+    impactScore: number; // 0–100
+    fixabilityScore: number; // 0–100
+    compositeScore: number; // Used for ranking
+    rationale: string[]; // Bullet explanation of score drivers
+  };
 };
 
 export type Violation =
