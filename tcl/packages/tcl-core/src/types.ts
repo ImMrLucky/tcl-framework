@@ -2,11 +2,51 @@ import type { LLMAdapter } from "./adapters/llm_adapter";
 
 export type Source = { id: string; text: string };
 
+// ============================================================================
+// CLAIM CLASSIFICATION - For contradiction gating
+// ============================================================================
+
+/** Claim kind determines how it participates in contradiction detection */
+export type ClaimKind = 
+  | "assertion"  // Factual statement that can be contradicted
+  | "intent"     // "I want to...", "I'd like to..." - customer goals
+  | "question"   // Ends with "?" or interrogative
+  | "meta"       // References docs/agreements, conversation control
+  | "emotion"    // Expresses feelings: frustrated, upset, confused
+  | "promise"    // Agent commitment: "I will...", "I'll send..."
+  | "unknown";   // Fallback
+
+/** Grounding status - where the claim gets its support */
+export type ClaimGrounding = {
+  kind: "transcript" | "external" | "none";
+  evidenceIds: string[];
+  quoteSpans?: Array<{ start: number; end: number }>;
+};
+
+/** Verification status - for claims against external sources */
+export type ClaimVerification = {
+  status: "unverified" | "verified" | "disputed" | "not_applicable";
+  evidenceIds: string[];
+};
+
+/** Consistency status - relationship to other claims */
+export type ClaimConsistency = {
+  status: "consistent" | "inconsistent" | "unknown";
+  against: string[]; // IDs of conflicting claims
+};
+
 export type Claim = {
   id: string;
   text: string;
   confidence: number; // 0..1 (calculated confidence score)
   evidence: { source_id: string; quote?: string; span?: string; weight?: number }[];
+  
+  // NEW: Claim classification for contradiction gating
+  claimKind?: ClaimKind;
+  grounding?: ClaimGrounding;
+  verification?: ClaimVerification;
+  consistency?: ClaimConsistency;
+  
   // Enhanced confidence metrics
   confidenceMetrics?: {
     groundingScore: number; // 0-1, based on evidence
@@ -182,8 +222,38 @@ export type ValidateInput = {
   options?: ValidationOptions;
 };
 
-export type SupportEdge = { claimA: string; claimB: string; weight: number };
-export type ContradictionEdge = { claimA: string; claimB: string; weight: number };
+// ============================================================================
+// EDGE TYPES - Enhanced with classification
+// ============================================================================
+
+/** Support edge types */
+export type SupportType = "entailed" | "paraphrase" | "reinforced" | "weak";
+
+export type SupportEdge = { 
+  claimA: string; 
+  claimB: string; 
+  weight: number;
+  // NEW: Support classification
+  supportType?: SupportType;
+};
+
+/** Contradiction edge types - critical for gating */
+export type ContradictionType = 
+  | "direct"         // Real semantic contradiction
+  | "topic_mismatch" // Different topics, not a real contradiction
+  | "low_overlap"    // Insufficient topic overlap
+  | "needs_review";  // Uncertain, flag for human review
+
+export type ContradictionEdge = { 
+  claimA: string; 
+  claimB: string; 
+  weight: number;
+  // NEW: Contradiction classification
+  contradictionType?: ContradictionType;
+  overlapScore?: number;  // Topic overlap (0-1)
+  reasonCodes?: string[]; // e.g., ["KIND_INTENT", "LOW_OVERLAP"]
+};
+
 export type GroundingEdge = { claimId: string; sourceId: string; weight: number; quote?: string };
 
 export type Suggestion = {
@@ -195,6 +265,71 @@ export type Suggestion = {
   description: string;
   suggestedAction: string; // What the user should do
   example?: string; // Optional example of how to fix
+};
+
+// ============================================================================
+// REVIEW ITEMS - Actionable outputs for users
+// ============================================================================
+
+/** Review item severity */
+export type ReviewSeverity = "low" | "medium" | "high" | "critical";
+
+/** Review item - the "money" output users actually need */
+export type ReviewItem = {
+  id: string;
+  title: string;                    // Short: "Contradiction about plan change vs fee"
+  severity: ReviewSeverity;
+  category: "contradiction" | "ungrounded" | "promise_unverified" | "policy" | "destructive";
+  whyItMatters: string;             // 1-2 lines explaining impact
+  
+  // Evidence
+  involvedClaimIds: string[];
+  claimTexts: string[];             // The actual claim text for display
+  speakerLabels: string[];          // Who said what
+  transcriptSpans?: Array<{ start: number; end: number }>;
+  
+  // Recommended action
+  recommendedAction: string;        // 1 concrete action
+  actionTemplate?: string;          // Template key: "billing_clarify", "promise_confirm", etc.
+  
+  // Drivers (why this was flagged)
+  drivers: {
+    nodeBlameNorm?: number;
+    contradictionWeight?: number;
+    overlapScore?: number;
+    destructiveImportance?: number;
+    reasonCodes?: string[];
+  };
+};
+
+// ============================================================================
+// ENHANCED SCORES - Replace misleading "truth" score
+// ============================================================================
+
+/** Enhanced scores that reflect reality */
+export type EnhancedScores = {
+  // NEW: Meaningful scores
+  groundednessScore: number | null;   // 0-100: % of claims with transcript/external grounding
+  verificationScore: number | null;   // 0-100: % verified against external sources (null if none)
+  consistencyScore: number | null;    // 0-100: derived from DIRECT contradictions only
+  coherenceScore: number | null;      // 0-100: from spectral analysis
+  
+  // LEGACY: Keep for backwards compatibility, but deprecate
+  /** @deprecated Use groundednessScore instead */
+  truth: number | null;
+  consistency: number | null;
+  coherence: number | null;
+  overall: number | null;
+};
+
+/** Summary stats for UI display */
+export type SummaryStats = {
+  totalClaims: number;
+  groundedClaims: number;            // Claims with grounding.kind !== "none"
+  verifiedClaims: number;            // Claims with verification.status === "verified"
+  directContradictions: number;      // Only "direct" type contradictions
+  needsReviewCount: number;          // Claims/edges flagged for review
+  hasExternalEvidence: boolean;      // Whether any external sources connected
 };
 
 export type GraphDebugInfo = {
@@ -275,17 +410,26 @@ export type RunManifest = {
 export type ValidateOutput = {
   answer: string;
   refusal: boolean;
+  
+  // LEGACY scores (kept for backwards compatibility)
   scores: { truth: number | null; consistency: number | null; coherence: number | null; overall: number | null };
-  scorerId?: string; // ID of the NLI scorer used (e.g., "transformers-deberta-v3-base", "token-heuristic-v1")
+  
+  // NEW: Enhanced scores that reflect reality
+  enhancedScores?: EnhancedScores;
+  summaryStats?: SummaryStats;
+  
+  scorerId?: string; // ID of the scorer used
   latency?: number; // Request latency in milliseconds
   cacheHitRate?: number; // Cache hit rate percentage (0-100)
   engineVersion?: string; // Engine version/commit hash
+  
   report: {
     claims: Claim[];
     violations: Violation[];
     missingEvidence: { claimId: string; reason: string }[];
     contradictions: { claimA: string; claimB: string; reason: string }[];
     spectral?: SpectralReport & { spectralSkipped?: boolean; debugReason?: string; graphHealthDiagnostic?: any };
+    
     // Graph edges from buildClaimGraph
     graph?: {
       supports: SupportEdge[];
@@ -293,10 +437,15 @@ export type ValidateOutput = {
       grounding: GroundingEdge[];
       debug?: GraphDebugInfo;
     };
-    // New features
-    suggestions?: Suggestion[]; // Actionable suggestions for fixing issues
-    destructiveClaims?: DestructiveClaim[]; // All destructive claims ranked by importance
-    trajectory?: TrajectoryReport; // Trajectory scoring for transcripts
+    
+    // NEW: Top review items - the "money" output
+    reviewItems?: ReviewItem[];
+    
+    // Existing features
+    suggestions?: Suggestion[];
+    destructiveClaims?: DestructiveClaim[];
+    trajectory?: TrajectoryReport;
+    
     // AUDIT-CRITICAL: Run manifest for reproducibility
     manifest?: RunManifest;
   };

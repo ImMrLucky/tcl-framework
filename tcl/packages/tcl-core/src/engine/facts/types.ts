@@ -75,6 +75,15 @@ export type EdgeType = "support" | "contradiction" | "grounding" | "structure";
 export type EdgeProvenance = "rules" | "retrieval" | "structure";
 
 /**
+ * Contradiction type for gating
+ */
+export type TruthEdgeContradictionType = 
+  | "direct"         // Real semantic contradiction
+  | "topic_mismatch" // Different topics, not a real contradiction  
+  | "low_overlap"    // Insufficient topic overlap
+  | "needs_review";  // Uncertain, flag for human review
+
+/**
  * Rule-based edge with full provenance.
  */
 export interface TruthEdge {
@@ -88,6 +97,11 @@ export interface TruthEdge {
   reason: string;          // Human-readable explanation
   ruleId: string;          // Stable identifier for auditing
   provenance: EdgeProvenance;
+  
+  // NEW: Contradiction classification for gating
+  contradictionType?: TruthEdgeContradictionType;
+  overlapScore?: number;   // Topic overlap (0-1)
+  reasonCodes?: string[];  // e.g., ["KIND_INTENT", "LOW_OVERLAP"]
   
   // Optional metadata for detailed analysis
   metadata?: {

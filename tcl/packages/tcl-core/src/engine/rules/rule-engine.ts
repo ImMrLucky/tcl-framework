@@ -8,12 +8,21 @@
  * 4. Agent self-contradiction
  * 
  * All edge weights come from config - nothing hard-coded.
+ * 
+ * KEY FIX: Uses claim classification + topic overlap gating to prevent
+ * false contradictions between intents, questions, emotions, etc.
  */
 
 import { createHash } from "crypto";
 import type { TruthEngineConfig } from "../config/types.js";
 import type { EnhancedClaim, Fact, TruthEdge } from "../facts/types.js";
 import { DEFAULT_CONFIG } from "../config/types.js";
+import type { ContradictionType } from "../../types.js";
+import { 
+  classifyClaimKind, 
+  shouldConsiderContradiction, 
+  calculateTopicOverlap 
+} from "../../claim_classifier.js";
 
 export interface RuleEngineResult {
   contradictionEdges: TruthEdge[];
