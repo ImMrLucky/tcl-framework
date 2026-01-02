@@ -69,6 +69,26 @@ export class SpectralNliScorer implements SemanticScorer {
 
       const data: NliBatchResponse = await res.json();
       
+      // Log diagnostic info for first batch
+      if (pairs.length > 0) {
+        console.log(`🔬 SpectralNliScorer batch response (${pairs.length} pairs):`);
+        console.log(`   Model: ${data.model}`);
+        // Show first 3 pairs with their scores
+        for (let i = 0; i < Math.min(3, pairs.length); i++) {
+          const pair = pairs[i];
+          const score = data.scores[i];
+          console.log(`   [${i}] ${pair.task}: ent=${score?.entailment?.toFixed(3)}, con=${score?.contradiction?.toFixed(3)}, neu=${score?.neutral?.toFixed(3)}`);
+          console.log(`       premise: "${pair.a.substring(0, 60)}..."`);
+          console.log(`       hypothesis: "${pair.b.substring(0, 60)}..."`);
+        }
+        
+        // Summary stats
+        const entailments = data.scores.map(s => s.entailment || 0);
+        const maxEnt = Math.max(...entailments);
+        const avgEnt = entailments.reduce((a, b) => a + b, 0) / entailments.length;
+        console.log(`   Stats: maxEntailment=${maxEnt.toFixed(3)}, avgEntailment=${avgEnt.toFixed(3)}`);
+      }
+      
       // Map results back to BatchScore format based on task
       return pairs.map((pair, i) => {
         const nliScore = data.scores[i];
