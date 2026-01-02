@@ -685,6 +685,8 @@ export function buildIssuesList(
   options?: {
     hasExternalDocs?: boolean;
     contradictions?: Array<{ claimA: string; claimB: string; weight: number }>;
+    supports?: Array<{ claimA: string; claimB: string; weight: number }>;
+    grounding?: Array<{ claimId: string; sourceId: string; weight: number; quote?: string }>;
     totalTurns?: number;
   }
 ): DefensibleIssue[] {
@@ -709,7 +711,28 @@ export function buildIssuesList(
   // Check if we have external docs (affects issue type: UNSUPPORTED vs UNVERIFIED)
   const hasExternalDocs = options?.hasExternalDocs ?? false;
   const contradictionsFromGraph = options?.contradictions || [];
+  const supportsFromGraph = options?.supports || [];
+  const groundingFromGraph = options?.grounding || [];
   const totalTurns = options?.totalTurns || claims.length;
+  
+  // CRITICAL: Build grounding score lookup from actual graph edges (NOT hard-coded)
+  // This maps each claimId to its max grounding weight from NLI scoring
+  const groundingScoreByClaimId = new Map<string, number>();
+  for (const gnd of groundingFromGraph) {
+    const existing = groundingScoreByClaimId.get(gnd.claimId) || 0;
+    groundingScoreByClaimId.set(gnd.claimId, Math.max(existing, gnd.weight));
+  }
+  console.log(`📊 Grounding scores from ${groundingFromGraph.length} edges:`, 
+    Array.from(groundingScoreByClaimId.entries()).slice(0, 5));
+  
+  // Build support score lookup from actual graph edges
+  const supportScoreByClaimId = new Map<string, number>();
+  for (const sup of supportsFromGraph) {
+    const existingA = supportScoreByClaimId.get(sup.claimA) || 0;
+    const existingB = supportScoreByClaimId.get(sup.claimB) || 0;
+    supportScoreByClaimId.set(sup.claimA, Math.max(existingA, sup.weight));
+    supportScoreByClaimId.set(sup.claimB, Math.max(existingB, sup.weight));
+  }
   
   // If we have destructive claims from the orchestrator, use those as a priority source
   const destructiveClaimIds = new Set((destructiveClaims || []).map(dc => dc.claimId));
@@ -769,12 +792,16 @@ export function buildIssuesList(
       }
     }
     
-    // Extract risk signals
+    // Get actual grounding and support scores from graph edges (NOT hard-coded)
+    const actualGroundingScore = groundingScoreByClaimId.get(claim.id) || 0;
+    const actualSupportScore = supportScoreByClaimId.get(claim.id) || maxSupportScore;
+    
+    // Extract risk signals with REAL computed scores
     const riskSignals = extractRiskSignals(extendedClaim, {
       nliScores: {
         contradiction: maxContradictionScore,
-        support: maxSupportScore,
-        grounding: claim.confidence || 0
+        support: actualSupportScore,
+        grounding: actualGroundingScore // Use ACTUAL grounding from graph edges
       },
       spectral: {
         nodeBlameNorm: blame,
@@ -922,7 +949,7 @@ export function buildIssuesList(
         nodeBlameNorm: blame,
         importance,
         nliScore: maxContradictionScore > 0 ? maxContradictionScore : undefined,
-        groundingScore: claim.confidence
+        groundingScore: actualGroundingScore // Use ACTUAL grounding from graph edges
       },
       
       status: "OPEN"

@@ -479,15 +479,23 @@ app.post("/validate", async (req, res) => {
     if (out.report?.claims && out.report.claims.length > 0) {
       try {
         // Map claims to the format expected by buildIssuesList
+        // CRITICAL: Use actual confidenceMetrics.groundingScore from NLI, NOT hard-coded 0.75
         const claimsForIssues = out.report.claims.map((c: any) => ({
           id: c.id,
           text: c.text,
-          confidence: c.confidence || 0.75,
+          // Use computed grounding score from confidenceMetrics, or 0 if not computed
+          confidence: c.confidenceMetrics?.groundingScore ?? c.confidence ?? 0,
           evidence: c.evidence || [],
           meta: {
             speaker: c.meta?.speaker,
             turnIndex: c.meta?.turnIndex
-          }
+          },
+          // Pass through extended claim fields for risk scoring
+          claimType: c.claimType,
+          isAuditable: c.isAuditable,
+          topicTags: c.topicTags || [],
+          hasAbsoluteLanguage: c.hasAbsoluteLanguage || false,
+          hasMoney: c.hasMoney || false
         }));
         
         // Use spectral if available, otherwise create empty spectral report
@@ -507,17 +515,38 @@ app.post("/validate", async (req, res) => {
               coherenceScore: null 
             });
         
-        console.log("6️⃣ BUILDING ISSUES with spectral data:", {
+        // Get graph edges for actual score computation (NOT hard-coded)
+        const graphData = out.report.graph || {};
+        const graphSupports = graphData.supports || [];
+        const graphContradictions = graphData.contradictions || out.report.contradictions?.map((c: any) => ({ 
+          claimA: c.claimA, 
+          claimB: c.claimB, 
+          weight: 1.0 
+        })) || [];
+        const graphGrounding = graphData.grounding || [];
+        
+        console.log("6️⃣ BUILDING ISSUES with spectral + graph data:", {
           hasSpectral: !out.report.spectral?.spectralSkipped,
           truthStatesCount: spectralData.truthStates?.length || 0,
           nodeBlameCount: spectralData.nodeBlameNorm?.length || 0,
-          destructiveCount: out.report.destructiveClaims?.length || 0
+          destructiveCount: out.report.destructiveClaims?.length || 0,
+          graphSupports: graphSupports.length,
+          graphContradictions: graphContradictions.length,
+          graphGrounding: graphGrounding.length
         });
         
         issues = buildIssuesList(
           spectralData,
           claimsForIssues,
-          out.report.destructiveClaims
+          out.report.destructiveClaims,
+          undefined, // evaluationId
+          {
+            hasExternalDocs: false, // transcript-only mode
+            contradictions: graphContradictions,
+            supports: graphSupports,
+            grounding: graphGrounding,
+            totalTurns: claimsForIssues.length
+          }
         );
         
         console.log("7️⃣ ISSUES BUILT:", {

@@ -114,10 +114,11 @@ export async function runEvaluation(
   const latency = Date.now() - startTime;
   
   // Convert provided claims to Claim[] format for buildIssuesList
+  // CRITICAL: Do NOT hard-code confidence. Use 0 if not provided - it must be computed from graph edges.
   const claims: Array<Claim & { meta?: { speaker?: string; turnIndex?: number } }> = input.claims.map(c => ({
     id: c.id,
     text: c.text,
-    confidence: 0.75,
+    confidence: 0, // Will be computed from grounding edges in buildIssuesList
     evidence: [],
     meta: {
       speaker: c.speaker === 'AGENT' ? 'Agent' : c.speaker === 'CUSTOMER' ? 'Customer' : undefined,
