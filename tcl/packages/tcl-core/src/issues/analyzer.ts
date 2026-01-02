@@ -15,11 +15,14 @@ import type {
   RunReproducibility,
   IssueCategory,
   IssueSeverity,
-  Speaker
+  Speaker,
+  IssueNarrative
 } from "./types.js";
 import { clusterClaims, generateIssues } from "./clustering.js";
 import { getRiskModelConfig, getConfigHash, type RiskModelConfig } from "../config/risk.model.js";
 import type { Claim, ContradictionEdge, SupportEdge, GroundingEdge } from "../types.js";
+import { buildIssueNarratives } from "./narratives.js";
+import { computeConfigHash } from "../config/loader.js";
 
 // ============================================================================
 // MAIN ANALYZER
@@ -65,10 +68,59 @@ export function analyzeForIssues(input: AnalyzeInput): IssueAnalysisOutput {
   
   console.log(`📋 Generated ${issues.length} issues`);
   
+  // 4b. Generate IssueNarratives (QA-manager-grade format)
+  // Convert clusters to format expected by narrative builder
+  const narrativeClusters = clusters.map(cluster => {
+    // Extract top contradictions for this cluster
+    const clusterEdgeIds = new Set(cluster.edgeIds);
+    const clusterContradictions = edges
+      .filter(e => e.type === 'CONTRADICTION' && clusterEdgeIds.has(e.id))
+      .sort((a, b) => b.score - a.score)
+      .slice(0, 3)
+      .map(e => ({
+        claimAId: e.fromClaimId,
+        claimBId: e.toClaimId,
+        score: e.score,
+        edgeId: e.id
+      }));
+    
+    // Extract ungrounded claims (claims with no grounding edges)
+    const clusterClaimIds = new Set(cluster.claimIds);
+    const groundingEdges = edges.filter(e => 
+      e.type === 'GROUNDING' && clusterClaimIds.has(e.fromClaimId)
+    );
+    const groundedClaimIds = new Set(groundingEdges.map(e => e.fromClaimId));
+    const topUngrounded = cluster.claimIds.filter(id => !groundedClaimIds.has(id));
+    
+    return {
+      id: cluster.id,
+      claimIds: cluster.claimIds,
+      edgeIds: cluster.edgeIds,
+      category: 'OTHER', // Will be determined by narrative builder from topics
+      subcategory: undefined, // Will be determined by narrative builder
+      turnRange: [cluster.turnRange.min, cluster.turnRange.max] as [number, number],
+      contradictionMass: cluster.contradictionMass,
+      supportMass: cluster.supportMass,
+      groundingMass: cluster.groundingMass,
+      topContradictions: clusterContradictions,
+      topUngrounded: topUngrounded.slice(0, 5)
+    };
+  });
+  
+  // Extract spectral data if available (will be passed from orchestrator)
+  const narratives = buildIssueNarratives(
+    narrativeClusters,
+    input.claims,
+    edges,
+    undefined // spectralData - will be passed from orchestrator
+  );
+  
+  console.log(`📝 Generated ${narratives.length} issue narratives`);
+  
   // 5. Generate summary
   const summary = generateSummary(issues);
   
-  // 6. Generate reproducibility metadata
+  // 6. Generate reproducibility metadata (with all hashes)
   const reproducibility = generateReproducibility(input.transcript, config);
   
   const processingTimeMs = Date.now() - startTime;
@@ -76,6 +128,7 @@ export function analyzeForIssues(input: AnalyzeInput): IssueAnalysisOutput {
   return {
     summary,
     issues,
+    narratives, // NEW: QA-manager-grade narratives
     claims: claimsForClustering,
     edges,
     reproducibility,
@@ -235,13 +288,39 @@ function generateReproducibility(
   transcript: string,
   config: RiskModelConfig
 ): RunReproducibility {
+  // Compute input hash (normalized transcript)
+  const normalizedTranscript = transcript.trim().toLowerCase();
+  const inputHash = createHash("sha256")
+    .update(normalizedTranscript)
+    .digest("hex")
+    .substring(0, 16);
+  
+  // Compute config hash (from config loader - includes scoring, templates, taxonomy)
+  const configHash = computeConfigHash();
+  
+  // Get code version (must be injected at build time)
+  const codeVersion = process.env.GIT_COMMIT || 
+                      process.env.VERCEL_GIT_COMMIT_SHA ||
+                      process.env.RAILWAY_GIT_COMMIT_SHA ||
+                      "development";
+  
+  // Engine version
+  const engineVersion = process.env.ENGINE_VERSION || "2.0.0";
+  
+  // Model fingerprint (should include all models used)
+  const modelFingerprint = [
+    `truth-engine:${engineVersion}`,
+    `claim-extractor:v1`,
+    `config:${configHash.substring(0, 8)}`
+  ].join("|");
+  
   return {
     runId: randomUUID(),
-    inputHash: createHash("sha256").update(transcript).digest("hex").substring(0, 16),
-    configHash: getConfigHash(config),
-    codeVersion: process.env.GIT_COMMIT || "development",
-    engineVersion: "2.0.0", // Issue-based engine
-    modelFingerprint: "truth-engine-rules-v1",
+    inputHash,
+    configHash,
+    codeVersion,
+    engineVersion,
+    modelFingerprint,
     createdAt: new Date().toISOString(),
   };
 }

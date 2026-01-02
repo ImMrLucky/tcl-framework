@@ -242,6 +242,75 @@ export interface RunReproducibility {
 }
 
 // ============================================================================
+// ISSUE NARRATIVE (QA Manager Grade - New Spec)
+// ============================================================================
+
+/**
+ * IssueNarrative - The new QA-manager-grade finding format.
+ * Replaces the generic Issue type with specific fields for audit-ready findings.
+ */
+export interface IssueNarrative {
+  issueId: string;
+  category: string;              // e.g., BILLING
+  subcategory?: string;          // e.g., Cancellation Fees
+  title: string;                 // human-friendly (no "discrepancy about X and Y")
+  severity: "LOW"|"MEDIUM"|"HIGH"|"CRITICAL";
+  confidence: "LOW"|"MEDIUM"|"HIGH";
+  status: "OPEN"|"RESOLVED"|"DISMISSED";
+  
+  scope: {
+    turnRange: [number, number];
+    claimIds: string[];
+    speakerFocus: "AGENT"|"SYSTEM"|"CUSTOMER"; // default "AGENT"
+  };
+  
+  whatIsWrong: string;           // 1–3 sentences, specific
+  whyWrong: string[];            // bullet reasons (policy/logic)
+  whyItMatters: string[];        // business impact bullets
+  
+  recommendedActions: Array<{
+    type: "COACHING"|"PROCESS"|"COMPLIANCE"|"SYSTEM_FIX";
+    action: string;
+  }>;
+  
+  evidenceQuotes: Array<{
+    quoteId: string;
+    claimId: string;
+    speaker: "Agent"|"Customer"|"System";
+    turnIndex: number;
+    lineSpan?: [number, number];
+    text: string;                // exact quote (not truncated)
+    evidenceRef?: { type:"Call"|"Policy"|"KB"; ref: string; };
+  }>;
+  
+  contradictionPairs?: Array<{
+    claimAId: string;
+    claimBId: string;
+    score: number;
+    explanation: string;         // auto-generated: "These cannot both be true because…"
+    quoteIds: [string, string];  // references into evidenceQuotes
+  }>;
+  
+  traceability: {
+    topEdges: Array<{
+      type: "support"|"contradiction"|"grounding";
+      fromClaimId: string;
+      toClaimId: string;
+      weight: number;
+      reason?: string;
+    }>;
+  };
+  
+  scoring: {
+    riskScore: number;           // 0–100 (configurable mapping)
+    impactScore: number;         // 0–100
+    fixabilityScore: number;     // 0–100
+    compositeScore: number;      // used for ranking
+    rationale: string[];         // bullet explanation of score drivers
+  };
+}
+
+// ============================================================================
 // FULL RUN OUTPUT
 // ============================================================================
 
@@ -253,6 +322,8 @@ export interface IssueAnalysisOutput {
   summary: RunSummary;
   /** Ranked list of issues (primary output) */
   issues: Issue[];
+  /** Ranked list of issue narratives (new QA-manager-grade format) */
+  narratives?: IssueNarrative[];
   /** All claims (supporting data) */
   claims: ClaimForClustering[];
   /** All edges (supporting data) */
