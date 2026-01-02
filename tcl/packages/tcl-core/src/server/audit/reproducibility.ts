@@ -772,7 +772,7 @@ export function buildIssuesList(
       evidence: claim.evidence || [],
       meta: claim.meta,
       claimType: claim.claimType || "ASSERTION",
-      isAuditable: claim.isAuditable !== false,
+      isAuditable: claim.isAuditable ?? true,
       topicTags: claim.topicTags || [],
       hasAbsoluteLanguage: claim.hasAbsoluteLanguage || false,
       hasMoney: claim.hasMoney || false
