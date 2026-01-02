@@ -43,6 +43,17 @@ class EdgeAttribution(BaseModel):
     claimAId: Optional[str] = None  # Added: claim ID for claimA
     claimBId: Optional[str] = None  # Added: claim ID for claimB
 
+class ClaimImportance(BaseModel):
+    """Claim importance ranking data."""
+    claimIndex: int
+    claimId: Optional[str] = None  # Added: claim ID
+    importanceScore: float
+    centrality: float
+    influence: float
+    groundingDistance: int  # -1 if unreachable
+    truthValue: float
+    priority: str  # "CRITICAL", "HIGH", "MEDIUM"
+
 class SpectralAnalyzeResponse(BaseModel):
     # Required existing fields (same as SpectralResponse)
     coherenceScore: int
@@ -61,6 +72,9 @@ class SpectralAnalyzeResponse(BaseModel):
     nodeBlame: Optional[List[float]] = None
     nodeBlameNorm: List[float]  # Added: normalized node blame (0..1)
     fingerprint: Optional[Dict[str, object]] = None
+    # Claim importance ranking (new)
+    rankedClaims: Optional[List[ClaimImportance]] = None
+    topCriticalClaims: Optional[List[ClaimImportance]] = None
 
 
 # ============================================================================

@@ -1,11 +1,18 @@
 from fastapi import FastAPI, HTTPException
 from contextlib import asynccontextmanager
 from .models import (
-    SpectralRequest, SpectralResponse, SpectralAnalyzeResponse, EdgeAttribution,
+    SpectralRequest, SpectralResponse, SpectralAnalyzeResponse, EdgeAttribution, ClaimImportance,
     NliBatchRequest, NliBatchResponse, NliScore,
     BuildEdgesRequest, BuildEdgesResponse, EdgeIn, GroundingEdge
 )
-from .spectral import build_index, spectral_metrics, spectral_truth_vector, spectral_edge_attribution, spectral_fingerprint
+from .spectral import (
+    build_index, 
+    spectral_metrics, 
+    spectral_truth_vector, 
+    spectral_edge_attribution, 
+    spectral_fingerprint,
+    spectral_claim_importance
+)
 import logging
 import time
 
@@ -396,7 +403,7 @@ def score(req: SpectralRequest):
 @app.post("/spectral/analyze", response_model=SpectralAnalyzeResponse)
 def analyze(req: SpectralRequest):
     """
-    Enhanced spectral analysis with per-claim truth vectors and edge attribution.
+    Enhanced spectral analysis with per-claim truth vectors, edge attribution, and claim importance ranking.
     
     Returns all existing metrics from /spectral/score plus:
     - truthVector: per-claim truth values
@@ -406,6 +413,14 @@ def analyze(req: SpectralRequest):
     - nodeBlame: blame scores per node
     - nodeBlameNorm: normalized node blame (0..1)
     - fingerprint: monitoring fingerprint
+    - rankedClaims: all claims ranked by structural importance (centrality + influence + grounding distance)
+    - topCriticalClaims: claims with CRITICAL priority (importanceScore > 0.75)
+    
+    Claim importance combines:
+    - Eigenvector centrality (structural importance in network)
+    - Truth propagation influence (how much fixing this claim affects others)
+    - Grounding distance (proximity to evidence sources)
+    - Problem factor (low truth certainty = more problematic)
     """
     ids = [c.id for c in req.claims]
     idx = build_index(ids)
@@ -478,7 +493,45 @@ def analyze(req: SpectralRequest):
     top_bad_contradictions_with_ids = [with_ids(e) for e in attribution_result["topBadContradictions"]]
     top_bad_supports_with_ids = [with_ids(e) for e in attribution_result["topBadSupports"]]
     
-    # 6. Generate fingerprint (new)
+    # 6. Compute claim importance ranking (new)
+    importance_result = spectral_claim_importance(
+        n=n,
+        truth_vector=truth_result["truthVector"],
+        support_edges=supports,
+        contradiction_edges=contradictions,
+        grounded_ids=grounded_ids
+    )
+    
+    # Add claim IDs to importance rankings
+    ranked_claims_with_ids = []
+    for claim in importance_result["rankedClaims"]:
+        claim_idx = claim["claimIndex"]
+        ranked_claims_with_ids.append(ClaimImportance(
+            claimIndex=claim_idx,
+            claimId=idx_to_id.get(claim_idx),
+            importanceScore=claim["importanceScore"],
+            centrality=claim["centrality"],
+            influence=claim["influence"],
+            groundingDistance=claim["groundingDistance"],
+            truthValue=claim["truthValue"],
+            priority=claim["priority"]
+        ))
+    
+    top_critical_with_ids = []
+    for claim in importance_result["topCritical"]:
+        claim_idx = claim["claimIndex"]
+        top_critical_with_ids.append(ClaimImportance(
+            claimIndex=claim_idx,
+            claimId=idx_to_id.get(claim_idx),
+            importanceScore=claim["importanceScore"],
+            centrality=claim["centrality"],
+            influence=claim["influence"],
+            groundingDistance=claim["groundingDistance"],
+            truthValue=claim["truthValue"],
+            priority=claim["priority"]
+        ))
+    
+    # 7. Generate fingerprint (new)
     fingerprint = spectral_fingerprint(
         coherence_score=m["coherenceScore"],
         spectral_gap=m["spectralGap"],
@@ -487,7 +540,7 @@ def analyze(req: SpectralRequest):
         heat_trace=m["heatTrace"]
     )
     
-    # 7. Build response with all fields
+    # 8. Build response with all fields
     return SpectralAnalyzeResponse(
         # Existing fields (same as SpectralResponse)
         coherenceScore=m["coherenceScore"],
@@ -504,5 +557,7 @@ def analyze(req: SpectralRequest):
         topBadSupports=[EdgeAttribution(**e) for e in top_bad_supports_with_ids],
         nodeBlame=attribution_result["nodeBlame"],
         nodeBlameNorm=node_blame_norm,  # Added normalized blame
-        fingerprint=fingerprint
+        fingerprint=fingerprint,
+        rankedClaims=ranked_claims_with_ids,  # Added: claim importance ranking
+        topCriticalClaims=top_critical_with_ids  # Added: top critical claims
     )

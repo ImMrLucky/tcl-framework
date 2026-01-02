@@ -1,5 +1,6 @@
 import numpy as np
 from typing import List, Dict, Tuple, Set
+from collections import deque
 
 def build_index(claim_ids: List[str]) -> Dict[str, int]:
     return {cid: i for i, cid in enumerate(claim_ids)}
@@ -336,3 +337,239 @@ def spectral_fingerprint(
         "circularityScore": circularity_score,
         "heatTrace": [float(h) for h in heat_trace]
     }
+
+# ============================================================================
+# CLAIM IMPORTANCE RANKING
+# ============================================================================
+
+def spectral_claim_importance(
+    n: int,
+    truth_vector: List[float],
+    support_edges: List[Tuple[int,int,float]],
+    contradiction_edges: List[Tuple[int,int,float]],
+    grounded_ids: Set[int]
+) -> Dict[str, object]:
+    """
+    Rank claims by their structural importance in the network.
+    
+    Combines: centrality, truth propagation influence, and grounding distance.
+    
+    Returns claims that, if corrected, would have maximum coherence impact.
+    
+    Args:
+        n: Number of claims
+        truth_vector: Per-claim truth values from spectral_truth_vector
+        support_edges: List of (i, j, weight) tuples for support edges
+        contradiction_edges: List of (i, j, weight) tuples for contradiction edges
+        grounded_ids: Set of claim indices that are grounded to evidence
+    
+    Returns:
+        Dict with:
+            - rankedClaims: List of dicts with claimIndex, importanceScore, centrality,
+              influence, groundingDistance, truthValue, priority
+            - topCritical: List of claims with priority "CRITICAL"
+    """
+    if n <= 0:
+        return {
+            "rankedClaims": [],
+            "topCritical": []
+        }
+    
+    x = np.array(truth_vector, dtype=np.float64)
+    
+    # Build full adjacency (support + contradiction) for centrality
+    A = np.zeros((n, n), dtype=np.float64)
+    for i, j, w in support_edges:
+        if 0 <= i < n and 0 <= j < n:
+            A[i, j] += float(w)
+            A[j, i] += float(w)  # symmetrize for centrality
+    
+    for i, j, w in contradiction_edges:
+        if 0 <= i < n and 0 <= j < n:
+            A[i, j] += float(w)
+            A[j, i] += float(w)
+    
+    # 1. Eigenvector centrality (structural importance)
+    centrality = _compute_eigenvector_centrality(A)
+    
+    # 2. Truth propagation influence (how much fixing this node affects others)
+    influence = _compute_truth_influence(n, x, support_edges)
+    
+    # 3. Grounding distance (how far from grounded sources)
+    grounding_dist = _compute_grounding_distance(n, support_edges, grounded_ids)
+    
+    # Combined importance score
+    importance_scores = []
+    for i in range(n):
+        # High importance if: central, influential, and problematic truth value
+        problem_factor = 1.0 - abs(x[i])  # Low truth certainty = problematic
+        
+        # Normalize grounding distance (inverse: closer to ground = more important)
+        # Use 1.0 if already grounded, otherwise 1/(1+distance)
+        if i in grounded_ids:
+            grounding_score = 1.0
+        else:
+            dist = grounding_dist[i]
+            if dist == np.inf:
+                grounding_score = 0.0  # Unreachable from ground
+            else:
+                grounding_score = 1.0 / (1.0 + float(dist))
+        
+        score = (
+            0.35 * float(centrality[i]) +
+            0.35 * float(influence[i]) +
+            0.20 * grounding_score +
+            0.10 * problem_factor
+        )
+        
+        # Determine priority
+        if score > 0.75:
+            priority = "CRITICAL"
+        elif score > 0.5:
+            priority = "HIGH"
+        else:
+            priority = "MEDIUM"
+        
+        importance_scores.append({
+            "claimIndex": int(i),
+            "importanceScore": float(score),
+            "centrality": float(centrality[i]),
+            "influence": float(influence[i]),
+            "groundingDistance": int(grounding_dist[i]) if grounding_dist[i] != np.inf else -1,
+            "truthValue": float(x[i]),
+            "priority": priority
+        })
+    
+    # Sort by importance score descending
+    importance_scores.sort(key=lambda x: x["importanceScore"], reverse=True)
+    
+    # Extract top critical claims
+    top_critical = [c for c in importance_scores if c["priority"] == "CRITICAL"]
+    
+    return {
+        "rankedClaims": importance_scores,
+        "topCritical": top_critical
+    }
+
+
+def _compute_eigenvector_centrality(A: np.ndarray, iterations: int = 100) -> np.ndarray:
+    """
+    Power iteration for eigenvector centrality.
+    
+    Computes the principal eigenvector of the adjacency matrix, which represents
+    the structural importance of each node in the network.
+    
+    Args:
+        A: Symmetric adjacency matrix (n x n)
+        iterations: Maximum number of power iteration steps
+    
+    Returns:
+        Normalized eigenvector centrality scores (0-1 scale)
+    """
+    n = A.shape[0]
+    if n == 0:
+        return np.array([])
+    
+    # Initialize with uniform vector
+    x = np.ones(n, dtype=np.float64) / np.sqrt(float(n))
+    
+    # Power iteration: x_{k+1} = A * x_k / ||A * x_k||
+    for _ in range(iterations):
+        x_new = A @ x
+        norm = np.linalg.norm(x_new)
+        if norm > 1e-10:
+            x = x_new / norm
+        else:
+            # Convergence to zero vector (disconnected graph)
+            break
+    
+    # Normalize to [0, 1] scale
+    max_val = np.max(x)
+    if max_val > 1e-10:
+        x = x / max_val
+    
+    return x
+
+
+def _compute_truth_influence(
+    n: int,
+    truth_vector: np.ndarray,
+    support_edges: List[Tuple[int,int,float]]
+) -> np.ndarray:
+    """
+    Compute how much each node influences truth propagation through support edges.
+    
+    Nodes that strongly influence neighbors' truth values (via support edges) are
+    more important to correct, as fixing them will propagate corrections.
+    
+    Args:
+        n: Number of claims
+        truth_vector: Per-claim truth values
+        support_edges: List of (i, j, weight) tuples
+    
+    Returns:
+        Normalized influence scores (0-1 scale) per node
+    """
+    influence = np.zeros(n, dtype=np.float64)
+    
+    for i, j, w in support_edges:
+        if 0 <= i < n and 0 <= j < n:
+            # Node i influences j proportional to weight and truth difference
+            # Larger difference = more influence needed to correct
+            truth_diff = abs(truth_vector[i] - truth_vector[j])
+            influence[i] += float(w) * truth_diff
+    
+    # Normalize to [0, 1] scale
+    max_inf = np.max(influence)
+    if max_inf > 1e-10:
+        influence = influence / max_inf
+    
+    return influence
+
+
+def _compute_grounding_distance(
+    n: int,
+    support_edges: List[Tuple[int,int,float]],
+    grounded_ids: Set[int]
+) -> np.ndarray:
+    """
+    Compute shortest path distance from each node to the nearest grounded source.
+    
+    Uses multi-source BFS starting from all grounded nodes.
+    Claims closer to grounded sources are more important to correct, as they
+    can propagate corrections back to evidence.
+    
+    Args:
+        n: Number of claims
+        support_edges: List of (i, j, weight) tuples (weight ignored for BFS)
+        grounded_ids: Set of claim indices that are grounded to evidence
+    
+    Returns:
+        Array of distances (0 for grounded nodes, np.inf for unreachable)
+    """
+    # Build adjacency list (undirected, from support edges)
+    adj = [[] for _ in range(n)]
+    for i, j, _ in support_edges:
+        if 0 <= i < n and 0 <= j < n:
+            adj[i].append(j)
+            adj[j].append(i)
+    
+    # Initialize distances to infinity
+    distances = np.full(n, np.inf, dtype=np.float64)
+    
+    # Multi-source BFS from all grounded nodes
+    queue = deque()
+    for g_id in grounded_ids:
+        if 0 <= g_id < n:
+            distances[g_id] = 0.0
+            queue.append(g_id)
+    
+    # BFS traversal
+    while queue:
+        node = queue.popleft()
+        for neighbor in adj[node]:
+            if distances[neighbor] == np.inf:
+                distances[neighbor] = distances[node] + 1.0
+                queue.append(neighbor)
+    
+    return distances
