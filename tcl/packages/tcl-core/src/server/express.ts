@@ -869,13 +869,18 @@ app.post("/validate", async (req, res) => {
     };
     
     console.log("📦 Report structure being stored:", {
+      hasGraph: !!reportWithIssues.graph,
       hasSpectral: !!reportWithIssues.spectral,
       spectralCoherence: reportWithIssues.spectral?.coherenceScore,
       issuesCount: issues.length,
       claimsCount: reportWithIssues.claims?.length || 0,
       inputsClaimsCount: reportWithIssues.inputs?.claims?.length || 0,
       supportsCount: reportWithIssues.graph?.supports?.length || 0,
-      contradictionsCount: reportWithIssues.graph?.contradictions?.length || 0
+      contradictionsCount: reportWithIssues.graph?.contradictions?.length || 0,
+      groundingCount: reportWithIssues.graph?.grounding?.length || 0,
+      // Verify graph structure
+      graphKeys: reportWithIssues.graph ? Object.keys(reportWithIssues.graph) : 'MISSING',
+      reportKeys: Object.keys(reportWithIssues)
     });
 
     // Store validation in Supabase if configured
