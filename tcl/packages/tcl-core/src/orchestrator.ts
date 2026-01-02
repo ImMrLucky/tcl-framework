@@ -1,4 +1,4 @@
-import { ValidateInput, ValidateOutput, SpectralReport, Source, RunManifest } from "./types.js";
+import { ValidateInput, ValidateOutput, SpectralReport, Source, RunManifest, Claim, GraphDebugInfo } from "./types.js";
 import { extractClaims, extractClaimsWithTypes, type ExtractedClaim } from "./claim_extractor.js";
 import { attachEvidenceAndFindViolations } from "./evidence.js";
 import { findLogicViolations } from "./logic.js";
@@ -155,15 +155,14 @@ async function validateOnce(input: ValidateInput, adapter?: LLMAdapter, startTim
       // Build issues
       const issues = buildIssuesFromGraph(engineResult.graph);
       
-      // Build claims in expected format
-      const claims = engineResult.graph.claims.map(c => ({
+      // Build claims in expected format (must match Claim type)
+      const claims: Claim[] = engineResult.graph.claims.map(c => ({
         id: c.id,
         text: c.text,
-        speaker: c.speaker,
+        evidence: [], // No external evidence in transcript-only mode
         meta: {
           speaker: c.speaker,
           turnIndex: c.turnIndex,
-          claimType: c.modality,
         },
         confidence: 0.7, // Will be refined by spectral
       }));
@@ -215,19 +214,59 @@ async function validateOnce(input: ValidateInput, adapter?: LLMAdapter, startTim
         spectralEngineVersion: spectral && !(spectral as any).spectralSkipped ? "v1.0.0" : undefined,
         codeVersion: engineResult.graph.codeVersion,
         createdAt: engineResult.graph.generatedAt,
-        transcriptSourcesGenerated: 0,
+        transcriptSourcesCount: 0,
         graphHealth: {
           supportEdges: legacyGraph.supports.length,
           contradictionEdges: legacyGraph.contradictions.length,
           groundingEdges: legacyGraph.grounding.length,
           totalEdges: legacyGraph.supports.length + legacyGraph.contradictions.length + legacyGraph.grounding.length,
           healthy: legacyGraph.contradictions.length > 0 || legacyGraph.supports.length > 0,
-          diagnostic: undefined,
+          reason: undefined,
         },
       };
       
       console.log(`✅ Truth Engine complete: ${engineResult.timings.total}ms (vs ~100s with NLI)`);
       timer.logSummary();
+      
+      // Map contradictions with reasons for the report (different from graph edges)
+      const reportContradictions = engineResult.graph.contradictionEdges.map(e => ({
+        claimA: e.srcId,
+        claimB: e.dstId,
+        reason: e.reason,
+      }));
+      
+      // Build debug info matching GraphDebugInfo type
+      const debugInfo: GraphDebugInfo = {
+        numClaims: engineResult.graph.claims.length,
+        numSources: 0,
+        transcriptSourcesGenerated: 0,
+        annEnabled: false,
+        cacheEnabled: false,
+        spectralEnabled: spectralEnabled,
+        neighborK: 0,
+        supportThreshold: 0,
+        contradictionThreshold: 0,
+        groundingThreshold: 0,
+        pairsGenerated: 0,
+        pairsScored: 0,
+        edges: {
+          supportsAdded: legacyGraph.supports.length,
+          contradictionsAdded: legacyGraph.contradictions.length,
+          groundingAdded: 0,
+        },
+        filtered: {
+          belowSupportThreshold: 0,
+          belowContradictionThreshold: 0,
+          belowGroundingThreshold: 0,
+          droppedByMaxEdges: 0,
+        },
+        model: {
+          scorerId: "truth-engine-rules-v1",
+        },
+        reasonIfEmptyGraph: legacyGraph.contradictions.length === 0 && legacyGraph.supports.length === 0 
+          ? "no_edges_from_rules" 
+          : null,
+      };
       
       return {
         answer: answer || transcript,
@@ -246,13 +285,13 @@ async function validateOnce(input: ValidateInput, adapter?: LLMAdapter, startTim
           claims,
           violations: [],
           missingEvidence: [],
-          contradictions: legacyGraph.contradictions,
+          contradictions: reportContradictions,
           spectral,
           graph: {
             supports: legacyGraph.supports,
             contradictions: legacyGraph.contradictions,
             grounding: legacyGraph.grounding,
-            debug: legacyGraph.debug,
+            debug: debugInfo,
           },
           suggestions: [],
           manifest,
