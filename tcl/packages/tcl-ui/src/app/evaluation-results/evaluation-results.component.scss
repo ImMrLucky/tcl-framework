@@ -767,6 +767,101 @@
   min-width: 50px;
 }
 
+/* Issue Narrative Cards (QA-Manager Grade) */
+.issue-narratives-list {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.issue-narrative-card {
+  display: flex;
+  align-items: flex-start;
+  gap: 16px;
+  padding: 20px;
+  background: white;
+  border-radius: 12px;
+  cursor: pointer;
+  transition: all 0.2s;
+  border: 2px solid #e5e7eb;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+}
+
+.issue-narrative-card:hover {
+  border-color: #2563eb;
+  box-shadow: 0 4px 12px rgba(37, 99, 235, 0.15);
+  transform: translateY(-2px);
+}
+
+.issue-why-matters {
+  font-size: 0.875rem;
+  color: #6b7280;
+  margin-top: 8px;
+  margin-bottom: 8px;
+  font-style: italic;
+}
+
+.issue-actions-preview {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 8px;
+  padding: 8px 12px;
+  background: #f0f9ff;
+  border-radius: 6px;
+  font-size: 0.85rem;
+  color: #0369a1;
+}
+
+.action-icon {
+  font-size: 16px;
+  width: 16px;
+  height: 16px;
+}
+
+.issue-scores {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 80px;
+}
+
+.score-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 8px 12px;
+  background: #f9fafb;
+  border-radius: 8px;
+}
+
+.score-value {
+  font-size: 1.25rem;
+  font-weight: bold;
+  color: #1f2937;
+}
+
+.score-label {
+  font-size: 0.7rem;
+  color: #6b7280;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.issue-evidence {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.info-icon {
+  font-size: 14px;
+  width: 14px;
+  height: 14px;
+  opacity: 0.6;
+  margin-left: 4px;
+}
+
 .risk-value {
   font-size: 1.5rem;
   font-weight: bold;

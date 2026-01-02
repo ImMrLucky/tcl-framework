@@ -23,7 +23,65 @@ import { SimulationDialogComponent, SimulationModifications } from '../simulatio
 import { IssueDetailModalComponent } from '../issue-detail-modal/issue-detail-modal.component';
 import { SensitiveActionService } from '../sensitive-action.service';
 
-// New clustered issue types (manager-grade)
+// Issue Narrative type (QA-Manager Grade)
+interface IssueNarrative {
+  issueId: string;
+  category: string;
+  subcategory?: string;
+  title: string;
+  severity: 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL';
+  confidence: 'LOW' | 'MEDIUM' | 'HIGH';
+  status: 'OPEN' | 'RESOLVED' | 'DISMISSED';
+  scope: {
+    turnRange: [number, number];
+    claimIds: string[];
+    speakerFocus: 'AGENT' | 'SYSTEM' | 'CUSTOMER';
+  };
+  whatIsWrong: string;
+  whyWrong: string[];
+  whyItMatters: string[];
+  recommendedActions: Array<{
+    type: 'COACHING' | 'PROCESS' | 'COMPLIANCE' | 'SYSTEM_FIX';
+    action: string;
+  }>;
+  evidenceQuotes: Array<{
+    quoteId: string;
+    claimId: string;
+    speaker: 'Agent' | 'Customer' | 'System';
+    turnIndex: number;
+    lineSpan?: [number, number];
+    text: string;
+    evidenceRef?: {
+      type: 'Call' | 'Policy' | 'KB';
+      ref: string;
+    };
+  }>;
+  contradictionPairs?: Array<{
+    claimAId: string;
+    claimBId: string;
+    score: number;
+    explanation: string;
+    quoteIds: [string, string];
+  }>;
+  traceability: {
+    topEdges: Array<{
+      type: 'support' | 'contradiction' | 'grounding';
+      fromClaimId: string;
+      toClaimId: string;
+      weight: number;
+      reason?: string;
+    }>;
+  };
+  scoring: {
+    riskScore: number;
+    impactScore: number;
+    fixabilityScore: number;
+    compositeScore: number;
+    rationale: string[];
+  };
+}
+
+// Legacy clustered issue type (for backward compatibility)
 interface ClusteredIssue {
   id: string;
   title: string;
@@ -110,7 +168,11 @@ export class EvaluationResultsComponent implements OnInit {
   topContradictions: Array<{ claimAId: string; claimBId: string; weight: number }> = [];
   topSupports: Array<{ claimAId: string; claimBId: string; weight: number }> = [];
   
-  // NEW: Manager-grade clustered issues
+  // NEW: Manager-grade issue narratives (QA-Manager Grade)
+  issueNarratives: IssueNarrative[] = [];
+  issueNarrativesSummary: IssueSummary | null = null;
+  
+  // Legacy: Manager-grade clustered issues (for backward compatibility)
   clusteredIssues: ClusteredIssue[] = [];
   issueSummary: IssueSummary | null = null;
   showClusteredView = true; // Toggle between clustered and per-claim view
@@ -153,12 +215,29 @@ export class EvaluationResultsComponent implements OnInit {
         this.extractTopOffenders();
       }
       
-      // Load clustered issues (manager-grade) from report
+      // Load issue narratives (QA-Manager Grade) from report - PRIMARY
+      const issueNarrativesData = (this.evaluation?.report as any)?.issueNarratives;
+      if (issueNarrativesData) {
+        this.issueNarratives = issueNarrativesData.narratives || [];
+        this.issueNarrativesSummary = {
+          totalIssues: issueNarrativesData.summary?.totalIssues || 0,
+          bySeverity: issueNarrativesData.summary?.bySeverity || { LOW: 0, MEDIUM: 0, HIGH: 0, CRITICAL: 0 },
+          byCategory: issueNarrativesData.summary?.byCategory || {},
+          primaryRiskCategories: issueNarrativesData.summary?.topCategories || [],
+          auditReady: true, // Issue narratives include full reproducibility
+        };
+        console.log('📊 Loaded issue narratives:', {
+          count: this.issueNarratives.length,
+          summary: this.issueNarrativesSummary
+        });
+      }
+      
+      // Load clustered issues (legacy manager-grade) from report - FALLBACK
       const issueAnalysis = (this.evaluation?.report as any)?.issueAnalysis;
-      if (issueAnalysis) {
+      if (issueAnalysis && this.issueNarratives.length === 0) {
         this.clusteredIssues = issueAnalysis.clusteredIssues || [];
         this.issueSummary = issueAnalysis.summary || null;
-        console.log('📊 Loaded clustered issues:', {
+        console.log('📊 Loaded clustered issues (legacy):', {
           count: this.clusteredIssues.length,
           summary: this.issueSummary
         });
@@ -441,6 +520,75 @@ export class EvaluationResultsComponent implements OnInit {
     }
   }
 
+  // ============================================================================
+  // ISSUE NARRATIVES (QA-Manager Grade)
+  // ============================================================================
+
+  selectIssueNarrative(narrative: IssueNarrative) {
+    this.dialog.open(IssueDetailModalComponent, {
+      width: '900px',
+      maxWidth: '90vw',
+      maxHeight: '90vh',
+      data: narrative,
+      panelClass: 'issue-detail-modal-container'
+    });
+  }
+
+  getNarrativeTurnRange(narrative: IssueNarrative): string {
+    const [min, max] = narrative.scope.turnRange;
+    const minDisplay = min + 1;
+    const maxDisplay = max + 1;
+    
+    if (minDisplay === maxDisplay) {
+      return `Turn ${minDisplay}`;
+    }
+    return `Turns ${minDisplay}-${maxDisplay}`;
+  }
+
+  getNarrativeSeverityColor(severity: string): string {
+    switch (severity?.toUpperCase()) {
+      case 'CRITICAL': return '#991b1b';
+      case 'HIGH': return '#ea580c';
+      case 'MEDIUM': return '#2563eb';
+      case 'LOW': return '#16a34a';
+      default: return '#6b7280';
+    }
+  }
+
+  getNarrativeSeverityBgColor(severity: string): string {
+    switch (severity?.toUpperCase()) {
+      case 'CRITICAL': return '#fee2e2';
+      case 'HIGH': return '#fef3c7';
+      case 'MEDIUM': return '#e0e7ff';
+      case 'LOW': return '#d1fae5';
+      default: return '#f3f4f6';
+    }
+  }
+
+  getNarrativeConfidenceColor(confidence: string): string {
+    switch (confidence?.toUpperCase()) {
+      case 'HIGH': return '#16a34a';
+      case 'MEDIUM': return '#2563eb';
+      case 'LOW': return '#ea580c';
+      default: return '#6b7280';
+    }
+  }
+
+  // Tooltip definitions for metrics
+  getMetricTooltip(metric: string): string {
+    const definitions: Record<string, string> = {
+      'coherenceScore': 'Measures overall consistency of claims. Higher scores indicate fewer contradictions and better logical flow.',
+      'contradictionEnergy': 'Sum of contradiction edge weights. Higher values indicate more conflicting information.',
+      'supportEnergy': 'Sum of support edge weights. Higher values indicate more supporting relationships.',
+      'spectralGap': 'Difference between truth and falsehood propagation. Larger gaps indicate clearer truth/falsehood separation.',
+      'circularityScore': 'Measures circular support chains. Higher scores indicate more circular reasoning.',
+      'supported': 'Claims with truthState="Supported" that are not involved in high-badness contradictions.',
+      'contradicted': 'Claims with truthState="Contradicted" OR claims with contradiction edges above threshold.',
+      'ungrounded': 'Claims with truthState="Ungrounded" OR claims with no grounding evidence.',
+    };
+    return definitions[metric] || '';
+  }
+
   exportHTML() {
     // Trigger HTML export download
     window.open(`/api/evaluations/${this.evaluationId}/export/html`, '_blank');
@@ -454,6 +602,21 @@ export class EvaluationResultsComponent implements OnInit {
   exportIssuesJSON() {
     // Trigger JSON export download
     window.open(`/api/evaluations/${this.evaluationId}/export/json`, '_blank');
+  }
+
+  exportNarrativesCSV() {
+    // Trigger issue narratives CSV export
+    window.open(`/api/evaluations/${this.evaluationId}/export/narratives/csv`, '_blank');
+  }
+
+  exportNarrativesJSON() {
+    // Trigger issue narratives JSON export
+    window.open(`/api/evaluations/${this.evaluationId}/export/narratives/json`, '_blank');
+  }
+
+  exportNarrativesHTML() {
+    // Trigger issue narratives HTML/PDF export
+    window.open(`/api/evaluations/${this.evaluationId}/export/narratives/html`, '_blank');
   }
 
   getSpectralScores() {

@@ -8,7 +8,12 @@
       >
         {{ issue.severity }}
       </span>
-      <h2 class="issue-title">{{ issue.title }}</h2>
+      <h2 class="issue-title">{{ getTitle() }}</h2>
+      <span class="issue-category" *ngIf="issue.category">
+        <mat-icon>{{ getCategoryIcon(issue.category) }}</mat-icon>
+        {{ getCategoryLabel(issue.category) }}
+        <span *ngIf="isNarrative && (issue as any).subcategory"> · {{ (issue as any).subcategory }}</span>
+      </span>
     </div>
     <button mat-icon-button (click)="close()" class="close-button">
       <mat-icon>close</mat-icon>
@@ -22,27 +27,42 @@
         <div class="tab-content">
           <div class="detail-section">
             <h4>Problem Statement</h4>
-            <p>{{ issue.problemStatement }}</p>
+            <p>{{ getProblemStatement() }}</p>
           </div>
-          <div class="detail-section" *ngIf="issue.whyWrong && issue.whyWrong.length > 0">
+          <div class="detail-section" *ngIf="getWhyWrong().length > 0">
             <h4>Why This Is Wrong</h4>
             <ul>
-              <li *ngFor="let reason of issue.whyWrong">{{ reason }}</li>
+              <li *ngFor="let reason of getWhyWrong()">{{ reason }}</li>
             </ul>
           </div>
-          <div class="detail-section">
-            <h4>Impact</h4>
-            <p>{{ issue.impact }}</p>
+          <div class="detail-section" *ngIf="getWhyItMatters().length > 0">
+            <h4>Why It Matters</h4>
+            <ul *ngIf="isNarrative">
+              <li *ngFor="let reason of getWhyItMatters()">{{ reason }}</li>
+            </ul>
+            <p *ngIf="!isNarrative">{{ getWhyItMatters()[0] }}</p>
           </div>
-          <div class="detail-section" *ngIf="issue.recommendedAction && issue.recommendedAction.length > 0">
-            <h4>Recommended Action</h4>
+          <div class="detail-section" *ngIf="getRecommendedActions().length > 0">
+            <h4>Recommended Actions</h4>
             <ul>
-              <li *ngFor="let action of issue.recommendedAction">{{ action }}</li>
+              <li *ngFor="let action of getRecommendedActions()">
+                <strong *ngIf="isNarrative">{{ action.type }}:</strong> {{ isNarrative ? action.action : action }}
+              </li>
             </ul>
           </div>
           <div class="detail-section confidence">
             <h4>Confidence: {{ issue.confidence }}</h4>
-            <p>{{ issue.confidenceExplanation }}</p>
+            <p *ngIf="!isNarrative">{{ (issue as ClusteredIssue).confidenceExplanation }}</p>
+            <p *ngIf="isNarrative">Based on spectral analysis and evidence strength.</p>
+          </div>
+          <div class="detail-section" *ngIf="isNarrative && (issue as IssueNarrative).contradictionPairs && (issue as IssueNarrative).contradictionPairs!.length > 0">
+            <h4>Contradiction Pairs</h4>
+            <div class="contradiction-pairs">
+              <div class="contradiction-pair" *ngFor="let pair of (issue as IssueNarrative).contradictionPairs">
+                <strong>Claim {{ pair.claimAId }} vs Claim {{ pair.claimBId }}</strong> (Score: {{ pair.score.toFixed(2) }})
+                <p>{{ pair.explanation }}</p>
+              </div>
+            </div>
           </div>
         </div>
       </mat-tab>
@@ -50,8 +70,8 @@
       <!-- Evidence Tab -->
       <mat-tab label="Evidence">
         <div class="tab-content">
-          <div class="evidence-list" *ngIf="issue.primaryEvidence && issue.primaryEvidence.length > 0">
-            <div class="evidence-item" *ngFor="let ev of issue.primaryEvidence">
+          <div class="evidence-list" *ngIf="hasEvidence()">
+            <div class="evidence-item" *ngFor="let ev of getEvidence()">
               <div class="evidence-speaker">
                 <span [class]="'speaker-badge speaker-' + (ev?.speaker || 'unknown').toLowerCase()">
                   {{ ev?.speaker || 'Unknown' }}
@@ -62,11 +82,14 @@
                 <span class="timestamp" *ngIf="ev?.timestampMs !== undefined && ev.timestampMs !== null">
                   {{ (ev.timestampMs || 0) / 1000 | number:'1.1-1' }}s
                 </span>
+                <span class="evidence-ref" *ngIf="ev?.evidenceRef">
+                  · {{ ev.evidenceRef.ref }}
+                </span>
               </div>
-              <blockquote class="evidence-quote">"{{ ev?.quote || 'No quote available' }}"</blockquote>
+              <blockquote class="evidence-quote">"{{ isNarrative ? ev.text : ev.quote || 'No quote available' }}"</blockquote>
             </div>
           </div>
-          <div class="empty-state" *ngIf="!issue.primaryEvidence || issue.primaryEvidence.length === 0">
+          <div class="empty-state" *ngIf="!hasEvidence()">
             <mat-icon>info</mat-icon>
             <p>No evidence data available for this issue.</p>
             <p class="empty-hint">Evidence may not have been generated during analysis.</p>
@@ -77,50 +100,94 @@
       <!-- Metrics Tab -->
       <mat-tab label="Metrics">
         <div class="tab-content">
-          <div class="metrics-detail" *ngIf="issue.metrics">
+          <div class="metrics-detail" *ngIf="hasMetrics()">
+            <div class="metric-row" *ngIf="isNarrative">
+              <span class="metric-name">Composite Score</span>
+              <span class="metric-value">{{ getMetrics().compositeScore ?? 'N/A' }}</span>
+            </div>
             <div class="metric-row">
               <span class="metric-name">Risk Score</span>
-              <span class="metric-value">{{ issue.metrics.riskScore ?? 'N/A' }}</span>
+              <span class="metric-value">{{ isNarrative ? getMetrics().riskScore : getMetrics().riskScore ?? 'N/A' }}</span>
             </div>
-            <div class="metric-row">
+            <div class="metric-row" *ngIf="isNarrative">
+              <span class="metric-name">Impact Score</span>
+              <span class="metric-value">{{ getMetrics().impactScore ?? 'N/A' }}</span>
+            </div>
+            <div class="metric-row" *ngIf="isNarrative">
+              <span class="metric-name">Fixability Score</span>
+              <span class="metric-value">{{ getMetrics().fixabilityScore ?? 'N/A' }}</span>
+            </div>
+            <div class="metric-row" *ngIf="!isNarrative">
               <span class="metric-name">Contradiction Mass</span>
-              <span class="metric-value">{{ issue.metrics.contradictionMass !== undefined ? issue.metrics.contradictionMass.toFixed(2) : 'N/A' }}</span>
+              <span class="metric-value">{{ getMetrics().contradictionMass !== undefined ? getMetrics().contradictionMass.toFixed(2) : 'N/A' }}</span>
             </div>
-            <div class="metric-row">
+            <div class="metric-row" *ngIf="!isNarrative">
               <span class="metric-name">Support Mass</span>
-              <span class="metric-value">{{ issue.metrics.supportMass !== undefined ? issue.metrics.supportMass.toFixed(2) : 'N/A' }}</span>
+              <span class="metric-value">{{ getMetrics().supportMass !== undefined ? getMetrics().supportMass.toFixed(2) : 'N/A' }}</span>
             </div>
-            <div class="metric-row">
+            <div class="metric-row" *ngIf="!isNarrative">
               <span class="metric-name">Grounding Mass</span>
-              <span class="metric-value">{{ issue.metrics.groundingMass !== undefined ? issue.metrics.groundingMass.toFixed(2) : 'N/A' }}</span>
+              <span class="metric-value">{{ getMetrics().groundingMass !== undefined ? getMetrics().groundingMass.toFixed(2) : 'N/A' }}</span>
             </div>
             <div class="metric-row">
               <span class="metric-name">Claims Involved</span>
-              <span class="metric-value">{{ issue.metrics.claimCount ?? 'N/A' }}</span>
+              <span class="metric-value">{{ isNarrative ? (issue as IssueNarrative).scope.claimIds.length : getMetrics().claimCount ?? 'N/A' }}</span>
             </div>
-            <div class="metric-row">
+            <div class="metric-row" *ngIf="!isNarrative">
               <span class="metric-name">Turn Span</span>
-              <span class="metric-value">{{ issue.metrics.turnSpan ?? 'N/A' }}</span>
+              <span class="metric-value">{{ getMetrics().turnSpan ?? 'N/A' }}</span>
             </div>
-            <div class="metric-row">
+            <div class="metric-row" *ngIf="!isNarrative">
               <span class="metric-name">Centrality</span>
-              <span class="metric-value">{{ issue.metrics.centrality !== undefined ? issue.metrics.centrality.toFixed(3) : 'N/A' }}</span>
+              <span class="metric-value">{{ getMetrics().centrality !== undefined ? getMetrics().centrality.toFixed(3) : 'N/A' }}</span>
             </div>
-            <div class="metric-row">
+            <div class="metric-row" *ngIf="!isNarrative">
               <span class="metric-name">Rank</span>
-              <span class="metric-value">#{{ issue.metrics.rank ?? 'N/A' }}</span>
+              <span class="metric-value">#{{ getMetrics().rank ?? 'N/A' }}</span>
             </div>
-            <div class="drivers-section" *ngIf="issue.metrics.drivers && issue.metrics.drivers.length > 0">
+            <div class="drivers-section" *ngIf="isNarrative && getMetrics().rationale && getMetrics().rationale.length > 0">
+              <h4>Score Rationale</h4>
+              <ul>
+                <li *ngFor="let rationale of getMetrics().rationale">{{ rationale }}</li>
+              </ul>
+            </div>
+            <div class="drivers-section" *ngIf="!isNarrative && getMetrics().drivers && getMetrics().drivers.length > 0">
               <h4>Risk Drivers</h4>
               <ul>
-                <li *ngFor="let driver of issue.metrics.drivers">{{ driver }}</li>
+                <li *ngFor="let driver of getMetrics().drivers">{{ driver }}</li>
               </ul>
             </div>
           </div>
-          <div class="empty-state" *ngIf="!issue.metrics">
+          <div class="empty-state" *ngIf="!hasMetrics()">
             <mat-icon>info</mat-icon>
             <p>No metrics data available for this issue.</p>
             <p class="empty-hint">Metrics may not have been computed during analysis.</p>
+          </div>
+        </div>
+      </mat-tab>
+
+      <!-- Traceability Tab (for narratives only) -->
+      <mat-tab label="Traceability" *ngIf="isNarrative">
+        <div class="tab-content">
+          <div class="traceability-detail" *ngIf="(issue as IssueNarrative).traceability && (issue as IssueNarrative).traceability.topEdges.length > 0">
+            <h4>Top Edges</h4>
+            <div class="edge-list">
+              <div class="edge-item" *ngFor="let edge of (issue as IssueNarrative).traceability.topEdges">
+                <div class="edge-type" [class]="'edge-' + edge.type">
+                  {{ edge.type.toUpperCase() }}
+                </div>
+                <div class="edge-details">
+                  <strong>From:</strong> {{ edge.fromClaimId }}<br>
+                  <strong>To:</strong> {{ edge.toClaimId }}<br>
+                  <strong>Weight:</strong> {{ edge.weight.toFixed(3) }}<br>
+                  <span *ngIf="edge.reason"><strong>Reason:</strong> {{ edge.reason }}</span>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="empty-state" *ngIf="!(issue as IssueNarrative).traceability || (issue as IssueNarrative).traceability.topEdges.length === 0">
+            <mat-icon>info</mat-icon>
+            <p>No traceability data available for this issue.</p>
           </div>
         </div>
       </mat-tab>

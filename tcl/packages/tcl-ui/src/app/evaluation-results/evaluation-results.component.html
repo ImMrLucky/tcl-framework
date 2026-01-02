@@ -26,9 +26,22 @@
         <mat-icon>download</mat-icon>
       </button>
       <mat-menu #exportMenu="matMenu">
+        <button mat-menu-item (click)="exportNarrativesHTML()" *ngIf="issueNarratives.length > 0">
+          <mat-icon>picture_as_pdf</mat-icon>
+          <span>Export Audit Report (HTML/PDF)</span>
+        </button>
+        <button mat-menu-item (click)="exportNarrativesCSV()" *ngIf="issueNarratives.length > 0">
+          <mat-icon>table_chart</mat-icon>
+          <span>Export Narratives CSV</span>
+        </button>
+        <button mat-menu-item (click)="exportNarrativesJSON()" *ngIf="issueNarratives.length > 0">
+          <mat-icon>code</mat-icon>
+          <span>Export Narratives JSON</span>
+        </button>
+        <mat-divider *ngIf="issueNarratives.length > 0"></mat-divider>
         <button mat-menu-item (click)="exportHTML()">
           <mat-icon>picture_as_pdf</mat-icon>
-          <span>Export Report (HTML/PDF)</span>
+          <span>Export Report (HTML/PDF) - Legacy</span>
         </button>
         <button mat-menu-item (click)="exportIssuesCSV()">
           <mat-icon>table_chart</mat-icon>
@@ -89,38 +102,38 @@
         <mat-card-subtitle>What compliance needs to know at a glance</mat-card-subtitle>
       </mat-card-header>
       <mat-card-content>
-        <!-- NEW: Issue Summary Grid -->
-        <div class="executive-grid" *ngIf="issueSummary">
+        <!-- NEW: Issue Summary Grid (use issueNarrativesSummary if available, fallback to issueSummary) -->
+        <div class="executive-grid" *ngIf="issueNarrativesSummary || issueSummary">
           <div class="exec-metric total">
-            <div class="exec-value">{{ issueSummary?.totalIssues || 0 }}</div>
+            <div class="exec-value">{{ (issueNarrativesSummary || issueSummary)?.totalIssues || 0 }}</div>
             <div class="exec-label">Total Issues</div>
           </div>
-          <div class="exec-metric critical" *ngIf="(issueSummary?.bySeverity?.CRITICAL || 0) > 0">
-            <div class="exec-value">{{ issueSummary?.bySeverity?.CRITICAL || 0 }}</div>
+          <div class="exec-metric critical" *ngIf="((issueNarrativesSummary || issueSummary)?.bySeverity?.CRITICAL || 0) > 0">
+            <div class="exec-value">{{ (issueNarrativesSummary || issueSummary)?.bySeverity?.CRITICAL || 0 }}</div>
             <div class="exec-label">Critical</div>
           </div>
           <div class="exec-metric high">
-            <div class="exec-value">{{ (issueSummary?.bySeverity?.HIGH || 0) + (issueSummary?.bySeverity?.CRITICAL || 0) }}</div>
+            <div class="exec-value">{{ ((issueNarrativesSummary || issueSummary)?.bySeverity?.HIGH || 0) + ((issueNarrativesSummary || issueSummary)?.bySeverity?.CRITICAL || 0) }}</div>
             <div class="exec-label">High/Critical</div>
           </div>
           <div class="exec-metric medium">
-            <div class="exec-value">{{ issueSummary?.bySeverity?.MEDIUM || 0 }}</div>
+            <div class="exec-value">{{ (issueNarrativesSummary || issueSummary)?.bySeverity?.MEDIUM || 0 }}</div>
             <div class="exec-label">Medium</div>
           </div>
           <div class="exec-metric low">
-            <div class="exec-value">{{ issueSummary?.bySeverity?.LOW || 0 }}</div>
+            <div class="exec-value">{{ (issueNarrativesSummary || issueSummary)?.bySeverity?.LOW || 0 }}</div>
             <div class="exec-label">Low</div>
           </div>
-          <div class="exec-metric audit-status" [class.ready]="issueSummary?.auditReady">
-            <mat-icon>{{ issueSummary?.auditReady ? 'verified' : 'pending' }}</mat-icon>
-            <div class="exec-label">{{ issueSummary?.auditReady ? 'Audit Ready' : 'Pending' }}</div>
+          <div class="exec-metric audit-status" [class.ready]="(issueNarrativesSummary || issueSummary)?.auditReady">
+            <mat-icon>{{ (issueNarrativesSummary || issueSummary)?.auditReady ? 'verified' : 'pending' }}</mat-icon>
+            <div class="exec-label">{{ (issueNarrativesSummary || issueSummary)?.auditReady ? 'Audit Ready' : 'Pending' }}</div>
           </div>
         </div>
 
         <!-- Primary Risk Categories -->
-        <div class="risk-categories" *ngIf="issueSummary?.primaryRiskCategories?.length">
+        <div class="risk-categories" *ngIf="(issueNarrativesSummary || issueSummary)?.primaryRiskCategories?.length">
           <span class="category-label">Primary Risk Areas:</span>
-          <span class="category-chip" *ngFor="let cat of issueSummary?.primaryRiskCategories || []">
+          <span class="category-chip" *ngFor="let cat of (issueNarrativesSummary || issueSummary)?.primaryRiskCategories || []">
             <mat-icon class="category-icon">{{ getCategoryIcon(cat) }}</mat-icon>
             {{ getCategoryLabel(cat) }}
           </span>
@@ -128,8 +141,11 @@
 
         <!-- Fallback to old summary if no issue analysis -->
         <div class="audit-summary-grid" *ngIf="!issueSummary">
-          <div class="summary-metric">
-            <div class="metric-label">Coherence Score</div>
+          <div class="summary-metric" [matTooltip]="getMetricTooltip('coherenceScore')">
+            <div class="metric-label">
+              Coherence Score
+              <mat-icon class="info-icon">info</mat-icon>
+            </div>
             <div class="metric-value-large" [class.no-data]="getSpectralScores().coherenceScore === undefined">
               {{ getSpectralScores().coherenceScore !== undefined ? getSpectralScores().coherenceScore : 'N/A' }}
             </div>
@@ -142,16 +158,22 @@
             </div>
           </div>
 
-          <div class="summary-metric">
-            <div class="metric-label">Contradicted Claims</div>
+          <div class="summary-metric" [matTooltip]="getMetricTooltip('contradicted')">
+            <div class="metric-label">
+              Contradicted Claims
+              <mat-icon class="info-icon">info</mat-icon>
+            </div>
             <div class="metric-value" [class.has-issues]="(getCounts().contradicted || 0) > 0">
               {{ getCounts().contradicted ?? 0 }}
             </div>
             <div class="metric-sublabel">out of {{ getCounts().claims ?? 0 }} total</div>
           </div>
 
-          <div class="summary-metric">
-            <div class="metric-label">Ungrounded Claims</div>
+          <div class="summary-metric" [matTooltip]="getMetricTooltip('ungrounded')">
+            <div class="metric-label">
+              Ungrounded Claims
+              <mat-icon class="info-icon">info</mat-icon>
+            </div>
             <div class="metric-value" [class.has-issues]="(getCounts().ungrounded || 0) > 0">
               {{ getCounts().ungrounded ?? 0 }}
             </div>
@@ -225,8 +247,9 @@
             <div class="metric-item">
               <strong>Total Claims:</strong> {{ getCounts().claims ?? 0 }}
             </div>
-            <div class="metric-item">
+            <div class="metric-item" [matTooltip]="getMetricTooltip('supported')">
               <strong>Supported Claims:</strong> {{ getCounts().supported ?? 0 }}
+              <mat-icon class="info-icon">info</mat-icon>
             </div>
             <div class="metric-item">
               <strong>Support Edges:</strong> {{ getCounts().supports ?? 0 }}
@@ -234,17 +257,21 @@
             <div class="metric-item">
               <strong>Contradiction Edges:</strong> {{ getCounts().contradictions ?? 0 }}
             </div>
-            <div class="metric-item" *ngIf="!getSpectralScores().spectralSkipped">
+            <div class="metric-item" *ngIf="!getSpectralScores().spectralSkipped" [matTooltip]="getMetricTooltip('contradictionEnergy')">
               <strong>Contradiction Energy:</strong> {{ getSpectralScores().contradictionEnergy?.toFixed(3) ?? 'N/A' }}
+              <mat-icon class="info-icon">info</mat-icon>
             </div>
-            <div class="metric-item" *ngIf="!getSpectralScores().spectralSkipped">
+            <div class="metric-item" *ngIf="!getSpectralScores().spectralSkipped" [matTooltip]="getMetricTooltip('supportEnergy')">
               <strong>Support Energy:</strong> {{ getSpectralScores().supportEnergy?.toFixed(3) ?? 'N/A' }}
+              <mat-icon class="info-icon">info</mat-icon>
             </div>
-            <div class="metric-item" *ngIf="!getSpectralScores().spectralSkipped">
+            <div class="metric-item" *ngIf="!getSpectralScores().spectralSkipped" [matTooltip]="getMetricTooltip('circularityScore')">
               <strong>Circularity Score:</strong> {{ getSpectralScores().circularityScore ?? 'N/A' }}
+              <mat-icon class="info-icon">info</mat-icon>
             </div>
-            <div class="metric-item" *ngIf="!getSpectralScores().spectralSkipped">
+            <div class="metric-item" *ngIf="!getSpectralScores().spectralSkipped" [matTooltip]="getMetricTooltip('spectralGap')">
               <strong>Spectral Gap:</strong> {{ getSpectralScores().spectralGap?.toFixed(3) ?? 'N/A' }}
+              <mat-icon class="info-icon">info</mat-icon>
             </div>
             <div class="metric-item" *ngIf="!getSpectralScores().spectralSkipped">
               <strong>Cycle Mass:</strong> {{ getSpectralScores().cycleMass?.toFixed(3) ?? 'N/A' }}
@@ -258,10 +285,10 @@
       <!-- B) Issues Section with Toggle -->
       <div class="main-content">
         <!-- View Toggle -->
-        <div class="view-toggle" *ngIf="clusteredIssues.length > 0">
+        <div class="view-toggle" *ngIf="issueNarratives.length > 0 || clusteredIssues.length > 0">
           <button mat-button [class.active]="showClusteredView" (click)="showClusteredView = true">
             <mat-icon>category</mat-icon>
-            Problem Statements ({{ clusteredIssues.length }})
+            Problem Statements ({{ issueNarratives.length || clusteredIssues.length }})
           </button>
           <button mat-button [class.active]="!showClusteredView" (click)="showClusteredView = false">
             <mat-icon>list</mat-icon>
@@ -269,8 +296,87 @@
           </button>
         </div>
 
-        <!-- NEW: Clustered Issues View (Manager-grade) -->
-        <mat-card class="issues-card clustered-issues" *ngIf="showClusteredView && clusteredIssues.length > 0">
+        <!-- PRIMARY: Issue Narratives View (QA-Manager Grade) -->
+        <mat-card class="issues-card issue-narratives" *ngIf="showClusteredView && issueNarratives.length > 0">
+          <mat-card-header>
+            <mat-card-title>
+              <mat-icon>assignment</mat-icon>
+              Problem Statements (Ranked by Risk)
+            </mat-card-title>
+            <mat-card-subtitle>QA-Manager Grade findings with exact evidence quotes and actionable recommendations</mat-card-subtitle>
+          </mat-card-header>
+          <mat-card-content>
+            <div class="issue-narratives-list">
+              <div 
+                class="issue-narrative-card" 
+                *ngFor="let narrative of issueNarratives; let i = index"
+                (click)="selectIssueNarrative(narrative)"
+              >
+                <div class="issue-rank">#{{ i + 1 }}</div>
+                <div 
+                  class="issue-severity-badge"
+                  [style.background-color]="getNarrativeSeverityBgColor(narrative.severity)"
+                  [style.color]="getNarrativeSeverityColor(narrative.severity)"
+                >
+                  {{ narrative.severity }}
+                </div>
+                <div class="issue-main">
+                  <div class="issue-title">{{ narrative.title }}</div>
+                  <div class="issue-problem">{{ narrative.whatIsWrong }}</div>
+                  <div class="issue-why-matters" *ngIf="narrative.whyItMatters.length > 0">
+                    <strong>Why it matters:</strong> {{ narrative.whyItMatters[0] }}
+                  </div>
+                  <div class="issue-meta">
+                    <span class="issue-category">
+                      <mat-icon>{{ getCategoryIcon(narrative.category) }}</mat-icon>
+                      {{ getCategoryLabel(narrative.category) }}
+                      <span *ngIf="narrative.subcategory"> · {{ narrative.subcategory }}</span>
+                    </span>
+                    <span class="issue-confidence" [style.color]="getNarrativeConfidenceColor(narrative.confidence)">
+                      <mat-icon class="meta-icon">verified</mat-icon>
+                      {{ narrative.confidence }} confidence
+                    </span>
+                    <span class="issue-turns">
+                      <mat-icon class="meta-icon">chat</mat-icon>
+                      {{ getNarrativeTurnRange(narrative) }}
+                    </span>
+                    <span class="issue-claims">
+                      <mat-icon class="meta-icon">label</mat-icon>
+                      {{ narrative.scope.claimIds.length }} claim{{ narrative.scope.claimIds.length !== 1 ? 's' : '' }}
+                    </span>
+                    <span class="issue-evidence" *ngIf="narrative.evidenceQuotes.length > 0">
+                      <mat-icon class="meta-icon">description</mat-icon>
+                      {{ narrative.evidenceQuotes.length }} quote{{ narrative.evidenceQuotes.length !== 1 ? 's' : '' }}
+                    </span>
+                  </div>
+                  <div class="issue-actions-preview" *ngIf="narrative.recommendedActions.length > 0">
+                    <mat-icon class="action-icon">lightbulb</mat-icon>
+                    <span>{{ narrative.recommendedActions[0].type }}: {{ narrative.recommendedActions[0].action }}</span>
+                  </div>
+                </div>
+                <div class="issue-scores">
+                  <div class="score-item">
+                    <div class="score-value">{{ narrative.scoring.compositeScore }}</div>
+                    <div class="score-label">Composite</div>
+                  </div>
+                  <div class="score-item">
+                    <div class="score-value">{{ narrative.scoring.riskScore }}</div>
+                    <div class="score-label">Risk</div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Empty state -->
+            <div class="empty-state" *ngIf="issueNarratives.length === 0">
+              <mat-icon>check_circle</mat-icon>
+              <p>No significant issues detected</p>
+            </div>
+          </mat-card-content>
+        </mat-card>
+
+        <!-- FALLBACK: Legacy Clustered Issues View -->
+        <mat-card class="issues-card clustered-issues" *ngIf="showClusteredView && issueNarratives.length === 0 && clusteredIssues.length > 0">
           <mat-card-header>
             <mat-card-title>
               <mat-icon>assignment</mat-icon>
