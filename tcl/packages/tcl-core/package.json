@@ -7,7 +7,9 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "start": "node dist/server/express.js",
-    "dev": "node --loader ts-node/esm src/server/express.ts"
+    "dev": "node --loader ts-node/esm src/server/express.ts",
+    "test": "vitest run",
+    "test:watch": "vitest"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.89.0",
@@ -24,6 +26,7 @@
     "@types/multer": "^1.4.13",
     "@types/node": "^22.10.0",
     "ts-node": "^10.9.2",
-    "typescript": "^5.6.3"
+    "typescript": "^5.6.3",
+    "vitest": "^1.6.0"
   }
 }

@@ -1,5 +1,5 @@
 import { ValidateInput, ValidateOutput, SpectralReport, Source, RunManifest } from "./types.js";
-import { extractClaims } from "./claim_extractor.js";
+import { extractClaims, extractClaimsWithTypes, type ExtractedClaim } from "./claim_extractor.js";
 import { attachEvidenceAndFindViolations } from "./evidence.js";
 import { findLogicViolations } from "./logic.js";
 import { blendScores, shouldRefuse } from "./scoring.js";

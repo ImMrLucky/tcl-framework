@@ -1,0 +1,42 @@
+Agent: Thank you for calling BrightLine Services. My name is Alex. How can I help you today?
+
+Customer: Hi, I'm calling because my bill this month is higher than usual, and I was told my rate wouldn't change.
+
+Agent: I understand your concern. Based on what I can see, your plan itself hasn't changed.
+
+Customer: Okay, but the total is about twenty dollars more.
+
+Agent: Sometimes additional charges can appear depending on usage or fees.
+
+Customer: When I signed up, I was told there wouldn't be any extra fees.
+
+Agent: Right, there are no extra fees on your account.
+
+Customer: Then why is the bill higher?
+
+Agent: Let me take another look… I do see a monthly service adjustment fee that started this cycle.
+
+Customer: I wasn't told about that. Can I cancel without a penalty?
+
+Agent: Yes, you can cancel at any time without a cancellation fee.
+
+Customer: That's good to know.
+
+Agent: Just to clarify, if you cancel before the end of your promotional period, there may be an early termination charge.
+
+Customer: So there is a cancellation fee?
+
+Agent: It depends on the situation, but in some cases, yes.
+
+Customer: That's not what I was told before.
+
+Agent: I apologize for the confusion. The full details are outlined in the service agreement.
+
+Customer: Can you send me something in writing?
+
+Agent: Yes, I can email you a copy of your agreement and the billing breakdown right after this call.
+
+Customer: Okay, please do. I just want to understand what I'm being charged for.
+
+Agent: Absolutely. I'll make sure that information is sent over today.
+
