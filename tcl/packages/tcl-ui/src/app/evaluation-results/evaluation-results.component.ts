@@ -22,31 +22,6 @@ import { EvidenceViewerComponent } from '../evidence-viewer/evidence-viewer.comp
 import { SimulationDialogComponent, SimulationModifications } from '../simulation-dialog/simulation-dialog.component';
 import { SensitiveActionService } from '../sensitive-action.service';
 
-@Component({
-  selector: 'app-evaluation-results',
-  standalone: true,
-  imports: [
-    CommonModule,
-    MatCardModule,
-    MatTableModule,
-    MatButtonModule,
-    MatIconModule,
-    MatMenuModule,
-    MatProgressSpinnerModule,
-    MatChipsModule,
-    MatTooltipModule,
-    MatDialogModule,
-    MatSnackBarModule,
-    MatSelectModule,
-    MatProgressBarModule,
-    MatExpansionModule,
-    MatDividerModule,
-    MatTabsModule,
-    AppHeaderComponent
-  ],
-  templateUrl: './evaluation-results.component.html',
-  styleUrls: ['./evaluation-results.component.scss']
-})
 // New clustered issue types (manager-grade)
 interface ClusteredIssue {
   id: string;
@@ -94,6 +69,31 @@ interface IssueSummary {
   auditReady: boolean;
 }
 
+@Component({
+  selector: 'app-evaluation-results',
+  standalone: true,
+  imports: [
+    CommonModule,
+    MatCardModule,
+    MatTableModule,
+    MatButtonModule,
+    MatIconModule,
+    MatMenuModule,
+    MatProgressSpinnerModule,
+    MatChipsModule,
+    MatTooltipModule,
+    MatDialogModule,
+    MatSnackBarModule,
+    MatSelectModule,
+    MatProgressBarModule,
+    MatExpansionModule,
+    MatDividerModule,
+    MatTabsModule,
+    AppHeaderComponent
+  ],
+  templateUrl: './evaluation-results.component.html',
+  styleUrls: ['./evaluation-results.component.scss']
+})
 export class EvaluationResultsComponent implements OnInit {
   evaluationId: string = '';
   evaluation: Evaluation | null = null;
