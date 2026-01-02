@@ -684,9 +684,15 @@ app.post("/validate", async (req, res) => {
             });
         
         // Get graph edges for actual score computation (NOT hard-coded)
-        const graphData = out.report.graph || {};
+        // CRITICAL: Verify graph exists - if not, log warning but continue
+        if (!out.report?.graph) {
+          console.warn("⚠️ WARNING: out.report.graph is missing! Graph may not have been created by orchestrator.");
+          console.warn("   Report keys:", Object.keys(out.report || {}));
+        }
+        
+        const graphData = out.report?.graph || {};
         const graphSupports = graphData.supports || [];
-        const graphContradictions = graphData.contradictions || out.report.contradictions?.map((c: any) => ({ 
+        const graphContradictions = graphData.contradictions || out.report?.contradictions?.map((c: any) => ({ 
           claimA: c.claimA, 
           claimB: c.claimB, 
           weight: 1.0 
@@ -694,10 +700,11 @@ app.post("/validate", async (req, res) => {
         const graphGrounding = graphData.grounding || [];
         
         console.log("6️⃣ BUILDING ISSUES with spectral + graph data:", {
-          hasSpectral: !out.report.spectral?.spectralSkipped,
+          hasGraph: !!out.report?.graph,
+          hasSpectral: !out.report?.spectral?.spectralSkipped,
           truthStatesCount: spectralData.truthStates?.length || 0,
           nodeBlameCount: spectralData.nodeBlameNorm?.length || 0,
-          destructiveCount: out.report.destructiveClaims?.length || 0,
+          destructiveCount: out.report?.destructiveClaims?.length || 0,
           graphSupports: graphSupports.length,
           graphContradictions: graphContradictions.length,
           graphGrounding: graphGrounding.length
@@ -732,53 +739,71 @@ app.post("/validate", async (req, res) => {
         
         // NEW: Generate CLUSTERED issues using the manager-grade issue analyzer
         // This groups claims into problem statements with proper risk scoring
+        // NOTE: This is ADDITIVE only - it does not modify the main validation flow
         try {
-          // Construct transcript from input (same logic as orchestrator)
-          const transcript = (input.answer && input.answer.trim().length > 0) ? input.answer : input.question;
-          const issueAnalysis = analyzeForIssues({
-            transcript: transcript || "",
-            claims: claimsForIssues,
-            edges: {
-              contradictions: graphContradictions.map((c: any) => ({
-                claimA: c.claimA,
-                claimB: c.claimB,
-                weight: c.weight || 1,
-                reason: c.reason || "Contradiction detected"
-              })),
-              supports: graphSupports.map((s: any) => ({
-                claimA: s.claimA,
-                claimB: s.claimB,
-                weight: s.weight || 1
-              })),
-              grounding: graphGrounding.map((g: any) => ({
-                claimId: g.claimId,
-                sourceId: g.sourceId || g.evidenceId,
-                weight: g.weight || 1,
-                quote: g.quote
-              }))
-            }
-          });
-          
-          // Store the clustered issues analysis alongside the per-claim issues
-          (out.report as any).issueAnalysis = {
-            summary: issueAnalysis.summary,
-            clusteredIssues: issueAnalysis.issues,
-            reproducibility: issueAnalysis.reproducibility,
-            processingTimeMs: issueAnalysis.processingTimeMs
-          };
-          
-          console.log("8️⃣ CLUSTERED ISSUES (Manager-grade):", {
-            totalIssues: issueAnalysis.summary.totalIssues,
-            bySeverity: issueAnalysis.summary.bySeverity,
-            primaryCategories: issueAnalysis.summary.primaryRiskCategories,
-            topIssue: issueAnalysis.issues[0] ? {
-              title: issueAnalysis.issues[0].title,
-              severity: issueAnalysis.issues[0].severity,
-              riskScore: issueAnalysis.issues[0].metrics.riskScore
-            } : "none"
-          });
+          // Only run if we have claims and edges
+          if (claimsForIssues.length > 0 && (graphContradictions.length > 0 || graphSupports.length > 0 || graphGrounding.length > 0)) {
+            // Construct transcript from input (same logic as orchestrator)
+            const transcript = (input.answer && input.answer.trim().length > 0) ? input.answer : input.question;
+            
+            // Safely map edges with null checks
+            const safeContradictions = (graphContradictions || []).map((c: any) => ({
+              claimA: c?.claimA || '',
+              claimB: c?.claimB || '',
+              weight: c?.weight || 1,
+              reason: c?.reason || "Contradiction detected"
+            })).filter((c: any) => c.claimA && c.claimB);
+            
+            const safeSupports = (graphSupports || []).map((s: any) => ({
+              claimA: s?.claimA || '',
+              claimB: s?.claimB || '',
+              weight: s?.weight || 1
+            })).filter((s: any) => s.claimA && s.claimB);
+            
+            const safeGrounding = (graphGrounding || []).map((g: any) => ({
+              claimId: g?.claimId || '',
+              sourceId: g?.sourceId || g?.evidenceId || '',
+              weight: g?.weight || 1,
+              quote: g?.quote
+            })).filter((g: any) => g.claimId && g.sourceId);
+            
+            const issueAnalysis = analyzeForIssues({
+              transcript: transcript || "",
+              claims: claimsForIssues,
+              edges: {
+                contradictions: safeContradictions,
+                supports: safeSupports,
+                grounding: safeGrounding
+              }
+            });
+            
+            // Store the clustered issues analysis alongside the per-claim issues
+            // This is ADDITIVE - it doesn't modify existing report structure
+            (out.report as any).issueAnalysis = {
+              summary: issueAnalysis.summary,
+              clusteredIssues: issueAnalysis.issues,
+              reproducibility: issueAnalysis.reproducibility,
+              processingTimeMs: issueAnalysis.processingTimeMs
+            };
+            
+            console.log("8️⃣ CLUSTERED ISSUES (Manager-grade):", {
+              totalIssues: issueAnalysis.summary.totalIssues,
+              bySeverity: issueAnalysis.summary.bySeverity,
+              primaryCategories: issueAnalysis.summary.primaryRiskCategories,
+              topIssue: issueAnalysis.issues[0] ? {
+                title: issueAnalysis.issues[0].title,
+                severity: issueAnalysis.issues[0].severity,
+                riskScore: issueAnalysis.issues[0].metrics.riskScore
+              } : "none"
+            });
+          } else {
+            console.log("8️⃣ CLUSTERED ISSUES: Skipped (no claims or edges available)");
+          }
         } catch (clusterErr: any) {
-          console.warn('Failed to generate clustered issues:', clusterErr.message);
+          // Log error but don't break the main flow
+          console.error('Failed to generate clustered issues:', clusterErr);
+          console.error('Error stack:', clusterErr.stack);
+          // Don't throw - this is optional functionality
         }
       } catch (issueErr: any) {
         console.warn('Failed to build issues list:', issueErr.message);
@@ -800,8 +825,21 @@ app.post("/validate", async (req, res) => {
     
     // Add issues to the report and normalize the structure
     // Ensure report has consistent structure for frontend
+    // CRITICAL: Explicitly preserve graph, spectral, and all other report data
     const reportWithIssues = {
       ...out.report,
+      // Explicitly preserve graph (don't let it get lost)
+      graph: out.report?.graph || {
+        supports: [],
+        contradictions: [],
+        grounding: [],
+        debug: {}
+      },
+      // Explicitly preserve spectral (don't let it get lost)
+      spectral: out.report?.spectral || {},
+      // Explicitly preserve claims
+      claims: out.report?.claims || [],
+      // Add issues
       issues,
       // Normalize: ensure inputs is available (for simulation modal and evaluation results)
       inputs: {
