@@ -49,7 +49,8 @@ def health():
 def nli_test():
     """
     Quick test of the NLI model.
-    Returns entailment/contradiction scores for a known test case.
+    Returns entailment/contradiction scores for known test cases.
+    CRITICAL: This verifies the label mapping is correct.
     """
     nli_module, error = get_nli()
     
@@ -66,37 +67,88 @@ def nli_test():
         }
     
     try:
-        # Test case: obvious entailment
+        # Get model config for verification
+        model, tokenizer, device = nli_module.get_model_and_tokenizer()
+        model_config = {
+            "name": nli_module._model_name,
+            "device": str(device),
+            "num_labels": model.config.num_labels if hasattr(model.config, 'num_labels') else "unknown",
+            "id2label": model.config.id2label if hasattr(model.config, 'id2label') else "unknown"
+        }
+        
+        # Test case 1: obvious entailment
         result1 = nli_module.score_pair("The sky is blue.", "The sky has a blue color.")
         
-        # Test case: obvious contradiction
+        # Test case 2: obvious contradiction
         result2 = nli_module.score_pair("The door is open.", "The door is closed.")
         
-        # Test case: neutral
+        # Test case 3: neutral
         result3 = nli_module.score_pair("The cat is on the mat.", "It is raining outside.")
         
+        # Test case 4: transcript-like (source entails claim)
+        result4 = nli_module.score_pair(
+            "Agent: Yes, you can cancel at any time without a cancellation fee.",
+            "you can cancel at any time without a cancellation fee"
+        )
+        
+        # Test case 5: transcript-like contradiction
+        result5 = nli_module.score_pair(
+            "you can cancel at any time without a cancellation fee",
+            "there may be an early termination charge"
+        )
+        
+        # Verify expected behavior
+        tests_passed = (
+            result1["entailment"] > 0.5 and  # Should be high entailment
+            result2["contradiction"] > 0.5 and  # Should be high contradiction
+            result4["entailment"] > 0.3  # Transcript case should have some entailment
+        )
+        
         return {
-            "status": "ok",
-            "model": "nli-distilroberta-base",
+            "status": "ok" if tests_passed else "warning",
+            "model_config": model_config,
             "tests": {
                 "entailment_test": {
                     "premise": "The sky is blue.",
                     "hypothesis": "The sky has a blue color.",
                     "scores": result1,
-                    "expected": "entailment should be high (>0.8)"
+                    "expected": "entailment should be high (>0.5)",
+                    "passed": result1["entailment"] > 0.5
                 },
                 "contradiction_test": {
                     "premise": "The door is open.",
                     "hypothesis": "The door is closed.",
                     "scores": result2,
-                    "expected": "contradiction should be high (>0.8)"
+                    "expected": "contradiction should be high (>0.5)",
+                    "passed": result2["contradiction"] > 0.5
                 },
                 "neutral_test": {
                     "premise": "The cat is on the mat.",
                     "hypothesis": "It is raining outside.",
                     "scores": result3,
-                    "expected": "neutral should be high (>0.5)"
+                    "expected": "neutral should be high (>0.5)",
+                    "passed": result3["neutral"] > 0.3
+                },
+                "transcript_grounding_test": {
+                    "premise": "Agent: Yes, you can cancel at any time without a cancellation fee.",
+                    "hypothesis": "you can cancel at any time without a cancellation fee",
+                    "scores": result4,
+                    "expected": "entailment should be >= 0.3 (source entails claim)",
+                    "passed": result4["entailment"] >= 0.3
+                },
+                "transcript_contradiction_test": {
+                    "premise": "you can cancel at any time without a cancellation fee",
+                    "hypothesis": "there may be an early termination charge",
+                    "scores": result5,
+                    "expected": "contradiction should be >= 0.3 (conflicting fee statements)",
+                    "passed": result5["contradiction"] >= 0.3
                 }
+            },
+            "summary": {
+                "tests_passed": tests_passed,
+                "entailment_working": result1["entailment"] > 0.5,
+                "contradiction_working": result2["contradiction"] > 0.5,
+                "transcript_grounding_working": result4["entailment"] >= 0.3
             }
         }
     except Exception as e:

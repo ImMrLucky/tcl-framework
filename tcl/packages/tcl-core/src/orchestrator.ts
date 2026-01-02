@@ -219,18 +219,23 @@ async function validateOnce(input: ValidateInput, adapter?: LLMAdapter, startTim
       try {
         const spectralScorer = new SpectralNliScorer({ endpoint: spectralUrl });
         
-        // Test the connection
-        console.log(`🔌 Testing Spectral NLI connection...`);
+        // Test the connection with a strong entailment case
+        console.log(`🔌 Testing Spectral NLI connection at ${spectralUrl}...`);
         const testScore = await spectralScorer.entailment(
           "The sky is blue.",
           "The sky has a blue color."
         );
         
-        if (testScore >= 0) {
+        // CRITICAL: Score must be > 0.3 for obvious entailment, not just >= 0
+        // If the model returns 0 or very low for obvious entailment, it's broken
+        if (testScore > 0.3) {
           scorer = spectralScorer;
           console.log(`✅ Using scorer: ${scorer.id} (Spectral Python service, test score: ${testScore.toFixed(3)})`);
         } else {
-          throw new Error(`Test score invalid: ${testScore}`);
+          console.error(`❌ Spectral NLI test FAILED: expected high score for obvious entailment, got ${testScore.toFixed(3)}`);
+          console.error(`   This indicates the NLI model is not working correctly.`);
+          console.error(`   Check tcl-spectral logs for NLI loading errors.`);
+          throw new Error(`Test score too low for obvious entailment: ${testScore}. NLI model may not be loaded correctly.`);
         }
       } catch (error: any) {
         console.warn(`⚠️ Spectral NLI failed: ${error.message}`);
