@@ -382,6 +382,11 @@ export async function buildClaimGraph(
   // -----------------------------
   // Grounding (source -> claim: does source ENTAIL claim?)
   // -----------------------------
+  // CRITICAL FIX: Use a local Map for batch results when cache is disabled (NoopCache)
+  // Previously, batch results were stored in NoopCache which discards them, causing
+  // 231 individual HTTP requests instead of using the batch results
+  const groundingResultsMap = new Map<string, { score: number; quote?: string }>();
+  
   if (sources?.length) {
     // batch score grounding where possible
     // Check if scorer has scoreBatch method (optional property)
@@ -392,14 +397,36 @@ export async function buildClaimGraph(
           const key = cache.makeKey("gnd", c.text, s.text);
           // For grounding: a=source (premise), b=claim (hypothesis)
           // We check if source ENTAILS claim
-          if (!cache.get(key)) pairs.push({ task: "grounding", a: s.text, b: c.text, key });
+          if (!cache.get(key) && !groundingResultsMap.has(key)) {
+            pairs.push({ task: "grounding", a: s.text, b: c.text, key });
+          }
         }
       }
+      
+      console.log(`🔍 Grounding: ${claims.length} claims × ${sources.length} sources = ${pairs.length} pairs to score`);
+      
       const scoreBatchFn = (scorer as any).scoreBatch as (pairs: BatchPair[]) => Promise<BatchScore[]>;
+      let batchScoresReceived = 0;
+      
       await runBatches(pairs, batchSize, async (batch) => {
-        const out = await scoreBatchFn(batch);
-        for (const r of out) cache.set(r.key, r.score, r.quote);
+        try {
+          const out = await scoreBatchFn(batch);
+          for (const r of out) {
+            // Store in BOTH cache AND local map to ensure we don't lose results
+            cache.set(r.key, r.score, r.quote);
+            groundingResultsMap.set(r.key, { score: r.score, quote: r.quote });
+            batchScoresReceived++;
+          }
+        } catch (batchErr: any) {
+          console.error(`❌ Grounding batch scoring error: ${batchErr.message}`);
+        }
       });
+      
+      console.log(`✅ Grounding batch scoring complete: ${batchScoresReceived}/${pairs.length} scores received`);
+      
+      if (batchScoresReceived === 0 && pairs.length > 0) {
+        console.error(`❌ CRITICAL: No grounding scores received! NLI service may be failing.`);
+      }
     }
 
     // Diagnostic: track max scores per claim
@@ -409,14 +436,27 @@ export async function buildClaimGraph(
       const scored: Array<{ sid: string; sc: number; quote?: string }> = [];
       for (const s of sources) {
         const key = cache.makeKey("gnd", c.text, s.text);
-        const hit = cache.get(key);
-        if (hit) {
-          scored.push({ sid: s.id, sc: hit.v, quote: hit.quote });
-        } else {
-          const r = await scorer.grounding(c.text, s.text);
-          cache.set(key, r.score, r.quote);
-          scored.push({ sid: s.id, sc: r.score, quote: r.quote });
+        
+        // Check local map FIRST (has batch results even when cache is NoopCache)
+        const localHit = groundingResultsMap.get(key);
+        if (localHit) {
+          scored.push({ sid: s.id, sc: localHit.score, quote: localHit.quote });
+          continue;
         }
+        
+        // Then check cache
+        const cacheHit = cache.get(key);
+        if (cacheHit) {
+          scored.push({ sid: s.id, sc: cacheHit.v, quote: cacheHit.quote });
+          continue;
+        }
+        
+        // Fallback to individual scoring (should rarely happen now)
+        console.warn(`⚠️ Cache miss for grounding ${c.id} - scoring individually`);
+        const r = await scorer.grounding(c.text, s.text);
+        cache.set(key, r.score, r.quote);
+        groundingResultsMap.set(key, { score: r.score, quote: r.quote });
+        scored.push({ sid: s.id, sc: r.score, quote: r.quote });
       }
       scored.sort((a, b) => b.sc - a.sc);
       const top = scored.slice(0, Math.max(1, topGroundingK));
@@ -519,6 +559,9 @@ export async function buildClaimGraph(
   const supports: SupportEdge[] = [];
   const contradictions: ContradictionEdge[] = [];
   
+  // CRITICAL FIX: Use local Map for batch results when cache is disabled (NoopCache)
+  const pairResultsMap = new Map<string, number>();
+  
   // Debug tracking (continued)
   let pairsScored = 0;
   let filteredBelowSupport = 0;
@@ -535,14 +578,14 @@ export async function buildClaimGraph(
     const B = claims[j].text;
 
     const kCon = cache.makeKey("con", A, B);
-    if (!cache.get(kCon)) {
+    if (!cache.get(kCon) && !pairResultsMap.has(kCon)) {
       pairsToScore.push({ task: "contradiction", a: A, b: B, key: kCon });
     } else {
       cacheHits++;
     }
 
     const kEnt = cache.makeKey("ent", A, B);
-    if (!cache.get(kEnt)) {
+    if (!cache.get(kEnt) && !pairResultsMap.has(kEnt)) {
       pairsToScore.push({ task: "entailment", a: A, b: B, key: kEnt });
     } else {
       cacheHits++;
@@ -572,13 +615,10 @@ export async function buildClaimGraph(
               batchErrors++;
               continue;
             }
+            // Store in BOTH cache AND local map to ensure we don't lose results
             cache.set(r.key, r.score, r.quote);
+            pairResultsMap.set(r.key, r.score);
             batchScoresStored++;
-            // Verify cache storage worked
-            const verify = cache.get(r.key);
-            if (!verify) {
-              console.error(`  ❌ Cache storage failed for key ${r.key.substring(0, 20)}...`);
-            }
             // Log first few scores to verify they're different
             if (batchScoresStored <= 5) {
               const pair = pairsToScore.find(p => p.key === r.key);
@@ -610,18 +650,22 @@ export async function buildClaimGraph(
     const A = claims[i];
     const B = claims[j];
 
-    // Score contradiction
+    // Score contradiction - check local map FIRST (has batch results even when cache is NoopCache)
     const kCon = cache.makeKey("con", A.text, B.text);
+    const conFromMap = pairResultsMap.get(kCon);
     const conHit = cache.get(kCon);
     let con: number;
     try {
-      if (conHit) {
+      if (conFromMap !== undefined) {
+        con = conFromMap;
+      } else if (conHit) {
         con = conHit.v;
       } else {
         // Cache miss - should have been scored in batch, but fallback to individual
-        console.warn(`  ⚠️ Cache miss for contradiction ${A.id} vs ${B.id} - scoring individually (key: ${kCon.substring(0, 20)}...)`);
+        console.warn(`  ⚠️ Cache miss for contradiction ${A.id} vs ${B.id} - scoring individually`);
         con = await scorer.contradiction(A.text, B.text);
         if (cacheEnabled) cache.set(kCon, con);
+        pairResultsMap.set(kCon, con);
       }
     } catch (error: any) {
       console.error(`❌ Error scoring contradiction for ${A.id} vs ${B.id}:`, error);
@@ -643,18 +687,22 @@ export async function buildClaimGraph(
       }
     }
 
-    // Score entailment (support)
+    // Score entailment (support) - check local map FIRST
     const kEnt = cache.makeKey("ent", A.text, B.text);
+    const entFromMap = pairResultsMap.get(kEnt);
     const entHit = cache.get(kEnt);
     let ent: number;
     try {
-      if (entHit) {
+      if (entFromMap !== undefined) {
+        ent = entFromMap;
+      } else if (entHit) {
         ent = entHit.v;
       } else {
         // Cache miss - should have been scored in batch, but fallback to individual
-        console.warn(`  ⚠️ Cache miss for entailment ${A.id} → ${B.id} - scoring individually (key: ${kEnt.substring(0, 20)}...)`);
+        console.warn(`  ⚠️ Cache miss for entailment ${A.id} → ${B.id} - scoring individually`);
         ent = await scorer.entailment(A.text, B.text);
         if (cacheEnabled) cache.set(kEnt, ent);
+        pairResultsMap.set(kEnt, ent);
       }
     } catch (error: any) {
       console.error(`❌ Error scoring entailment for ${A.id} → ${B.id}:`, error);
