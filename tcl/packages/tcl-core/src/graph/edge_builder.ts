@@ -1,6 +1,7 @@
 import { Claim, Source, SupportEdge, ContradictionEdge, GroundingEdge } from "../types.js";
 import { EmbeddingProvider, SparseHashEmbeddingProvider, CandidateIndex, BruteForceIndex, HnswIndex } from "./ann.js";
 import { SemanticCache, NoopCache, type CacheLike } from "./cache.js";
+import { createHash } from "crypto";
 
 /**
  * PRODUCTION EDGE BUILDER (ANN + CACHE)
@@ -354,7 +355,6 @@ export async function buildClaimGraph(
   const cacheEnabled = opts.cache?.enabled ?? true;
   const makeKeyFn = (task: "ent"|"con"|"gnd", a: string, b: string) => {
     const payload = `tcl|v1|${scorer.id}|${task}|${a.toLowerCase().replace(/\s+/g, " ").trim()}|${b.toLowerCase().replace(/\s+/g, " ").trim()}`;
-    const { createHash } = require("crypto");
     return createHash("sha256").update(payload).digest("hex");
   };
   
