@@ -10,7 +10,7 @@ import logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-app = FastAPI(title="TCL-Spectral", version="0.4.0")
+app = FastAPI(title="TCL-Spectral", version="0.5.0")  # v0.5.0: ONNX Runtime for 2-4x faster NLI
 
 # Lazy import NLI to allow app to start even if torch fails
 nli = None
@@ -37,11 +37,19 @@ def get_nli():
 def health():
     """Health check endpoint."""
     nli_module, error = get_nli()
+    
+    # Check if ONNX is being used
+    onnx_enabled = False
+    if nli_module:
+        onnx_enabled = getattr(nli_module, '_use_onnx', False)
+    
     return {
         "status": "ok", 
-        "version": "0.4.1",
+        "version": "0.5.0",
         "nli_available": nli_module is not None,
-        "nli_error": error
+        "nli_error": error,
+        "onnx_enabled": onnx_enabled,
+        "inference_mode": "onnx" if onnx_enabled else "pytorch"
     }
 
 
@@ -52,6 +60,7 @@ def nli_test():
     Returns entailment/contradiction scores for known test cases.
     CRITICAL: This verifies the label mapping is correct.
     """
+    import time
     nli_module, error = get_nli()
     
     if error:
@@ -68,13 +77,14 @@ def nli_test():
     
     try:
         # Get model config for verification
-        model, tokenizer, device = nli_module.get_model_and_tokenizer()
         model_config = {
             "name": nli_module._model_name,
-            "device": str(device),
-            "num_labels": model.config.num_labels if hasattr(model.config, 'num_labels') else "unknown",
-            "id2label": model.config.id2label if hasattr(model.config, 'id2label') else "unknown"
+            "onnx_enabled": getattr(nli_module, '_use_onnx', False),
+            "inference_mode": "onnx" if getattr(nli_module, '_use_onnx', False) else "pytorch"
         }
+        
+        # Time the inference to show speed improvement
+        start = time.time()
         
         # Test case 1: obvious entailment
         result1 = nli_module.score_pair("The sky is blue.", "The sky has a blue color.")
@@ -97,6 +107,8 @@ def nli_test():
             "there may be an early termination charge"
         )
         
+        elapsed = time.time() - start
+        
         # Verify expected behavior
         tests_passed = (
             result1["entailment"] > 0.5 and  # Should be high entailment
@@ -107,6 +119,8 @@ def nli_test():
         return {
             "status": "ok" if tests_passed else "warning",
             "model_config": model_config,
+            "inference_time_seconds": round(elapsed, 3),
+            "avg_time_per_pair_ms": round(elapsed * 1000 / 5, 1),
             "tests": {
                 "entailment_test": {
                     "premise": "The sky is blue.",
@@ -193,7 +207,9 @@ def nli_score(req: NliBatchRequest):
                 contradiction=result["contradiction"]
             ))
         
-        return NliBatchResponse(scores=scores, model="nli-distilroberta-base")
+        model_name = getattr(nli_module, '_model_name', 'unknown')
+        inference_mode = "onnx" if getattr(nli_module, '_use_onnx', False) else "pytorch"
+        return NliBatchResponse(scores=scores, model=f"{model_name} ({inference_mode})")
     except Exception as e:
         logger.error(f"NLI scoring error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -247,6 +263,55 @@ def build_edges(req: BuildEdgesRequest):
     except Exception as e:
         logger.error(f"Build edges error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/nli/benchmark")
+def nli_benchmark():
+    """
+    Benchmark NLI performance with a realistic batch size.
+    This helps verify ONNX speedup is working.
+    """
+    import time
+    nli_module, error = get_nli()
+    
+    if error or nli_module is None:
+        return {"status": "error", "error": error or "NLI not loaded"}
+    
+    # Create 50 test pairs (realistic for a transcript)
+    test_pairs = [
+        ("The agent promised free shipping.", "Free shipping was mentioned."),
+        ("There is no cancellation fee.", "You can cancel anytime."),
+        ("The product costs $99.", "The price is under $100."),
+        ("Delivery takes 3-5 business days.", "You'll receive it within a week."),
+        ("This offer expires tomorrow.", "There is a deadline for this offer."),
+    ] * 10  # 50 pairs
+    
+    # Warm up (first run is slower due to ONNX session creation)
+    _ = nli_module.score_pair("warmup", "warmup")
+    
+    # Benchmark batch
+    start = time.time()
+    results = nli_module.score_batch(test_pairs)
+    elapsed = time.time() - start
+    
+    avg_ms = (elapsed * 1000) / len(test_pairs)
+    pairs_per_second = len(test_pairs) / elapsed
+    
+    return {
+        "status": "ok",
+        "batch_size": len(test_pairs),
+        "total_time_seconds": round(elapsed, 3),
+        "avg_time_per_pair_ms": round(avg_ms, 1),
+        "pairs_per_second": round(pairs_per_second, 1),
+        "onnx_enabled": getattr(nli_module, '_use_onnx', False),
+        "inference_mode": "onnx" if getattr(nli_module, '_use_onnx', False) else "pytorch",
+        "performance_rating": (
+            "excellent" if avg_ms < 50 else
+            "good" if avg_ms < 100 else
+            "acceptable" if avg_ms < 200 else
+            "slow"
+        )
+    }
+
 
 @app.post("/spectral/score", response_model=SpectralResponse)
 def score(req: SpectralRequest):

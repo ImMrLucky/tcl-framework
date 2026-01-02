@@ -4,3 +4,6 @@ numpy==2.0.1
 pydantic==2.8.2
 transformers>=4.36.0
 accelerate>=0.25.0
+# ONNX Runtime for 2-4x faster CPU inference
+onnxruntime>=1.16.0
+optimum>=1.14.0

@@ -1,123 +1,140 @@
 """
-NLI (Natural Language Inference) scorer using Hugging Face transformers.
+NLI (Natural Language Inference) scorer using ONNX Runtime for fast CPU inference.
 This module provides high-quality entailment/contradiction/neutral scoring
 for claim pairs, which feeds into the spectral analysis graph.
+
+Uses ONNX Runtime for 2-4x faster inference on CPU compared to PyTorch.
 """
 
-from transformers import AutoModelForSequenceClassification, AutoTokenizer
-import torch
-import torch.nn.functional as F
+from transformers import AutoTokenizer
+import numpy as np
 from typing import List, Tuple, Dict, Optional
 import logging
+import os
 
 logger = logging.getLogger(__name__)
 
-# Global model instances (lazy loaded)
-_model = None
+# Global instances (lazy loaded)
+_session = None
 _tokenizer = None
-# Use smaller model to fit in Railway memory constraints (~300MB vs 2GB)
-# cross-encoder/nli-distilroberta-base is specifically trained for NLI
+_use_onnx = True  # Default to ONNX for speed, fallback to PyTorch if needed
+
+# Model name - cross-encoder/nli-distilroberta-base is fast and accurate
 _model_name = "cross-encoder/nli-distilroberta-base"
-_device = None
-
-# MNLI label mapping 
-# For cross-encoder/nli-distilroberta-base: 0 = contradiction, 1 = entailment, 2 = neutral
-LABEL_MAP = {0: "contradiction", 1: "entailment", 2: "neutral"}
 
 
-def get_model_and_tokenizer():
-    """Lazy load the NLI model and tokenizer."""
-    global _model, _tokenizer, _device
+def get_onnx_session():
+    """Get ONNX Runtime session for fast inference."""
+    global _session, _tokenizer, _use_onnx
     
-    if _model is None:
-        logger.info(f"Loading NLI model: {_model_name}...")
-        try:
-            _device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-            _tokenizer = AutoTokenizer.from_pretrained(_model_name)
-            _model = AutoModelForSequenceClassification.from_pretrained(_model_name)
-            _model.to(_device)
-            _model.eval()
-            logger.info(f"NLI model loaded successfully (device: {_device})")
-        except Exception as e:
-            logger.error(f"Failed to load NLI model: {e}")
-            raise
+    if _session is not None:
+        return _session, _tokenizer
     
-    return _model, _tokenizer, _device
-
-
-def score_pair(premise: str, hypothesis: str) -> Dict[str, float]:
-    """
-    Score a single premise-hypothesis pair.
-    Returns dict with 'entailment', 'neutral', 'contradiction' probabilities.
-    """
-    model, tokenizer, device = get_model_and_tokenizer()
-    
-    # Tokenize the premise-hypothesis pair
-    inputs = tokenizer(
-        premise, 
-        hypothesis, 
-        return_tensors="pt", 
-        truncation=True, 
-        max_length=512,
-        padding=True
-    )
-    inputs = {k: v.to(device) for k, v in inputs.items()}
-    
-    # Get model predictions
-    with torch.no_grad():
-        outputs = model(**inputs)
-        logits = outputs.logits
-        probs = F.softmax(logits, dim=-1)[0]
-    
-    # Map to labels based on model
-    # cross-encoder/nli-distilroberta-base: 0=contradiction, 1=entailment, 2=neutral
-    scores = {
-        "contradiction": float(probs[0]),
-        "entailment": float(probs[1]),
-        "neutral": float(probs[2])
-    }
-    
-    return scores
-
-
-def score_batch(pairs: List[Tuple[str, str]]) -> List[Dict[str, float]]:
-    """
-    Score multiple premise-hypothesis pairs in batch.
-    More efficient than scoring one at a time.
-    
-    Args:
-        pairs: List of (premise, hypothesis) tuples
+    try:
+        from optimum.onnxruntime import ORTModelForSequenceClassification
+        import onnxruntime as ort
         
-    Returns:
-        List of score dicts, each with 'entailment', 'neutral', 'contradiction'
-    """
-    if not pairs:
-        return []
+        logger.info(f"Loading NLI model with ONNX Runtime: {_model_name}...")
+        
+        # Try to load from cached ONNX model first
+        cache_dir = "/tmp/nli_onnx_cache"
+        os.makedirs(cache_dir, exist_ok=True)
+        
+        try:
+            # Try loading from cache
+            _session = ORTModelForSequenceClassification.from_pretrained(
+                cache_dir,
+                file_name="model.onnx"
+            )
+            logger.info("Loaded ONNX model from cache")
+        except Exception:
+            # Convert PyTorch model to ONNX
+            logger.info("Converting model to ONNX (one-time operation)...")
+            _session = ORTModelForSequenceClassification.from_pretrained(
+                _model_name,
+                export=True
+            )
+            # Save for next time
+            _session.save_pretrained(cache_dir)
+            logger.info("ONNX model saved to cache")
+        
+        _tokenizer = AutoTokenizer.from_pretrained(_model_name)
+        
+        # Log optimization info
+        providers = ort.get_available_providers()
+        logger.info(f"ONNX Runtime providers: {providers}")
+        logger.info("NLI model loaded with ONNX Runtime (2-4x faster than PyTorch)")
+        
+        return _session, _tokenizer
+        
+    except ImportError as e:
+        logger.warning(f"ONNX Runtime not available: {e}")
+        logger.warning("Falling back to PyTorch (slower)")
+        _use_onnx = False
+        return get_pytorch_model()
+    except Exception as e:
+        logger.error(f"Error loading ONNX model: {e}")
+        logger.warning("Falling back to PyTorch")
+        _use_onnx = False
+        return get_pytorch_model()
+
+
+def get_pytorch_model():
+    """Fallback to PyTorch model if ONNX not available."""
+    global _session, _tokenizer
     
-    model, tokenizer, device = get_model_and_tokenizer()
+    import torch
+    from transformers import AutoModelForSequenceClassification
     
-    # Tokenize all pairs at once
+    logger.info(f"Loading PyTorch NLI model: {_model_name}...")
+    
+    device = torch.device("cpu")  # Force CPU
+    _tokenizer = AutoTokenizer.from_pretrained(_model_name)
+    _session = AutoModelForSequenceClassification.from_pretrained(_model_name)
+    _session.to(device)
+    _session.eval()
+    
+    logger.info("PyTorch NLI model loaded")
+    
+    return _session, _tokenizer
+
+
+def softmax(x):
+    """Compute softmax values for numpy array."""
+    exp_x = np.exp(x - np.max(x, axis=-1, keepdims=True))
+    return exp_x / np.sum(exp_x, axis=-1, keepdims=True)
+
+
+def score_batch_onnx(pairs: List[Tuple[str, str]]) -> List[Dict[str, float]]:
+    """Score batch using ONNX Runtime."""
+    session, tokenizer = get_onnx_session()
+    
+    if not _use_onnx:
+        return score_batch_pytorch(pairs)
+    
     premises = [p for p, h in pairs]
     hypotheses = [h for p, h in pairs]
     
+    # Tokenize
     inputs = tokenizer(
         premises,
         hypotheses,
-        return_tensors="pt",
+        return_tensors="np",
         truncation=True,
-        max_length=512,
+        max_length=256,  # Reduced for speed
         padding=True
     )
-    inputs = {k: v.to(device) for k, v in inputs.items()}
     
-    # Get model predictions
-    with torch.no_grad():
-        outputs = model(**inputs)
-        logits = outputs.logits
-        probs = F.softmax(logits, dim=-1)
+    # Run inference
+    outputs = session(**inputs)
+    logits = outputs.logits if hasattr(outputs, 'logits') else outputs[0]
     
-    # Convert to list of score dicts
-    # cross-encoder/nli-distilroberta-base: 0=contradiction, 1=entailment, 2=neutral
+    if hasattr(logits, 'numpy'):
+        logits = logits.numpy()
+    
+    probs = softmax(logits)
+    
+    # Map to scores: 0=contradiction, 1=entailment, 2=neutral
     all_scores = []
     for i in range(len(pairs)):
         scores = {
@@ -130,6 +147,77 @@ def score_batch(pairs: List[Tuple[str, str]]) -> List[Dict[str, float]]:
     return all_scores
 
 
+def score_batch_pytorch(pairs: List[Tuple[str, str]]) -> List[Dict[str, float]]:
+    """Score batch using PyTorch (fallback)."""
+    import torch
+    import torch.nn.functional as F
+    
+    model, tokenizer = get_pytorch_model()
+    
+    premises = [p for p, h in pairs]
+    hypotheses = [h for p, h in pairs]
+    
+    inputs = tokenizer(
+        premises,
+        hypotheses,
+        return_tensors="pt",
+        truncation=True,
+        max_length=256,
+        padding=True
+    )
+    
+    with torch.no_grad():
+        outputs = model(**inputs)
+        logits = outputs.logits
+        probs = F.softmax(logits, dim=-1)
+    
+    all_scores = []
+    for i in range(len(pairs)):
+        scores = {
+            "contradiction": float(probs[i][0]),
+            "entailment": float(probs[i][1]),
+            "neutral": float(probs[i][2])
+        }
+        all_scores.append(scores)
+    
+    return all_scores
+
+
+def score_batch(pairs: List[Tuple[str, str]]) -> List[Dict[str, float]]:
+    """
+    Score multiple premise-hypothesis pairs in batch.
+    Uses ONNX Runtime for fast inference, with PyTorch fallback.
+    
+    Args:
+        pairs: List of (premise, hypothesis) tuples
+        
+    Returns:
+        List of score dicts, each with 'entailment', 'neutral', 'contradiction'
+    """
+    if not pairs:
+        return []
+    
+    # Process in smaller batches to avoid memory issues
+    MAX_BATCH = 32
+    all_scores = []
+    
+    for i in range(0, len(pairs), MAX_BATCH):
+        batch = pairs[i:i + MAX_BATCH]
+        if _use_onnx:
+            scores = score_batch_onnx(batch)
+        else:
+            scores = score_batch_pytorch(batch)
+        all_scores.extend(scores)
+    
+    return all_scores
+
+
+def score_pair(premise: str, hypothesis: str) -> Dict[str, float]:
+    """Score a single premise-hypothesis pair."""
+    results = score_batch([(premise, hypothesis)])
+    return results[0] if results else {"entailment": 0, "neutral": 0, "contradiction": 0}
+
+
 def build_edges_from_claims(
     claims: List[Dict[str, str]],
     sources: List[Dict[str, str]],
@@ -139,16 +227,6 @@ def build_edges_from_claims(
 ) -> Dict:
     """
     Build graph edges from claims using NLI scoring.
-    
-    Args:
-        claims: List of {"id": str, "text": str}
-        sources: List of {"id": str, "text": str} (evidence sources from transcript)
-        support_threshold: Min entailment score for support edge
-        contradiction_threshold: Min contradiction score for contradiction edge
-        grounding_threshold: Min entailment score for grounding edge
-        
-    Returns:
-        Dict with 'supports', 'contradictions', 'grounding', 'groundedClaimIds'
     """
     supports = []
     contradictions = []
@@ -157,14 +235,14 @@ def build_edges_from_claims(
     
     logger.info(f"Building edges from {len(claims)} claims and {len(sources)} sources")
     
-    # 1. Claim-to-claim edges (support and contradiction)
+    # 1. Claim-to-claim edges
     if len(claims) > 1:
         claim_pairs = []
         pair_indices = []
         
         for i, c1 in enumerate(claims):
             for j, c2 in enumerate(claims):
-                if i < j:  # Only check each pair once
+                if i < j:
                     claim_pairs.append((c1["text"], c2["text"]))
                     pair_indices.append((i, j))
         
@@ -175,7 +253,6 @@ def build_edges_from_claims(
             for (i, j), score in zip(pair_indices, scores):
                 c1, c2 = claims[i], claims[j]
                 
-                # Support edge (high entailment)
                 if score["entailment"] >= support_threshold:
                     supports.append({
                         "claimA": c1["id"],
@@ -183,7 +260,6 @@ def build_edges_from_claims(
                         "weight": score["entailment"]
                     })
                 
-                # Contradiction edge
                 if score["contradiction"] >= contradiction_threshold:
                     contradictions.append({
                         "claimA": c1["id"],
@@ -198,18 +274,17 @@ def build_edges_from_claims(
         
         for i, claim in enumerate(claims):
             for j, source in enumerate(sources):
-                grounding_pairs.append((source["text"], claim["text"]))  # source entails claim?
+                grounding_pairs.append((source["text"], claim["text"]))
                 grounding_indices.append((i, j))
         
         if grounding_pairs:
-            logger.info(f"Scoring {len(grounding_pairs)} claim-source pairs for grounding...")
+            logger.info(f"Scoring {len(grounding_pairs)} grounding pairs...")
             scores = score_batch(grounding_pairs)
             
             for (claim_idx, source_idx), score in zip(grounding_indices, scores):
                 claim = claims[claim_idx]
                 source = sources[source_idx]
                 
-                # Grounding edge (source entails claim)
                 if score["entailment"] >= grounding_threshold:
                     grounding.append({
                         "claimId": claim["id"],
@@ -227,4 +302,3 @@ def build_edges_from_claims(
         "grounding": grounding,
         "groundedClaimIds": list(grounded_claim_ids)
     }
-

@@ -385,8 +385,8 @@ export async function buildClaimGraph(
   // CRITICAL FIX: Use a local Map for batch results when cache is disabled (NoopCache)
   const groundingResultsMap = new Map<string, { score: number; quote?: string }>();
   
-  // OPTIMIZATION: Pre-filter pairs using fast token overlap heuristic
-  // This reduces NLI calls by 70-80% while maintaining accuracy
+  // Pre-filter pairs using fast token overlap heuristic
+  // This reduces obviously irrelevant pairs while keeping important ones
   const quickOverlap = (a: string, b: string): number => {
     const tokensA = new Set(a.toLowerCase().split(/\s+/).filter(t => t.length > 3));
     const tokensB = new Set(b.toLowerCase().split(/\s+/).filter(t => t.length > 3));
@@ -396,8 +396,8 @@ export async function buildClaimGraph(
     return overlap / Math.min(tokensA.size, tokensB.size);
   };
   
-  // Minimum overlap threshold for pre-filtering (0.1 = at least 10% token overlap)
-  const MIN_OVERLAP_FOR_NLI = 0.08;
+  // Minimum overlap threshold - low to keep most pairs
+  const MIN_OVERLAP_FOR_NLI = 0.05;
   
   if (sources?.length) {
     // batch score grounding where possible
@@ -423,9 +423,7 @@ export async function buildClaimGraph(
       }
       
       console.log(`🔍 Grounding: ${claims.length} claims × ${sources.length} sources`);
-      console.log(`   Pre-filtered: ${skippedByPrefilter} pairs skipped (no overlap), ${pairs.length} pairs to score`);
-      
-      console.log(`🔍 Grounding: ${claims.length} claims × ${sources.length} sources = ${pairs.length} pairs to score [v2.1.0]`);
+      console.log(`   Pre-filtered: ${skippedByPrefilter} skipped, ${pairs.length} pairs to score`);
       
       // Log first 2 pairs to verify format
       if (pairs.length > 0) {
@@ -663,7 +661,7 @@ export async function buildClaimGraph(
     }
   }
   
-  console.log(`🎯 Claim pairs: ${finalPairs.length} total → ${claimPairsSkipped} skipped (no overlap) → ${pairsToScore.length} to score, ${cacheHits} cache hits`);
+  console.log(`🎯 Claim pairs: ${finalPairs.length} total → ${claimPairsSkipped} skipped → ${pairsToScore.length} to score, ${cacheHits} cache hits`);
 
   // Check if scorer has scoreBatch method
   if (scorer && 'scoreBatch' in scorer && typeof (scorer as any).scoreBatch === 'function' && pairsToScore.length) {
