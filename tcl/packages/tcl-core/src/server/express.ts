@@ -733,8 +733,10 @@ app.post("/validate", async (req, res) => {
         // NEW: Generate CLUSTERED issues using the manager-grade issue analyzer
         // This groups claims into problem statements with proper risk scoring
         try {
+          // Construct transcript from input (same logic as orchestrator)
+          const transcript = (input.answer && input.answer.trim().length > 0) ? input.answer : input.question;
           const issueAnalysis = analyzeForIssues({
-            transcript: text || "",
+            transcript: transcript || "",
             claims: claimsForIssues,
             edges: {
               contradictions: graphContradictions.map((c: any) => ({
