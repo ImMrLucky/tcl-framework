@@ -356,7 +356,7 @@ Customer: Wait, that contradicts what you just said about no fees.`;
     };
     
     // Step 4: Manually test batch scoring for grounding
-    const groundingPairs = [];
+    const groundingPairs: Array<{ task: "grounding"; a: string; b: string; key: string }> = [];
     for (const claim of claims) {
       for (const source of sources) {
         groundingPairs.push({
