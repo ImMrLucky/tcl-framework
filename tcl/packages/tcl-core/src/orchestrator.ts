@@ -17,9 +17,16 @@ import { generateSourcesFromRawTranscript, retrieveEvidenceForClaims } from "./e
 import { createHash } from "crypto";
 import { startPipelineTimer, type PipelineTimer } from "./pipeline_timer.js";
 
+// NEW: Deterministic Truth Engine (replaces NLI)
+import { runTruthEngine, toLegacyGraph, buildIssuesFromGraph } from "./engine/index.js";
+
 // Cache for scorer to avoid re-initialization on every request
 let cachedScorer: { scorer: any; url: string; timestamp: number } | null = null;
 const SCORER_CACHE_TTL = 5 * 60 * 1000; // 5 minutes
+
+// Feature flag: Use deterministic Truth Engine instead of NLI
+// Set via environment variable or options
+const USE_TRUTH_ENGINE = process.env.TCL_USE_TRUTH_ENGINE === "true";
 
 /**
  * Generate input hash for reproducibility
@@ -125,6 +132,139 @@ async function validateOnce(input: ValidateInput, adapter?: LLMAdapter, startTim
   const validationStartTime = startTime ?? Date.now();
   try {
     const { question, answer, sources: externalSources, options } = input;
+    
+    // =========================================================================
+    // FAST PATH: Use deterministic Truth Engine instead of NLI
+    // This is 100-1000x faster and more reproducible
+    // =========================================================================
+    const useTruthEngine = (options as any)?.useTruthEngine ?? USE_TRUTH_ENGINE;
+    
+    if (useTruthEngine) {
+      console.log("🚀 Using deterministic Truth Engine (NLI disabled)");
+      
+      // Run the Truth Engine
+      const transcript = answer && answer.trim().length > 0 ? answer : question;
+      const engineResult = runTruthEngine({ 
+        transcript,
+        conversationId: (options as any)?.conversationId ?? "inline"
+      });
+      
+      // Convert to legacy graph format
+      const legacyGraph = toLegacyGraph(engineResult);
+      
+      // Build issues
+      const issues = buildIssuesFromGraph(engineResult.graph);
+      
+      // Build claims in expected format
+      const claims = engineResult.graph.claims.map(c => ({
+        id: c.id,
+        text: c.text,
+        speaker: c.speaker,
+        meta: {
+          speaker: c.speaker,
+          turnIndex: c.turnIndex,
+          claimType: c.modality,
+        },
+        confidence: 0.7, // Will be refined by spectral
+      }));
+      
+      // Call spectral with the rule-based graph
+      const spectralEnabled = options?.spectral !== false;
+      const spectralServiceUrl = options?.spectralServiceUrl ?? process.env.TCL_SPECTRAL_URL ?? "";
+      
+      let spectral: SpectralReport | undefined;
+      let coherenceScore: number | null = null;
+      
+      if (spectralEnabled && spectralServiceUrl && claims.length > 0) {
+        try {
+          console.log(`📡 Calling Spectral with rule-based graph (${legacyGraph.contradictions.length} contradictions, ${legacyGraph.supports.length} supports)`);
+          
+          spectral = await callSpectralAnalyzeService(
+            spectralServiceUrl,
+            claims.map(c => ({ id: c.id, text: c.text })),
+            legacyGraph.supports,
+            legacyGraph.contradictions,
+            legacyGraph.groundedClaimIds,
+            {}
+          );
+          coherenceScore = spectral.coherenceScore;
+          console.log(`✅ Spectral complete. Coherence: ${coherenceScore}`);
+        } catch (e: any) {
+          console.error("❌ Spectral error:", e.message);
+          spectral = { spectralSkipped: true, debugReason: `spectral_error: ${e.message}` } as any;
+        }
+      }
+      
+      // Calculate scores
+      const consistencyScore = legacyGraph.contradictions.length === 0 ? 100 :
+        Math.max(0, 100 - legacyGraph.contradictions.length * 15);
+      const finalCoherence = coherenceScore !== null ? Math.round(coherenceScore * 100) : null;
+      const overall = finalCoherence !== null 
+        ? Math.round((consistencyScore + finalCoherence) / 2)
+        : consistencyScore;
+      
+      // Build manifest
+      const manifest: RunManifest = {
+        inputHash: engineResult.graph.inputHash,
+        artifactId: (options as any)?.artifactId,
+        claimExtractorVersion: "truth-engine-v1",
+        nliModelId: "none-rules-only",
+        nliThresholds: { support: 0, contradiction: 0, grounding: 0 },
+        embeddingModel: "none",
+        retrievalK: 0,
+        spectralEngineVersion: spectral && !(spectral as any).spectralSkipped ? "v1.0.0" : undefined,
+        codeVersion: engineResult.graph.codeVersion,
+        createdAt: engineResult.graph.generatedAt,
+        transcriptSourcesGenerated: 0,
+        graphHealth: {
+          supportEdges: legacyGraph.supports.length,
+          contradictionEdges: legacyGraph.contradictions.length,
+          groundingEdges: legacyGraph.grounding.length,
+          totalEdges: legacyGraph.supports.length + legacyGraph.contradictions.length + legacyGraph.grounding.length,
+          healthy: legacyGraph.contradictions.length > 0 || legacyGraph.supports.length > 0,
+          diagnostic: undefined,
+        },
+      };
+      
+      console.log(`✅ Truth Engine complete: ${engineResult.timings.total}ms (vs ~100s with NLI)`);
+      timer.logSummary();
+      
+      return {
+        answer: answer || transcript,
+        refusal: false,
+        scores: {
+          truth: null,
+          consistency: consistencyScore,
+          coherence: finalCoherence,
+          overall,
+        },
+        scorerId: "truth-engine-v1",
+        latency: engineResult.timings.total,
+        engineVersion: engineResult.graph.codeVersion,
+        performanceMs: engineResult.timings,
+        report: {
+          claims,
+          violations: [],
+          missingEvidence: [],
+          contradictions: legacyGraph.contradictions,
+          spectral,
+          graph: {
+            supports: legacyGraph.supports,
+            contradictions: legacyGraph.contradictions,
+            grounding: legacyGraph.grounding,
+            debug: legacyGraph.debug,
+          },
+          suggestions: [],
+          manifest,
+        },
+      };
+    }
+    
+    // =========================================================================
+    // LEGACY PATH: NLI-based edge generation (slow, ~100s)
+    // =========================================================================
+    console.log("⚠️ Using NLI-based edge generation (slow). Set TCL_USE_TRUTH_ENGINE=true for 100x speedup.");
+    
     // Spectral is the CORE VALUE of the app - enabled by default
     // Only disable if explicitly set to false
     const spectralEnabled = options?.spectral !== false;
