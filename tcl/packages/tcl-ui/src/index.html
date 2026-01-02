@@ -11,9 +11,16 @@
   <script>
     // Allow setting API URL via environment variable or Netlify build-time injection
     // This can be overridden by Netlify's environment variable injection
-    if (typeof window !== 'undefined' && !window.__TCL_API_URL) {
-      // Default to proxy path for Netlify
-      window.__TCL_API_URL = null; // null means use relative /api path
+    if (typeof window !== 'undefined') {
+      // Default to proxy path for Netlify (quick API calls)
+      if (!window.__TCL_API_URL) {
+        window.__TCL_API_URL = null; // null means use relative /api path
+      }
+      // Railway URL for long-running operations like /validate (bypasses Netlify timeout)
+      // Set this in Netlify environment variables: TCL_EVALUATION_URL
+      if (!window.__TCL_EVALUATION_URL) {
+        window.__TCL_EVALUATION_URL = null; // null means use same as __TCL_API_URL
+      }
     }
   </script>
 </head>

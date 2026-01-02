@@ -314,9 +314,10 @@ export class IngestionComponent implements OnInit {
       }
 
       // Step 2: Run evaluation with /validate endpoint
-      // The normalized data is now stored, pass artifact reference
+      // Use evaluation URL (Railway direct) to bypass Netlify timeout
+      const evalUrl = this.auditService.getEvaluationBaseUrl();
       const evaluationData = await firstValueFrom(
-        this.http.post<any>(`${apiUrl}/validate`, {
+        this.http.post<any>(`${evalUrl}/validate`, {
           question: this.transcript,
           answer: '',
           sources: [],
@@ -419,8 +420,10 @@ export class IngestionComponent implements OnInit {
       this.snackBar.open('Audio and transcript linked successfully', 'Close', { duration: 3000 });
 
       // Step 3: Run evaluation
+      // Use evaluation URL (Railway direct) to bypass Netlify timeout
+      const evalUrl = this.auditService.getEvaluationBaseUrl();
       await firstValueFrom(
-        this.http.post<any>(`${apiUrl}/validate`, {
+        this.http.post<any>(`${evalUrl}/validate`, {
           question: transcriptContent,
           answer: '',
           sources: [],

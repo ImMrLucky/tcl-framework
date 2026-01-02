@@ -185,10 +185,35 @@ export class AuditService {
   }
 
   /**
+   * Get the evaluation service URL (Railway direct for long-running operations)
+   * This bypasses Netlify's 30-second function timeout.
+   */
+  private get evaluationBase(): string {
+    if (typeof window !== 'undefined') {
+      // First check for dedicated evaluation URL (Railway)
+      if ((window as any).__TCL_EVALUATION_URL) {
+        return (window as any).__TCL_EVALUATION_URL;
+      }
+      // Fall back to API URL
+      if ((window as any).__TCL_API_URL) {
+        return (window as any).__TCL_API_URL;
+      }
+    }
+    return '/api';
+  }
+
+  /**
    * Get the API base URL (public method for components that need it)
    */
   getApiBaseUrl(): string {
     return this.apiBase;
+  }
+
+  /**
+   * Get the evaluation service URL (for long-running operations like /validate)
+   */
+  getEvaluationBaseUrl(): string {
+    return this.evaluationBase;
   }
 
   constructor(private http: HttpClient) {}

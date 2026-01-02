@@ -32,6 +32,40 @@ import { registerIngestEndpoints } from "./ingestion/ingest-endpoint.js";
 
 const app = express();
 
+// CORS middleware - allows frontend to call Railway directly
+// This is necessary when the frontend calls Railway directly for /validate
+// to bypass Netlify's function timeout
+app.use((req, res, next) => {
+  // Allow requests from any origin in production
+  // In production, you might want to restrict this to specific domains
+  const allowedOrigins = [
+    'https://protectqa.com',
+    'https://www.protectqa.com',
+    'http://localhost:4200',
+    'http://localhost:3000'
+  ];
+  
+  const origin = req.headers.origin;
+  if (origin && allowedOrigins.some(allowed => origin.startsWith(allowed.replace('www.', '')))) {
+    res.setHeader('Access-Control-Allow-Origin', origin);
+  } else if (origin) {
+    // For development, allow any origin
+    res.setHeader('Access-Control-Allow-Origin', origin);
+  }
+  
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+  res.setHeader('Access-Control-Allow-Credentials', 'true');
+  res.setHeader('Access-Control-Max-Age', '86400'); // 24 hours
+  
+  // Handle preflight requests
+  if (req.method === 'OPTIONS') {
+    return res.status(200).end();
+  }
+  
+  next();
+});
+
 // Configure multer for file uploads FIRST (before JSON parsing)
 // This prevents JSON parser from trying to parse multipart/form-data
 const upload = multer({

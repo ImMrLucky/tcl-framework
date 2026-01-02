@@ -7,12 +7,17 @@ import { ValidateOutput, ValidationOptions, Source, CallMetadata } from './types
   providedIn: 'root'
 })
 export class TclService {
-  // Use environment variable or fallback to proxy path
-  private get apiBase(): string {
+  // Use evaluation URL (Railway direct) for long-running /validate calls
+  // This bypasses Netlify's 30-second function timeout
+  private get validateUrl(): string {
     if (typeof window !== 'undefined') {
-      const apiUrl = (window as any).__TCL_API_URL;
-      if (apiUrl) {
-        return `${apiUrl}/validate`;
+      // First check for dedicated evaluation URL (Railway)
+      if ((window as any).__TCL_EVALUATION_URL) {
+        return `${(window as any).__TCL_EVALUATION_URL}/validate`;
+      }
+      // Fall back to API URL
+      if ((window as any).__TCL_API_URL) {
+        return `${(window as any).__TCL_API_URL}/validate`;
       }
     }
     return '/api/validate';
@@ -27,7 +32,7 @@ export class TclService {
     options: ValidationOptions,
     callMetadata?: CallMetadata
   ): Observable<ValidateOutput> {
-    return this.http.post<ValidateOutput>(this.apiBase, {
+    return this.http.post<ValidateOutput>(this.validateUrl, {
       question,
       answer,
       sources,
