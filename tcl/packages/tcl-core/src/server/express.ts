@@ -30,6 +30,7 @@ import { buildIssuesList } from "./audit/reproducibility.js";
 import { analyzeForIssues, exportAsJSON, exportAsCSV, exportAsHTML, type IssueAnalysisOutput } from "../issues/index.js";
 import { buildIssueNarratives } from "../analysis/issue-narratives.js";
 import { computeHeadlineCounts } from "../analysis/headline-counts.js";
+import { exportNarrativesAsCSV, exportNarrativesAsJSON, exportNarrativesAsHTML } from "../analysis/exports.js";
 import { getOrgContext } from "./auth-context.js";
 import { registerIngestEndpoints } from "./ingestion/ingest-endpoint.js";
 
@@ -2047,6 +2048,189 @@ app.get("/evaluations/:evaluationId/export/html", async (req, res) => {
     res.send(html);
   } catch (e: any) {
     console.error("Export HTML error:", e);
+    res.status(500).json({ error: e?.message ?? "unknown error" });
+  }
+});
+
+// Export issue narratives as CSV
+app.get("/evaluations/:evaluationId/export/narratives/csv", async (req, res) => {
+  try {
+    const { evaluationId } = req.params;
+    const context = await getOrgContext(req);
+    
+    if (!context || context.error) {
+      return res.status(401).json({ error: context?.error || "Authorization required" });
+    }
+    
+    if (!supabaseAdmin) {
+      return res.status(503).json({ error: "Supabase not configured" });
+    }
+    
+    const { data: evaluation, error: evalError } = await supabaseAdmin
+      .from('evaluations')
+      .select('*')
+      .eq('id', evaluationId)
+      .eq('org_id', context.orgId)
+      .single();
+    
+    if (evalError) {
+      return res.status(500).json({ error: evalError.message });
+    }
+    
+    if (!evaluation) {
+      return res.status(404).json({ error: "Evaluation not found" });
+    }
+    
+    const report = evaluation.report as any;
+    const issueNarratives = report?.issueNarratives;
+    
+    if (!issueNarratives || !issueNarratives.narratives) {
+      return res.status(404).json({ error: "Issue narratives not found for this evaluation" });
+    }
+    
+    // Get reproducibility from manifest
+    const manifest = report?.manifest || {};
+    const reproducibility = {
+      inputHash: manifest.inputHash || "N/A",
+      configHash: manifest.configHash || "N/A",
+      codeVersion: manifest.codeVersion || "N/A",
+      engineVersion: manifest.engineVersion || "N/A",
+      modelFingerprint: manifest.modelFingerprint || {},
+    };
+    
+    const exportData = {
+      narratives: issueNarratives.narratives,
+      summary: issueNarratives.summary,
+      reproducibility,
+    };
+    
+    res.setHeader('Content-Type', 'text/csv');
+    res.setHeader('Content-Disposition', `attachment; filename="evaluation-${evaluationId}-narratives.csv"`);
+    return res.send(exportNarrativesAsCSV(exportData));
+  } catch (e: any) {
+    console.error("Export narratives CSV error:", e);
+    res.status(500).json({ error: e?.message ?? "unknown error" });
+  }
+});
+
+// Export issue narratives as JSON
+app.get("/evaluations/:evaluationId/export/narratives/json", async (req, res) => {
+  try {
+    const { evaluationId } = req.params;
+    const context = await getOrgContext(req);
+    
+    if (!context || context.error) {
+      return res.status(401).json({ error: context?.error || "Authorization required" });
+    }
+    
+    if (!supabaseAdmin) {
+      return res.status(503).json({ error: "Supabase not configured" });
+    }
+    
+    const { data: evaluation, error: evalError } = await supabaseAdmin
+      .from('evaluations')
+      .select('*')
+      .eq('id', evaluationId)
+      .eq('org_id', context.orgId)
+      .single();
+    
+    if (evalError) {
+      return res.status(500).json({ error: evalError.message });
+    }
+    
+    if (!evaluation) {
+      return res.status(404).json({ error: "Evaluation not found" });
+    }
+    
+    const report = evaluation.report as any;
+    const issueNarratives = report?.issueNarratives;
+    
+    if (!issueNarratives || !issueNarratives.narratives) {
+      return res.status(404).json({ error: "Issue narratives not found for this evaluation" });
+    }
+    
+    // Get reproducibility from manifest
+    const manifest = report?.manifest || {};
+    const reproducibility = {
+      inputHash: manifest.inputHash || "N/A",
+      configHash: manifest.configHash || "N/A",
+      codeVersion: manifest.codeVersion || "N/A",
+      engineVersion: manifest.engineVersion || "N/A",
+      modelFingerprint: manifest.modelFingerprint || {},
+    };
+    
+    const exportData = {
+      narratives: issueNarratives.narratives,
+      summary: issueNarratives.summary,
+      reproducibility,
+    };
+    
+    res.setHeader('Content-Type', 'application/json');
+    res.setHeader('Content-Disposition', `attachment; filename="evaluation-${evaluationId}-narratives.json"`);
+    return res.send(exportNarrativesAsJSON(exportData));
+  } catch (e: any) {
+    console.error("Export narratives JSON error:", e);
+    res.status(500).json({ error: e?.message ?? "unknown error" });
+  }
+});
+
+// Export issue narratives as HTML (PDF-ready)
+app.get("/evaluations/:evaluationId/export/narratives/html", async (req, res) => {
+  try {
+    const { evaluationId } = req.params;
+    const context = await getOrgContext(req);
+    
+    if (!context || context.error) {
+      return res.status(401).json({ error: context?.error || "Authorization required" });
+    }
+    
+    if (!supabaseAdmin) {
+      return res.status(503).json({ error: "Supabase not configured" });
+    }
+    
+    const { data: evaluation, error: evalError } = await supabaseAdmin
+      .from('evaluations')
+      .select('*')
+      .eq('id', evaluationId)
+      .eq('org_id', context.orgId)
+      .single();
+    
+    if (evalError) {
+      return res.status(500).json({ error: evalError.message });
+    }
+    
+    if (!evaluation) {
+      return res.status(404).json({ error: "Evaluation not found" });
+    }
+    
+    const report = evaluation.report as any;
+    const issueNarratives = report?.issueNarratives;
+    
+    if (!issueNarratives || !issueNarratives.narratives) {
+      return res.status(404).json({ error: "Issue narratives not found for this evaluation" });
+    }
+    
+    // Get reproducibility from manifest
+    const manifest = report?.manifest || {};
+    const reproducibility = {
+      inputHash: manifest.inputHash || "N/A",
+      configHash: manifest.configHash || "N/A",
+      codeVersion: manifest.codeVersion || "N/A",
+      engineVersion: manifest.engineVersion || "N/A",
+      modelFingerprint: manifest.modelFingerprint || {},
+    };
+    
+    const exportData = {
+      narratives: issueNarratives.narratives,
+      summary: issueNarratives.summary,
+      reproducibility,
+    };
+    
+    res.setHeader('Content-Type', 'text/html');
+    res.setHeader('Content-Disposition', `attachment; filename="evaluation-${evaluationId}-narratives.html"`);
+    return res.send(exportNarrativesAsHTML(exportData));
+  } catch (e: any) {
+    console.error("Export narratives HTML error:", e);
     res.status(500).json({ error: e?.message ?? "unknown error" });
   }
 });
