@@ -62,14 +62,43 @@ interface ClusteredIssue {
   styleUrls: ['./issue-detail-modal.component.scss']
 })
 export class IssueDetailModalComponent {
+  issue: ClusteredIssue;
+
   constructor(
     public dialogRef: MatDialogRef<IssueDetailModalComponent>,
-    @Inject(MAT_DIALOG_DATA) public issue: ClusteredIssue
+    @Inject(MAT_DIALOG_DATA) data: ClusteredIssue
   ) {
+    // Ensure issue is always defined, provide defaults if missing
+    this.issue = data || {
+      id: '',
+      title: 'Issue Details',
+      category: 'OTHER',
+      severity: 'MEDIUM',
+      confidence: 'MEDIUM',
+      problemStatement: 'No data available',
+      whyWrong: [],
+      impact: 'No impact description',
+      recommendedAction: [],
+      confidenceExplanation: 'No explanation available',
+      primaryEvidence: [],
+      metrics: {
+        contradictionMass: 0,
+        supportMass: 0,
+        groundingMass: 0,
+        centrality: 0,
+        claimCount: 0,
+        turnSpan: 0,
+        riskScore: 0,
+        rank: 0,
+        drivers: []
+      },
+      tags: []
+    };
+    
     // Debug: log the issue data to see what we're receiving
-    console.log('IssueDetailModal - Received issue data:', issue);
-    console.log('IssueDetailModal - primaryEvidence:', issue?.primaryEvidence);
-    console.log('IssueDetailModal - metrics:', issue?.metrics);
+    console.log('IssueDetailModal - Received issue data:', this.issue);
+    console.log('IssueDetailModal - primaryEvidence:', this.issue.primaryEvidence);
+    console.log('IssueDetailModal - metrics:', this.issue.metrics);
   }
 
   getSeverityColor(severity: string): string {
@@ -130,12 +159,12 @@ export class IssueDetailModalComponent {
 
   // Helper to check if evidence exists
   hasEvidence(): boolean {
-    return !!(this.issue?.primaryEvidence && this.issue.primaryEvidence.length > 0);
+    return !!(this.issue.primaryEvidence && this.issue.primaryEvidence.length > 0);
   }
 
   // Helper to check if metrics exist
   hasMetrics(): boolean {
-    return !!this.issue?.metrics;
+    return !!this.issue.metrics;
   }
 }
 
