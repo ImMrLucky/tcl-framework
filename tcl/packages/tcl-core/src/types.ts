@@ -453,6 +453,8 @@ export type GraphDebugInfo = {
 export type RunManifest = {
   /** SHA-256 hash of input */
   inputHash: string;
+  /** SHA-256 hash of config bundle (scoring + templates + taxonomy) */
+  configHash: string;
   /** Artifact ID if provided */
   artifactId?: string;
   /** Claim extractor version */
@@ -471,8 +473,18 @@ export type RunManifest = {
   retrievalK: number;
   /** Spectral engine version */
   spectralEngineVersion?: string;
-  /** Code version */
+  /** Code version (git commit SHA) */
   codeVersion: string;
+  /** Engine version */
+  engineVersion: string;
+  /** Model fingerprint (all model versions used) */
+  modelFingerprint: {
+    nliModel?: string;
+    claimExtractor?: string;
+    embeddingModel?: string;
+    spectralEngine?: string;
+    configHash?: string;
+  };
   /** Timestamp */
   createdAt: string;
   /** Number of transcript sources generated */

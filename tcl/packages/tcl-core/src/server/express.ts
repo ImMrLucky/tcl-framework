@@ -29,6 +29,7 @@ import { setupAuditRoutes } from "./audit/routes.js";
 import { buildIssuesList } from "./audit/reproducibility.js";
 import { analyzeForIssues, exportAsJSON, exportAsCSV, exportAsHTML, type IssueAnalysisOutput } from "../issues/index.js";
 import { buildIssueNarratives } from "../analysis/issue-narratives.js";
+import { computeHeadlineCounts } from "../analysis/headline-counts.js";
 import { getOrgContext } from "./auth-context.js";
 import { registerIngestEndpoints } from "./ingestion/ingest-endpoint.js";
 
@@ -954,17 +955,15 @@ app.post("/validate", async (req, res) => {
         const spectralReport = out.report?.spectral || {};
         const spectralSkipped = spectralReport.spectralSkipped === true;
         
-        // Count issues by type
-        const contradictedCount = issues.filter((i: any) => 
-          i.what?.truthState === 'Contradicted' || i.truthState === 'Contradicted'
-        ).length;
-        const ungroundedCount = issues.filter((i: any) => 
-          i.what?.truthState === 'Ungrounded' || i.truthState === 'Ungrounded'
-        ).length;
-        const totalClaims = out.report?.claims?.length || 0;
-        
         // Calculate coherence - use spectral if available, fallback to orchestrator score
         const coherenceScore = spectralReport.coherenceScore ?? out.scores?.coherence;
+        
+        // Compute headline counts with configurable thresholds
+        const headlineCounts = computeHeadlineCounts({
+          claims: out.report?.claims || [],
+          contradictions: out.report?.graph?.contradictions || [],
+          spectral: spectralReport,
+        });
         
         const scoresForDb = {
           // Top-level scores from orchestrator
@@ -985,14 +984,16 @@ app.post("/validate", async (req, res) => {
             cycleMass: spectralReport.cycleMass,
             heatTrace: spectralReport.heatTrace
           },
-          // Counts (always include for UI display)
+          // Counts (computed with configurable thresholds)
           counts: {
-            claims: totalClaims,
-            contradicted: contradictedCount,
-            ungrounded: ungroundedCount,
-            supported: Math.max(0, totalClaims - contradictedCount - ungroundedCount),
+            claims: headlineCounts.total,
+            contradicted: headlineCounts.contradicted,
+            ungrounded: headlineCounts.ungrounded,
+            supported: headlineCounts.supported,
             supports: out.report?.graph?.supports?.length || 0,
-            contradictions: out.report?.graph?.contradictions?.length || 0
+            contradictions: out.report?.graph?.contradictions?.length || 0,
+            // Include definitions for tooltips
+            definitions: headlineCounts.definitions
           }
         };
         

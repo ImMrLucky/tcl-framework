@@ -70,7 +70,8 @@ export function buildIssueNarratives(input: BuildNarrativesInput): BuildNarrativ
       templates,
       taxonomy,
       config,
-      input.spectral
+      input.spectral,
+      input.claims
     );
     
     if (narrative) {
@@ -225,7 +226,8 @@ function buildNarrativeForCluster(
   templates: any,
   taxonomy: any,
   config: any,
-  spectral?: SpectralReport
+  spectral?: SpectralReport,
+  allClaims?: Claim[]
 ): IssueNarrative | null {
   const claims = cluster.claimIds.map(id => claimMap.get(id)).filter(Boolean) as Claim[];
   
@@ -244,8 +246,48 @@ function buildNarrativeForCluster(
   // Determine speaker focus (default: AGENT)
   const speakerFocus = determineSpeakerFocus(claims);
   
-  // Compute scores
-  const scores = computeIssueScores(cluster, claims, spectral, taxonomy, config);
+  // Compute scores (pass all claims for proper spectral index mapping)
+  const fullClaimsArray = allClaims || Array.from(claimMap.values());
+  const scores = computeIssueScores(cluster, claims, fullClaimsArray, spectral, taxonomy, config);
+  
+  // Compute confidence from spectral signals
+  let confidenceScore = 0.7; // Default medium
+  if (spectral) {
+    const claimIdToIndex = new Map<string, number>();
+    fullClaimsArray.forEach((c, idx) => claimIdToIndex.set(c.id, idx));
+    
+    let hasSpectralConfirmation = false;
+    let hasHighStructuralImportance = false;
+    
+    if (spectral.truthStates && spectral.truthStates.length > 0) {
+      for (const claim of claims) {
+        const idx = claimIdToIndex.get(claim.id);
+        if (idx !== undefined && idx < spectral.truthStates.length) {
+          const state = spectral.truthStates[idx];
+          if (state === "Contradicted" || state === "Ungrounded") {
+            hasSpectralConfirmation = true;
+          }
+        }
+      }
+    }
+    
+    if (spectral.nodeBlameNorm && spectral.nodeBlameNorm.length > 0) {
+      for (const claim of claims) {
+        const idx = claimIdToIndex.get(claim.id);
+        if (idx !== undefined && idx < spectral.nodeBlameNorm.length) {
+          if (spectral.nodeBlameNorm[idx] > 0.5) {
+            hasHighStructuralImportance = true;
+          }
+        }
+      }
+    }
+    
+    if (hasSpectralConfirmation) {
+      confidenceScore = 0.85; // High confidence if spectral confirms
+    } else if (hasHighStructuralImportance) {
+      confidenceScore = 0.75; // Medium-high if structurally important
+    }
+  }
   
   // Generate narrative text using templates
   const subcategory = cluster.subcategory || inferSubcategory(claims);
@@ -284,7 +326,7 @@ function buildNarrativeForCluster(
     subcategory,
     title,
     severity: getSeverity(scores.riskScore, taxonomy),
-    confidence: getConfidence(scores.confidence || 0.7, taxonomy),
+    confidence: getConfidence(confidenceScore, taxonomy),
     status: "OPEN",
     scope: {
       turnRange: cluster.turnRange,
@@ -379,33 +421,132 @@ function determineSpeakerFocus(claims: Claim[]): "AGENT" | "SYSTEM" | "CUSTOMER"
 
 function computeIssueScores(
   cluster: ClaimCluster,
-  claims: Claim[],
+  clusterClaims: Claim[],
+  allClaims: Claim[],
   spectral?: SpectralReport,
   taxonomy?: any,
   config?: any
 ): IssueNarrative["scoring"] {
   // Risk score: based on contradiction strength, category risk, spectral signals
   let riskScore = 0;
+  const rationale: string[] = [];
   
+  // Map claim IDs to indices in the full claims array (for spectral arrays)
+  const claimIdToIndex = new Map<string, number>();
+  allClaims.forEach((c, idx) => {
+    claimIdToIndex.set(c.id, idx);
+  });
+  
+  // Get spectral signals for these claims
+  let maxNodeBlame = 0;
+  let hasContradictedState = false;
+  let hasUngroundedState = false;
+  let maxTruthValue = 0;
+  
+  if (spectral) {
+    // Check truth states
+    if (spectral.truthStates && spectral.truthStates.length > 0) {
+      for (const claim of clusterClaims) {
+        const idx = claimIdToIndex.get(claim.id);
+        if (idx !== undefined && idx < spectral.truthStates.length) {
+          const state = spectral.truthStates[idx];
+          if (state === "Contradicted") hasContradictedState = true;
+          if (state === "Ungrounded") hasUngroundedState = true;
+        }
+      }
+    }
+    
+    // Check node blame (structural importance)
+    if (spectral.nodeBlameNorm && spectral.nodeBlameNorm.length > 0) {
+      for (const claim of clusterClaims) {
+        const idx = claimIdToIndex.get(claim.id);
+        if (idx !== undefined && idx < spectral.nodeBlameNorm.length) {
+          const blame = spectral.nodeBlameNorm[idx];
+          maxNodeBlame = Math.max(maxNodeBlame, blame);
+        }
+      }
+      if (maxNodeBlame > 0.5) {
+        rationale.push(`Claim has high structural importance (node blame: ${maxNodeBlame.toFixed(2)}).`);
+      }
+    }
+    
+    // Check truth vector (truth propagation)
+    if (spectral.truthVector && spectral.truthVector.length > 0) {
+      for (const claim of clusterClaims) {
+        const idx = claimIdToIndex.get(claim.id);
+        if (idx !== undefined && idx < spectral.truthVector.length) {
+          const truthVal = spectral.truthVector[idx];
+          maxTruthValue = Math.max(maxTruthValue, Math.abs(truthVal));
+        }
+      }
+    }
+    
+    // Check top bad contradictions (using claim indices from full array)
+    if (spectral.topBadContradictions && spectral.topBadContradictions.length > 0) {
+      for (const badContra of spectral.topBadContradictions) {
+        if (badContra.claimAIndex < allClaims.length && badContra.claimBIndex < allClaims.length) {
+          const claimAId = allClaims[badContra.claimAIndex]?.id;
+          const claimBId = allClaims[badContra.claimBIndex]?.id;
+          if (cluster.claimIds.includes(claimAId || "") || cluster.claimIds.includes(claimBId || "")) {
+            rationale.push(`Contradiction edge has high badness score (${badContra.badness.toFixed(2)}).`);
+            break;
+          }
+        }
+      }
+    }
+  }
+  
+  // Base risk score from issue type
   if (cluster.issueType === "contradiction" && cluster.topContradictions.length > 0) {
     const maxContraScore = Math.max(...cluster.topContradictions.map(c => c.score));
     riskScore = maxContraScore * 100; // Scale to 0-100
+    rationale.push(`Direct contradiction detected (strength: ${maxContraScore.toFixed(2)}).`);
   } else if (cluster.issueType === "ungrounded") {
-    // Ungrounded claims are risky
     riskScore = 60; // Medium-high baseline
+    rationale.push("Claim lacks supporting evidence.");
   } else {
     riskScore = 40; // Medium baseline
+  }
+  
+  // Boost risk if spectral indicates contradiction
+  if (hasContradictedState) {
+    riskScore = Math.min(100, riskScore * 1.2);
+    rationale.push("Spectral analysis confirms contradicted state.");
+  }
+  
+  // Boost risk if ungrounded
+  if (hasUngroundedState) {
+    riskScore = Math.min(100, riskScore * 1.15);
+    rationale.push("Spectral analysis confirms ungrounded state.");
+  }
+  
+  // Boost risk based on node blame (structural importance)
+  if (maxNodeBlame > 0.5) {
+    riskScore = Math.min(100, riskScore * (1 + maxNodeBlame * 0.3));
   }
   
   // Apply category risk multiplier
   const riskMultiplier = getRiskMultiplier(cluster.category, cluster.subcategory, taxonomy);
   riskScore = Math.min(100, riskScore * riskMultiplier);
+  rationale.push(`Category: ${cluster.category} (risk multiplier: ${riskMultiplier.toFixed(2)}).`);
   
-  // Impact score: based on category and customer harm potential
+  // Impact score: based on category, spectral signals, and customer harm potential
   let impactScore = riskScore * 0.8; // Slightly lower than risk
   
-  // Fixability score: based on clarity and number of claims
-  const fixabilityScore = Math.max(0, 100 - (claims.length * 10)); // Fewer claims = easier to fix
+  // Boost impact if high structural importance
+  if (maxNodeBlame > 0.6) {
+    impactScore = Math.min(100, impactScore * 1.1);
+    rationale.push("High structural importance increases potential downstream impact.");
+  }
+  
+  // Fixability score: based on clarity, number of claims, and spectral coherence
+  let fixabilityScore = Math.max(0, 100 - (clusterClaims.length * 10)); // Fewer claims = easier to fix
+  
+  // Lower fixability if spectral coherence is low (indicates systemic issues)
+  if (spectral?.coherenceScore !== undefined && spectral.coherenceScore < 0.5) {
+    fixabilityScore = Math.max(0, fixabilityScore - 20);
+    rationale.push("Low spectral coherence suggests systemic issues (harder to fix).");
+  }
   
   // Composite score: weighted sum from config
   const weights = config?.weights?.issueComposite || { risk: 0.5, impact: 0.3, fixability: 0.2 };
@@ -413,16 +554,6 @@ function computeIssueScores(
     riskScore * weights.risk +
     impactScore * weights.impact +
     fixabilityScore * weights.fixability;
-  
-  // Rationale
-  const rationale: string[] = [];
-  if (cluster.issueType === "contradiction") {
-    rationale.push("Direct contradiction detected between claims.");
-  }
-  if (cluster.issueType === "ungrounded") {
-    rationale.push("Claim lacks supporting evidence.");
-  }
-  rationale.push(`Category: ${cluster.category} (risk multiplier: ${riskMultiplier.toFixed(2)})`);
   
   return {
     riskScore: Math.round(riskScore),

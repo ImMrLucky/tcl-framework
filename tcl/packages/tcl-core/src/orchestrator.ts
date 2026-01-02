@@ -19,6 +19,13 @@ import { startPipelineTimer, type PipelineTimer } from "./pipeline_timer.js";
 
 // NEW: Deterministic Truth Engine (replaces NLI)
 import { runTruthEngine, toLegacyGraph, buildIssuesFromGraph } from "./engine/index.js";
+import { 
+  generateReproducibilityMetadata,
+  getCodeVersion,
+  getEngineVersion,
+  getModelFingerprint,
+  computeFullConfigHash
+} from "./analysis/reproducibility.js";
 
 // Cache for scorer to avoid re-initialization on every request
 let cachedScorer: { scorer: any; url: string; timestamp: number } | null = null;
@@ -27,14 +34,6 @@ const SCORER_CACHE_TTL = 5 * 60 * 1000; // 5 minutes
 // Feature flag: Use deterministic Truth Engine instead of NLI
 // Set via environment variable or options
 const USE_TRUTH_ENGINE = process.env.TCL_USE_TRUTH_ENGINE === "true";
-
-/**
- * Generate input hash for reproducibility
- */
-function generateInputHash(question: string, answer: string): string {
-  const input = `${question}|||${answer}`;
-  return createHash("sha256").update(input).digest("hex").substring(0, 16);
-}
 
 async function callSpectralService(
   spectralServiceUrl: string,
@@ -202,9 +201,14 @@ async function validateOnce(input: ValidateInput, adapter?: LLMAdapter, startTim
         ? Math.round((consistencyScore + finalCoherence) / 2)
         : consistencyScore;
       
-      // Build manifest
+      // Generate reproducibility metadata
+      const transcript = answer || question;
+      const reproMetadata = generateReproducibilityMetadata(transcript);
+      
+      // Build manifest with full reproducibility
       const manifest: RunManifest = {
-        inputHash: engineResult.graph.inputHash,
+        inputHash: reproMetadata.inputHash,
+        configHash: reproMetadata.configHash,
         artifactId: (options as any)?.artifactId,
         claimExtractorVersion: "truth-engine-v1",
         nliModelId: "none-rules-only",
@@ -212,7 +216,9 @@ async function validateOnce(input: ValidateInput, adapter?: LLMAdapter, startTim
         embeddingModel: "none",
         retrievalK: 0,
         spectralEngineVersion: spectral && !(spectral as any).spectralSkipped ? "v1.0.0" : undefined,
-        codeVersion: engineResult.graph.codeVersion,
+        codeVersion: reproMetadata.codeVersion,
+        engineVersion: reproMetadata.engineVersion,
+        modelFingerprint: reproMetadata.modelFingerprint,
         createdAt: engineResult.graph.generatedAt,
         transcriptSourcesCount: 0,
         graphHealth: {
