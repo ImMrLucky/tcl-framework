@@ -15,6 +15,11 @@ import { computeDestructiveClaims } from "./destructive.js";
 import { computeTrajectory } from "./trajectory.js";
 import { generateSourcesFromRawTranscript, retrieveEvidenceForClaims } from "./evidence_sources.js";
 import { createHash } from "crypto";
+import { startPipelineTimer, type PipelineTimer } from "./pipeline_timer.js";
+
+// Cache for scorer to avoid re-initialization on every request
+let cachedScorer: { scorer: any; url: string; timestamp: number } | null = null;
+const SCORER_CACHE_TTL = 5 * 60 * 1000; // 5 minutes
 
 /**
  * Generate input hash for reproducibility
@@ -116,6 +121,7 @@ async function callSpectralAnalyzeService(
 }
 
 async function validateOnce(input: ValidateInput, adapter?: LLMAdapter, startTime?: number): Promise<ValidateOutput> {
+  const timer = startPipelineTimer();
   const validationStartTime = startTime ?? Date.now();
   try {
     const { question, answer, sources: externalSources, options } = input;
@@ -130,66 +136,55 @@ async function validateOnce(input: ValidateInput, adapter?: LLMAdapter, startTim
     const artifactId = (options as any)?.artifactId;
 
     // 1) claims
+    timer.start('claim_extract');
     let claims = [];
     if (adapter) {
       const art = await adapter.extractArtifacts({ question, answer, sources: externalSources });
       claims = art.claims;
-      console.log(`📋 Extracted ${claims.length} claims using adapter`);
     } else {
-      // For call center QA: if answer is empty, extract claims from question (transcript)
-      // For original QA: extract claims from answer
       const textToExtract = answer && answer.trim().length > 0 ? answer : question;
-      console.log(`📋 Extracting claims from ${answer && answer.trim().length > 0 ? 'answer' : 'question (transcript)'}, length=${textToExtract.length}`);
       claims = extractClaims(textToExtract);
-      console.log(`📋 Extracted ${claims.length} claims`);
     }
+    timer.end('claim_extract');
+    timer.set('num_claims', claims.length);
+    console.log(`📋 Claims extracted: ${claims.length} (${timer.duration('claim_extract')}ms)`);
     
     if (claims.length === 0) {
-      console.error(`❌ ERROR: No claims extracted! This will cause an empty graph.`);
-      console.error(`  Question length: ${question.length}`);
-      console.error(`  Answer length: ${answer?.length || 0}`);
+      console.error(`❌ ERROR: No claims extracted!`);
     }
 
     // 2) CRITICAL: Generate transcript sources for grounding
-    // This is REQUIRED even if no external sources are provided
+    timer.start('source_gen');
     let sources: Source[] = [...(externalSources || [])];
     let transcriptSourcesCount = 0;
     
     const isCallTranscript = !answer || answer.trim().length === 0;
     if (isCallTranscript && question.trim().length > 0) {
-      // Generate sources from transcript text
       const transcriptSources = generateSourcesFromRawTranscript(question, conversationId);
       sources = [...sources, ...transcriptSources];
       transcriptSourcesCount = transcriptSources.length;
-      console.log(`📝 Generated ${transcriptSourcesCount} transcript evidence sources for grounding`);
-      
-      if (transcriptSourcesCount === 0) {
-        console.warn(`⚠️ No transcript sources generated - grounding will fail!`);
-      }
     } else if (sources.length === 0 && answer && answer.trim().length > 0) {
-      // For Q&A mode with answer text, generate sources from answer
       const answerSources = generateSourcesFromRawTranscript(answer, conversationId);
       sources = [...sources, ...answerSources];
       transcriptSourcesCount = answerSources.length;
-      console.log(`📝 Generated ${transcriptSourcesCount} answer evidence sources`);
     }
+    timer.end('source_gen');
+    timer.set('num_sources', sources.length);
+    console.log(`📝 Sources generated: ${sources.length} (${timer.duration('source_gen')}ms)`);
 
     // 3) Retrieve evidence for each claim BEFORE NLI (MANDATORY)
-    // This ensures NLI is run on (claim, relevant_chunk) pairs, not in a vacuum
+    timer.start('retrieval');
     const evidencePerClaim = retrieveEvidenceForClaims(claims, sources, retrievalK);
     
     let totalEvidenceHits = 0;
     for (const [, hits] of evidencePerClaim) {
       totalEvidenceHits += hits.length;
     }
-    console.log(`🔍 Retrieved ${totalEvidenceHits} evidence hits for ${claims.length} claims (k=${retrievalK})`);
-    
-    if (totalEvidenceHits === 0 && claims.length > 0 && sources.length > 0) {
-      console.error(`❌ CRITICAL: No evidence retrieved despite having ${sources.length} sources!`);
-      console.error(`   This will cause zero grounding edges.`);
-    }
+    timer.end('retrieval');
+    timer.set('num_evidence_chunks', totalEvidenceHits);
+    console.log(`🔍 Evidence retrieved: ${totalEvidenceHits} hits (${timer.duration('retrieval')}ms)`);
 
-    // 4) grounding (legacy MVP evidence check - enhanced with retrieved evidence)
+    // 4) grounding (legacy MVP evidence check)
     const evidenceRes = attachEvidenceAndFindViolations(claims, sources);
 
     // 3) logic (legacy MVP contradiction check)
@@ -203,98 +198,70 @@ async function validateOnce(input: ValidateInput, adapter?: LLMAdapter, startTim
     //   4. Local Transformers (may fail in containers)
     //   5. TokenHeuristicScorer (fallback)
     
+    timer.start('scorer_init');
     const spectralUrl = options?.spectralServiceUrl || process.env.TCL_SPECTRAL_URL || "";
     const nliEndpoint = options?.nliEndpoint || process.env.TCL_NLI_ENDPOINT || "";
     const nliApiKey = options?.nliApiKey || process.env.TCL_NLI_API_KEY;
     const nliModelId = options?.nliModelId || process.env.TCL_NLI_MODEL_ID || "nli-default";
     const mistralApiKey = options?.mistralApiKey || process.env.MISTRAL_API_KEY;
     const mistralModel = options?.mistralModel || process.env.MISTRAL_MODEL;
-    const useLocalNli = options?.useLocalNli ?? (process.env.TCL_USE_LOCAL_NLI === "true"); // Default: false (prefer spectral)
+    const useLocalNli = options?.useLocalNli ?? (process.env.TCL_USE_LOCAL_NLI === "true");
     
     let scorer;
     
-    if (spectralUrl && !nliEndpoint) {
-      // Priority 1: Spectral NLI (Python service with transformers - works in any container)
-      // This is the RECOMMENDED approach as it avoids native onnxruntime issues
+    // OPTIMIZATION: Cache scorer to avoid re-testing on every request
+    if (cachedScorer && cachedScorer.url === spectralUrl && (Date.now() - cachedScorer.timestamp) < SCORER_CACHE_TTL) {
+      scorer = cachedScorer.scorer;
+      console.log(`⚡ Using cached scorer: ${scorer.id} (cache hit)`);
+    } else if (spectralUrl && !nliEndpoint) {
+      // Priority 1: Spectral NLI (Python service)
       try {
         const spectralScorer = new SpectralNliScorer({ endpoint: spectralUrl });
         
-        // Test the connection with a strong entailment case
-        console.log(`🔌 Testing Spectral NLI connection at ${spectralUrl}...`);
+        // Quick test - only once per cache period
+        console.log(`🔌 Testing Spectral NLI connection...`);
         const testScore = await spectralScorer.entailment(
           "The sky is blue.",
           "The sky has a blue color."
         );
         
-        // CRITICAL: Score must be > 0.3 for obvious entailment, not just >= 0
-        // If the model returns 0 or very low for obvious entailment, it's broken
         if (testScore > 0.3) {
           scorer = spectralScorer;
-          console.log(`✅ Using scorer: ${scorer.id} (Spectral Python service, test score: ${testScore.toFixed(3)})`);
+          cachedScorer = { scorer, url: spectralUrl, timestamp: Date.now() };
+          console.log(`✅ Scorer: ${scorer.id} (test: ${testScore.toFixed(3)})`);
         } else {
-          console.error(`❌ Spectral NLI test FAILED: expected high score for obvious entailment, got ${testScore.toFixed(3)}`);
-          console.error(`   This indicates the NLI model is not working correctly.`);
-          console.error(`   Check tcl-spectral logs for NLI loading errors.`);
-          throw new Error(`Test score too low for obvious entailment: ${testScore}. NLI model may not be loaded correctly.`);
+          throw new Error(`Test score too low: ${testScore}`);
         }
       } catch (error: any) {
         console.warn(`⚠️ Spectral NLI failed: ${error.message}`);
-        console.warn(`   Falling back to next scorer option...`);
       }
     }
     
     if (!scorer && nliEndpoint) {
-      // Priority 2: Custom NLI endpoint (most flexible - user's own NLI)
-      scorer = new HttpNliScorer({ 
-        endpoint: nliEndpoint, 
-        apiKey: nliApiKey,
-        modelId: nliModelId
-      });
-      console.log(`Using scorer: ${scorer.id} (custom NLI endpoint: ${nliEndpoint})`);
+      scorer = new HttpNliScorer({ endpoint: nliEndpoint, apiKey: nliApiKey, modelId: nliModelId });
     }
     
     if (!scorer && mistralApiKey) {
-      // Priority 3: Built-in Mistral API (easy upgrade, no deployment needed)
       const { MistralNliScorer } = await import("./graph/edge_builder.js");
-      scorer = new MistralNliScorer({
-        apiKey: mistralApiKey,
-        model: mistralModel
-      });
-      console.log(`Using scorer: ${scorer.id} (Mistral API - auto-enabled)`);
+      scorer = new MistralNliScorer({ apiKey: mistralApiKey, model: mistralModel });
     }
     
     if (!scorer && useLocalNli) {
-      // Priority 4: Local Transformers model (downloads on first run, no API keys)
-      // May fail in containers without native onnxruntime libraries
       try {
-        const localModelName = process.env.TCL_LOCAL_NLI_MODEL;
-        const transformersScorer = new TransformersNliScorer(
-          localModelName ? { modelName: localModelName } : {}
-        );
-        console.log(`Testing local NLI model: ${transformersScorer.id}...`);
-        
-        const testScore = await transformersScorer.entailment(
-          "The sky is blue.",
-          "The sky has color."
-        );
-        
-        if (testScore >= 0) {
-          scorer = transformersScorer;
-          console.log(`✅ Using scorer: ${scorer.id} (local model verified, test score: ${testScore.toFixed(3)})`);
-        } else {
-          throw new Error(`Test score invalid: ${testScore}`);
-        }
+        const transformersScorer = new TransformersNliScorer({});
+        const testScore = await transformersScorer.entailment("The sky is blue.", "The sky has color.");
+        if (testScore >= 0) scorer = transformersScorer;
       } catch (error: any) {
-        console.warn(`⚠️ Local NLI model failed: ${error.message}`);
+        console.warn(`⚠️ Local NLI failed: ${error.message}`);
       }
     }
     
     if (!scorer) {
-      // Priority 5: Fallback heuristic (always works, basic accuracy)
       scorer = new TokenHeuristicScorer();
-      console.log(`⚠️ Using scorer: ${scorer.id} (fallback - basic accuracy)`);
-      console.log(`💡 Tip: Configure TCL_SPECTRAL_URL to use Python-based NLI (recommended)`);
+      console.log(`⚠️ Using fallback scorer: ${scorer.id}`);
     }
+    timer.end('scorer_init');
+    console.log(`🔧 Scorer init: ${timer.duration('scorer_init')}ms`);
 
     // Determine threshold values BEFORE graph building (hoisted for use in manifest)
     // These need to be accessible throughout the function
@@ -331,60 +298,52 @@ async function validateOnce(input: ValidateInput, adapter?: LLMAdapter, startTim
       defaultGroundingThreshold = 0.45 * transcriptMultiplier;
     }
 
+    // OPTIMIZATION: Limit candidate pairs using top-K instead of all-vs-all
+    // For N claims and M sources:
+    //   - Old: N*M grounding pairs + N*(N-1)/2 claim pairs = O(N*M + N²)
+    //   - New: N*K grounding pairs + N*K claim pairs = O(N*K) where K << M
+    const MAX_GROUNDING_PAIRS_PER_CLAIM = 10; // Only ground against top 10 sources
+    const MAX_CLAIM_PAIRS = 100; // Limit total claim-to-claim pairs
+    
     let graph;
+    timer.start('graph_build');
+    timer.start('nli_total');
     try {
-      console.log("Building claim graph...");
-      console.log(`Using scorer: ${scorer.id}, Claims: ${evidenceRes.claims.length}, Sources: ${sources?.length || 0}`);
-      console.log(`Text type: ${isCallTranscript ? 'Call transcript' : 'Answer text'}, Conversational patterns: ${hasConversationalPatterns}`);
-      console.log(`Building graph with ${evidenceRes.claims.length} claims, scorer: ${scorer.id}`);
-      console.log(`Thresholds: support=${options?.supportThreshold ?? defaultSupportThreshold}, contradiction=${options?.contradictionThreshold ?? defaultContradictionThreshold}, grounding=${options?.groundingThreshold ?? defaultGroundingThreshold}`);
-      if (isCallTranscript || hasConversationalPatterns) {
-        console.log(`📞 Call transcript detected - using lower thresholds for conversational text`);
-        console.log(`   Support threshold lowered to: ${options?.supportThreshold ?? defaultSupportThreshold} (from 0.45)`);
-      }
+      console.log(`🔨 Building claim graph: ${evidenceRes.claims.length} claims, ${sources?.length || 0} sources`);
+      console.log(`   Thresholds: sup=${(options?.supportThreshold ?? defaultSupportThreshold).toFixed(2)}, con=${(options?.contradictionThreshold ?? defaultContradictionThreshold).toFixed(2)}, gnd=${(options?.groundingThreshold ?? defaultGroundingThreshold).toFixed(2)}`);
       
       graph = await buildClaimGraph(evidenceRes.claims, sources, {
         scorer,
         supportThreshold: options?.supportThreshold ?? defaultSupportThreshold,
         contradictionThreshold: options?.contradictionThreshold ?? defaultContradictionThreshold,
         groundingThreshold: options?.groundingThreshold ?? defaultGroundingThreshold,
-        maxPairwiseEdges: options?.maxPairwiseEdges ?? 200, // Increased to find more edges
-        batchSize: options?.batchSize ?? 256, // Increased from 32 to reduce HTTP round trips
+        maxPairwiseEdges: options?.maxPairwiseEdges ?? MAX_CLAIM_PAIRS,
+        batchSize: options?.batchSize ?? 256, // Large batches = fewer HTTP calls
         ann: {
-          index: "bruteforce", // Use brute force instead of HNSW to avoid dependency issues
-          neighborK: options?.annNeighborK ?? options?.neighborK ?? Math.min(12, evidenceRes.claims.length - 1) // Don't exceed claim count
+          index: "bruteforce",
+          neighborK: options?.annNeighborK ?? options?.neighborK ?? Math.min(MAX_GROUNDING_PAIRS_PER_CLAIM, evidenceRes.claims.length - 1)
         },
         cache: {
-          enabled: options?.cache ?? false, // Default: disabled (enable in production for many calls)
+          enabled: options?.cache ?? false,
           persistPath: options?.cachePersistPath
-        }
+        },
+        // Pass timer for NLI tracking
+        timer
       });
       
-      console.log("Claim graph built successfully");
-      console.log(`Graph stats: ${graph.supports.length} supports, ${graph.contradictions.length} contradictions, ${graph.grounding.length} grounding edges`);
-      if (graph.supports.length === 0 && graph.contradictions.length === 0) {
-        console.warn("⚠️ No edges found in graph. This might indicate:");
-        console.warn("  - Thresholds are too high (try lowering support/contradiction thresholds)");
-        console.warn("  - Scorer is not finding relationships (check scorer logs above for actual scores)");
-        console.warn("  - Claims are too dissimilar");
-        if (isCallTranscript || hasConversationalPatterns) {
-          console.warn("  - 📞 Call transcript detected - conversational text may have implicit support relationships");
-          console.warn("  - 💡 Try lowering support threshold to 0.30-0.35 for call transcripts");
-        }
-        console.warn(`  - Current thresholds: support=${options?.supportThreshold ?? defaultSupportThreshold}, contradiction=${options?.contradictionThreshold ?? defaultContradictionThreshold}`);
-        console.warn(`  - Scorer: ${scorer.id}`);
-        console.warn("  - Check logs above for '[TransformersNliScorer]' to see actual scores being returned");
-      }
+      timer.end('nli_total');
+      timer.end('graph_build');
+      timer.set('edges_support', graph.supports.length);
+      timer.set('edges_contra', graph.contradictions.length);
+      timer.set('edges_ground', graph.grounding.length);
+      
+      console.log(`📊 Graph: ${graph.supports.length} sup, ${graph.contradictions.length} con, ${graph.grounding.length} gnd (${timer.duration('graph_build')}ms)`);
+      
     } catch (error: any) {
       console.error("Error building claim graph:", error);
-      console.error("Error stack:", error?.stack);
-      // Fallback: return empty graph if build fails
-      graph = {
-        supports: [],
-        contradictions: [],
-        grounding: [],
-        groundedClaimIds: []
-      };
+      timer.end('nli_total');
+      timer.end('graph_build');
+      graph = { supports: [], contradictions: [], grounding: [], groundedClaimIds: [] };
     }
 
     // 4.5) Custom rule validation (domain-specific rules)
@@ -539,9 +498,8 @@ async function validateOnce(input: ValidateInput, adapter?: LLMAdapter, startTim
         }
         
         try {
-          // ALWAYS use /spectral/analyze - this is the production endpoint
-          // /spectral/score was the first iteration for testing only
-          console.log(`📡 Calling Spectral service at: ${urlToUse}/spectral/analyze`);
+          timer.start('spectral');
+          console.log(`📡 Calling Spectral: ${urlToUse}/spectral/analyze`);
           
           spectral = await callSpectralAnalyzeService(
             urlToUse,
@@ -549,24 +507,15 @@ async function validateOnce(input: ValidateInput, adapter?: LLMAdapter, startTim
             graph.supports,
             uniqueContradictions.map(c => ({ claimA: c.claimA, claimB: c.claimB, weight: c.weight })),
             groundedForSpectral,
-            {
-              wSupport: undefined, // Use spectral service defaults
-              wContradiction: undefined,
-              wCircularity: undefined,
-              cycleMaxLen: undefined
-            }
+            {}
           );
+          timer.end('spectral');
           coherenceScore = spectral.coherenceScore;
-          console.log(`✅ Spectral ANALYZE complete. Coherence: ${coherenceScore}, truthVector: ${spectral.truthVector?.length || 0} values`);
+          console.log(`✅ Spectral: coherence=${coherenceScore}, truthVector=${spectral.truthVector?.length || 0} (${timer.duration('spectral')}ms)`);
         } catch (error: any) {
-          console.error("❌ Spectral service error:", error);
-          console.error("Error message:", error?.message);
-          console.error("Error stack:", error?.stack);
-          // Continue without Spectral - don't fail the entire validation
-          spectral = {
-            spectralSkipped: true,
-            debugReason: `spectral_service_error: ${error?.message || 'unknown'}`
-          } as any;
+          timer.end('spectral');
+          console.error("❌ Spectral error:", error?.message);
+          spectral = { spectralSkipped: true, debugReason: `spectral_error: ${error?.message}` } as any;
           coherenceScore = null;
         }
       }
@@ -706,14 +655,28 @@ async function validateOnce(input: ValidateInput, adapter?: LLMAdapter, startTim
       }
     };
 
-    return {
+    // Log performance summary
+    timer.set('num_issues', issues?.length || 0);
+    timer.logSummary();
+    
+    const result = {
       answer,
       refusal,
       scores: { truth: truthScore, consistency: finalConsistencyScore, coherence: finalCoherenceScore, overall },
-      scorerId: scorer.id, // Include scorer ID so UI can display it
+      scorerId: scorer.id,
       latency,
       cacheHitRate,
       engineVersion,
+      // Include performance metrics in response for debugging
+      performanceMs: {
+        total: timer.total(),
+        claimExtract: timer.duration('claim_extract'),
+        graphBuild: timer.duration('graph_build'),
+        nliTotal: timer.duration('nli_total'),
+        spectral: timer.duration('spectral'),
+        nliCalls: timer.get('num_nli_calls'),
+        nliPairs: timer.get('num_nli_pairs')
+      },
       report: {
         claims: claimsWithConfidence,
         violations: [...evidenceRes.violations, ...logicRes.violations, ...customRuleViolations],
@@ -727,16 +690,18 @@ async function validateOnce(input: ValidateInput, adapter?: LLMAdapter, startTim
           debug: graph.debug ? { 
             ...graph.debug, 
             spectralEnabled: spectralEnabled,
-            numSources: sources.length, // Use actual sources count
+            numSources: sources.length,
             transcriptSourcesGenerated: transcriptSourcesCount
           } : undefined
         },
         suggestions,
         destructiveClaims: destructiveClaims.length > 0 ? destructiveClaims : undefined,
         trajectory,
-        manifest: runManifest // AUDIT-CRITICAL: Include run manifest
+        manifest: runManifest
       }
     };
+    
+    return result;
   } catch (error: any) {
     console.error("validateOnce error:", error);
     throw error;

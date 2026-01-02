@@ -93,6 +93,9 @@ export type EdgeBuilderOptions = {
 
   // grounding
   topGroundingK?: number;
+  
+  // OPTIMIZATION: Limit grounding pairs per claim (candidate generation)
+  maxGroundingPairsPerClaim?: number; // Default: 10 (only check top 10 sources per claim)
 
   // pruning
   maxPairwiseEdges?: number; // hard cap on scored claim-claim pairs
@@ -105,6 +108,9 @@ export type EdgeBuilderOptions = {
 
   // cache
   cache?: EdgeBuilderCacheConfig;
+  
+  // Performance tracking
+  timer?: any; // PipelineTimer instance for metrics
 };
 
 function clamp01(x: number) {
@@ -385,8 +391,7 @@ export async function buildClaimGraph(
   // CRITICAL FIX: Use a local Map for batch results when cache is disabled (NoopCache)
   const groundingResultsMap = new Map<string, { score: number; quote?: string }>();
   
-  // Pre-filter pairs using fast token overlap heuristic
-  // This reduces obviously irrelevant pairs while keeping important ones
+  // OPTIMIZATION: Fast token overlap for candidate generation
   const quickOverlap = (a: string, b: string): number => {
     const tokensA = new Set(a.toLowerCase().split(/\s+/).filter(t => t.length > 3));
     const tokensB = new Set(b.toLowerCase().split(/\s+/).filter(t => t.length > 3));
@@ -396,34 +401,47 @@ export async function buildClaimGraph(
     return overlap / Math.min(tokensA.size, tokensB.size);
   };
   
-  // Minimum overlap threshold - low to keep most pairs
-  const MIN_OVERLAP_FOR_NLI = 0.05;
+  // OPTIMIZATION: Limit grounding pairs per claim (candidate generation)
+  // Instead of all-vs-all (N*M pairs), only check top K sources per claim
+  const maxGroundingPerClaim = opts.maxGroundingPairsPerClaim ?? 10;
+  const timer = opts.timer;
   
   if (sources?.length) {
-    // batch score grounding where possible
     if (scorer && 'scoreBatch' in scorer && typeof (scorer as any).scoreBatch === 'function') {
       const pairs: BatchPair[] = [];
-      let skippedByPrefilter = 0;
+      let skippedByCandidate = 0;
       
+      // For each claim, find top-K sources by overlap and only score those
       for (const c of claims) {
-        for (const s of sources) {
-          const key = cache.makeKey("gnd", c.text, s.text);
-          if (!cache.get(key) && !groundingResultsMap.has(key)) {
-            // FAST PRE-FILTER: Skip pairs with no token overlap
-            const overlap = quickOverlap(s.text, c.text);
-            if (overlap >= MIN_OVERLAP_FOR_NLI) {
-              pairs.push({ task: "grounding", a: s.text, b: c.text, key });
-            } else {
-              // Store as 0 score (definitely not grounded)
-              groundingResultsMap.set(key, { score: 0, quote: undefined });
-              skippedByPrefilter++;
-            }
+        // Score all sources by overlap
+        const sourcesWithOverlap = sources.map(s => ({
+          source: s,
+          overlap: quickOverlap(s.text, c.text),
+          key: cache.makeKey("gnd", c.text, s.text)
+        }));
+        
+        // Sort by overlap, take top K
+        sourcesWithOverlap.sort((a, b) => b.overlap - a.overlap);
+        const topSources = sourcesWithOverlap.slice(0, maxGroundingPerClaim);
+        const skipped = sourcesWithOverlap.slice(maxGroundingPerClaim);
+        
+        // Add top sources to pairs for NLI scoring
+        for (const { source, key, overlap } of topSources) {
+          if (!cache.get(key) && !groundingResultsMap.has(key) && overlap > 0) {
+            pairs.push({ task: "grounding", a: source.text, b: c.text, key });
           }
+        }
+        
+        // Mark skipped sources as 0 score
+        for (const { key } of skipped) {
+          groundingResultsMap.set(key, { score: 0, quote: undefined });
+          skippedByCandidate++;
         }
       }
       
-      console.log(`🔍 Grounding: ${claims.length} claims × ${sources.length} sources`);
-      console.log(`   Pre-filtered: ${skippedByPrefilter} skipped, ${pairs.length} pairs to score`);
+      const totalPossible = claims.length * sources.length;
+      console.log(`🔍 Grounding: ${claims.length} claims × ${sources.length} sources = ${totalPossible} possible`);
+      console.log(`   Candidate generation: top ${maxGroundingPerClaim}/claim → ${pairs.length} to score (${skippedByCandidate} skipped)`);
       
       // Log first 2 pairs to verify format
       if (pairs.length > 0) {
@@ -443,11 +461,17 @@ export async function buildClaimGraph(
       let highestScore = 0;
       let lowestScore = 1;
       
+      let nliCallCount = 0;
       await runBatches(pairs, batchSize, async (batch) => {
         try {
-          console.log(`  📤 Sending batch of ${batch.length} grounding pairs to NLI...`);
+          nliCallCount++;
+          timer?.count('num_nli_calls');
+          timer?.count('num_nli_pairs', batch.length);
+          
+          const batchStart = Date.now();
           const out = await scorerWithBatch.scoreBatch(batch);
-          console.log(`  📥 Received ${out.length} scores from NLI`);
+          const batchTime = Date.now() - batchStart;
+          console.log(`  📤 NLI batch ${nliCallCount}: ${batch.length} pairs → ${out.length} scores (${batchTime}ms, ${(batchTime/batch.length).toFixed(0)}ms/pair)`);
           
           for (const r of out) {
             // Store in BOTH cache AND local map to ensure we don't lose results
@@ -666,16 +690,23 @@ export async function buildClaimGraph(
 
   // Check if scorer has scoreBatch method
   if (scorer && 'scoreBatch' in scorer && typeof (scorer as any).scoreBatch === 'function' && pairsToScore.length) {
-    console.log(`  Running batch scoring with ${scorer.id} (${pairsToScore.length} pairs, batch size: ${batchSize})...`);
-    // CRITICAL: Call scoreBatch as a method on scorer to preserve 'this' context
+    console.log(`  Claim-pair batch scoring: ${pairsToScore.length} pairs, batch size: ${batchSize}`);
     const scorerWithBatch = scorer as SemanticScorerWithBatch;
     const startTime = Date.now();
     let batchScoresStored = 0;
     let batchErrors = 0;
+    let claimNliCalls = 0;
     try {
       await runBatches(pairsToScore, batchSize, async (batch) => {
         try {
+          claimNliCalls++;
+          timer?.count('num_nli_calls');
+          timer?.count('num_nli_pairs', batch.length);
+          
+          const batchStart = Date.now();
           const out = await scorerWithBatch.scoreBatch(batch);
+          const batchTime = Date.now() - batchStart;
+          console.log(`  📤 Claim NLI batch ${claimNliCalls}: ${batch.length} pairs → ${out.length} scores (${batchTime}ms)`);
           if (!out || out.length === 0) {
             console.error(`  ❌ Batch scoring returned empty results for batch of ${batch.length} pairs`);
             return;
