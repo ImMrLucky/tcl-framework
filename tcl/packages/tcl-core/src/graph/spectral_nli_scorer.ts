@@ -35,6 +35,12 @@ export class SpectralNliScorer implements SemanticScorer {
     } else {
       console.log(`🔌 SpectralNliScorer initialized: ${this.endpoint}`);
     }
+    
+    // CRITICAL: Bind methods to preserve 'this' context when passed as callbacks
+    this.scoreBatch = this.scoreBatch.bind(this);
+    this.entailment = this.entailment.bind(this);
+    this.contradiction = this.contradiction.bind(this);
+    this.grounding = this.grounding.bind(this);
   }
 
   async scoreBatch(pairs: BatchPair[]): Promise<BatchScore[]> {

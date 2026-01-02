@@ -434,7 +434,8 @@ export async function buildClaimGraph(
         }
       }
       
-      const scoreBatchFn = (scorer as any).scoreBatch as (pairs: BatchPair[]) => Promise<BatchScore[]>;
+      // CRITICAL: Call scoreBatch as a method on scorer to preserve 'this' context
+      const scorerWithBatch = scorer as SemanticScorerWithBatch;
       let batchScoresReceived = 0;
       
       // Track score distribution for diagnostics
@@ -445,7 +446,7 @@ export async function buildClaimGraph(
       await runBatches(pairs, batchSize, async (batch) => {
         try {
           console.log(`  📤 Sending batch of ${batch.length} grounding pairs to NLI...`);
-          const out = await scoreBatchFn(batch);
+          const out = await scorerWithBatch.scoreBatch(batch);
           console.log(`  📥 Received ${out.length} scores from NLI`);
           
           for (const r of out) {
@@ -666,14 +667,15 @@ export async function buildClaimGraph(
   // Check if scorer has scoreBatch method
   if (scorer && 'scoreBatch' in scorer && typeof (scorer as any).scoreBatch === 'function' && pairsToScore.length) {
     console.log(`  Running batch scoring with ${scorer.id} (${pairsToScore.length} pairs, batch size: ${batchSize})...`);
-    const scoreBatchFn = (scorer as any).scoreBatch as (pairs: BatchPair[]) => Promise<BatchScore[]>;
+    // CRITICAL: Call scoreBatch as a method on scorer to preserve 'this' context
+    const scorerWithBatch = scorer as SemanticScorerWithBatch;
     const startTime = Date.now();
     let batchScoresStored = 0;
     let batchErrors = 0;
     try {
       await runBatches(pairsToScore, batchSize, async (batch) => {
         try {
-          const out = await scoreBatchFn(batch);
+          const out = await scorerWithBatch.scoreBatch(batch);
           if (!out || out.length === 0) {
             console.error(`  ❌ Batch scoring returned empty results for batch of ${batch.length} pairs`);
             return;
