@@ -419,7 +419,7 @@ Customer: Wait, that contradicts what you just said about no fees.`;
       contradictionThreshold: 0.35,
       groundingThreshold: 0.25,
       maxPairwiseEdges: 200,
-      batchSize: 32,
+      batchSize: 256, // Larger batches = fewer HTTP calls
       cache: { enabled: false } // Disable cache for testing
     });
     

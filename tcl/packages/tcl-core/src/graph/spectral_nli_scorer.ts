@@ -28,7 +28,7 @@ export class SpectralNliScorer implements SemanticScorer {
     // Use spectral URL and add /nli/score path
     const spectralUrl = cfg.endpoint || process.env.TCL_SPECTRAL_URL || "";
     this.endpoint = spectralUrl.replace(/\/$/, "") + "/nli/score";
-    this.timeoutMs = cfg.timeoutMs ?? 30000;
+    this.timeoutMs = cfg.timeoutMs ?? 60000; // 60s timeout for large batches
     
     if (!spectralUrl) {
       console.warn("⚠️ SpectralNliScorer: No TCL_SPECTRAL_URL configured");

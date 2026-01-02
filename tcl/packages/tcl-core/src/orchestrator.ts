@@ -349,7 +349,7 @@ async function validateOnce(input: ValidateInput, adapter?: LLMAdapter, startTim
         contradictionThreshold: options?.contradictionThreshold ?? defaultContradictionThreshold,
         groundingThreshold: options?.groundingThreshold ?? defaultGroundingThreshold,
         maxPairwiseEdges: options?.maxPairwiseEdges ?? 200, // Increased to find more edges
-        batchSize: options?.batchSize ?? 32,
+        batchSize: options?.batchSize ?? 256, // Increased from 32 to reduce HTTP round trips
         ann: {
           index: "bruteforce", // Use brute force instead of HNSW to avoid dependency issues
           neighborK: options?.annNeighborK ?? options?.neighborK ?? Math.min(12, evidenceRes.claims.length - 1) // Don't exceed claim count
