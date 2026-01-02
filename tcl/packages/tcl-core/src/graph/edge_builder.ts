@@ -403,26 +403,59 @@ export async function buildClaimGraph(
         }
       }
       
-      console.log(`🔍 Grounding: ${claims.length} claims × ${sources.length} sources = ${pairs.length} pairs to score`);
+      console.log(`🔍 Grounding: ${claims.length} claims × ${sources.length} sources = ${pairs.length} pairs to score [v2.1.0]`);
+      
+      // Log first 2 pairs to verify format
+      if (pairs.length > 0) {
+        console.log(`📋 Sample grounding pairs:`);
+        for (let i = 0; i < Math.min(2, pairs.length); i++) {
+          console.log(`   [${i}] premise (source): "${pairs[i].a.substring(0, 50)}..."`);
+          console.log(`       hypothesis (claim): "${pairs[i].b.substring(0, 50)}..."`);
+        }
+      }
       
       const scoreBatchFn = (scorer as any).scoreBatch as (pairs: BatchPair[]) => Promise<BatchScore[]>;
       let batchScoresReceived = 0;
       
+      // Track score distribution for diagnostics
+      const scoreDistribution = { high: 0, medium: 0, low: 0 };
+      let highestScore = 0;
+      let lowestScore = 1;
+      
       await runBatches(pairs, batchSize, async (batch) => {
         try {
+          console.log(`  📤 Sending batch of ${batch.length} grounding pairs to NLI...`);
           const out = await scoreBatchFn(batch);
+          console.log(`  📥 Received ${out.length} scores from NLI`);
+          
           for (const r of out) {
             // Store in BOTH cache AND local map to ensure we don't lose results
             cache.set(r.key, r.score, r.quote);
             groundingResultsMap.set(r.key, { score: r.score, quote: r.quote });
             batchScoresReceived++;
+            
+            // Track distribution
+            if (r.score >= 0.5) scoreDistribution.high++;
+            else if (r.score >= 0.25) scoreDistribution.medium++;
+            else scoreDistribution.low++;
+            
+            if (r.score > highestScore) highestScore = r.score;
+            if (r.score < lowestScore) lowestScore = r.score;
+            
+            // Log first 3 scores
+            if (batchScoresReceived <= 3) {
+              console.log(`    Score ${batchScoresReceived}: ${r.score.toFixed(3)}`);
+            }
           }
         } catch (batchErr: any) {
           console.error(`❌ Grounding batch scoring error: ${batchErr.message}`);
+          console.error(`   Stack: ${batchErr.stack}`);
         }
       });
       
       console.log(`✅ Grounding batch scoring complete: ${batchScoresReceived}/${pairs.length} scores received`);
+      console.log(`   Score distribution: high(≥0.5)=${scoreDistribution.high}, medium(≥0.25)=${scoreDistribution.medium}, low(<0.25)=${scoreDistribution.low}`);
+      console.log(`   Range: ${lowestScore.toFixed(3)} - ${highestScore.toFixed(3)}`);
       
       if (batchScoresReceived === 0 && pairs.length > 0) {
         console.error(`❌ CRITICAL: No grounding scores received! NLI service may be failing.`);
