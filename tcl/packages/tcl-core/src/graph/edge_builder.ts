@@ -428,17 +428,24 @@ export async function buildClaimGraph(
         const topSources = sourcesWithOverlap.slice(0, maxGroundingPerClaim);
         const skipped = sourcesWithOverlap.slice(maxGroundingPerClaim);
         
-        // Add top sources to pairs for NLI scoring
+        // Add top sources to pairs for NLI scoring, or mark as 0 if no overlap
         for (const { source, key, overlap } of topSources) {
-          if (!cache.get(key) && !groundingResultsMap.has(key) && overlap > 0) {
-            pairs.push({ task: "grounding", a: source.text, b: c.text, key });
+          if (!cache.get(key) && !groundingResultsMap.has(key)) {
+            if (overlap > 0) {
+              pairs.push({ task: "grounding", a: source.text, b: c.text, key });
+            } else {
+              // No overlap - store 0 score without calling NLI
+              groundingResultsMap.set(key, { score: 0, quote: undefined });
+            }
           }
         }
         
-        // Mark skipped sources as 0 score
+        // Mark skipped sources (beyond top K) as 0 score
         for (const { key } of skipped) {
-          groundingResultsMap.set(key, { score: 0, quote: undefined });
-          skippedByCandidate++;
+          if (!groundingResultsMap.has(key)) {
+            groundingResultsMap.set(key, { score: 0, quote: undefined });
+            skippedByCandidate++;
+          }
         }
       }
       

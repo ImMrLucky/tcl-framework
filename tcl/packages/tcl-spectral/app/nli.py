@@ -11,6 +11,7 @@ import numpy as np
 from typing import List, Tuple, Dict, Optional
 import logging
 import os
+import traceback
 
 logger = logging.getLogger(__name__)
 
@@ -18,14 +19,26 @@ logger = logging.getLogger(__name__)
 _session = None
 _tokenizer = None
 _use_onnx = True  # Default to ONNX for speed, fallback to PyTorch if needed
+_onnx_error = None  # Store error for diagnostics
+_model_loaded = False
 
 # Model name - cross-encoder/nli-distilroberta-base is fast and accurate
 _model_name = "cross-encoder/nli-distilroberta-base"
 
 
+def get_status() -> Dict:
+    """Get current NLI module status for health checks."""
+    return {
+        "model_name": _model_name,
+        "model_loaded": _model_loaded,
+        "using_onnx": _use_onnx,
+        "onnx_error": _onnx_error
+    }
+
+
 def get_onnx_session():
     """Get ONNX Runtime session for fast inference."""
-    global _session, _tokenizer, _use_onnx
+    global _session, _tokenizer, _use_onnx, _onnx_error, _model_loaded
     
     if _session is not None:
         return _session, _tokenizer
@@ -47,7 +60,8 @@ def get_onnx_session():
                 file_name="model.onnx"
             )
             logger.info("Loaded ONNX model from cache")
-        except Exception:
+        except Exception as cache_err:
+            logger.info(f"Cache miss: {cache_err}")
             # Convert PyTorch model to ONNX
             logger.info("Converting model to ONNX (one-time operation)...")
             _session = ORTModelForSequenceClassification.from_pretrained(
@@ -63,17 +77,21 @@ def get_onnx_session():
         # Log optimization info
         providers = ort.get_available_providers()
         logger.info(f"ONNX Runtime providers: {providers}")
-        logger.info("NLI model loaded with ONNX Runtime (2-4x faster than PyTorch)")
+        logger.info("✅ NLI model loaded with ONNX Runtime (2-4x faster than PyTorch)")
+        _model_loaded = True
         
         return _session, _tokenizer
         
     except ImportError as e:
+        _onnx_error = f"ImportError: {e}"
         logger.warning(f"ONNX Runtime not available: {e}")
         logger.warning("Falling back to PyTorch (slower)")
         _use_onnx = False
         return get_pytorch_model()
     except Exception as e:
+        _onnx_error = f"{type(e).__name__}: {e}\n{traceback.format_exc()}"
         logger.error(f"Error loading ONNX model: {e}")
+        logger.error(traceback.format_exc())
         logger.warning("Falling back to PyTorch")
         _use_onnx = False
         return get_pytorch_model()
@@ -81,7 +99,7 @@ def get_onnx_session():
 
 def get_pytorch_model():
     """Fallback to PyTorch model if ONNX not available."""
-    global _session, _tokenizer
+    global _session, _tokenizer, _model_loaded
     
     import torch
     from transformers import AutoModelForSequenceClassification
@@ -94,7 +112,8 @@ def get_pytorch_model():
     _session.to(device)
     _session.eval()
     
-    logger.info("PyTorch NLI model loaded")
+    logger.info("⚠️ PyTorch NLI model loaded (slower than ONNX)")
+    _model_loaded = True
     
     return _session, _tokenizer
 

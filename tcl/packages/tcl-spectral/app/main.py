@@ -1,4 +1,5 @@
 from fastapi import FastAPI, HTTPException
+from contextlib import asynccontextmanager
 from .models import (
     SpectralRequest, SpectralResponse, SpectralAnalyzeResponse, EdgeAttribution,
     NliBatchRequest, NliBatchResponse, NliScore,
@@ -6,11 +7,10 @@ from .models import (
 )
 from .spectral import build_index, spectral_metrics, spectral_truth_vector, spectral_edge_attribution, spectral_fingerprint
 import logging
+import time
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
-
-app = FastAPI(title="TCL-Spectral", version="0.5.0")  # v0.5.0: ONNX Runtime for 2-4x faster NLI
 
 # Lazy import NLI to allow app to start even if torch fails
 nli = None
@@ -29,27 +29,62 @@ def get_nli():
     return nli, nli_error
 
 
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Startup: preload NLI model to avoid cold start on first request."""
+    logger.info("🚀 Starting up - preloading NLI model...")
+    start = time.time()
+    
+    nli_module, error = get_nli()
+    if nli_module and not error:
+        try:
+            # Warm up with a test inference
+            result = nli_module.score_pair("The sky is blue.", "The sky has color.")
+            elapsed = time.time() - start
+            status = nli_module.get_status()
+            logger.info(f"✅ NLI model preloaded in {elapsed:.1f}s")
+            logger.info(f"   Mode: {'ONNX' if status.get('using_onnx') else 'PyTorch'}")
+            if status.get('onnx_error'):
+                logger.warning(f"   ONNX error: {status['onnx_error'][:200]}")
+        except Exception as e:
+            logger.error(f"❌ NLI warmup failed: {e}")
+    else:
+        logger.error(f"❌ NLI module failed to load: {error}")
+    
+    yield  # App runs here
+    
+    logger.info("👋 Shutting down")
+
+
+app = FastAPI(title="TCL-Spectral", version="0.5.1", lifespan=lifespan)
+
+
 # ============================================================================
 # HEALTH CHECK
 # ============================================================================
 
 @app.get("/health")
 def health():
-    """Health check endpoint."""
+    """Health check endpoint with detailed NLI status."""
     nli_module, error = get_nli()
     
-    # Check if ONNX is being used
-    onnx_enabled = False
+    # Get detailed status from NLI module
+    nli_status = {}
     if nli_module:
-        onnx_enabled = getattr(nli_module, '_use_onnx', False)
+        try:
+            nli_status = nli_module.get_status()
+        except:
+            pass
     
     return {
         "status": "ok", 
-        "version": "0.5.0",
+        "version": "0.5.1",
         "nli_available": nli_module is not None,
         "nli_error": error,
-        "onnx_enabled": onnx_enabled,
-        "inference_mode": "onnx" if onnx_enabled else "pytorch"
+        "nli_status": nli_status,
+        "onnx_enabled": nli_status.get("using_onnx", False),
+        "onnx_error": nli_status.get("onnx_error"),
+        "inference_mode": "onnx" if nli_status.get("using_onnx") else "pytorch"
     }
 
 
