@@ -656,7 +656,7 @@ async function validateOnce(input: ValidateInput, adapter?: LLMAdapter, startTim
     };
 
     // Log performance summary
-    timer.set('num_issues', issues?.length || 0);
+    timer.set('num_issues', destructiveClaims?.length || 0);
     timer.logSummary();
     
     const result = {

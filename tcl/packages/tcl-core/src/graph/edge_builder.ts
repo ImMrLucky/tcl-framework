@@ -401,6 +401,9 @@ export async function buildClaimGraph(
     return overlap / Math.min(tokensA.size, tokensB.size);
   };
   
+  // Minimum overlap threshold for NLI scoring
+  const MIN_OVERLAP_FOR_NLI = 0.05;
+  
   // OPTIMIZATION: Limit grounding pairs per claim (candidate generation)
   // Instead of all-vs-all (N*M pairs), only check top K sources per claim
   const maxGroundingPerClaim = opts.maxGroundingPairsPerClaim ?? 10;
