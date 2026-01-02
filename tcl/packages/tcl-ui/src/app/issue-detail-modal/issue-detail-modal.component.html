@@ -1,0 +1,134 @@
+<div class="issue-detail-modal">
+  <div class="modal-header">
+    <div class="header-content">
+      <span 
+        class="severity-badge"
+        [style.background-color]="getSeverityBgColor(issue.severity)"
+        [style.color]="getSeverityColor(issue.severity)"
+      >
+        {{ issue.severity }}
+      </span>
+      <h2 class="issue-title">{{ issue.title }}</h2>
+    </div>
+    <button mat-icon-button (click)="close()" class="close-button">
+      <mat-icon>close</mat-icon>
+    </button>
+  </div>
+
+  <div class="modal-content">
+    <mat-tab-group>
+      <!-- Overview Tab -->
+      <mat-tab label="Overview">
+        <div class="tab-content">
+          <div class="detail-section">
+            <h4>Problem Statement</h4>
+            <p>{{ issue.problemStatement }}</p>
+          </div>
+          <div class="detail-section">
+            <h4>Why This Is Wrong</h4>
+            <ul>
+              <li *ngFor="let reason of issue.whyWrong">{{ reason }}</li>
+            </ul>
+          </div>
+          <div class="detail-section">
+            <h4>Impact</h4>
+            <p>{{ issue.impact }}</p>
+          </div>
+          <div class="detail-section">
+            <h4>Recommended Action</h4>
+            <ul>
+              <li *ngFor="let action of issue.recommendedAction">{{ action }}</li>
+            </ul>
+          </div>
+          <div class="detail-section confidence">
+            <h4>Confidence: {{ issue.confidence }}</h4>
+            <p>{{ issue.confidenceExplanation }}</p>
+          </div>
+        </div>
+      </mat-tab>
+
+      <!-- Evidence Tab -->
+      <mat-tab label="Evidence">
+        <div class="tab-content">
+          <div class="evidence-list">
+            <div class="evidence-item" *ngFor="let ev of issue.primaryEvidence">
+              <div class="evidence-speaker">
+                <span [class]="'speaker-badge speaker-' + ev.speaker.toLowerCase()">{{ ev.speaker }}</span>
+                <span class="turn-info">Turn {{ ev.turnIndex + 1 }}</span>
+                <span class="timestamp" *ngIf="ev.timestampMs">
+                  {{ ev.timestampMs / 1000 | number:'1.1-1' }}s
+                </span>
+              </div>
+              <blockquote class="evidence-quote">"{{ ev.quote }}"</blockquote>
+            </div>
+          </div>
+        </div>
+      </mat-tab>
+
+      <!-- Metrics Tab -->
+      <mat-tab label="Metrics">
+        <div class="tab-content">
+          <div class="metrics-detail">
+            <div class="metric-row">
+              <span class="metric-name">Risk Score</span>
+              <span class="metric-value">{{ issue.metrics.riskScore }}</span>
+            </div>
+            <div class="metric-row">
+              <span class="metric-name">Contradiction Mass</span>
+              <span class="metric-value">{{ issue.metrics.contradictionMass.toFixed(2) }}</span>
+            </div>
+            <div class="metric-row">
+              <span class="metric-name">Support Mass</span>
+              <span class="metric-value">{{ issue.metrics.supportMass.toFixed(2) }}</span>
+            </div>
+            <div class="metric-row">
+              <span class="metric-name">Grounding Mass</span>
+              <span class="metric-value">{{ issue.metrics.groundingMass.toFixed(2) }}</span>
+            </div>
+            <div class="metric-row">
+              <span class="metric-name">Claims Involved</span>
+              <span class="metric-value">{{ issue.metrics.claimCount }}</span>
+            </div>
+            <div class="metric-row">
+              <span class="metric-name">Turn Span</span>
+              <span class="metric-value">{{ issue.metrics.turnSpan }}</span>
+            </div>
+            <div class="metric-row">
+              <span class="metric-name">Centrality</span>
+              <span class="metric-value">{{ issue.metrics.centrality.toFixed(3) }}</span>
+            </div>
+            <div class="metric-row">
+              <span class="metric-name">Rank</span>
+              <span class="metric-value">#{{ issue.metrics.rank }}</span>
+            </div>
+            <div class="drivers-section">
+              <h4>Risk Drivers</h4>
+              <ul>
+                <li *ngFor="let driver of issue.metrics.drivers">{{ driver }}</li>
+              </ul>
+            </div>
+          </div>
+        </div>
+      </mat-tab>
+    </mat-tab-group>
+
+    <!-- Tags and Flags -->
+    <div class="footer-info">
+      <div class="issue-tags" *ngIf="issue.tags?.length">
+        <span class="tags-label">Tags:</span>
+        <mat-chip *ngFor="let tag of issue.tags">{{ tag }}</mat-chip>
+      </div>
+      <div class="issue-flags" *ngIf="issue.flags">
+        <mat-chip *ngIf="issue.flags.sensitiveData" color="warn">Sensitive Data</mat-chip>
+        <mat-chip *ngIf="issue.flags.financialImpact" color="accent">Financial Impact</mat-chip>
+        <mat-chip *ngIf="issue.flags.policyConflict" color="warn">Policy Conflict</mat-chip>
+        <mat-chip *ngIf="issue.flags.regulatoryRisk" color="warn">Regulatory Risk</mat-chip>
+      </div>
+      <div class="category-info">
+        <mat-icon>{{ getCategoryIcon(issue.category) }}</mat-icon>
+        <span>{{ getCategoryLabel(issue.category) }}</span>
+      </div>
+    </div>
+  </div>
+</div>
+

@@ -20,6 +20,7 @@ import { AppHeaderComponent } from '../shared/app-header.component';
 import { AuditService, Evaluation, Issue } from '../audit.service';
 import { EvidenceViewerComponent } from '../evidence-viewer/evidence-viewer.component';
 import { SimulationDialogComponent, SimulationModifications } from '../simulation-dialog/simulation-dialog.component';
+import { IssueDetailModalComponent } from '../issue-detail-modal/issue-detail-modal.component';
 import { SensitiveActionService } from '../sensitive-action.service';
 
 // New clustered issue types (manager-grade)
@@ -338,7 +339,13 @@ export class EvaluationResultsComponent implements OnInit {
   }
 
   selectClusteredIssue(issue: ClusteredIssue) {
-    this.selectedClusteredIssue = issue;
+    this.dialog.open(IssueDetailModalComponent, {
+      width: '900px',
+      maxWidth: '90vw',
+      maxHeight: '90vh',
+      data: issue,
+      panelClass: 'issue-detail-modal-container'
+    });
   }
 
   closeClusteredIssueDetail() {

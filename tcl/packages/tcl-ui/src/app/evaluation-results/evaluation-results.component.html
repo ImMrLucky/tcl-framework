@@ -284,7 +284,6 @@
                 class="clustered-issue-card" 
                 *ngFor="let issue of clusteredIssues; let i = index"
                 (click)="selectClusteredIssue(issue)"
-                [class.selected]="selectedClusteredIssue?.id === issue.id"
               >
                 <div class="issue-rank">#{{ i + 1 }}</div>
                 <div 
@@ -321,8 +320,8 @@
           </mat-card-content>
         </mat-card>
 
-        <!-- Selected Issue Detail Panel -->
-        <mat-card class="issue-detail-panel" *ngIf="selectedClusteredIssue">
+        <!-- Selected Issue Detail Panel (Replaced by Modal) -->
+        <!-- <mat-card class="issue-detail-panel" *ngIf="selectedClusteredIssue">
           <mat-card-header>
             <mat-card-title>
               <span 
@@ -429,7 +428,7 @@
               <mat-chip *ngIf="selectedClusteredIssue.flags.regulatoryRisk" color="warn">Regulatory Risk</mat-chip>
             </div>
           </mat-card-content>
-        </mat-card>
+        </mat-card> -->
 
         <!-- Original Per-Claim Issues Table (when toggled) -->
         <mat-card class="issues-card" *ngIf="!showClusteredView || clusteredIssues.length === 0">
