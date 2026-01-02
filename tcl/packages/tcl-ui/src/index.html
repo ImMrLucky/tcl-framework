@@ -10,16 +10,15 @@
   <link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet">
   <script>
     // Allow setting API URL via environment variable or Netlify build-time injection
-    // This can be overridden by Netlify's environment variable injection
     if (typeof window !== 'undefined') {
-      // Default to proxy path for Netlify (quick API calls)
+      // Default to proxy path for Netlify (quick API calls like /auth, /conversations)
       if (!window.__TCL_API_URL) {
         window.__TCL_API_URL = null; // null means use relative /api path
       }
       // Railway URL for long-running operations like /validate (bypasses Netlify timeout)
-      // Set this in Netlify environment variables: TCL_EVALUATION_URL
+      // This is the tcl-core Railway service URL
       if (!window.__TCL_EVALUATION_URL) {
-        window.__TCL_EVALUATION_URL = null; // null means use same as __TCL_API_URL
+        window.__TCL_EVALUATION_URL = 'https://tcl-framework-production.up.railway.app';
       }
     }
   </script>
