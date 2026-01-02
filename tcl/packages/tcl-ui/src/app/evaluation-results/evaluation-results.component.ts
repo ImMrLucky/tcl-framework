@@ -113,7 +113,6 @@ export class EvaluationResultsComponent implements OnInit {
   clusteredIssues: ClusteredIssue[] = [];
   issueSummary: IssueSummary | null = null;
   showClusteredView = true; // Toggle between clustered and per-claim view
-  selectedClusteredIssue: ClusteredIssue | null = null;
 
   constructor(
     private route: ActivatedRoute,
@@ -346,10 +345,6 @@ export class EvaluationResultsComponent implements OnInit {
       data: issue,
       panelClass: 'issue-detail-modal-container'
     });
-  }
-
-  closeClusteredIssueDetail() {
-    this.selectedClusteredIssue = null;
   }
 
   getClusteredSeverityColor(severity: string): string {
