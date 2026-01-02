@@ -317,6 +317,7 @@
                   class="issue-severity-badge"
                   [style.background-color]="getNarrativeSeverityBgColor(narrative.severity)"
                   [style.color]="getNarrativeSeverityColor(narrative.severity)"
+                  [matTooltip]="getSeverityTooltip(narrative.severity)"
                 >
                   {{ narrative.severity }}
                 </div>
@@ -332,7 +333,11 @@
                       {{ getCategoryLabel(narrative.category) }}
                       <span *ngIf="narrative.subcategory"> · {{ narrative.subcategory }}</span>
                     </span>
-                    <span class="issue-confidence" [style.color]="getNarrativeConfidenceColor(narrative.confidence)">
+                    <span 
+                      class="issue-confidence" 
+                      [style.color]="getNarrativeConfidenceColor(narrative.confidence)"
+                      [matTooltip]="getConfidenceTooltip(narrative.confidence)"
+                    >
                       <mat-icon class="meta-icon">verified</mat-icon>
                       {{ narrative.confidence }} confidence
                     </span>
@@ -355,11 +360,11 @@
                   </div>
                 </div>
                 <div class="issue-scores">
-                  <div class="score-item">
+                  <div class="score-item" [matTooltip]="getNarrativeScoreTooltip('compositeScore')">
                     <div class="score-value">{{ narrative.scoring.compositeScore }}</div>
                     <div class="score-label">Composite</div>
                   </div>
-                  <div class="score-item">
+                  <div class="score-item" [matTooltip]="getNarrativeScoreTooltip('riskScore')">
                     <div class="score-value">{{ narrative.scoring.riskScore }}</div>
                     <div class="score-label">Risk</div>
                   </div>

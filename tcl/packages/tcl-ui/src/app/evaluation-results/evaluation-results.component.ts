@@ -576,17 +576,64 @@ export class EvaluationResultsComponent implements OnInit {
 
   // Tooltip definitions for metrics
   getMetricTooltip(metric: string): string {
+    // First check if definitions are available from backend (from headline counts)
+    const counts = this.evaluation?.scores?.counts;
+    if (counts?.definitions) {
+      if (metric === 'supported' && counts.definitions.supported) {
+        return counts.definitions.supported;
+      }
+      if (metric === 'contradicted' && counts.definitions.contradicted) {
+        return counts.definitions.contradicted;
+      }
+      if (metric === 'ungrounded' && counts.definitions.ungrounded) {
+        return counts.definitions.ungrounded;
+      }
+    }
+    
+    // Fallback to default definitions
     const definitions: Record<string, string> = {
       'coherenceScore': 'Measures overall consistency of claims. Higher scores indicate fewer contradictions and better logical flow.',
       'contradictionEnergy': 'Sum of contradiction edge weights. Higher values indicate more conflicting information.',
       'supportEnergy': 'Sum of support edge weights. Higher values indicate more supporting relationships.',
       'spectralGap': 'Difference between truth and falsehood propagation. Larger gaps indicate clearer truth/falsehood separation.',
       'circularityScore': 'Measures circular support chains. Higher scores indicate more circular reasoning.',
-      'supported': 'Claims with truthState="Supported" that are not involved in high-badness contradictions.',
-      'contradicted': 'Claims with truthState="Contradicted" OR claims with contradiction edges above threshold.',
-      'ungrounded': 'Claims with truthState="Ungrounded" OR claims with no grounding evidence.',
+      'supported': 'Claims with truthState="Supported" that are not involved in high-badness contradictions and have contradiction edge weight below threshold.',
+      'contradicted': 'Claims with truthState="Contradicted" OR claims with contradiction edges above threshold (weight >= 0.55).',
+      'ungrounded': 'Claims with truthState="Ungrounded" OR claims with no grounding evidence (grounding.kind="none" or evidenceIds.length=0).',
     };
     return definitions[metric] || '';
+  }
+  
+  // Tooltip for issue narrative scores
+  getNarrativeScoreTooltip(scoreType: string): string {
+    const tooltips: Record<string, string> = {
+      'riskScore': 'Risk score (0-100): Based on contradiction strength, category risk multiplier, and spectral signals.',
+      'impactScore': 'Impact score (0-100): Based on category, customer harm potential, and structural importance.',
+      'fixabilityScore': 'Fixability score (0-100): Based on clarity, number of claims, and spectral coherence. Higher = easier to fix.',
+      'compositeScore': 'Composite score (0-100): Weighted average of risk (50%), impact (30%), and fixability (20%). Used for ranking.',
+    };
+    return tooltips[scoreType] || '';
+  }
+  
+  // Tooltip for severity levels
+  getSeverityTooltip(severity: string): string {
+    const tooltips: Record<string, string> = {
+      'CRITICAL': 'Critical severity: Highest risk, immediate action required. Typically policy violations or high-impact contradictions.',
+      'HIGH': 'High severity: Significant risk, requires prompt attention. Strong contradictions or ungrounded critical claims.',
+      'MEDIUM': 'Medium severity: Moderate risk, should be addressed. Some contradictions or ungrounded claims.',
+      'LOW': 'Low severity: Minor risk, may be addressed in routine review. Weak contradictions or minor issues.',
+    };
+    return tooltips[severity] || '';
+  }
+  
+  // Tooltip for confidence levels
+  getConfidenceTooltip(confidence: string): string {
+    const tooltips: Record<string, string> = {
+      'HIGH': 'High confidence: Spectral analysis confirms the issue. Strong evidence and clear signals.',
+      'MEDIUM': 'Medium confidence: Some evidence supports the issue. Moderate signals.',
+      'LOW': 'Low confidence: Limited evidence. Weak signals or uncertain classification.',
+    };
+    return tooltips[confidence] || '';
   }
 
   exportHTML() {
