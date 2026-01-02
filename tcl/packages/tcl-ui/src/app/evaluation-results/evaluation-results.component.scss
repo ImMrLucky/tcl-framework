@@ -743,6 +743,20 @@
   height: 14px;
 }
 
+.issue-turns,
+.issue-claims {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.meta-icon {
+  font-size: 14px;
+  width: 14px;
+  height: 14px;
+  opacity: 0.7;
+}
+
 .issue-risk-score {
   display: flex;
   flex-direction: column;

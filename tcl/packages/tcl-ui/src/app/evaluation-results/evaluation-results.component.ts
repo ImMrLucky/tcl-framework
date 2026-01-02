@@ -42,6 +42,7 @@ interface ClusteredIssue {
     timestampMs?: number;
     claimId: string;
   }>;
+  relatedClaimIds?: string[];
   metrics: {
     contradictionMass: number;
     supportMass: number;
@@ -397,6 +398,47 @@ export class EvaluationResultsComponent implements OnInit {
       'OTHER': 'help_outline'
     };
     return icons[category] || 'help_outline';
+  }
+
+  /**
+   * Get turn range from primary evidence (e.g., "Turns 5-12" or "Turn 5")
+   */
+  getTurnRange(issue: ClusteredIssue): string {
+    if (!issue.primaryEvidence || issue.primaryEvidence.length === 0) {
+      return '';
+    }
+    
+    const turnIndices = issue.primaryEvidence.map(ev => ev.turnIndex).sort((a, b) => a - b);
+    const minTurn = turnIndices[0];
+    const maxTurn = turnIndices[turnIndices.length - 1];
+    
+    // Convert to 1-based for display
+    const minDisplay = minTurn + 1;
+    const maxDisplay = maxTurn + 1;
+    
+    if (minDisplay === maxDisplay) {
+      return `Turn ${minDisplay}`;
+    }
+    return `Turns ${minDisplay}-${maxDisplay}`;
+  }
+
+  /**
+   * Get formatted claim IDs (e.g., "3 claims: claim_123, claim_456, claim_789")
+   */
+  getClaimIdsSummary(issue: ClusteredIssue): string {
+    if (!issue.relatedClaimIds || issue.relatedClaimIds.length === 0) {
+      return `${issue.metrics.claimCount} claim${issue.metrics.claimCount !== 1 ? 's' : ''}`;
+    }
+    
+    const count = issue.relatedClaimIds.length;
+    if (count <= 3) {
+      // Show all claim IDs if 3 or fewer
+      return `${count} claim${count !== 1 ? 's' : ''}: ${issue.relatedClaimIds.join(', ')}`;
+    } else {
+      // Show first 2 and count
+      const firstTwo = issue.relatedClaimIds.slice(0, 2).join(', ');
+      return `${count} claims: ${firstTwo}, +${count - 2} more`;
+    }
   }
 
   exportHTML() {

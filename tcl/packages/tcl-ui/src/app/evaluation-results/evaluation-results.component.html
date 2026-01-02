@@ -302,7 +302,14 @@
                       {{ getCategoryLabel(issue.category) }}
                     </span>
                     <span class="issue-confidence">Confidence: {{ issue.confidence }}</span>
-                    <span class="issue-claims">{{ issue.metrics.claimCount }} claims</span>
+                    <span class="issue-turns" *ngIf="getTurnRange(issue)">
+                      <mat-icon class="meta-icon">chat</mat-icon>
+                      {{ getTurnRange(issue) }}
+                    </span>
+                    <span class="issue-claims" [matTooltip]="getClaimIdsSummary(issue)">
+                      <mat-icon class="meta-icon">label</mat-icon>
+                      {{ issue.metrics.claimCount }} claim{{ issue.metrics.claimCount !== 1 ? 's' : '' }}
+                    </span>
                   </div>
                 </div>
                 <div class="issue-risk-score">
