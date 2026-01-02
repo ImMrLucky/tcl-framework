@@ -280,7 +280,6 @@ async function validateOnce(input: ValidateInput, adapter?: LLMAdapter, startTim
         scorerId: "truth-engine-v1",
         latency: engineResult.timings.total,
         engineVersion: engineResult.graph.codeVersion,
-        performanceMs: engineResult.timings,
         report: {
           claims,
           violations: [],
