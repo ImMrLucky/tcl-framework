@@ -2,6 +2,9 @@
  * Local NLI scorer using transformers.js
  * Downloads model on first run, caches locally
  * No API keys needed, works out of box
+ *
+ * CRITICAL: This scorer must correctly map NLI labels (LABEL_0/1/2) to semantic labels
+ * (ENTAILMENT/NEUTRAL/CONTRADICTION) using the model's id2label config.
  */
 // Softmax helper for logits
 function softmax(logits) {
@@ -10,12 +13,77 @@ function softmax(logits) {
     const sum = exp.reduce((a, b) => a + b, 0);
     return exp.map(x => x / sum);
 }
+/**
+ * Map a raw label (like "LABEL_0", "LABEL_1", "LABEL_2" or direct labels)
+ * to normalized semantic labels using id2label mapping.
+ *
+ * CRITICAL: This fixes the issue where LABEL_0/1/2 were not being mapped
+ * to ENTAILMENT/NEUTRAL/CONTRADICTION, causing all NLI scores to be 0.
+ */
+function normalizeLabel(rawLabel, id2label) {
+    // Already a semantic label?
+    const upper = rawLabel.toUpperCase();
+    if (upper === "ENTAILMENT" || upper === "CONTRADICTION" || upper === "NEUTRAL") {
+        return upper;
+    }
+    // Check for partial matches
+    if (upper.includes("ENTAIL"))
+        return "ENTAILMENT";
+    if (upper.includes("CONTRAD"))
+        return "CONTRADICTION";
+    if (upper.includes("NEUTRAL"))
+        return "NEUTRAL";
+    // Try to extract index from LABEL_X format
+    const labelMatch = rawLabel.match(/LABEL[_\-]?(\d+)/i);
+    if (labelMatch && id2label) {
+        const idx = labelMatch[1];
+        const mappedLabel = id2label[idx];
+        if (mappedLabel) {
+            const normalizedMapped = mappedLabel.toUpperCase();
+            if (normalizedMapped.includes("ENTAIL"))
+                return "ENTAILMENT";
+            if (normalizedMapped.includes("CONTRAD"))
+                return "CONTRADICTION";
+            if (normalizedMapped.includes("NEUTRAL"))
+                return "NEUTRAL";
+            return normalizedMapped;
+        }
+    }
+    // Fallback: return as-is (will likely not match any task)
+    return upper;
+}
+/**
+ * Standard MNLI label ordering (most models follow this):
+ * 0 = CONTRADICTION, 1 = NEUTRAL, 2 = ENTAILMENT
+ *
+ * But roberta-large-mnli uses:
+ * 0 = CONTRADICTION, 1 = NEUTRAL, 2 = ENTAILMENT
+ *
+ * deberta-v3 and bart-large-mnli use:
+ * 0 = ENTAILMENT, 1 = NEUTRAL, 2 = CONTRADICTION
+ *
+ * This function creates a fallback id2label for common models.
+ */
+function getDefaultId2Label(modelName) {
+    const name = modelName.toLowerCase();
+    // roberta-large-mnli, distilbart-mnli, etc.
+    if (name.includes("roberta") || name.includes("distilbart")) {
+        return { "0": "CONTRADICTION", "1": "NEUTRAL", "2": "ENTAILMENT" };
+    }
+    // deberta and bart-large-mnli
+    if (name.includes("deberta") || name.includes("bart-large-mnli")) {
+        return { "0": "ENTAILMENT", "1": "NEUTRAL", "2": "CONTRADICTION" };
+    }
+    // Default: assume standard MNLI ordering
+    return { "0": "CONTRADICTION", "1": "NEUTRAL", "2": "ENTAILMENT" };
+}
 export class TransformersNliScorer {
     id;
     model = null;
     modelName;
     cacheDir;
     labelMap = {}; // Expose label map for debug
+    labelMapInitialized = false;
     constructor(cfg) {
         // Default to roberta-large-mnli (best for NLI tasks, specifically trained for MNLI)
         // Can override with TCL_LOCAL_NLI_MODEL env var or pass modelName
@@ -23,6 +91,8 @@ export class TransformersNliScorer {
         this.modelName = cfg.modelName || process.env.TCL_LOCAL_NLI_MODEL || "Xenova/roberta-large-mnli";
         this.cacheDir = cfg.cacheDir || ".tcl_models";
         this.id = `transformers-${this.modelName.split("/").pop()}`;
+        // Initialize with default label map based on model name
+        this.labelMap = getDefaultId2Label(this.modelName);
         // Bind methods to preserve 'this' context
         this.loadModel = this.loadModel.bind(this);
         this.scoreBatch = this.scoreBatch.bind(this);
@@ -34,23 +104,38 @@ export class TransformersNliScorer {
         if (this.model)
             return this.model;
         try {
-            // Set environment variable BEFORE import to force WASM-only mode
-            // This prevents onnxruntime-node from trying to load native bindings
+            // CRITICAL: Set environment variables BEFORE import to force WASM-only mode
+            // This prevents onnxruntime-node native library from being loaded (causes errors in containers)
             if (typeof process !== 'undefined' && process.env) {
+                // Force WASM backend
+                process.env.TRANSFORMERS_BACKEND = 'wasm';
                 process.env.USE_WASM = '1';
-                // Prevent onnxruntime-node from being used
+                // Disable native onnxruntime
                 process.env.ONNXRUNTIME_EXECUTION_PROVIDERS = '';
+                process.env.ONNX_DISABLE_NATIVE = '1';
             }
             // Dynamic import to avoid bundling transformers.js if not used
-            const { pipeline, env } = await import("@xenova/transformers");
-            // Force WASM backend to avoid native onnxruntime-node dependency
-            // This prevents errors in containers that don't have native libraries
-            if (env && env.backends && env.backends.onnx) {
-                // Disable proxy mode and use WASM directly
-                env.backends.onnx.wasm.proxy = false;
-                env.backends.onnx.wasm.numThreads = 1;
+            const transformersModule = await import("@xenova/transformers");
+            const { pipeline, env } = transformersModule;
+            // CRITICAL: Force WASM backend configuration BEFORE loading any model
+            // This must be done before pipeline() is called
+            if (env) {
+                // Disable local model check (always download from hub)
+                env.allowLocalModels = false;
+                // Force WASM backend
+                if (env.backends) {
+                    // Disable ONNX native backend entirely
+                    if (env.backends.onnx) {
+                        // Use WASM exclusively
+                        env.backends.onnx.wasm = env.backends.onnx.wasm || {};
+                        env.backends.onnx.wasm.proxy = false;
+                        env.backends.onnx.wasm.numThreads = 1;
+                    }
+                }
+                // Set cache directory
+                env.cacheDir = this.cacheDir;
             }
-            console.log(`Loading NLI model: ${this.modelName} (this may take a minute on first run)...`);
+            console.log(`Loading NLI model: ${this.modelName} (WASM-only mode, may take a minute on first run)...`);
             // For MNLI models (like roberta-large-mnli), use text-classification pipeline
             // MNLI models are specifically trained for Natural Language Inference tasks
             // They expect premise-hypothesis pairs and return entailment/contradiction/neutral
@@ -61,15 +146,42 @@ export class TransformersNliScorer {
                 cache_dir: this.cacheDir
             });
             // Extract label map from model if available (for MNLI models)
-            if (this.model?.model?.config?.id2label) {
-                this.labelMap = this.model.model.config.id2label;
-                console.log(`✅ Label map extracted:`, this.labelMap);
+            // CRITICAL: This mapping is required to convert LABEL_0/1/2 to semantic labels
+            let extractedLabelMap = null;
+            // Try multiple paths to find id2label
+            const configPaths = [
+                this.model?.model?.config?.id2label,
+                this.model?.processor?.tokenizer?.model?.config?.id2label,
+                this.model?.tokenizer?.model?.config?.id2label,
+                this.model?.config?.id2label
+            ];
+            for (const path of configPaths) {
+                if (path && typeof path === 'object') {
+                    extractedLabelMap = path;
+                    break;
+                }
             }
-            else if (this.model?.processor?.tokenizer?.model?.config?.id2label) {
-                this.labelMap = this.model.processor.tokenizer.model.config.id2label;
-                console.log(`✅ Label map extracted from tokenizer:`, this.labelMap);
+            if (extractedLabelMap) {
+                this.labelMap = extractedLabelMap;
+                this.labelMapInitialized = true;
+                console.log(`✅ Label map extracted from model config:`, this.labelMap);
+            }
+            else {
+                // Use default based on model name
+                console.log(`⚠️ Could not extract label map from model, using default for ${this.modelName}:`, this.labelMap);
+            }
+            // Validate label map has expected values
+            const labelValues = Object.values(this.labelMap).map(v => v.toUpperCase());
+            const hasEntailment = labelValues.some(v => v.includes("ENTAIL"));
+            const hasContradiction = labelValues.some(v => v.includes("CONTRAD"));
+            if (!hasEntailment || !hasContradiction) {
+                console.error(`❌ CRITICAL: Label map is missing ENTAILMENT or CONTRADICTION!`);
+                console.error(`   Label map: ${JSON.stringify(this.labelMap)}`);
+                console.error(`   This will cause NLI scoring to fail silently.`);
+                throw new Error(`Invalid label map for NLI model: missing ENTAILMENT or CONTRADICTION. Got: ${JSON.stringify(this.labelMap)}`);
             }
             console.log(`✅ NLI model loaded: ${this.modelName}`);
+            console.log(`   Label map: ${JSON.stringify(this.labelMap)}`);
             return this.model;
         }
         catch (error) {
@@ -106,7 +218,6 @@ export class TransformersNliScorer {
                 if (isMnliModel) {
                     // For MNLI models, use premise-hypothesis pair format
                     // text-classification pipeline expects: { text: premise, text_pair: hypothesis }
-                    // This correctly represents a single pair, not a batch of two items
                     result = await model({ text: a, text_pair: b });
                 }
                 else {
@@ -126,73 +237,86 @@ export class TransformersNliScorer {
                 // Extract score based on result format
                 let score = 0.0;
                 if (isMnliModel) {
-                    // MNLI text-classification returns: { label: "ENTAILMENT"|"CONTRADICTION"|"NEUTRAL", score: number }
-                    // OR: { logits: number[], ... } - need to map using id2label
-                    let label = "";
-                    let prob = 0.0;
                     // Handle different result formats from transformers.js
                     if (Array.isArray(result)) {
-                        // Sometimes returns array of results
                         result = result[0];
                     }
-                    if (result.label) {
-                        // Direct label format
-                        label = result.label.toUpperCase();
+                    let semanticLabel = "";
+                    let prob = 0.0;
+                    if (result.label !== undefined) {
+                        // CRITICAL FIX: Map raw label (LABEL_0, LABEL_1, LABEL_2) to semantic label
+                        const rawLabel = String(result.label);
+                        semanticLabel = normalizeLabel(rawLabel, this.labelMap);
                         prob = result.score || 0.0;
+                        // Debug: log label mapping for first few pairs
+                        const pairIndex = pairs.indexOf(pair);
+                        if (pairIndex < 3) {
+                            console.log(`  [LabelMap] Raw="${rawLabel}" → Semantic="${semanticLabel}" (id2label: ${JSON.stringify(this.labelMap)})`);
+                        }
                     }
-                    else if (result.logits && this.labelMap) {
-                        // Logits format - map using id2label
+                    else if (result.logits) {
+                        // Logits format - compute probabilities and extract correct one
                         const logits = Array.isArray(result.logits) ? result.logits : Object.values(result.logits);
                         const probs = softmax(logits);
                         // Build label->prob map using id2label
                         const labelProb = {};
                         for (let i = 0; i < probs.length; i++) {
-                            const labelRaw = (this.labelMap[String(i)] || "").toLowerCase();
-                            labelProb[labelRaw] = probs[i];
+                            const mappedLabel = normalizeLabel(this.labelMap[String(i)] || `LABEL_${i}`, this.labelMap);
+                            labelProb[mappedLabel] = probs[i];
                         }
-                        // Normalize possible variants
-                        const entail = labelProb["entailment"] ?? labelProb["entails"] ?? 0;
-                        const contra = labelProb["contradiction"] ?? labelProb["contradicts"] ?? 0;
-                        const neutral = labelProb["neutral"] ?? 0;
+                        // Extract probabilities
+                        const entailProb = labelProb["ENTAILMENT"] ?? 0;
+                        const contraProb = labelProb["CONTRADICTION"] ?? 0;
+                        const neutralProb = labelProb["NEUTRAL"] ?? 0;
                         // Use the appropriate probability based on task
-                        if (task === "entailment") {
-                            prob = entail;
-                            label = "ENTAILMENT";
+                        if (task === "entailment" || task === "grounding") {
+                            prob = entailProb;
+                            semanticLabel = "ENTAILMENT";
                         }
                         else if (task === "contradiction") {
-                            prob = contra;
-                            label = "CONTRADICTION";
+                            prob = contraProb;
+                            semanticLabel = "CONTRADICTION";
                         }
-                        else if (task === "grounding") {
-                            prob = entail + neutral * 0.5; // Entailment is strong, neutral is weak
-                            label = entail > neutral ? "ENTAILMENT" : "NEUTRAL";
+                        // For grounding, also consider neutral as partial support
+                        if (task === "grounding") {
+                            prob = entailProb + neutralProb * 0.3;
+                        }
+                        const pairIndex = pairs.indexOf(pair);
+                        if (pairIndex < 3) {
+                            console.log(`  [Logits] Entail=${entailProb.toFixed(3)}, Contra=${contraProb.toFixed(3)}, Neutral=${neutralProb.toFixed(3)}`);
                         }
                     }
-                    else {
-                        // Fallback: try to extract from result
-                        label = (result.label || "").toUpperCase();
-                        prob = result.score || 0.0;
-                    }
-                    // Map label to score based on task
-                    if (task === "entailment" && (label === "ENTAILMENT" || label.includes("ENTAIL"))) {
+                    // Map semantic label to score based on task
+                    if (task === "entailment" && semanticLabel === "ENTAILMENT") {
                         score = prob;
                     }
-                    else if (task === "contradiction" && (label === "CONTRADICTION" || label.includes("CONTRAD"))) {
+                    else if (task === "contradiction" && semanticLabel === "CONTRADICTION") {
                         score = prob;
                     }
                     else if (task === "grounding") {
-                        if (label === "ENTAILMENT" || label.includes("ENTAIL")) {
+                        if (semanticLabel === "ENTAILMENT") {
                             score = prob;
                         }
-                        else if (label === "NEUTRAL") {
-                            score = prob * 0.5; // Neutral is weaker support
+                        else if (semanticLabel === "NEUTRAL") {
+                            score = prob * 0.4; // Neutral is weaker support
                         }
                     }
                     else {
-                        // Label doesn't match task - score is 0.0 (correct behavior)
-                        // But log it for debugging
-                        if (pairs.indexOf(pair) < 3) {
-                            console.log(`  [MNLI] Task=${task} but label=${label}, prob=${prob.toFixed(3)} → score=0.0`);
+                        // Label doesn't match task - but DON'T return 0 if we have logits!
+                        // For multi-class output, we want the probability of the CORRECT class, not 0
+                        // This was the bug: when label=NEUTRAL but task=entailment, we returned 0
+                        // But we should return the entailment probability from logits
+                        // If we got here from label path (not logits), we need to recalculate
+                        if (result.logits) {
+                            // Already handled above
+                        }
+                        else if (result.label !== undefined) {
+                            // Model returned different label than task - that's fine, score = 0 is correct
+                            // (e.g., task=entailment but model says NEUTRAL → entailment score = 0)
+                            const pairIndex = pairs.indexOf(pair);
+                            if (pairIndex < 3) {
+                                console.log(`  [MNLI] Task=${task} but semanticLabel=${semanticLabel}, prob=${prob.toFixed(3)} → score=0.0 (label mismatch)`);
+                            }
                         }
                     }
                 }
@@ -203,30 +327,27 @@ export class TransformersNliScorer {
                         ? result.scores[labelIndex]
                         : 0.0;
                 }
-                // Enhanced debug logging - log more samples to see what's happening
+                // Enhanced debug logging
                 const pairIndex = pairs.indexOf(pair);
-                if (pairIndex < 5 || Math.random() < 0.1) { // Log first 5 or 10% randomly
-                    if (isMnliModel) {
-                        const logLabel = result.label || 'N/A';
-                        const logProb = result.score || 0.0;
-                        console.log(`[TransformersNliScorer] ${task} #${pairIndex}: "${a.substring(0, 40)}..." -> "${b.substring(0, 40)}..." | score=${score.toFixed(3)} | label=${logLabel} | prob=${logProb.toFixed(3)}`);
-                    }
-                    else {
-                        console.log(`[TransformersNliScorer] ${task} #${pairIndex}: "${a.substring(0, 40)}..." -> "${b.substring(0, 40)}..." | score=${score.toFixed(3)}`);
-                        if (result.labels && result.scores) {
-                            console.log(`  All scores: ${result.labels.map((l, i) => `${l}=${result.scores[i].toFixed(3)}`).join(', ')}`);
-                        }
-                    }
+                if (pairIndex < 5 || Math.random() < 0.05) {
+                    const rawLabel = result.label || 'N/A';
+                    const rawProb = result.score || 0.0;
+                    console.log(`[NLI] ${task} #${pairIndex}: score=${score.toFixed(3)} | raw_label="${rawLabel}" → mapped | raw_prob=${typeof rawProb === 'number' ? rawProb.toFixed(3) : rawProb}`);
+                    console.log(`      A: "${a.substring(0, 50)}..."`);
+                    console.log(`      B: "${b.substring(0, 50)}..."`);
                 }
                 const finalScore = Math.max(0, Math.min(1, score));
-                if (pairIndex < 3 && finalScore === 0.0 && task !== "grounding") {
-                    console.warn(`  ⚠️ Zero score for ${task} - this pair will not create an edge`);
+                // CRITICAL: Warn if we get zero scores - this indicates mapping failure
+                if (pairIndex < 5 && finalScore === 0.0) {
+                    const rawLabel = result.label || 'unknown';
+                    console.warn(`  ⚠️ Zero score for ${task} (raw_label=${rawLabel}) - check label mapping!`);
                 }
                 return { key, score: finalScore };
             }
             catch (error) {
                 console.error(`Error scoring pair ${key}:`, error);
-                return { key, score: 0.0 };
+                // DON'T silently return 0 - throw so caller knows something went wrong
+                throw new Error(`NLI scoring failed for pair: ${error.message}`);
             }
         }));
         return scores;

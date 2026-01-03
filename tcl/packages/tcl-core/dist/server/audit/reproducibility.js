@@ -1,4 +1,113 @@
 import { createHash } from "crypto";
+import { extractRiskSignals, computeRiskScore, determineIssueType, getDefaultRiskConfig } from "../../risk_scoring.js";
+/**
+ * Build an immutable evaluation manifest
+ */
+export function buildImmutableManifest(evaluationId, conversationId, context, claims, supports, contradictions, grounded, config, spectral, issues, latencyMs, options) {
+    const inputHash = computeInputHash(claims, supports, contradictions, grounded);
+    const configHash = computeConfigHash(config);
+    // Compute source hash from claims text
+    const sourceContent = claims.map(c => c.text).join("\n");
+    const sourceHash = createHash('sha256').update(sourceContent).digest('hex');
+    return {
+        evaluationId,
+        mode: options?.mode || "EVALUATION",
+        parentEvaluationId: options?.parentEvaluationId,
+        provenance: {
+            createdAt: new Date().toISOString(),
+            createdBy: context.userId,
+            orgId: context.orgId,
+            projectId: context.projectId,
+            env: context.env
+        },
+        source: {
+            conversationId,
+            sourceType: "transcript",
+            sourceHash,
+            sourceTitle: options?.sourceTitle,
+            externalId: options?.externalId
+        },
+        frozenInputs: {
+            inputHash,
+            claims: claims.map(c => ({
+                id: c.id,
+                text: c.text,
+                speaker: (c.speaker === "AGENT" || c.speaker === "Agent" ? "AGENT" :
+                    c.speaker === "CUSTOMER" || c.speaker === "Customer" ? "CUSTOMER" :
+                        c.speaker === "SYSTEM" || c.speaker === "System" ? "SYSTEM" : "UNKNOWN"),
+                turnStartIdx: c.turnIndex,
+                turnEndIdx: c.turnIndex,
+                timestampStartMs: c.timestampMs,
+                tags: c.tags || []
+            })),
+            supports: supports.map(s => ({
+                claimA: s.claimA,
+                claimB: s.claimB,
+                weight: s.weight || 1.0,
+                source: (s.source || "nli")
+            })),
+            contradictions: contradictions.map(c => ({
+                claimA: c.claimA,
+                claimB: c.claimB,
+                weight: c.weight || 1.0,
+                source: (c.source || "nli")
+            })),
+            grounded
+        },
+        frozenConfig: {
+            configHash,
+            engineName: "tcl-spectral",
+            engineVersion: getEngineVersion(),
+            codeVersion: getCodeVersion(),
+            modelFingerprint: getModelFingerprint(),
+            parameters: {
+                wSupport: config.wSupport ?? 1.0,
+                wContradiction: config.wContradiction ?? 1.0,
+                wCircularity: config.wCircularity ?? 1.0,
+                cycleMaxLen: config.cycleMaxLen ?? 4,
+                alpha: config.alpha,
+                tau: config.tau
+            }
+        },
+        frozenOutputs: {
+            spectral: {
+                coherenceScore: spectral.coherenceScore || 0,
+                contradictionEnergy: spectral.contradictionEnergy || 0,
+                supportEnergy: spectral.supportEnergy || 0,
+                circularityScore: spectral.circularityScore || 0,
+                spectralGap: spectral.spectralGap || 0,
+                cycleMass: spectral.cycleMass || 0,
+                heatTrace: spectral.heatTrace || [],
+                truthVector: spectral.truthVector || [],
+                truthStates: spectral.truthStates || [],
+                nodeBlame: spectral.nodeBlame || [],
+                nodeBlameNorm: spectral.nodeBlameNorm || []
+            },
+            counts: {
+                claims: claims.length,
+                contradicted: issues.filter(i => i.what.truthState === "Contradicted").length,
+                ungrounded: issues.filter(i => i.what.truthState === "Ungrounded").length,
+                supported: claims.length - issues.length, // Approximate
+                inconclusive: issues.filter(i => i.what.truthState === "Inconclusive").length
+            },
+            fingerprint: {
+                coherenceScore: spectral.coherenceScore || 0,
+                spectralGap: spectral.spectralGap || 0,
+                contradictionEnergy: spectral.contradictionEnergy || 0,
+                circularityScore: spectral.circularityScore || 0,
+                heatTrace: spectral.heatTrace || []
+            }
+        },
+        issues,
+        latencyMs,
+        expiresAt: options?.mode === "SIMULATION"
+            ? new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString() // 7 days for simulations
+            : undefined
+    };
+}
+// ============================================================================
+// FUNCTIONS: Hashing and Versioning
+// ============================================================================
 /**
  * Canonicalize and hash the input payload (claims + edges + grounded)
  */
@@ -72,109 +181,444 @@ export function getModelFingerprint() {
  * Calculate importance score for an issue
  */
 export function calculateImportance(params) {
-    const { nodeBlameNorm = 0, truthState, speaker, hasPolicyTag = false } = params;
-    // Truth state multipliers
+    const { nodeBlameNorm = 0, truthState, speaker, hasPolicyTag = false, claimConfidence } = params;
+    // Base importance - if no nodeBlameNorm, use truth state and other factors
+    let baseImportance = nodeBlameNorm;
+    // If nodeBlameNorm is 0 or undefined (spectral skipped), compute a base importance from truth state
+    if (!nodeBlameNorm || nodeBlameNorm < 0.01) {
+        // Use truth state as primary signal
+        baseImportance = {
+            "Contradicted": 0.85, // High base importance
+            "Ungrounded": 0.65, // Medium-high base importance
+            "Inconclusive": 0.35, // Medium base importance
+            "Supported": 0.15 // Low base importance (shouldn't be an issue)
+        }[truthState || "Inconclusive"] || 0.35;
+        // Reduce if claim has high confidence (more likely to be correct)
+        if (claimConfidence !== undefined && claimConfidence > 0.8) {
+            baseImportance *= 0.85;
+        }
+    }
+    // Truth state multipliers (still apply as adjustment)
     const truthStateMultiplier = {
         "Contradicted": 1.35,
         "Ungrounded": 1.15,
         "Inconclusive": 1.05,
         "Supported": 0.75
     }[truthState || "Inconclusive"] || 1.0;
-    // Agent multiplier
+    // Agent multiplier - agent statements are more important for compliance
     const agentMultiplier = speaker === "AGENT" ? 1.15 : 1.0;
-    // Policy multiplier
+    // Policy multiplier - policy-related issues are more important
     const policyMultiplier = hasPolicyTag ? 1.25 : 1.0;
-    return nodeBlameNorm * truthStateMultiplier * agentMultiplier * policyMultiplier;
+    // Calculate final importance, capped at 1.0
+    const raw = baseImportance * truthStateMultiplier * agentMultiplier * policyMultiplier;
+    return Math.min(1.0, raw);
+}
+/**
+ * Generate a unique issue ID
+ */
+function generateIssueId(claimId, evaluationId) {
+    const timestamp = Date.now().toString(36);
+    const random = Math.random().toString(36).substring(2, 8);
+    return `issue_${claimId}_${timestamp}_${random}`;
+}
+/**
+ * Get severity based on truth state and issue type
+ */
+function getSeverity(truthState, issueType, nodeBlameNorm) {
+    if (issueType === "POLICY_VIOLATION" && truthState === "Contradicted") {
+        return "critical";
+    }
+    if (truthState === "Contradicted" || issueType === "POLICY_VIOLATION") {
+        return "high";
+    }
+    if (truthState === "Ungrounded" || issueType === "POLICY_MISS" || nodeBlameNorm > 0.7) {
+        return "medium";
+    }
+    return "low";
+}
+/**
+ * Generate human-readable issue description (short summary)
+ */
+function generateIssueDescription(truthState, issueType, speaker, conflictsCount) {
+    const speakerLabel = speaker === "AGENT" ? "Agent" :
+        speaker === "CUSTOMER" ? "Customer" : "Speaker";
+    switch (issueType) {
+        case "CONTRADICTION":
+            return `${speakerLabel} statement contradicts ${conflictsCount > 1 ? `${conflictsCount} other claims` : 'another claim'}`;
+        case "UNSUPPORTED":
+            return `${speakerLabel} claim has no supporting evidence in policy documents`;
+        case "UNVERIFIED":
+            return `${speakerLabel} claim cannot be verified (no external documents available)`;
+        case "CIRCULAR":
+            return `Circular reasoning detected - claims support each other without external evidence`;
+        case "POLICY_VIOLATION":
+            return `${speakerLabel} statement violates policy rules`;
+        case "POLICY_MISS":
+            return `Required policy disclosure may be missing`;
+        case "VAGUE_LANGUAGE":
+            return `${speakerLabel} used ambiguous language that could mislead`;
+        case "LATE_DISCLAIMER":
+            return `Important disclaimer provided late in the conversation`;
+        case "PROMISE_RISK":
+            return `${speakerLabel} made a commitment that should be verified`;
+        case "ABSOLUTE_CLAIM":
+            return `${speakerLabel} used absolute language (always, never, guaranteed)`;
+        default:
+            return `Issue detected requiring review`;
+    }
+}
+/**
+ * Generate a specific "Why Flagged" explanation that includes conflict details
+ */
+function generateWhyFlagged(issueType, speaker, claimText, conflicts) {
+    const claimSummary = claimText.length > 80 ? claimText.substring(0, 77) + "..." : claimText;
+    if (issueType === "CONTRADICTION" && conflicts.length > 0) {
+        // Find the strongest contradiction
+        const strongestConflict = conflicts
+            .filter(c => c.relationshipType === "contradiction")
+            .sort((a, b) => b.edgeWeight - a.edgeWeight)[0];
+        if (strongestConflict) {
+            const conflictText = strongestConflict.claimText.length > 100
+                ? strongestConflict.claimText.substring(0, 97) + "..."
+                : strongestConflict.claimText;
+            return `Directly contradicted by: "${conflictText}"`;
+        }
+        return `Contradicts ${conflicts.length} other statement(s) in the conversation`;
+    }
+    if (issueType === "UNSUPPORTED") {
+        return `No grounding in policy documents or verified sources`;
+    }
+    if (issueType === "UNVERIFIED") {
+        return `Cannot be verified against policy/account documents (transcript-only mode)`;
+    }
+    if (issueType === "CIRCULAR") {
+        return `Part of circular reasoning chain - claims mutually support without independent verification`;
+    }
+    if (issueType === "POLICY_VIOLATION") {
+        return `Statement conflicts with established policy guidelines`;
+    }
+    if (issueType === "POLICY_MISS") {
+        return `Required disclosure not provided to customer`;
+    }
+    if (issueType === "VAGUE_LANGUAGE") {
+        return `Vague language increases risk of customer misunderstanding`;
+    }
+    if (issueType === "LATE_DISCLAIMER") {
+        return `Important disclaimer/caveat provided late in conversation`;
+    }
+    if (issueType === "PROMISE_RISK") {
+        return `Agent commitment requires verification and tracking`;
+    }
+    if (issueType === "ABSOLUTE_CLAIM") {
+        return `Absolute language ("always", "never", "guaranteed") may be difficult to defend`;
+    }
+    return `Claim requires verification or supporting evidence`;
+}
+/**
+ * Generate risk explanation
+ */
+function generateRiskExplanation(issueType, severity, speaker) {
+    const agentContext = speaker === "AGENT" ? " by an agent" : "";
+    switch (issueType) {
+        case "CONTRADICTION":
+            return `Contradictory statements${agentContext} can undermine customer trust, create liability exposure, and may indicate miscommunication or intentional misinformation.`;
+        case "UNSUPPORTED":
+            return `Unsupported claims${agentContext} may expose the organization to liability if later proven false. They cannot be defended in an audit or legal proceeding.`;
+        case "UNVERIFIED":
+            return `This claim cannot be verified against external documents. It is grounded only in the transcript. In transcript-only mode, this is expected for many claims.`;
+        case "CIRCULAR":
+            return `Circular reasoning creates an illusion of support without genuine evidence. This is particularly problematic in compliance contexts where claims must be independently verifiable.`;
+        case "POLICY_VIOLATION":
+            return `Policy violations${agentContext} can result in regulatory penalties, customer complaints, and organizational liability.`;
+        case "POLICY_MISS":
+            return `Missing required disclosures${agentContext} may constitute regulatory non-compliance and could expose the organization to penalties.`;
+        case "VAGUE_LANGUAGE":
+            return `Vague or ambiguous statements${agentContext} can lead to customer misunderstanding and disputes. Clear, specific language is preferred.`;
+        case "LATE_DISCLAIMER":
+            return `Disclaimers and caveats should be provided early in conversations. Late disclaimers may not adequately inform the customer before decisions are made.`;
+        case "PROMISE_RISK":
+            return `Agent commitments and promises require tracking to ensure fulfillment. Unfulfilled promises can damage customer relationships and create liability.`;
+        case "ABSOLUTE_CLAIM":
+            return `Statements using absolute language ("always", "never", "guaranteed") are difficult to defend if exceptions exist. More qualified language is advisable.`;
+        default:
+            return `This issue may affect the reliability and defensibility of the conversation record.`;
+    }
 }
 /**
  * Build issues list from spectral output and claims
+ * Creates fully defensible issue objects that answer all required questions
+ *
+ * KEY CHANGES:
+ * - Uses new risk_scoring.ts for computed severity (NO hard-coded values)
+ * - Uses UNVERIFIED for transcript-only mode (no external docs)
+ * - Filters out non-auditable claims (QUESTION, ACKNOWLEDGEMENT, FILLER)
+ * - Severity varies based on actual signals, not hard-coded rules
  */
-export function buildIssuesList(spectral, claims, destructiveClaims) {
+export function buildIssuesList(spectral, claims, destructiveClaims, evaluationId, options) {
     const issues = [];
     const claimMap = new Map(claims.map(c => [c.id, c]));
-    // Use destructive claims if available, otherwise derive from spectral
-    if (destructiveClaims && destructiveClaims.length > 0) {
-        for (const dc of destructiveClaims) {
-            const claim = claimMap.get(dc.claimId);
-            if (!claim)
-                continue;
-            const truthState = dc.truthState || "Inconclusive";
-            const nodeBlameNorm = dc.nodeBlameNorm || 0;
-            const speaker = claim.meta?.speaker === "Agent" ? "AGENT" :
-                claim.meta?.speaker === "Customer" ? "CUSTOMER" : "UNKNOWN";
-            // Determine issue type
-            let issueType = "UNSUPPORTED";
-            if (truthState === "Contradicted") {
-                issueType = "CONTRADICTION";
+    // Build claim text lookup for conflicts
+    const claimTextMap = new Map(claims.map(c => [c.id, c.text]));
+    // Get spectral data
+    const truthStates = spectral.truthStates || [];
+    const nodeBlameNorm = spectral.nodeBlameNorm || [];
+    const topBadContradictions = spectral.topBadContradictions || [];
+    const topBadSupports = spectral.topBadSupports || [];
+    // Check if we have valid spectral data
+    const hasSpectralData = truthStates.length > 0 || nodeBlameNorm.length > 0;
+    // Config for risk scoring
+    const riskConfig = getDefaultRiskConfig();
+    // Check if we have external docs (affects issue type: UNSUPPORTED vs UNVERIFIED)
+    const hasExternalDocs = options?.hasExternalDocs ?? false;
+    const contradictionsFromGraph = options?.contradictions || [];
+    const supportsFromGraph = options?.supports || [];
+    const groundingFromGraph = options?.grounding || [];
+    const totalTurns = options?.totalTurns || claims.length;
+    // CRITICAL: Build grounding score lookup from actual graph edges (NOT hard-coded)
+    // This maps each claimId to its max grounding weight from NLI scoring
+    const groundingScoreByClaimId = new Map();
+    for (const gnd of groundingFromGraph) {
+        const existing = groundingScoreByClaimId.get(gnd.claimId) || 0;
+        groundingScoreByClaimId.set(gnd.claimId, Math.max(existing, gnd.weight));
+    }
+    console.log(`📊 Grounding scores from ${groundingFromGraph.length} edges:`, Array.from(groundingScoreByClaimId.entries()).slice(0, 5));
+    // Build support score lookup from actual graph edges
+    const supportScoreByClaimId = new Map();
+    for (const sup of supportsFromGraph) {
+        const existingA = supportScoreByClaimId.get(sup.claimA) || 0;
+        const existingB = supportScoreByClaimId.get(sup.claimB) || 0;
+        supportScoreByClaimId.set(sup.claimA, Math.max(existingA, sup.weight));
+        supportScoreByClaimId.set(sup.claimB, Math.max(existingB, sup.weight));
+    }
+    // If we have destructive claims from the orchestrator, use those as a priority source
+    const destructiveClaimIds = new Set((destructiveClaims || []).map(dc => dc.claimId));
+    const destructiveImportanceMap = new Map((destructiveClaims || []).map(dc => [dc.claimId, dc.importance]));
+    // Process each claim
+    for (let i = 0; i < claims.length; i++) {
+        const claim = claims[i];
+        // CRITICAL: Skip non-auditable claims (questions, acknowledgements, filler)
+        // These should not appear as issues
+        if (claim.isAuditable === false) {
+            continue;
+        }
+        let truthState = (truthStates[i] || "Inconclusive");
+        const blame = nodeBlameNorm[i] || 0;
+        // When spectral is skipped, derive truth state from destructive claims and other signals
+        if (!hasSpectralData) {
+            if (destructiveClaimIds.has(claim.id)) {
+                truthState = "Ungrounded";
             }
-            else if (dc.policyRuleIds && dc.policyRuleIds.length > 0) {
-                issueType = dc.policySeverity === "error" ? "POLICY_VIOLATION" : "POLICY_MISS";
+            else if (claim.confidence !== undefined && claim.confidence < 0.3) {
+                truthState = "Ungrounded";
             }
-            // Find related edges from spectral
-            const topBadContradictions = spectral.topBadContradictions?.filter(e => e.claimAId === dc.claimId || e.claimBId === dc.claimId) || [];
-            const topBadSupports = spectral.topBadSupports?.filter(e => e.claimAId === dc.claimId || e.claimBId === dc.claimId) || [];
-            issues.push({
-                claimId: dc.claimId,
-                truthState,
-                nodeBlameNorm,
-                importance: dc.importance,
+            else if (claim.confidence !== undefined && claim.confidence < 0.5) {
+                truthState = "Inconclusive";
+            }
+            else if (claim.confidence !== undefined && claim.confidence >= 0.7) {
+                truthState = "Supported";
+            }
+        }
+        // Build risk signals from claim data
+        const extendedClaim = {
+            id: claim.id,
+            text: claim.text,
+            confidence: claim.confidence || 0,
+            evidence: claim.evidence || [],
+            meta: claim.meta,
+            claimType: claim.claimType || "ASSERTION",
+            isAuditable: claim.isAuditable ?? true,
+            topicTags: claim.topicTags || [],
+            hasAbsoluteLanguage: claim.hasAbsoluteLanguage || false,
+            hasMoney: claim.hasMoney || false
+        };
+        // Find max contradiction score for this claim
+        let maxContradictionScore = 0;
+        let maxSupportScore = 0;
+        for (const edge of topBadContradictions) {
+            if (edge.claimAId === claim.id || edge.claimBId === claim.id) {
+                maxContradictionScore = Math.max(maxContradictionScore, edge.weight || edge.badness || 0);
+            }
+        }
+        for (const edge of topBadSupports) {
+            if (edge.claimAId === claim.id || edge.claimBId === claim.id) {
+                maxSupportScore = Math.max(maxSupportScore, edge.weight || edge.badness || 0);
+            }
+        }
+        // Get actual grounding and support scores from graph edges (NOT hard-coded)
+        const actualGroundingScore = groundingScoreByClaimId.get(claim.id) || 0;
+        const actualSupportScore = supportScoreByClaimId.get(claim.id) || maxSupportScore;
+        // Extract risk signals with REAL computed scores
+        const riskSignals = extractRiskSignals(extendedClaim, {
+            nliScores: {
+                contradiction: maxContradictionScore,
+                support: actualSupportScore,
+                grounding: actualGroundingScore // Use ACTUAL grounding from graph edges
+            },
+            spectral: {
+                nodeBlameNorm: blame,
+                truthState
+            },
+            contradictions: contradictionsFromGraph
+        });
+        // Compute risk score (NO HARD-CODED VALUES)
+        const riskResult = computeRiskScore(riskSignals, riskConfig);
+        // Determine if this claim should be flagged based on risk score
+        // Threshold: flag if riskScore >= medium threshold OR special conditions
+        const shouldFlag = riskResult.riskScore >= riskConfig.severityThresholds.medium ||
+            truthState === "Contradicted" ||
+            blame > 0.3 ||
+            destructiveClaimIds.has(claim.id);
+        if (!shouldFlag) {
+            continue;
+        }
+        // Determine speaker
+        const speakerRaw = claim.meta?.speaker;
+        const speaker = speakerRaw === "Agent" || speakerRaw === "AGENT" ? "AGENT" :
+            speakerRaw === "Customer" || speakerRaw === "CUSTOMER" ? "CUSTOMER" :
+                speakerRaw === "System" || speakerRaw === "SYSTEM" ? "SYSTEM" : "UNKNOWN";
+        // Determine issue type using new risk scoring module
+        const circularityScore = spectral.circularityScore || 0;
+        const cycleMass = spectral.cycleMass || 0;
+        const isCircular = circularityScore > 30 && cycleMass > 0.1;
+        const issueType = determineIssueType(riskSignals, {
+            hasExternalDocs,
+            turnIndex: claim.meta?.turnIndex,
+            totalTurns,
+            isCircular
+        });
+        // Find conflicting claims
+        const conflicts = [];
+        // Add contradictions
+        for (const edge of topBadContradictions) {
+            if (edge.claimAId === claim.id && edge.claimBId) {
+                conflicts.push({
+                    claimId: edge.claimBId,
+                    claimText: claimTextMap.get(edge.claimBId) || edge.claimBId,
+                    relationshipType: "contradiction",
+                    edgeWeight: edge.weight || edge.badness || 0
+                });
+            }
+            else if (edge.claimBId === claim.id && edge.claimAId) {
+                conflicts.push({
+                    claimId: edge.claimAId,
+                    claimText: claimTextMap.get(edge.claimAId) || edge.claimAId,
+                    relationshipType: "contradiction",
+                    edgeWeight: edge.weight || edge.badness || 0
+                });
+            }
+        }
+        // Add unsupported relationships
+        for (const edge of topBadSupports) {
+            if (edge.claimAId === claim.id && edge.claimBId) {
+                conflicts.push({
+                    claimId: edge.claimBId,
+                    claimText: claimTextMap.get(edge.claimBId) || edge.claimBId,
+                    relationshipType: "unsupported_by",
+                    edgeWeight: edge.weight || edge.badness || 0
+                });
+            }
+            else if (edge.claimBId === claim.id && edge.claimAId) {
+                conflicts.push({
+                    claimId: edge.claimAId,
+                    claimText: claimTextMap.get(edge.claimAId) || edge.claimAId,
+                    relationshipType: "unsupported_by",
+                    edgeWeight: edge.weight || edge.badness || 0
+                });
+            }
+        }
+        // Use computed importance from risk score, or destructive claims if available
+        let importance = destructiveImportanceMap.get(claim.id);
+        if (importance === undefined) {
+            importance = riskResult.riskScore; // Use risk score as importance
+        }
+        // Severity comes from computed risk score (NOT hard-coded)
+        const severity = riskResult.severity;
+        // Generate claim summary (truncated for table display)
+        const claimSummary = claim.text.length > 80
+            ? '"' + claim.text.substring(0, 77) + '..."'
+            : '"' + claim.text + '"';
+        // Use computed explanation from risk scoring
+        const whyFlagged = riskResult.explanation || generateWhyFlagged(issueType, speaker, claim.text, conflicts);
+        // Build the defensible issue
+        const issue = {
+            issueId: generateIssueId(claim.id, evaluationId),
+            claimId: claim.id,
+            evaluationId,
+            what: {
+                claimText: claim.text,
+                claimSummary,
                 issueType,
+                truthState,
+                description: generateIssueDescription(truthState, issueType, speaker, conflicts.length),
+                whyFlagged,
+                claimType: claim.claimType
+            },
+            who: {
                 speaker,
+                speakerLabel: speaker === "AGENT" ? "Agent" :
+                    speaker === "CUSTOMER" ? "Customer" :
+                        speaker === "SYSTEM" ? "System" : "Unknown"
+            },
+            where: {
                 turnStartIdx: claim.meta?.turnIndex,
                 turnEndIdx: claim.meta?.turnIndex,
-                primaryEvidence: claim.meta?.turnIndex !== undefined ? {
-                    turnIdx: claim.meta.turnIndex,
-                    speaker,
-                    excerpt: claim.text.substring(0, 200) // First 200 chars as excerpt
-                } : undefined,
-                relatedEdges: {
-                    topBadContradictions,
-                    topBadSupports
-                },
-                status: "OPEN"
-            });
-        }
+                timestampStartMs: claim.meta?.timestampMs,
+                excerpt: claim.text.substring(0, 300)
+            },
+            conflictsWith: conflicts,
+            risk: {
+                severity,
+                category: issueType === "CONTRADICTION" ? "accuracy" :
+                    issueType === "UNSUPPORTED" || issueType === "UNVERIFIED" ? "evidence" :
+                        issueType === "CIRCULAR" ? "reasoning" :
+                            issueType === "PROMISE_RISK" || issueType === "ABSOLUTE_CLAIM" ? "commitment" :
+                                "compliance",
+                explanation: generateRiskExplanation(issueType, severity, speaker),
+                policyRuleIds: undefined
+            },
+            confidence: {
+                nodeBlameNorm: blame,
+                importance,
+                nliScore: maxContradictionScore > 0 ? maxContradictionScore : undefined,
+                groundingScore: actualGroundingScore // Use ACTUAL grounding from graph edges
+            },
+            status: "OPEN"
+        };
+        issues.push(issue);
     }
-    else {
-        // Fallback: derive from spectral truthVector and nodeBlame
-        const truthStates = spectral.truthStates || [];
-        const nodeBlameNorm = spectral.nodeBlameNorm || [];
-        for (let i = 0; i < claims.length; i++) {
-            const claim = claims[i];
-            const truthState = (truthStates[i] || "Inconclusive");
-            const blame = nodeBlameNorm[i] || 0;
-            if (blame > 0.1 || truthState === "Contradicted" || truthState === "Ungrounded") {
-                const speaker = claim.meta?.speaker === "Agent" ? "AGENT" :
-                    claim.meta?.speaker === "Customer" ? "CUSTOMER" : "UNKNOWN";
-                const importance = calculateImportance({
-                    nodeBlameNorm: blame,
-                    truthState,
-                    speaker
-                });
-                issues.push({
-                    claimId: claim.id,
-                    truthState,
-                    nodeBlameNorm: blame,
-                    importance,
-                    issueType: truthState === "Contradicted" ? "CONTRADICTION" : "UNSUPPORTED",
-                    speaker,
-                    turnStartIdx: claim.meta?.turnIndex,
-                    turnEndIdx: claim.meta?.turnIndex,
-                    primaryEvidence: claim.meta?.turnIndex !== undefined ? {
-                        turnIdx: claim.meta.turnIndex,
-                        speaker,
-                        excerpt: claim.text.substring(0, 200)
-                    } : undefined,
-                    relatedEdges: {
-                        topBadContradictions: spectral.topBadContradictions?.filter(e => e.claimAId === claim.id || e.claimBId === claim.id) || [],
-                        topBadSupports: spectral.topBadSupports?.filter(e => e.claimAId === claim.id || e.claimBId === claim.id) || []
-                    },
-                    status: "OPEN"
-                });
-            }
-        }
-    }
-    // Sort by importance descending
-    issues.sort((a, b) => b.importance - a.importance);
+    // Sort by importance (risk score) descending
+    issues.sort((a, b) => b.confidence.importance - a.confidence.importance);
     return issues;
+}
+/**
+ * Legacy buildIssuesList for backward compatibility
+ * Returns simpler issue objects for existing code
+ */
+export function buildIssuesListLegacy(spectral, claims, destructiveClaims) {
+    // Use the new function and convert to legacy format
+    const defensibleIssues = buildIssuesList(spectral, claims, destructiveClaims);
+    return defensibleIssues.map(issue => ({
+        claimId: issue.claimId,
+        truthState: issue.what.truthState,
+        nodeBlameNorm: issue.confidence.nodeBlameNorm,
+        importance: issue.confidence.importance,
+        issueType: issue.what.issueType === "CIRCULAR" ? "UNSUPPORTED" : issue.what.issueType,
+        speaker: issue.who.speaker === "SYSTEM" ? "UNKNOWN" : issue.who.speaker,
+        turnStartIdx: issue.where.turnStartIdx,
+        turnEndIdx: issue.where.turnEndIdx,
+        primaryEvidence: issue.where.turnStartIdx !== undefined ? {
+            turnIdx: issue.where.turnStartIdx,
+            speaker: issue.who.speaker,
+            excerpt: issue.where.excerpt || ""
+        } : undefined,
+        relatedEdges: {
+            topBadContradictions: issue.conflictsWith
+                .filter(c => c.relationshipType === "contradiction")
+                .map(c => ({ claimAId: issue.claimId, claimBId: c.claimId, weight: c.edgeWeight })),
+            topBadSupports: issue.conflictsWith
+                .filter(c => c.relationshipType === "unsupported_by")
+                .map(c => ({ claimAId: issue.claimId, claimBId: c.claimId, weight: c.edgeWeight }))
+        },
+        status: issue.status
+    }));
 }

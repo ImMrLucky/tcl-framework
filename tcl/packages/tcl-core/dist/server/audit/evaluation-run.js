@@ -41,10 +41,11 @@ export async function runEvaluation(input, context, supabaseAdmin) {
     const spectral = await callSpectralAnalyze(input.claims, input.supports, input.contradictions, input.grounded, input.config);
     const latency = Date.now() - startTime;
     // Convert provided claims to Claim[] format for buildIssuesList
+    // CRITICAL: Do NOT hard-code confidence. Use 0 if not provided - it must be computed from graph edges.
     const claims = input.claims.map(c => ({
         id: c.id,
         text: c.text,
-        confidence: 0.75,
+        confidence: 0, // Will be computed from grounding edges in buildIssuesList
         evidence: [],
         meta: {
             speaker: c.speaker === 'AGENT' ? 'Agent' : c.speaker === 'CUSTOMER' ? 'Customer' : undefined,
@@ -110,9 +111,9 @@ export async function runEvaluation(input, context, supabaseAdmin) {
             } : {},
             counts: {
                 claims: claims.length,
-                contradicted: issues.filter(i => i.truthState === 'Contradicted').length,
-                ungrounded: issues.filter(i => i.truthState === 'Ungrounded').length,
-                supported: issues.filter(i => i.truthState === 'Supported').length
+                contradicted: issues.filter(i => i.what.truthState === 'Contradicted').length,
+                ungrounded: issues.filter(i => i.what.truthState === 'Ungrounded').length,
+                supported: issues.filter(i => i.what.truthState === 'Supported').length
             }
         },
         refusal: false,

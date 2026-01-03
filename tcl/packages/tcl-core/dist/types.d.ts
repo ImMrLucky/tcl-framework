@@ -3,6 +3,27 @@ export type Source = {
     id: string;
     text: string;
 };
+/** Claim kind determines how it participates in contradiction detection */
+export type ClaimKind = "assertion" | "intent" | "question" | "meta" | "emotion" | "promise" | "unknown";
+/** Grounding status - where the claim gets its support */
+export type ClaimGrounding = {
+    kind: "transcript" | "external" | "none";
+    evidenceIds: string[];
+    quoteSpans?: Array<{
+        start: number;
+        end: number;
+    }>;
+};
+/** Verification status - for claims against external sources */
+export type ClaimVerification = {
+    status: "unverified" | "verified" | "disputed" | "not_applicable";
+    evidenceIds: string[];
+};
+/** Consistency status - relationship to other claims */
+export type ClaimConsistency = {
+    status: "consistent" | "inconsistent" | "unknown";
+    against: string[];
+};
 export type Claim = {
     id: string;
     text: string;
@@ -13,6 +34,10 @@ export type Claim = {
         span?: string;
         weight?: number;
     }[];
+    claimKind?: ClaimKind;
+    grounding?: ClaimGrounding;
+    verification?: ClaimVerification;
+    consistency?: ClaimConsistency;
     confidenceMetrics?: {
         groundingScore: number;
         supportScore: number;
@@ -23,6 +48,79 @@ export type Claim = {
     meta?: {
         speaker?: string;
         turnIndex?: number;
+    };
+    truthState?: "Supported" | "Contradicted" | "Ungrounded" | "Inconclusive";
+    whyFlagged?: {
+        reasons: string[];
+        evidence: Array<{
+            source_id: string;
+            quote?: string;
+            span?: string;
+        }>;
+        conflictsWith: Array<{
+            claimId: string;
+            score: number;
+        }>;
+        missingEvidence: boolean;
+    };
+    suggestedRewrite?: string;
+};
+export type EvidenceQuote = {
+    quoteId: string;
+    claimId: string;
+    speaker: "Agent" | "Customer" | "System";
+    turnIndex: number;
+    lineSpan?: [number, number];
+    text: string;
+    evidenceRef?: {
+        type: "Call" | "Policy" | "KB";
+        ref: string;
+    };
+};
+export type ContradictionPair = {
+    claimAId: string;
+    claimBId: string;
+    score: number;
+    explanation: string;
+    quoteIds: [string, string];
+};
+export type IssueNarrative = {
+    issueId: string;
+    category: string;
+    subcategory?: string;
+    title: string;
+    severity: "LOW" | "MEDIUM" | "HIGH" | "CRITICAL";
+    confidence: "LOW" | "MEDIUM" | "HIGH";
+    status: "OPEN" | "RESOLVED" | "DISMISSED";
+    scope: {
+        turnRange: [number, number];
+        claimIds: string[];
+        speakerFocus: "AGENT" | "SYSTEM" | "CUSTOMER";
+    };
+    whatIsWrong: string;
+    whyWrong: string[];
+    whyItMatters: string[];
+    recommendedActions: Array<{
+        type: "COACHING" | "PROCESS" | "COMPLIANCE" | "SYSTEM_FIX";
+        action: string;
+    }>;
+    evidenceQuotes: EvidenceQuote[];
+    contradictionPairs?: ContradictionPair[];
+    traceability: {
+        topEdges: Array<{
+            type: "support" | "contradiction" | "grounding";
+            fromClaimId: string;
+            toClaimId: string;
+            weight: number;
+            reason?: string;
+        }>;
+    };
+    scoring: {
+        riskScore: number;
+        impactScore: number;
+        fixabilityScore: number;
+        compositeScore: number;
+        rationale: string[];
     };
 };
 export type Violation = {
@@ -168,7 +266,6 @@ export type ValidationOptions = {
     customRules?: CustomRule[];
     includeSuggestions?: boolean;
     includeConfidenceMetrics?: boolean;
-    spectralMode?: "score" | "analyze";
     trajectory?: boolean;
     trajectoryWindowTurns?: number;
     maxTrajectorySegments?: number;
@@ -179,15 +276,23 @@ export type ValidateInput = {
     sources?: Source[];
     options?: ValidationOptions;
 };
+/** Support edge types */
+export type SupportType = "entailed" | "paraphrase" | "reinforced" | "weak";
 export type SupportEdge = {
     claimA: string;
     claimB: string;
     weight: number;
+    supportType?: SupportType;
 };
+/** Contradiction edge types - critical for gating */
+export type ContradictionType = "direct" | "topic_mismatch" | "low_overlap" | "needs_review";
 export type ContradictionEdge = {
     claimA: string;
     claimB: string;
     weight: number;
+    contradictionType?: ContradictionType;
+    overlapScore?: number;
+    reasonCodes?: string[];
 };
 export type GroundingEdge = {
     claimId: string;
@@ -205,9 +310,57 @@ export type Suggestion = {
     suggestedAction: string;
     example?: string;
 };
+/** Review item severity */
+export type ReviewSeverity = "low" | "medium" | "high" | "critical";
+/** Review item - the "money" output users actually need */
+export type ReviewItem = {
+    id: string;
+    title: string;
+    severity: ReviewSeverity;
+    category: "contradiction" | "ungrounded" | "promise_unverified" | "policy" | "destructive";
+    whyItMatters: string;
+    involvedClaimIds: string[];
+    claimTexts: string[];
+    speakerLabels: string[];
+    transcriptSpans?: Array<{
+        start: number;
+        end: number;
+    }>;
+    recommendedAction: string;
+    actionTemplate?: string;
+    drivers: {
+        nodeBlameNorm?: number;
+        contradictionWeight?: number;
+        overlapScore?: number;
+        destructiveImportance?: number;
+        reasonCodes?: string[];
+    };
+};
+/** Enhanced scores that reflect reality */
+export type EnhancedScores = {
+    groundednessScore: number | null;
+    verificationScore: number | null;
+    consistencyScore: number | null;
+    coherenceScore: number | null;
+    /** @deprecated Use groundednessScore instead */
+    truth: number | null;
+    consistency: number | null;
+    coherence: number | null;
+    overall: number | null;
+};
+/** Summary stats for UI display */
+export type SummaryStats = {
+    totalClaims: number;
+    groundedClaims: number;
+    verifiedClaims: number;
+    directContradictions: number;
+    needsReviewCount: number;
+    hasExternalEvidence: boolean;
+};
 export type GraphDebugInfo = {
     numClaims: number;
     numSources: number;
+    transcriptSourcesGenerated?: number;
     annEnabled: boolean;
     cacheEnabled: boolean;
     spectralEnabled: boolean;
@@ -234,6 +387,61 @@ export type GraphDebugInfo = {
     };
     reasonIfEmptyGraph: string | null;
 };
+/**
+ * Run Manifest - AUDIT-CRITICAL
+ *
+ * Contains all configuration and metadata needed to reproduce an evaluation.
+ * Required for enterprise adoption and compliance.
+ */
+export type RunManifest = {
+    /** SHA-256 hash of input */
+    inputHash: string;
+    /** SHA-256 hash of config bundle (scoring + templates + taxonomy) */
+    configHash: string;
+    /** Artifact ID if provided */
+    artifactId?: string;
+    /** Claim extractor version */
+    claimExtractorVersion: string;
+    /** NLI model ID */
+    nliModelId: string;
+    /** NLI thresholds used */
+    nliThresholds: {
+        support: number;
+        contradiction: number;
+        grounding: number;
+    };
+    /** Embedding model for retrieval */
+    embeddingModel: string;
+    /** Retrieval k (top-k chunks per claim) */
+    retrievalK: number;
+    /** Spectral engine version */
+    spectralEngineVersion?: string;
+    /** Code version (git commit SHA) */
+    codeVersion: string;
+    /** Engine version */
+    engineVersion: string;
+    /** Model fingerprint (all model versions used) */
+    modelFingerprint: {
+        nliModel?: string;
+        claimExtractor?: string;
+        embeddingModel?: string;
+        spectralEngine?: string;
+        configHash?: string;
+    };
+    /** Timestamp */
+    createdAt: string;
+    /** Number of transcript sources generated */
+    transcriptSourcesCount: number;
+    /** Graph health check results */
+    graphHealth: {
+        supportEdges: number;
+        contradictionEdges: number;
+        groundingEdges: number;
+        totalEdges: number;
+        healthy: boolean;
+        reason?: string;
+    };
+};
 export type ValidateOutput = {
     answer: string;
     refusal: boolean;
@@ -243,6 +451,8 @@ export type ValidateOutput = {
         coherence: number | null;
         overall: number | null;
     };
+    enhancedScores?: EnhancedScores;
+    summaryStats?: SummaryStats;
     scorerId?: string;
     latency?: number;
     cacheHitRate?: number;
@@ -262,6 +472,7 @@ export type ValidateOutput = {
         spectral?: SpectralReport & {
             spectralSkipped?: boolean;
             debugReason?: string;
+            graphHealthDiagnostic?: any;
         };
         graph?: {
             supports: SupportEdge[];
@@ -269,9 +480,11 @@ export type ValidateOutput = {
             grounding: GroundingEdge[];
             debug?: GraphDebugInfo;
         };
+        reviewItems?: ReviewItem[];
         suggestions?: Suggestion[];
         destructiveClaims?: DestructiveClaim[];
         trajectory?: TrajectoryReport;
+        manifest?: RunManifest;
     };
 };
 export type BatchValidateInput = {

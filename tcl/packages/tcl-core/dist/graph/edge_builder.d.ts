@@ -97,10 +97,12 @@ export type EdgeBuilderOptions = {
     contradictionThreshold?: number;
     groundingThreshold?: number;
     topGroundingK?: number;
+    maxGroundingPairsPerClaim?: number;
     maxPairwiseEdges?: number;
     batchSize?: number;
     ann?: AnnConfig;
     cache?: EdgeBuilderCacheConfig;
+    timer?: any;
 };
 export declare class TokenHeuristicScorer implements SemanticScorer {
     id: string;

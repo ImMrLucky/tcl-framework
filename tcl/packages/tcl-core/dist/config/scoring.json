@@ -1,0 +1,66 @@
+{
+  "thresholds": {
+    "truthTau": 0.15,
+    "severity": {
+      "low": 0.25,
+      "medium": 0.5,
+      "high": 0.75,
+      "critical": 0.9
+    },
+    "confidence": {
+      "low": 0.4,
+      "medium": 0.6,
+      "high": 0.75
+    },
+    "contradictionWeight": 0.5,
+    "supportWeight": 0.3,
+    "groundingWeight": 0.2,
+    "minContradictionScore": 0.3,
+    "minSupportScore": 0.3,
+    "minGroundingScore": 0.3
+  },
+  "weights": {
+    "issueComposite": {
+      "risk": 0.5,
+      "impact": 0.3,
+      "fixability": 0.2
+    },
+    "riskScore": {
+      "severity": 0.4,
+      "contradictionStrength": 0.3,
+      "topicRiskMultiplier": 0.2,
+      "regulatorySensitivity": 0.1
+    },
+    "impactScore": {
+      "category": 0.3,
+      "customerHarmPotential": 0.4,
+      "regulatorySensitivity": 0.3
+    },
+    "fixabilityScore": {
+      "clarity": 0.4,
+      "claimCount": 0.2,
+      "turnSpan": 0.2,
+      "groundedness": 0.2
+    }
+  },
+  "categoryRiskMultipliers": {
+    "BILLING": 1.2,
+    "DISCLOSURE": 1.5,
+    "MISREPRESENTATION": 1.8,
+    "PRIVACY": 1.6,
+    "SECURITY": 2.0,
+    "PROCESS": 1.0,
+    "CUSTOMER_HARM": 1.7,
+    "REGULATORY": 1.9,
+    "PROMISE_BREACH": 1.3,
+    "OTHER": 1.0
+  },
+  "customerHarmIndicators": {
+    "financial": 1.5,
+    "legal": 1.8,
+    "privacy": 1.6,
+    "service_disruption": 1.3,
+    "trust": 1.2
+  }
+}
+

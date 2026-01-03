@@ -58,8 +58,8 @@ export async function computeTrajectory(input, validateOnce, adapter, options) {
             sources: input.sources,
             options: {
                 ...input.options,
-                spectral: input.options?.spectral ?? true,
-                spectralMode: input.options?.spectralMode ?? "analyze"
+                spectral: input.options?.spectral ?? true
+                // spectralMode removed - always uses /spectral/analyze
             }
         };
         try {

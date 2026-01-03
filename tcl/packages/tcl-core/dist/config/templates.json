@@ -1,0 +1,104 @@
+{
+  "contradiction": {
+    "title": "Conflicting {{subcategory}} information",
+    "whatIsWrong": "The agent provided conflicting information about {{subcategory}}. Statement A (turn {{turnA}}) states '{{quoteA}}' while Statement B (turn {{turnB}}) states '{{quoteB}}'.",
+    "whyWrong": [
+      "These statements cannot both be true without clarification.",
+      "Creates confusion and potential compliance risk if customer relies on incorrect information.",
+      "Violates consistency requirement for customer-facing communications."
+    ],
+    "whyItMatters": [
+      "May lead to billing disputes and escalations.",
+      "Creates compliance risk if customer relies on incorrect terms.",
+      "Damages customer trust and agent credibility.",
+      "May result in regulatory violations if not corrected."
+    ],
+    "recommendedActions": [
+      {
+        "type": "COACHING",
+        "action": "Coach agent to confirm terms in the service agreement and restate clearly."
+      },
+      {
+        "type": "PROCESS",
+        "action": "Review knowledge base for {{subcategory}} to ensure single source of truth."
+      },
+      {
+        "type": "COMPLIANCE",
+        "action": "Document discrepancy and verify correct policy with compliance team."
+      }
+    ]
+  },
+  "ungrounded": {
+    "title": "Ungrounded {{subcategory}} claim",
+    "whatIsWrong": "The agent made a claim about {{subcategory}} (turn {{turn}}): '{{quote}}' but this statement is not supported by available evidence or policy documents.",
+    "whyWrong": [
+      "Claim lacks grounding in policy, knowledge base, or transcript evidence.",
+      "Cannot be verified against authoritative sources.",
+      "May be inaccurate or unenforceable."
+    ],
+    "whyItMatters": [
+      "Creates legal and compliance risk if customer relies on unverified information.",
+      "May lead to service delivery failures if promises cannot be fulfilled.",
+      "Damages trust if information is later found to be incorrect."
+    ],
+    "recommendedActions": [
+      {
+        "type": "COACHING",
+        "action": "Train agent to verify information before making claims to customers."
+      },
+      {
+        "type": "PROCESS",
+        "action": "Add {{subcategory}} information to knowledge base with source citations."
+      },
+      {
+        "type": "COMPLIANCE",
+        "action": "Review claim for accuracy and update policy documentation if needed."
+      }
+    ]
+  },
+  "circular": {
+    "title": "Circular support pattern in {{subcategory}}",
+    "whatIsWrong": "Multiple claims about {{subcategory}} form a circular support pattern, where claims reference each other without external grounding.",
+    "whyWrong": [
+      "Claims support each other but lack independent verification.",
+      "No external evidence anchors the claim chain.",
+      "Creates risk of propagating incorrect information."
+    ],
+    "whyItMatters": [
+      "Circular reasoning cannot establish truth independently.",
+      "May mask underlying knowledge gaps or policy inconsistencies.",
+      "Creates audit risk if claims cannot be traced to authoritative sources."
+    ],
+    "recommendedActions": [
+      {
+        "type": "COACHING",
+        "action": "Train agent to ground claims in policy documents or verified knowledge base entries."
+      },
+      {
+        "type": "PROCESS",
+        "action": "Review knowledge base structure to ensure claims can be independently verified."
+      },
+      {
+        "type": "SYSTEM_FIX",
+        "action": "Update claim extraction to flag circular patterns and require grounding."
+      }
+    ]
+  },
+  "default": {
+    "title": "Issue with {{category}}",
+    "whatIsWrong": "An issue was identified in the {{category}} category that requires review.",
+    "whyWrong": [
+      "Issue requires manual review for specific context."
+    ],
+    "whyItMatters": [
+      "May impact customer experience or compliance."
+    ],
+    "recommendedActions": [
+      {
+        "type": "COACHING",
+        "action": "Review issue with agent and provide targeted coaching."
+      }
+    ]
+  }
+}
+

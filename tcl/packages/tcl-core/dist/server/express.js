@@ -1,11 +1,48 @@
 import express from "express";
 import multer from "multer";
 import { transcribeAudio, isValidAudioFormat } from "./transcription.js";
-import { supabaseAdmin, verifyApiKeyExtended, provisionUser, getUserOrgs, getUserRole, checkUserPermission, getOrgProjects, getProjectEnvs, generateApiKey, logAudit, trackUsage } from "./supabase.js";
+import { supabaseAdmin, provisionUser, getUserOrgs, getUserRole, checkUserPermission, getOrgProjects, getProjectEnvs, generateApiKey, logAudit, trackUsage } from "./supabase.js";
 import { inviteMember, updateMemberRole, removeMember, listMembers } from "./member-management.js";
 import { setupIntegrationRoutes } from "./integrations/routes.js";
 import { setupAuditRoutes } from "./audit/routes.js";
+import { buildIssuesList } from "./audit/reproducibility.js";
+import { analyzeForIssues, exportAsJSON, exportAsCSV, exportAsHTML } from "../issues/index.js";
+import { buildIssueNarratives } from "../analysis/issue-narratives.js";
+import { computeHeadlineCounts } from "../analysis/headline-counts.js";
+import { exportNarrativesAsCSV, exportNarrativesAsJSON, exportNarrativesAsHTML } from "../analysis/exports.js";
+import { getOrgContext } from "./auth-context.js";
+import { registerIngestEndpoints } from "./ingestion/ingest-endpoint.js";
 const app = express();
+// CORS middleware - allows frontend to call Railway directly
+// This is necessary when the frontend calls Railway directly for /validate
+// to bypass Netlify's function timeout
+app.use((req, res, next) => {
+    // Allow requests from any origin in production
+    // In production, you might want to restrict this to specific domains
+    const allowedOrigins = [
+        'https://protectqa.com',
+        'https://www.protectqa.com',
+        'http://localhost:4200',
+        'http://localhost:3000'
+    ];
+    const origin = req.headers.origin;
+    if (origin && allowedOrigins.some(allowed => origin.startsWith(allowed.replace('www.', '')))) {
+        res.setHeader('Access-Control-Allow-Origin', origin);
+    }
+    else if (origin) {
+        // For development, allow any origin
+        res.setHeader('Access-Control-Allow-Origin', origin);
+    }
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+    res.setHeader('Access-Control-Allow-Credentials', 'true');
+    res.setHeader('Access-Control-Max-Age', '86400'); // 24 hours
+    // Handle preflight requests
+    if (req.method === 'OPTIONS') {
+        return res.status(200).end();
+    }
+    next();
+});
 // Configure multer for file uploads FIRST (before JSON parsing)
 // This prevents JSON parser from trying to parse multipart/form-data
 const upload = multer({
@@ -40,6 +77,348 @@ app.use(express.urlencoded({ extended: true })); // Enable query string parsing
 // Health check endpoint - must work even if other imports fail
 app.get("/health", (req, res) => {
     res.json({ status: "ok", service: "tcl-core" });
+});
+// Diagnostic endpoint - test the entire NLI + Spectral pipeline
+app.get("/diagnostic", async (req, res) => {
+    const diagnostic = {
+        timestamp: new Date().toISOString(),
+        status: "running",
+        steps: {}
+    };
+    try {
+        // Step 1: Check modules loaded
+        diagnostic.steps.modulesLoaded = {
+            validate: !!validate,
+            orchestrator: "pending"
+        };
+        if (!validate) {
+            await loadModules();
+        }
+        diagnostic.steps.modulesLoaded.validate = !!validate;
+        diagnostic.steps.modulesLoaded.orchestrator = !!validate ? "ok" : "failed";
+        // Step 2: Test evidence source generation
+        const testTranscript = `Agent: Thank you for calling. How can I help you today?
+Customer: Hi, I'm calling about my bill. It's higher than expected.
+Agent: I understand. Let me look into that for you.
+Customer: I was told my rate wouldn't change.
+Agent: Based on what I can see, your plan hasn't changed.`;
+        const { generateSourcesFromRawTranscript } = await import("../evidence_sources.js");
+        const sources = generateSourcesFromRawTranscript(testTranscript, "test");
+        diagnostic.steps.evidenceSources = {
+            status: sources.length > 0 ? "ok" : "failed",
+            count: sources.length,
+            sample: sources[0]?.text?.substring(0, 100)
+        };
+        // Step 3: Test claim extraction
+        const { extractClaims } = await import("../claim_extractor.js");
+        const claims = extractClaims(testTranscript);
+        diagnostic.steps.claimExtraction = {
+            status: claims.length > 0 ? "ok" : "failed",
+            count: claims.length,
+            sample: claims[0]?.text?.substring(0, 100)
+        };
+        // Step 4: Test NLI scorer loading (priority: SpectralNli > Transformers > Heuristic)
+        let activeScorer = null;
+        let scorerType = "none";
+        // Try SpectralNliScorer first (recommended - uses Python service)
+        if (process.env.TCL_SPECTRAL_URL) {
+            try {
+                const { SpectralNliScorer } = await import("../graph/spectral_nli_scorer.js");
+                const spectralScorer = new SpectralNliScorer({ endpoint: process.env.TCL_SPECTRAL_URL });
+                diagnostic.steps.nliScorer = {
+                    status: "testing",
+                    type: "spectral",
+                    modelId: spectralScorer.id,
+                    endpoint: process.env.TCL_SPECTRAL_URL + "/nli/score"
+                };
+                // Test if it works - score should be > 0.3 for obvious entailment
+                const testScore = await spectralScorer.entailment("The sky is blue.", "The sky has a blue color.");
+                diagnostic.steps.nliScorer.testScore = testScore;
+                if (testScore > 0.3) {
+                    activeScorer = spectralScorer;
+                    scorerType = "spectral";
+                    diagnostic.steps.nliScorer.status = "ok";
+                }
+                else {
+                    diagnostic.steps.nliScorer.status = "low_score";
+                    diagnostic.steps.nliScorer.warning = `Entailment score ${testScore} is too low for obvious test case (expected > 0.3)`;
+                }
+            }
+            catch (spectralErr) {
+                diagnostic.steps.nliScorer = {
+                    status: "failed",
+                    type: "spectral",
+                    error: spectralErr.message,
+                    willFallback: true
+                };
+            }
+        }
+        // Try TransformersNliScorer if spectral failed
+        if (!activeScorer) {
+            try {
+                const { TransformersNliScorer } = await import("../graph/transformers_scorer.js");
+                const transformersScorer = new TransformersNliScorer({});
+                diagnostic.steps.nliScorerLocal = {
+                    status: "testing",
+                    type: "transformers",
+                    modelId: transformersScorer.id
+                };
+                const testScore = await transformersScorer.entailment("Test.", "Test.");
+                if (testScore >= 0) {
+                    activeScorer = transformersScorer;
+                    scorerType = "transformers";
+                    diagnostic.steps.nliScorerLocal.status = "ok";
+                }
+            }
+            catch (transformersErr) {
+                diagnostic.steps.nliScorerLocal = {
+                    status: "failed",
+                    type: "transformers",
+                    error: transformersErr.message,
+                    willFallback: true
+                };
+            }
+        }
+        // Fallback to TokenHeuristicScorer
+        if (!activeScorer) {
+            try {
+                const { TokenHeuristicScorer } = await import("../graph/edge_builder.js");
+                activeScorer = new TokenHeuristicScorer();
+                scorerType = "heuristic";
+                diagnostic.steps.nliScorerFallback = {
+                    status: "ok",
+                    type: "heuristic",
+                    modelId: activeScorer.id,
+                    note: "Using TokenHeuristicScorer as fallback (basic accuracy - configure TCL_SPECTRAL_URL for better results)"
+                };
+            }
+            catch (fallbackErr) {
+                diagnostic.steps.nliScorerFallback = {
+                    status: "failed",
+                    error: fallbackErr.message
+                };
+            }
+        }
+        // Step 5: Test NLI scoring with the active scorer
+        if (activeScorer) {
+            try {
+                const entailScore = await activeScorer.entailment("The sky is blue.", "The sky has a blue color.");
+                const contradictScore = await activeScorer.contradiction("The door is open.", "The door is closed.");
+                diagnostic.steps.nliScoring = {
+                    status: "ok",
+                    scorerType,
+                    scorerId: activeScorer.id,
+                    entailmentScore: entailScore,
+                    contradictionScore: contradictScore,
+                    labelMapAfterLoad: activeScorer.labelMap,
+                    note: scorerType === "heuristic"
+                        ? "Using heuristic scorer - results will be basic but functional"
+                        : null
+                };
+            }
+            catch (nliErr) {
+                diagnostic.steps.nliScoring = {
+                    status: "error",
+                    scorerType,
+                    error: nliErr.message
+                };
+            }
+        }
+        else {
+            diagnostic.steps.nliScoring = {
+                status: "error",
+                error: "No NLI scorer available"
+            };
+        }
+        // Step 6: Check spectral URL
+        diagnostic.steps.spectralConfig = {
+            url: process.env.TCL_SPECTRAL_URL || "NOT_SET",
+            status: process.env.TCL_SPECTRAL_URL ? "configured" : "missing"
+        };
+        // Step 7: Test spectral connection (try multiple endpoints)
+        if (process.env.TCL_SPECTRAL_URL) {
+            const spectralUrl = process.env.TCL_SPECTRAL_URL.replace(/\/$/, '');
+            diagnostic.steps.spectralConnection = { status: "testing", url: spectralUrl };
+            // Try health endpoint first, then root, then docs
+            const endpointsToTry = ['/health', '/', '/docs', '/spectral/score'];
+            let connected = false;
+            for (const endpoint of endpointsToTry) {
+                try {
+                    const resp = await fetch(`${spectralUrl}${endpoint}`, {
+                        method: endpoint === '/spectral/score' ? 'POST' : 'GET',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: endpoint === '/spectral/score' ? JSON.stringify({
+                            claims: [{ id: "test", text: "Test claim" }],
+                            supports: [],
+                            contradictions: [],
+                            grounded: []
+                        }) : undefined
+                    });
+                    if (resp.ok || resp.status < 500) {
+                        diagnostic.steps.spectralConnection = {
+                            status: "ok",
+                            endpoint: endpoint,
+                            httpStatus: resp.status
+                        };
+                        connected = true;
+                        break;
+                    }
+                }
+                catch (err) {
+                    // Continue trying other endpoints
+                }
+            }
+            if (!connected) {
+                diagnostic.steps.spectralConnection = {
+                    status: "error",
+                    error: "Could not connect to any spectral endpoint",
+                    triedEndpoints: endpointsToTry
+                };
+            }
+        }
+        diagnostic.status = "complete";
+        diagnostic.summary = {
+            evidenceSourcesWorking: diagnostic.steps.evidenceSources?.status === "ok",
+            claimExtractionWorking: diagnostic.steps.claimExtraction?.status === "ok",
+            nliScoringWorking: diagnostic.steps.nliScoring?.status === "ok",
+            nliScorerType: diagnostic.steps.nliScoring?.scorerType || "none",
+            spectralConfigured: diagnostic.steps.spectralConfig?.status === "configured",
+            spectralConnected: diagnostic.steps.spectralConnection?.status === "ok",
+            // Overall readiness
+            pipelineReady: (diagnostic.steps.evidenceSources?.status === "ok" &&
+                diagnostic.steps.claimExtraction?.status === "ok" &&
+                diagnostic.steps.nliScoring?.status === "ok" &&
+                diagnostic.steps.spectralConnection?.status === "ok")
+        };
+        res.json(diagnostic);
+    }
+    catch (err) {
+        diagnostic.status = "error";
+        diagnostic.error = err.message;
+        diagnostic.stack = err.stack;
+        res.status(500).json(diagnostic);
+    }
+});
+// Edge builder test endpoint - tests batch NLI scoring and edge creation
+app.get("/edge-test", async (req, res) => {
+    const result = {
+        timestamp: new Date().toISOString(),
+        steps: {}
+    };
+    try {
+        // Test transcript with known grounding relationship
+        const testTranscript = `Agent: Your plan allows you to cancel at any time without a fee.
+Customer: That's great to hear.
+Agent: However, there may be an early termination charge if you cancel during the promotional period.
+Customer: Wait, that contradicts what you just said about no fees.`;
+        // Step 1: Generate sources
+        const { generateSourcesFromRawTranscript } = await import("../evidence_sources.js");
+        const sources = generateSourcesFromRawTranscript(testTranscript, "test-edge");
+        result.steps.sources = {
+            count: sources.length,
+            texts: sources.map(s => s.text.substring(0, 80) + "...")
+        };
+        // Step 2: Extract claims
+        const { extractClaims } = await import("../claim_extractor.js");
+        const claims = extractClaims(testTranscript);
+        result.steps.claims = {
+            count: claims.length,
+            texts: claims.map(c => c.text.substring(0, 80) + "...")
+        };
+        // Step 3: Create scorer
+        const { SpectralNliScorer } = await import("../graph/spectral_nli_scorer.js");
+        const spectralUrl = process.env.TCL_SPECTRAL_URL || "";
+        const scorer = new SpectralNliScorer({ endpoint: spectralUrl });
+        result.steps.scorer = {
+            id: scorer.id,
+            endpoint: spectralUrl + "/nli/score"
+        };
+        // Step 4: Manually test batch scoring for grounding
+        const groundingPairs = [];
+        for (const claim of claims) {
+            for (const source of sources) {
+                groundingPairs.push({
+                    task: "grounding",
+                    a: source.text, // source as premise
+                    b: claim.text, // claim as hypothesis
+                    key: `gnd_${claim.id}_${source.id}`
+                });
+            }
+        }
+        result.steps.groundingPairs = {
+            count: groundingPairs.length,
+            samplePairs: groundingPairs.slice(0, 3).map(p => ({
+                task: p.task,
+                premise: p.a.substring(0, 60) + "...",
+                hypothesis: p.b.substring(0, 60) + "..."
+            }))
+        };
+        // Step 5: Call scoreBatch directly
+        const batchScores = await scorer.scoreBatch(groundingPairs);
+        result.steps.batchScoring = {
+            scoresReturned: batchScores.length,
+            sampleScores: batchScores.slice(0, 5).map((s, i) => ({
+                key: s.key?.substring(0, 30) + "...",
+                score: s.score?.toFixed(4),
+                pair: groundingPairs[i] ? {
+                    premise: groundingPairs[i].a.substring(0, 40),
+                    hypothesis: groundingPairs[i].b.substring(0, 40)
+                } : null
+            })),
+            distribution: {
+                high: batchScores.filter(s => s.score >= 0.5).length,
+                medium: batchScores.filter(s => s.score >= 0.25 && s.score < 0.5).length,
+                low: batchScores.filter(s => s.score < 0.25).length
+            },
+            stats: {
+                max: Math.max(...batchScores.map(s => s.score)),
+                min: Math.min(...batchScores.map(s => s.score)),
+                avg: batchScores.reduce((a, b) => a + b.score, 0) / batchScores.length
+            }
+        };
+        // Step 6: Count how many would pass threshold
+        const threshold = 0.25;
+        const passingEdges = batchScores.filter(s => s.score >= threshold);
+        result.steps.edgeCreation = {
+            threshold,
+            passingCount: passingEdges.length,
+            failingCount: batchScores.length - passingEdges.length,
+            passingScores: passingEdges.slice(0, 5).map(s => s.score.toFixed(4))
+        };
+        // Step 7: Now test full buildClaimGraph
+        const { buildClaimGraph } = await import("../graph/edge_builder.js");
+        const graph = await buildClaimGraph(claims, sources, {
+            scorer,
+            supportThreshold: 0.25,
+            contradictionThreshold: 0.35,
+            groundingThreshold: 0.25,
+            maxPairwiseEdges: 200,
+            batchSize: 256, // Larger batches = fewer HTTP calls
+            cache: { enabled: false } // Disable cache for testing
+        });
+        result.steps.graphBuild = {
+            supports: graph.supports.length,
+            contradictions: graph.contradictions.length,
+            grounding: graph.grounding.length,
+            groundedClaimIds: graph.groundedClaimIds,
+            debug: graph.debug
+        };
+        result.status = "complete";
+        result.summary = {
+            claimsExtracted: claims.length,
+            sourcesGenerated: sources.length,
+            pairsScored: batchScores.length,
+            edgesCreated: graph.supports.length + graph.contradictions.length + graph.grounding.length,
+            graphHealthy: graph.supports.length + graph.contradictions.length + graph.grounding.length > 0
+        };
+        res.json(result);
+    }
+    catch (err) {
+        result.status = "error";
+        result.error = err.message;
+        result.stack = err.stack;
+        res.status(500).json(result);
+    }
 });
 // Lazy load these to avoid startup crashes
 let validate;
@@ -78,61 +457,6 @@ async function loadModules() {
 }
 // Don't load modules on startup - let server start first, then load modules
 // This ensures health check works even if modules fail to load
-// Extract org/project/env from request (API key or user session)
-async function getOrgContext(req) {
-    // Check for API key in Authorization header
-    const authHeader = req.headers.authorization;
-    if (authHeader?.startsWith('Bearer ')) {
-        const token = authHeader.substring(7);
-        // First try API key verification
-        const verified = await verifyApiKeyExtended(token);
-        if (verified) {
-            return {
-                orgId: verified.orgId,
-                projectId: verified.projectId,
-                env: verified.env
-            };
-        }
-        // If not an API key, try Supabase JWT verification
-        if (supabaseAdmin) {
-            try {
-                const { data: { user }, error } = await supabaseAdmin.auth.getUser(token);
-                if (!error && user) {
-                    // Get user's org membership
-                    const { data: membership, error: memberError } = await supabaseAdmin
-                        .from('org_members')
-                        .select('org_id, role')
-                        .eq('user_id', user.id)
-                        .limit(1)
-                        .single();
-                    if (!memberError && membership) {
-                        // Get default project for the org
-                        const { data: project, error: projectError } = await supabaseAdmin
-                            .from('projects')
-                            .select('id')
-                            .eq('org_id', membership.org_id)
-                            .eq('is_default', true)
-                            .single();
-                        if (!projectError && project) {
-                            return {
-                                orgId: membership.org_id,
-                                projectId: project.id,
-                                env: 'sandbox', // Default to sandbox for user-initiated requests
-                                userId: user.id,
-                                role: membership.role || null
-                            };
-                        }
-                    }
-                }
-            }
-            catch (err) {
-                // JWT verification failed, continue to return null
-                console.debug('JWT verification failed:', err);
-            }
-        }
-    }
-    return null;
-}
 /**
  * Check if user has permission for an org
  * Returns { hasPermission: boolean, role: string | null }
@@ -189,12 +513,380 @@ app.post("/validate", async (req, res) => {
         const out = await validate(input);
         const latency = Date.now() - startTime;
         console.log("Validation complete");
+        // ========================================================================
+        // DIAGNOSTIC LOGGING - Trace the full pipeline
+        // ========================================================================
+        console.log("\n========== PIPELINE DIAGNOSTIC ==========");
+        console.log("1️⃣ CLAIMS:", {
+            count: out.report?.claims?.length || 0,
+            sample: out.report?.claims?.[0]?.text?.substring(0, 60)
+        });
+        console.log("2️⃣ GRAPH:", {
+            supports: out.report?.graph?.supports?.length || 0,
+            contradictions: out.report?.graph?.contradictions?.length || 0,
+            grounding: out.report?.graph?.grounding?.length || 0,
+            debug: out.report?.graph?.debug ? {
+                pairsGenerated: out.report.graph.debug.pairsGenerated,
+                pairsScored: out.report.graph.debug.pairsScored,
+                scorerId: out.report.graph.debug.model?.scorerId,
+                labelMap: out.report.graph.debug.model?.labelMap,
+                reasonIfEmpty: out.report.graph.debug.reasonIfEmptyGraph
+            } : "no debug info"
+        });
+        console.log("3️⃣ SPECTRAL:", {
+            skipped: out.report?.spectral?.spectralSkipped,
+            debugReason: out.report?.spectral?.debugReason,
+            coherenceScore: out.report?.spectral?.coherenceScore,
+            truthVectorLength: out.report?.spectral?.truthVector?.length || 0,
+            truthStatesLength: out.report?.spectral?.truthStates?.length || 0,
+            nodeBlameNormLength: out.report?.spectral?.nodeBlameNorm?.length || 0,
+            sampleTruthStates: out.report?.spectral?.truthStates?.slice(0, 3),
+            sampleNodeBlame: out.report?.spectral?.nodeBlameNorm?.slice(0, 3),
+            topBadContradictions: out.report?.spectral?.topBadContradictions?.length || 0,
+            topBadSupports: out.report?.spectral?.topBadSupports?.length || 0
+        });
+        console.log("4️⃣ DESTRUCTIVE CLAIMS:", {
+            count: out.report?.destructiveClaims?.length || 0,
+            sample: out.report?.destructiveClaims?.[0] ? {
+                claimId: out.report.destructiveClaims[0].claimId,
+                importance: out.report.destructiveClaims[0].importance,
+                truthState: out.report.destructiveClaims[0].truthState
+            } : "none"
+        });
+        console.log("5️⃣ MANIFEST:", out.report?.manifest ? {
+            inputHash: out.report.manifest.inputHash,
+            nliModelId: out.report.manifest.nliModelId,
+            transcriptSourcesCount: out.report.manifest.transcriptSourcesCount,
+            graphHealth: out.report.manifest.graphHealth
+        } : "no manifest");
+        console.log("==========================================\n");
+        // Build issues list from spectral output if available
+        // Also build issues from destructive claims even if spectral was skipped
+        let issues = [];
+        if (out.report?.claims && out.report.claims.length > 0) {
+            try {
+                // Map claims to the format expected by buildIssuesList
+                // CRITICAL: Use actual confidenceMetrics.groundingScore from NLI, NOT hard-coded 0.75
+                const claimsForIssues = out.report.claims.map((c) => ({
+                    id: c.id,
+                    text: c.text,
+                    // Use computed grounding score from confidenceMetrics, or 0 if not computed
+                    confidence: c.confidenceMetrics?.groundingScore ?? c.confidence ?? 0,
+                    evidence: c.evidence || [],
+                    meta: {
+                        speaker: c.meta?.speaker,
+                        turnIndex: c.meta?.turnIndex
+                    },
+                    // Pass through extended claim fields for risk scoring
+                    claimType: c.claimType,
+                    isAuditable: c.isAuditable,
+                    topicTags: c.topicTags || [],
+                    hasAbsoluteLanguage: c.hasAbsoluteLanguage || false,
+                    hasMoney: c.hasMoney || false
+                }));
+                // Use spectral if available, otherwise create empty spectral report
+                const spectralData = out.report.spectral?.spectralSkipped
+                    ? {
+                        truthStates: [],
+                        nodeBlameNorm: [],
+                        topBadContradictions: [],
+                        topBadSupports: [],
+                        coherenceScore: null
+                    }
+                    : (out.report.spectral || {
+                        truthStates: [],
+                        nodeBlameNorm: [],
+                        topBadContradictions: [],
+                        topBadSupports: [],
+                        coherenceScore: null
+                    });
+                // Get graph edges for actual score computation (NOT hard-coded)
+                // CRITICAL: Verify graph exists - if not, log warning but continue
+                if (!out.report?.graph) {
+                    console.warn("⚠️ WARNING: out.report.graph is missing! Graph may not have been created by orchestrator.");
+                    console.warn("   Report keys:", Object.keys(out.report || {}));
+                }
+                const graphData = out.report?.graph || {};
+                const graphSupports = graphData.supports || [];
+                const graphContradictions = graphData.contradictions || out.report?.contradictions?.map((c) => ({
+                    claimA: c.claimA,
+                    claimB: c.claimB,
+                    weight: 1.0
+                })) || [];
+                const graphGrounding = graphData.grounding || [];
+                console.log("6️⃣ BUILDING ISSUES with spectral + graph data:", {
+                    hasGraph: !!out.report?.graph,
+                    hasSpectral: !out.report?.spectral?.spectralSkipped,
+                    truthStatesCount: spectralData.truthStates?.length || 0,
+                    nodeBlameCount: spectralData.nodeBlameNorm?.length || 0,
+                    destructiveCount: out.report?.destructiveClaims?.length || 0,
+                    graphSupports: graphSupports.length,
+                    graphContradictions: graphContradictions.length,
+                    graphGrounding: graphGrounding.length
+                });
+                issues = buildIssuesList(spectralData, claimsForIssues, out.report.destructiveClaims, undefined, // evaluationId
+                {
+                    hasExternalDocs: false, // transcript-only mode
+                    contradictions: graphContradictions,
+                    supports: graphSupports,
+                    grounding: graphGrounding,
+                    totalTurns: claimsForIssues.length
+                });
+                console.log("7️⃣ ISSUES BUILT:", {
+                    count: issues.length,
+                    sample: issues[0] ? {
+                        claimId: issues[0].claimId,
+                        issueType: issues[0].what?.issueType || issues[0].issueType,
+                        truthState: issues[0].what?.truthState || issues[0].truthState,
+                        importance: issues[0].confidence?.importance || issues[0].importance,
+                        nodeBlameNorm: issues[0].confidence?.nodeBlameNorm || issues[0].nodeBlameNorm
+                    } : "none"
+                });
+                console.log(`Built ${issues.length} issues (spectral available: ${!out.report.spectral?.spectralSkipped})`);
+                // NEW: Generate CLUSTERED issues using the manager-grade issue analyzer
+                // This groups claims into problem statements with proper risk scoring
+                // NOTE: This is ADDITIVE only - it does not modify the main validation flow
+                try {
+                    // Only run if we have claims and edges
+                    if (claimsForIssues.length > 0 && (graphContradictions.length > 0 || graphSupports.length > 0 || graphGrounding.length > 0)) {
+                        // Construct transcript from input (same logic as orchestrator)
+                        const transcript = (input.answer && input.answer.trim().length > 0) ? input.answer : input.question;
+                        // Safely map edges with null checks
+                        const safeContradictions = (graphContradictions || []).map((c) => ({
+                            claimA: c?.claimA || '',
+                            claimB: c?.claimB || '',
+                            weight: c?.weight || 1,
+                            reason: c?.reason || "Contradiction detected"
+                        })).filter((c) => c.claimA && c.claimB);
+                        const safeSupports = (graphSupports || []).map((s) => ({
+                            claimA: s?.claimA || '',
+                            claimB: s?.claimB || '',
+                            weight: s?.weight || 1
+                        })).filter((s) => s.claimA && s.claimB);
+                        const safeGrounding = (graphGrounding || []).map((g) => ({
+                            claimId: g?.claimId || '',
+                            sourceId: g?.sourceId || g?.evidenceId || '',
+                            weight: g?.weight || 1,
+                            quote: g?.quote
+                        })).filter((g) => g.claimId && g.sourceId);
+                        const issueAnalysis = analyzeForIssues({
+                            transcript: transcript || "",
+                            claims: claimsForIssues,
+                            edges: {
+                                contradictions: safeContradictions,
+                                supports: safeSupports,
+                                grounding: safeGrounding
+                            }
+                        });
+                        // Store the clustered issues analysis alongside the per-claim issues
+                        // This is ADDITIVE - it doesn't modify existing report structure
+                        out.report.issueAnalysis = {
+                            summary: issueAnalysis.summary,
+                            clusteredIssues: issueAnalysis.issues,
+                            reproducibility: issueAnalysis.reproducibility,
+                            processingTimeMs: issueAnalysis.processingTimeMs
+                        };
+                        console.log("8️⃣ CLUSTERED ISSUES (Manager-grade):", {
+                            totalIssues: issueAnalysis.summary.totalIssues,
+                            bySeverity: issueAnalysis.summary.bySeverity,
+                            primaryCategories: issueAnalysis.summary.primaryRiskCategories,
+                            topIssue: issueAnalysis.issues[0] ? {
+                                title: issueAnalysis.issues[0].title,
+                                severity: issueAnalysis.issues[0].severity,
+                                riskScore: issueAnalysis.issues[0].metrics.riskScore
+                            } : "none"
+                        });
+                    }
+                    else {
+                        console.log("8️⃣ CLUSTERED ISSUES: Skipped (no claims or edges available)");
+                    }
+                    // NEW: Generate QA-Manager Grade Issue Narratives
+                    try {
+                        if (claimsForIssues.length > 0 && (graphContradictions.length > 0 || graphSupports.length > 0 || graphGrounding.length > 0)) {
+                            const transcript = (input.answer && input.answer.trim().length > 0) ? input.answer : input.question;
+                            const narrativesResult = buildIssueNarratives({
+                                claims: claimsForIssues.map((c) => ({
+                                    id: c.id,
+                                    text: c.text,
+                                    confidence: c.confidence || 0,
+                                    evidence: c.evidence || [],
+                                    claimKind: c.claimKind,
+                                    grounding: c.grounding,
+                                    verification: c.verification,
+                                    consistency: c.consistency,
+                                    confidenceMetrics: c.confidenceMetrics,
+                                    meta: c.meta,
+                                    truthState: c.truthState,
+                                })),
+                                contradictions: graphContradictions,
+                                supports: graphSupports,
+                                grounding: graphGrounding.map((g) => ({
+                                    claimId: g.claimId || g.claimA,
+                                    sourceId: g.sourceId || g.evidenceId || g.claimB,
+                                    weight: g.weight || 1,
+                                    quote: g.quote,
+                                })),
+                                spectral: out.report?.spectral,
+                                destructiveClaims: out.report?.destructiveClaims,
+                                transcript: transcript || "",
+                            });
+                            // Store issue narratives in report
+                            out.report.issueNarratives = {
+                                narratives: narrativesResult.narratives,
+                                summary: narrativesResult.summary,
+                            };
+                            console.log("9️⃣ ISSUE NARRATIVES (QA-Manager Grade):", {
+                                totalNarratives: narrativesResult.narratives.length,
+                                bySeverity: narrativesResult.summary.bySeverity,
+                                topCategories: narrativesResult.summary.topCategories,
+                                topNarrative: narrativesResult.narratives[0] ? {
+                                    title: narrativesResult.narratives[0].title,
+                                    severity: narrativesResult.narratives[0].severity,
+                                    category: narrativesResult.narratives[0].category,
+                                    compositeScore: narrativesResult.narratives[0].scoring.compositeScore,
+                                } : "none"
+                            });
+                        }
+                        else {
+                            console.log("9️⃣ ISSUE NARRATIVES: Skipped (no claims or edges available)");
+                        }
+                    }
+                    catch (narrativeErr) {
+                        // Log error but don't break the main flow
+                        console.error('Failed to generate issue narratives:', narrativeErr);
+                        console.error('Error stack:', narrativeErr.stack);
+                        // Don't throw - this is optional functionality
+                    }
+                }
+                catch (clusterErr) {
+                    // Log error but don't break the main flow
+                    console.error('Failed to generate clustered issues:', clusterErr);
+                    console.error('Error stack:', clusterErr.stack);
+                    // Don't throw - this is optional functionality
+                }
+            }
+            catch (issueErr) {
+                console.warn('Failed to build issues list:', issueErr.message);
+            }
+        }
+        // Log spectral data for debugging
+        const spectralData = out.report?.spectral;
+        console.log("📊 Spectral data from orchestrator:", {
+            hasSpectral: !!spectralData,
+            spectralSkipped: spectralData?.spectralSkipped,
+            coherenceScore: spectralData?.coherenceScore,
+            truthVectorLength: spectralData?.truthVector?.length || 0,
+            truthStatesLength: spectralData?.truthStates?.length || 0,
+            nodeBlameNormLength: spectralData?.nodeBlameNorm?.length || 0,
+            topBadContradictions: spectralData?.topBadContradictions?.length || 0,
+            topBadSupports: spectralData?.topBadSupports?.length || 0
+        });
+        // Add issues to the report and normalize the structure
+        // Ensure report has consistent structure for frontend
+        // CRITICAL: Explicitly preserve graph, spectral, and all other report data
+        const reportWithIssues = {
+            ...out.report,
+            // Explicitly preserve graph (don't let it get lost)
+            graph: out.report?.graph || {
+                supports: [],
+                contradictions: [],
+                grounding: [],
+                debug: {}
+            },
+            // Explicitly preserve spectral (don't let it get lost)
+            spectral: out.report?.spectral || {},
+            // Explicitly preserve claims
+            claims: out.report?.claims || [],
+            // Add issues
+            issues,
+            // Normalize: ensure inputs is available (for simulation modal and evaluation results)
+            inputs: {
+                claims: (out.report?.claims || []).map((c, idx) => ({
+                    id: c.id,
+                    text: c.text,
+                    speaker: c.meta?.speaker === 'Agent' ? 'AGENT' :
+                        c.meta?.speaker === 'Customer' ? 'CUSTOMER' :
+                            c.meta?.speaker || 'UNKNOWN',
+                    turnStartIdx: c.meta?.turnIndex,
+                    turnEndIdx: c.meta?.turnIndex,
+                    tags: []
+                })),
+                supports: out.report?.graph?.supports || [],
+                contradictions: out.report?.graph?.contradictions || [],
+                grounded: out.report?.graph?.grounding?.map((g) => g.claimId) || []
+            },
+            // Normalize: ensure run metadata is available
+            run: {
+                engineVersion: process.env.ENGINE_VERSION || '0.2.0',
+                scorerId: out.scorerId,
+                modelFingerprint: {
+                    nliModel: out.scorerId || 'unknown',
+                    claimExtractor: 'v1'
+                }
+            }
+        };
+        console.log("📦 Report structure being stored:", {
+            hasGraph: !!reportWithIssues.graph,
+            hasSpectral: !!reportWithIssues.spectral,
+            spectralCoherence: reportWithIssues.spectral?.coherenceScore,
+            issuesCount: issues.length,
+            claimsCount: reportWithIssues.claims?.length || 0,
+            inputsClaimsCount: reportWithIssues.inputs?.claims?.length || 0,
+            supportsCount: reportWithIssues.graph?.supports?.length || 0,
+            contradictionsCount: reportWithIssues.graph?.contradictions?.length || 0,
+            groundingCount: reportWithIssues.graph?.grounding?.length || 0,
+            // Verify graph structure
+            graphKeys: reportWithIssues.graph ? Object.keys(reportWithIssues.graph) : 'MISSING',
+            reportKeys: Object.keys(reportWithIssues)
+        });
         // Store validation in Supabase if configured
         const context = await getOrgContext(req);
         if (context && supabaseAdmin) {
             try {
                 // Check if conversation_id is provided in request body
                 const conversationId = req.body.conversation_id;
+                // Build proper scores structure that frontend expects
+                const spectralReport = out.report?.spectral || {};
+                const spectralSkipped = spectralReport.spectralSkipped === true;
+                // Calculate coherence - use spectral if available, fallback to orchestrator score
+                const coherenceScore = spectralReport.coherenceScore ?? out.scores?.coherence;
+                // Compute headline counts with configurable thresholds
+                const headlineCounts = computeHeadlineCounts({
+                    claims: out.report?.claims || [],
+                    contradictions: out.report?.graph?.contradictions || [],
+                    spectral: spectralReport,
+                });
+                const scoresForDb = {
+                    // Top-level scores from orchestrator
+                    truth: out.scores?.truth,
+                    consistency: out.scores?.consistency,
+                    coherence: out.scores?.coherence,
+                    overall: out.scores?.overall,
+                    // Spectral metrics (from report.spectral)
+                    spectral: spectralSkipped ? {
+                        spectralSkipped: true,
+                        coherenceScore: out.scores?.coherence, // Use orchestrator coherence as fallback
+                    } : {
+                        coherenceScore: spectralReport.coherenceScore,
+                        contradictionEnergy: spectralReport.contradictionEnergy,
+                        supportEnergy: spectralReport.supportEnergy,
+                        circularityScore: spectralReport.circularityScore,
+                        spectralGap: spectralReport.spectralGap,
+                        cycleMass: spectralReport.cycleMass,
+                        heatTrace: spectralReport.heatTrace
+                    },
+                    // Counts (computed with configurable thresholds)
+                    counts: {
+                        claims: headlineCounts.total,
+                        contradicted: headlineCounts.contradicted,
+                        ungrounded: headlineCounts.ungrounded,
+                        supported: headlineCounts.supported,
+                        supports: out.report?.graph?.supports?.length || 0,
+                        contradictions: out.report?.graph?.contradictions?.length || 0,
+                        // Include definitions for tooltips
+                        definitions: headlineCounts.definitions
+                    }
+                };
                 const { error: dbError } = await supabaseAdmin
                     .from('evaluations')
                     .insert({
@@ -202,12 +894,12 @@ app.post("/validate", async (req, res) => {
                     project_id: context.projectId || null,
                     conversation_id: conversationId || null,
                     env: context.env,
-                    scores: out.scores || {},
+                    scores: scoresForDb,
                     refusal: out.refusal || false,
                     scorer_id: out.scorerId || null,
                     engine_version: process.env.ENGINE_VERSION || '0.2.0',
                     latency_ms: latency,
-                    report: out.report || {}
+                    report: reportWithIssues
                 });
                 if (dbError) {
                     console.error('Failed to store evaluation:', dbError);
@@ -229,7 +921,11 @@ app.post("/validate", async (req, res) => {
             }
         }
         clearTimeout(timeout);
-        res.json(out);
+        // Return output with issues included
+        res.json({
+            ...out,
+            report: reportWithIssues
+        });
     }
     catch (e) {
         clearTimeout(timeout);
@@ -458,11 +1154,43 @@ app.post("/auth/provision", async (req, res) => {
                     .limit(1)
                     .maybeSingle();
                 if (orgsByEmail?.id) {
-                    console.log(`Partial success: Found org ${orgsByEmail.id} by email, returning it`);
+                    console.log(`Found org ${orgsByEmail.id} by email, attempting to add user to org_members...`);
+                    // Try to add the user to org_members
+                    const { error: fixMemberError } = await supabaseAdmin
+                        .from('org_members')
+                        .insert({
+                        org_id: orgsByEmail.id,
+                        user_id: userId,
+                        role: 'owner'
+                    });
+                    if (fixMemberError) {
+                        if (fixMemberError.code === '23505') {
+                            // Already exists - this is fine
+                            console.log('User already in org_members');
+                        }
+                        else {
+                            console.error('Failed to fix org_members:', fixMemberError);
+                        }
+                    }
+                    else {
+                        console.log('✅ Successfully added user to org_members');
+                    }
+                    // Get or create project for this org
+                    let projectId = '';
+                    const { data: existingProject } = await supabaseAdmin
+                        .from('projects')
+                        .select('id')
+                        .eq('org_id', orgsByEmail.id)
+                        .limit(1)
+                        .maybeSingle();
+                    if (existingProject) {
+                        projectId = existingProject.id;
+                    }
                     return res.json({
                         orgId: orgsByEmail.id,
-                        projectId: '',
-                        warning: 'Provision partially completed - org exists but member not added'
+                        projectId: projectId,
+                        fixed: true,
+                        message: 'User org membership has been fixed'
                     });
                 }
             }
@@ -709,8 +1437,8 @@ app.get("/orgs/:orgId/projects/:projectId/api-keys", async (req, res) => {
 app.get("/evaluations", async (req, res) => {
     try {
         const context = await getOrgContext(req);
-        if (!context) {
-            return res.status(401).json({ error: "Authorization required" });
+        if (!context || context.error) {
+            return res.status(401).json({ error: context?.error || "Authorization required" });
         }
         if (!supabaseAdmin) {
             return res.status(503).json({ error: "Supabase not configured" });
@@ -742,6 +1470,488 @@ app.get("/evaluations", async (req, res) => {
         res.status(500).json({
             error: e?.message ?? "unknown error"
         });
+    }
+});
+// Get a single evaluation by ID
+app.get("/evaluations/:evaluationId", async (req, res) => {
+    try {
+        const { evaluationId } = req.params;
+        const context = await getOrgContext(req);
+        if (!context || context.error) {
+            return res.status(401).json({ error: context?.error || "Authorization required" });
+        }
+        if (!supabaseAdmin) {
+            return res.status(503).json({ error: "Supabase not configured" });
+        }
+        const { data, error } = await supabaseAdmin
+            .from('evaluations')
+            .select('*')
+            .eq('id', evaluationId)
+            .eq('org_id', context.orgId)
+            .maybeSingle();
+        if (error) {
+            return res.status(500).json({ error: error.message });
+        }
+        if (!data) {
+            return res.status(404).json({ error: "Evaluation not found" });
+        }
+        res.json({ evaluation: data });
+    }
+    catch (e) {
+        console.error("Get evaluation error:", e);
+        res.status(500).json({
+            error: e?.message ?? "unknown error"
+        });
+    }
+});
+// Get issues for a specific evaluation
+app.get("/evaluations/:evaluationId/issues", async (req, res) => {
+    try {
+        const { evaluationId } = req.params;
+        const context = await getOrgContext(req);
+        if (!context || context.error) {
+            return res.status(401).json({ error: context?.error || "Authorization required" });
+        }
+        if (!supabaseAdmin) {
+            return res.status(503).json({ error: "Supabase not configured" });
+        }
+        // Get the evaluation with its report (which contains issues)
+        const { data: evaluation, error: evalError } = await supabaseAdmin
+            .from('evaluations')
+            .select('id, org_id, report')
+            .eq('id', evaluationId)
+            .eq('org_id', context.orgId)
+            .maybeSingle();
+        if (evalError) {
+            return res.status(500).json({ error: evalError.message });
+        }
+        if (!evaluation) {
+            return res.status(404).json({ error: "Evaluation not found" });
+        }
+        // Issues are stored in the report JSONB field
+        const issues = evaluation.report?.issues || [];
+        res.json({ issues });
+    }
+    catch (e) {
+        console.error("Get evaluation issues error:", e);
+        res.status(500).json({
+            error: e?.message ?? "unknown error"
+        });
+    }
+});
+// Update an issue status (e.g., mark as resolved)
+app.patch("/evaluations/:evaluationId/issues/:issueId", async (req, res) => {
+    try {
+        const { evaluationId, issueId } = req.params;
+        const { status } = req.body;
+        const context = await getOrgContext(req);
+        if (!context || context.error) {
+            return res.status(401).json({ error: context?.error || "Authorization required" });
+        }
+        if (!supabaseAdmin) {
+            return res.status(503).json({ error: "Supabase not configured" });
+        }
+        // Get the evaluation with its report
+        const { data: evaluation, error: evalError } = await supabaseAdmin
+            .from('evaluations')
+            .select('id, org_id, report')
+            .eq('id', evaluationId)
+            .eq('org_id', context.orgId)
+            .maybeSingle();
+        if (evalError) {
+            return res.status(500).json({ error: evalError.message });
+        }
+        if (!evaluation) {
+            return res.status(404).json({ error: "Evaluation not found" });
+        }
+        // Find and update the issue in the report
+        const report = evaluation.report;
+        if (!report || !report.issues) {
+            return res.status(404).json({ error: "No issues found in evaluation" });
+        }
+        // issueId could be the claimId or issue index
+        const issueIndex = report.issues.findIndex((i) => i.claimId === issueId || i.id === issueId);
+        if (issueIndex === -1) {
+            return res.status(404).json({ error: "Issue not found" });
+        }
+        // Update the issue status
+        report.issues[issueIndex].status = status;
+        report.issues[issueIndex].updated_at = new Date().toISOString();
+        // Save the updated report
+        const { error: updateError } = await supabaseAdmin
+            .from('evaluations')
+            .update({ report })
+            .eq('id', evaluationId);
+        if (updateError) {
+            return res.status(500).json({ error: updateError.message });
+        }
+        res.json({ success: true, issue: report.issues[issueIndex] });
+    }
+    catch (e) {
+        console.error("Update evaluation issue error:", e);
+        res.status(500).json({
+            error: e?.message ?? "unknown error"
+        });
+    }
+});
+// ============================================================================
+// ISSUE EXPORT ENDPOINTS
+// ============================================================================
+// Export evaluation issues as JSON
+app.get("/evaluations/:evaluationId/export/json", async (req, res) => {
+    try {
+        const { evaluationId } = req.params;
+        const context = await getOrgContext(req);
+        if (!context || context.error) {
+            return res.status(401).json({ error: context?.error || "Authorization required" });
+        }
+        if (!supabaseAdmin) {
+            return res.status(503).json({ error: "Supabase not configured" });
+        }
+        const { data: evaluation, error: evalError } = await supabaseAdmin
+            .from('evaluations')
+            .select('id, org_id, report')
+            .eq('id', evaluationId)
+            .eq('org_id', context.orgId)
+            .maybeSingle();
+        if (evalError) {
+            return res.status(500).json({ error: evalError.message });
+        }
+        if (!evaluation) {
+            return res.status(404).json({ error: "Evaluation not found" });
+        }
+        const report = evaluation.report;
+        const issueAnalysis = report?.issueAnalysis;
+        if (issueAnalysis) {
+            // Use the new clustered issue analysis
+            const output = {
+                summary: issueAnalysis.summary,
+                issues: issueAnalysis.clusteredIssues,
+                claims: report.claims?.map((c) => ({
+                    id: c.id,
+                    speaker: c.meta?.speaker || "UNKNOWN",
+                    text: c.text,
+                    turnIndex: c.meta?.turnIndex || 0,
+                    topics: c.topicTags || []
+                })) || [],
+                edges: (report.graph?.contradictions || []).map((c, i) => ({
+                    id: `edge_${i}`,
+                    type: "CONTRADICTION",
+                    fromClaimId: c.claimA,
+                    toClaimId: c.claimB,
+                    score: c.weight || 1,
+                    rationale: "Contradiction"
+                })).concat((report.graph?.supports || []).map((s, i) => ({
+                    id: `edge_support_${i}`,
+                    type: "SUPPORT",
+                    fromClaimId: s.claimA,
+                    toClaimId: s.claimB,
+                    score: s.weight || 1,
+                    rationale: "Support"
+                }))),
+                reproducibility: issueAnalysis.reproducibility,
+                processingTimeMs: issueAnalysis.processingTimeMs || 0
+            };
+            res.setHeader('Content-Type', 'application/json');
+            res.setHeader('Content-Disposition', `attachment; filename="evaluation-${evaluationId}.json"`);
+            return res.send(exportAsJSON(output));
+        }
+        // Fallback: export raw report
+        res.setHeader('Content-Type', 'application/json');
+        res.setHeader('Content-Disposition', `attachment; filename="evaluation-${evaluationId}.json"`);
+        res.json(report);
+    }
+    catch (e) {
+        console.error("Export JSON error:", e);
+        res.status(500).json({ error: e?.message ?? "unknown error" });
+    }
+});
+// Export evaluation issues as CSV
+app.get("/evaluations/:evaluationId/export/csv", async (req, res) => {
+    try {
+        const { evaluationId } = req.params;
+        const context = await getOrgContext(req);
+        if (!context || context.error) {
+            return res.status(401).json({ error: context?.error || "Authorization required" });
+        }
+        if (!supabaseAdmin) {
+            return res.status(503).json({ error: "Supabase not configured" });
+        }
+        const { data: evaluation, error: evalError } = await supabaseAdmin
+            .from('evaluations')
+            .select('id, org_id, report')
+            .eq('id', evaluationId)
+            .eq('org_id', context.orgId)
+            .maybeSingle();
+        if (evalError) {
+            return res.status(500).json({ error: evalError.message });
+        }
+        if (!evaluation) {
+            return res.status(404).json({ error: "Evaluation not found" });
+        }
+        const report = evaluation.report;
+        const issueAnalysis = report?.issueAnalysis;
+        if (issueAnalysis) {
+            const output = {
+                summary: issueAnalysis.summary,
+                issues: issueAnalysis.clusteredIssues,
+                claims: [],
+                edges: [],
+                reproducibility: issueAnalysis.reproducibility,
+                processingTimeMs: issueAnalysis.processingTimeMs || 0
+            };
+            res.setHeader('Content-Type', 'text/csv');
+            res.setHeader('Content-Disposition', `attachment; filename="evaluation-${evaluationId}.csv"`);
+            return res.send(exportAsCSV(output));
+        }
+        // Fallback: generate CSV from raw issues
+        const issues = report?.issues || [];
+        const headers = ["claimId", "severity", "issueType", "claimText", "speaker", "status"];
+        const rows = issues.map((i) => [
+            i.claimId,
+            i.risk?.severity || i.severity || "unknown",
+            i.what?.issueType || i.issueType || "unknown",
+            `"${(i.what?.claimText || i.claimText || "").replace(/"/g, '""')}"`,
+            i.who?.speaker || i.speaker || "unknown",
+            i.status || "OPEN"
+        ]);
+        res.setHeader('Content-Type', 'text/csv');
+        res.setHeader('Content-Disposition', `attachment; filename="evaluation-${evaluationId}.csv"`);
+        res.send([headers.join(","), ...rows.map((r) => r.join(","))].join("\n"));
+    }
+    catch (e) {
+        console.error("Export CSV error:", e);
+        res.status(500).json({ error: e?.message ?? "unknown error" });
+    }
+});
+// Export evaluation as HTML report (printable/PDF-ready)
+app.get("/evaluations/:evaluationId/export/html", async (req, res) => {
+    try {
+        const { evaluationId } = req.params;
+        const context = await getOrgContext(req);
+        if (!context || context.error) {
+            return res.status(401).json({ error: context?.error || "Authorization required" });
+        }
+        if (!supabaseAdmin) {
+            return res.status(503).json({ error: "Supabase not configured" });
+        }
+        const { data: evaluation, error: evalError } = await supabaseAdmin
+            .from('evaluations')
+            .select('id, org_id, report')
+            .eq('id', evaluationId)
+            .eq('org_id', context.orgId)
+            .maybeSingle();
+        if (evalError) {
+            return res.status(500).json({ error: evalError.message });
+        }
+        if (!evaluation) {
+            return res.status(404).json({ error: "Evaluation not found" });
+        }
+        const report = evaluation.report;
+        const issueAnalysis = report?.issueAnalysis;
+        if (issueAnalysis) {
+            const output = {
+                summary: issueAnalysis.summary,
+                issues: issueAnalysis.clusteredIssues,
+                claims: [],
+                edges: [],
+                reproducibility: issueAnalysis.reproducibility,
+                processingTimeMs: issueAnalysis.processingTimeMs || 0
+            };
+            res.setHeader('Content-Type', 'text/html');
+            res.setHeader('Content-Disposition', `attachment; filename="evaluation-${evaluationId}.html"`);
+            return res.send(exportAsHTML(output));
+        }
+        // Fallback: generate simple HTML from raw issues
+        const issues = report?.issues || [];
+        const html = `<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Evaluation Report - ${evaluationId}</title>
+  <style>
+    body { font-family: sans-serif; max-width: 800px; margin: 0 auto; padding: 20px; }
+    .issue { border: 1px solid #ddd; padding: 15px; margin: 10px 0; border-radius: 5px; }
+    .severity-critical { border-left: 4px solid #991b1b; }
+    .severity-high { border-left: 4px solid #ea580c; }
+    .severity-medium { border-left: 4px solid #2563eb; }
+    .severity-low { border-left: 4px solid #16a34a; }
+  </style>
+</head>
+<body>
+  <h1>Evaluation Report</h1>
+  <p>ID: ${evaluationId}</p>
+  <p>Total Issues: ${issues.length}</p>
+  ${issues.map((i, idx) => `
+    <div class="issue severity-${(i.risk?.severity || i.severity || 'medium').toLowerCase()}">
+      <h3>#${idx + 1}: ${i.what?.issueType || i.issueType || 'Issue'}</h3>
+      <p><strong>Speaker:</strong> ${i.who?.speaker || i.speaker || 'Unknown'}</p>
+      <p><strong>Claim:</strong> ${i.what?.claimText || i.claimText || 'N/A'}</p>
+      <p><strong>Status:</strong> ${i.status || 'OPEN'}</p>
+    </div>
+  `).join('')}
+</body>
+</html>`;
+        res.setHeader('Content-Type', 'text/html');
+        res.setHeader('Content-Disposition', `attachment; filename="evaluation-${evaluationId}.html"`);
+        res.send(html);
+    }
+    catch (e) {
+        console.error("Export HTML error:", e);
+        res.status(500).json({ error: e?.message ?? "unknown error" });
+    }
+});
+// Export issue narratives as CSV
+app.get("/evaluations/:evaluationId/export/narratives/csv", async (req, res) => {
+    try {
+        const { evaluationId } = req.params;
+        const context = await getOrgContext(req);
+        if (!context || context.error) {
+            return res.status(401).json({ error: context?.error || "Authorization required" });
+        }
+        if (!supabaseAdmin) {
+            return res.status(503).json({ error: "Supabase not configured" });
+        }
+        const { data: evaluation, error: evalError } = await supabaseAdmin
+            .from('evaluations')
+            .select('*')
+            .eq('id', evaluationId)
+            .eq('org_id', context.orgId)
+            .single();
+        if (evalError) {
+            return res.status(500).json({ error: evalError.message });
+        }
+        if (!evaluation) {
+            return res.status(404).json({ error: "Evaluation not found" });
+        }
+        const report = evaluation.report;
+        const issueNarratives = report?.issueNarratives;
+        if (!issueNarratives || !issueNarratives.narratives) {
+            return res.status(404).json({ error: "Issue narratives not found for this evaluation" });
+        }
+        // Get reproducibility from manifest
+        const manifest = report?.manifest || {};
+        const reproducibility = {
+            inputHash: manifest.inputHash || "N/A",
+            configHash: manifest.configHash || "N/A",
+            codeVersion: manifest.codeVersion || "N/A",
+            engineVersion: manifest.engineVersion || "N/A",
+            modelFingerprint: manifest.modelFingerprint || {},
+        };
+        const exportData = {
+            narratives: issueNarratives.narratives,
+            summary: issueNarratives.summary,
+            reproducibility,
+        };
+        res.setHeader('Content-Type', 'text/csv');
+        res.setHeader('Content-Disposition', `attachment; filename="evaluation-${evaluationId}-narratives.csv"`);
+        return res.send(exportNarrativesAsCSV(exportData));
+    }
+    catch (e) {
+        console.error("Export narratives CSV error:", e);
+        res.status(500).json({ error: e?.message ?? "unknown error" });
+    }
+});
+// Export issue narratives as JSON
+app.get("/evaluations/:evaluationId/export/narratives/json", async (req, res) => {
+    try {
+        const { evaluationId } = req.params;
+        const context = await getOrgContext(req);
+        if (!context || context.error) {
+            return res.status(401).json({ error: context?.error || "Authorization required" });
+        }
+        if (!supabaseAdmin) {
+            return res.status(503).json({ error: "Supabase not configured" });
+        }
+        const { data: evaluation, error: evalError } = await supabaseAdmin
+            .from('evaluations')
+            .select('*')
+            .eq('id', evaluationId)
+            .eq('org_id', context.orgId)
+            .single();
+        if (evalError) {
+            return res.status(500).json({ error: evalError.message });
+        }
+        if (!evaluation) {
+            return res.status(404).json({ error: "Evaluation not found" });
+        }
+        const report = evaluation.report;
+        const issueNarratives = report?.issueNarratives;
+        if (!issueNarratives || !issueNarratives.narratives) {
+            return res.status(404).json({ error: "Issue narratives not found for this evaluation" });
+        }
+        // Get reproducibility from manifest
+        const manifest = report?.manifest || {};
+        const reproducibility = {
+            inputHash: manifest.inputHash || "N/A",
+            configHash: manifest.configHash || "N/A",
+            codeVersion: manifest.codeVersion || "N/A",
+            engineVersion: manifest.engineVersion || "N/A",
+            modelFingerprint: manifest.modelFingerprint || {},
+        };
+        const exportData = {
+            narratives: issueNarratives.narratives,
+            summary: issueNarratives.summary,
+            reproducibility,
+        };
+        res.setHeader('Content-Type', 'application/json');
+        res.setHeader('Content-Disposition', `attachment; filename="evaluation-${evaluationId}-narratives.json"`);
+        return res.send(exportNarrativesAsJSON(exportData));
+    }
+    catch (e) {
+        console.error("Export narratives JSON error:", e);
+        res.status(500).json({ error: e?.message ?? "unknown error" });
+    }
+});
+// Export issue narratives as HTML (PDF-ready)
+app.get("/evaluations/:evaluationId/export/narratives/html", async (req, res) => {
+    try {
+        const { evaluationId } = req.params;
+        const context = await getOrgContext(req);
+        if (!context || context.error) {
+            return res.status(401).json({ error: context?.error || "Authorization required" });
+        }
+        if (!supabaseAdmin) {
+            return res.status(503).json({ error: "Supabase not configured" });
+        }
+        const { data: evaluation, error: evalError } = await supabaseAdmin
+            .from('evaluations')
+            .select('*')
+            .eq('id', evaluationId)
+            .eq('org_id', context.orgId)
+            .single();
+        if (evalError) {
+            return res.status(500).json({ error: evalError.message });
+        }
+        if (!evaluation) {
+            return res.status(404).json({ error: "Evaluation not found" });
+        }
+        const report = evaluation.report;
+        const issueNarratives = report?.issueNarratives;
+        if (!issueNarratives || !issueNarratives.narratives) {
+            return res.status(404).json({ error: "Issue narratives not found for this evaluation" });
+        }
+        // Get reproducibility from manifest
+        const manifest = report?.manifest || {};
+        const reproducibility = {
+            inputHash: manifest.inputHash || "N/A",
+            configHash: manifest.configHash || "N/A",
+            codeVersion: manifest.codeVersion || "N/A",
+            engineVersion: manifest.engineVersion || "N/A",
+            modelFingerprint: manifest.modelFingerprint || {},
+        };
+        const exportData = {
+            narratives: issueNarratives.narratives,
+            summary: issueNarratives.summary,
+            reproducibility,
+        };
+        res.setHeader('Content-Type', 'text/html');
+        res.setHeader('Content-Disposition', `attachment; filename="evaluation-${evaluationId}-narratives.html"`);
+        return res.send(exportNarrativesAsHTML(exportData));
+    }
+    catch (e) {
+        console.error("Export narratives HTML error:", e);
+        res.status(500).json({ error: e?.message ?? "unknown error" });
     }
 });
 // Get projects for an org
@@ -821,8 +2031,8 @@ app.post("/orgs/:orgId/projects/:projectId/api-keys/:keyId/revoke", async (req, 
 app.post("/conversations", async (req, res) => {
     try {
         const context = await getOrgContext(req);
-        if (!context) {
-            return res.status(401).json({ error: "Authorization required" });
+        if (!context || context.error) {
+            return res.status(401).json({ error: context?.error || "Authorization required" });
         }
         if (!supabaseAdmin) {
             return res.status(503).json({ error: "Supabase not configured" });
@@ -871,8 +2081,8 @@ app.post("/conversations", async (req, res) => {
 app.get("/conversations", async (req, res) => {
     try {
         const context = await getOrgContext(req);
-        if (!context) {
-            return res.status(401).json({ error: "Authorization required" });
+        if (!context || context.error) {
+            return res.status(401).json({ error: context?.error || "Authorization required" });
         }
         if (!supabaseAdmin) {
             return res.status(503).json({ error: "Supabase not configured" });
@@ -911,8 +2121,8 @@ app.get("/conversations/:conversationId/evaluations", async (req, res) => {
     try {
         const context = await getOrgContext(req);
         const { conversationId } = req.params;
-        if (!context) {
-            return res.status(401).json({ error: "Authorization required" });
+        if (!context || context.error) {
+            return res.status(401).json({ error: context?.error || "Authorization required" });
         }
         if (!supabaseAdmin) {
             return res.status(503).json({ error: "Supabase not configured" });
@@ -938,6 +2148,66 @@ app.get("/conversations/:conversationId/evaluations", async (req, res) => {
         });
     }
 });
+// ============================================================================
+// SENSITIVE ACTIONS: Re-authentication verification
+// ============================================================================
+/**
+ * Verify user password for sensitive actions
+ * This endpoint is called before performing operations like:
+ * - Deleting evaluations
+ * - Exporting audit packets
+ * - Changing org settings
+ * - Managing API keys
+ * - Modifying integrations
+ */
+app.post("/auth/verify-password", async (req, res) => {
+    try {
+        const { password } = req.body;
+        if (!password) {
+            return res.status(400).json({ error: "password is required" });
+        }
+        const context = await getOrgContext(req);
+        if (!context || context.error || !context.userId) {
+            return res.status(401).json({ error: context?.error || "Authorization required" });
+        }
+        if (!supabaseAdmin) {
+            return res.status(503).json({ error: "Supabase not configured" });
+        }
+        // Get user's email
+        const { data: { user }, error: userError } = await supabaseAdmin.auth.admin.getUserById(context.userId);
+        if (userError || !user || !user.email) {
+            return res.status(401).json({ error: "User not found" });
+        }
+        // Verify password by signing in (this doesn't create a new session, just verifies)
+        // Note: We use signInWithPassword to verify - Supabase doesn't have a dedicated verify endpoint
+        const { error: signInError } = await supabaseAdmin.auth.signInWithPassword({
+            email: user.email,
+            password
+        });
+        if (signInError) {
+            return res.status(401).json({ error: "Invalid password", verified: false });
+        }
+        // Log audit event
+        await logAudit({
+            orgId: context.orgId,
+            action: 'sensitive_action.reauth',
+            targetType: 'user',
+            targetId: context.userId,
+            meta: {
+                success: true,
+                ip: req.ip
+            }
+        });
+        res.json({ verified: true });
+    }
+    catch (e) {
+        console.error("Verify password error:", e);
+        res.status(500).json({
+            error: e?.message ?? "unknown error",
+            verified: false
+        });
+    }
+});
 // Audio transcription endpoint
 app.post("/transcribe", upload.single('audio'), async (req, res) => {
     try {
@@ -945,8 +2215,8 @@ app.post("/transcribe", upload.single('audio'), async (req, res) => {
             return res.status(400).json({ error: "No audio file provided" });
         }
         const context = await getOrgContext(req);
-        if (!context) {
-            return res.status(401).json({ error: "Authorization required" });
+        if (!context || context.error) {
+            return res.status(401).json({ error: context?.error || "Authorization required" });
         }
         // Transcribe audio (does not store the file)
         const result = await transcribeAudio(req.file.buffer, req.file.originalname);
@@ -982,17 +2252,31 @@ setupIntegrationRoutes(app);
 console.log("Registering audit routes...");
 setupAuditRoutes(app);
 console.log("Audit routes registered successfully");
+// Setup ingestion routes (normalization pipeline)
+console.log("Registering ingestion routes...");
+registerIngestEndpoints(app);
+console.log("Ingestion routes registered successfully");
 // Railway sets PORT automatically, but we default to 8787
 const port = Number(process.env.PORT || 8787);
 console.log(`Starting server...`);
 console.log(`PORT environment variable: ${process.env.PORT || 'not set'}`);
 console.log(`Using port: ${port}`);
+// Check critical environment variables
+const spectralUrl = process.env.TCL_SPECTRAL_URL;
+if (spectralUrl) {
+    console.log(`✅ TCL_SPECTRAL_URL configured: ${spectralUrl}`);
+}
+else {
+    console.warn(`⚠️ TCL_SPECTRAL_URL not set - spectral analysis will be skipped!`);
+    console.warn(`   Set this to your tcl-spectral service URL (e.g., https://tcl-spectral-production-xxxx.up.railway.app)`);
+}
 // Start server with error handling
 try {
     const server = app.listen(port, '0.0.0.0', () => {
         console.log(`✅ TCL-Core listening on ${port}`);
         console.log(`Health check available at http://0.0.0.0:${port}/health`);
         console.log(`Environment: PORT=${process.env.PORT || 'default (8787)'}, NODE_ENV=${process.env.NODE_ENV || 'not set'}`);
+        console.log(`TCL_SPECTRAL_URL: ${process.env.TCL_SPECTRAL_URL || 'NOT SET'}`);
         // Verify server is actually listening
         const address = server.address();
         if (address && typeof address === 'object') {

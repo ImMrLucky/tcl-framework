@@ -1,0 +1,84 @@
+{
+  "categories": {
+    "BILLING": {
+      "label": "Billing",
+      "subcategories": ["Cancellation Fees", "Rate Changes", "Payment Terms", "Refunds", "Charges", "Billing Disputes"],
+      "regulatorySensitivity": 0.7,
+      "customerHarmPotential": 0.8
+    },
+    "DISCLOSURE": {
+      "label": "Disclosure",
+      "subcategories": ["Terms & Conditions", "Privacy Policy", "Service Limitations", "Fees", "Cancellation Policy"],
+      "regulatorySensitivity": 0.9,
+      "customerHarmPotential": 0.7
+    },
+    "MISREPRESENTATION": {
+      "label": "Misrepresentation",
+      "subcategories": ["Service Capabilities", "Pricing", "Terms", "Availability", "Features"],
+      "regulatorySensitivity": 0.95,
+      "customerHarmPotential": 0.9
+    },
+    "PRIVACY": {
+      "label": "Privacy",
+      "subcategories": ["Data Collection", "Data Sharing", "Data Security", "Consent", "Access Rights"],
+      "regulatorySensitivity": 1.0,
+      "customerHarmPotential": 0.8
+    },
+    "SECURITY": {
+      "label": "Security",
+      "subcategories": ["Authentication", "Data Protection", "Access Control", "Vulnerabilities"],
+      "regulatorySensitivity": 1.0,
+      "customerHarmPotential": 0.9
+    },
+    "PROCESS": {
+      "label": "Process",
+      "subcategories": ["Workflow", "Escalation", "Documentation", "Follow-up", "Timeline"],
+      "regulatorySensitivity": 0.3,
+      "customerHarmPotential": 0.5
+    },
+    "CUSTOMER_HARM": {
+      "label": "Customer Harm",
+      "subcategories": ["Service Disruption", "Financial Impact", "Emotional Distress", "Time Loss"],
+      "regulatorySensitivity": 0.8,
+      "customerHarmPotential": 1.0
+    },
+    "REGULATORY": {
+      "label": "Regulatory",
+      "subcategories": ["Compliance Violation", "Required Disclosures", "Record Keeping", "Consumer Rights"],
+      "regulatorySensitivity": 1.0,
+      "customerHarmPotential": 0.7
+    },
+    "PROMISE_BREACH": {
+      "label": "Promise Breach",
+      "subcategories": ["Follow-up Commitments", "Service Promises", "Timeline Commitments", "Resolution Promises"],
+      "regulatorySensitivity": 0.6,
+      "customerHarmPotential": 0.8
+    },
+    "OTHER": {
+      "label": "Other",
+      "subcategories": [],
+      "regulatorySensitivity": 0.3,
+      "customerHarmPotential": 0.4
+    }
+  },
+  "subcategoryMapping": {
+    "fee": "Cancellation Fees",
+    "fees": "Cancellation Fees",
+    "cancellation": "Cancellation Policy",
+    "cancel": "Cancellation Policy",
+    "rate": "Rate Changes",
+    "price": "Pricing",
+    "pricing": "Pricing",
+    "refund": "Refunds",
+    "payment": "Payment Terms",
+    "billing": "Billing Disputes",
+    "terms": "Terms & Conditions",
+    "privacy": "Privacy Policy",
+    "data": "Data Collection",
+    "security": "Data Security",
+    "promise": "Follow-up Commitments",
+    "email": "Follow-up Commitments",
+    "follow-up": "Follow-up Commitments"
+  }
+}
+

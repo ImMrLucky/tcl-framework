@@ -4,9 +4,17 @@
  * NO HARD-CODED VALUES - everything comes from config files.
  */
 
-import scoringConfig from './scoring.json';
-import templatesConfig from './templates.json';
-import taxonomyConfig from './taxonomy.json';
+import { readFileSync } from 'fs';
+import { fileURLToPath } from 'url';
+import { dirname, join } from 'path';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
+
+// Load JSON configs at runtime (Node.js ESM requires import assertions which TypeScript doesn't support with current module setting)
+const scoringConfig = JSON.parse(readFileSync(join(__dirname, 'scoring.json'), 'utf-8'));
+const templatesConfig = JSON.parse(readFileSync(join(__dirname, 'templates.json'), 'utf-8'));
+const taxonomyConfig = JSON.parse(readFileSync(join(__dirname, 'taxonomy.json'), 'utf-8'));
 
 export interface ScoringConfig {
   thresholds: {

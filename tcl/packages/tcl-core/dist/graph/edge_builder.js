@@ -1,5 +1,6 @@
 import { SparseHashEmbeddingProvider, BruteForceIndex, HnswIndex } from "./ann.js";
 import { SemanticCache, NoopCache } from "./cache.js";
+import { createHash } from "crypto";
 function clamp01(x) {
     return Math.max(0, Math.min(1, x));
 }
@@ -225,7 +226,6 @@ export async function buildClaimGraph(claims, sources, opts = {}) {
     const cacheEnabled = opts.cache?.enabled ?? true;
     const makeKeyFn = (task, a, b) => {
         const payload = `tcl|v1|${scorer.id}|${task}|${a.toLowerCase().replace(/\s+/g, " ").trim()}|${b.toLowerCase().replace(/\s+/g, " ").trim()}`;
-        const { createHash } = require("crypto");
         return createHash("sha256").update(payload).digest("hex");
     };
     const cache = cacheEnabled
@@ -246,53 +246,177 @@ export async function buildClaimGraph(claims, sources, opts = {}) {
     // Debug tracking (declare early)
     let filteredBelowGrounding = 0;
     // -----------------------------
-    // Grounding (claim -> sources)
+    // Grounding (source -> claim: does source ENTAIL claim?)
     // -----------------------------
+    // CRITICAL FIX: Use a local Map for batch results when cache is disabled (NoopCache)
+    const groundingResultsMap = new Map();
+    // OPTIMIZATION: Fast token overlap for candidate generation
+    const quickOverlap = (a, b) => {
+        const tokensA = new Set(a.toLowerCase().split(/\s+/).filter(t => t.length > 3));
+        const tokensB = new Set(b.toLowerCase().split(/\s+/).filter(t => t.length > 3));
+        if (tokensA.size === 0 || tokensB.size === 0)
+            return 0;
+        let overlap = 0;
+        for (const t of tokensA)
+            if (tokensB.has(t))
+                overlap++;
+        return overlap / Math.min(tokensA.size, tokensB.size);
+    };
+    // Minimum overlap threshold for NLI scoring
+    const MIN_OVERLAP_FOR_NLI = 0.05;
+    // OPTIMIZATION: Limit grounding pairs per claim (candidate generation)
+    // Instead of all-vs-all (N*M pairs), only check top K sources per claim
+    const maxGroundingPerClaim = opts.maxGroundingPairsPerClaim ?? 10;
+    const timer = opts.timer;
     if (sources?.length) {
-        // batch score grounding where possible
-        // Check if scorer has scoreBatch method (optional property)
         if (scorer && 'scoreBatch' in scorer && typeof scorer.scoreBatch === 'function') {
             const pairs = [];
+            let skippedByCandidate = 0;
+            // For each claim, find top-K sources by overlap and only score those
             for (const c of claims) {
-                for (const s of sources) {
-                    const key = cache.makeKey("gnd", c.text, s.text);
-                    if (!cache.get(key))
-                        pairs.push({ task: "grounding", a: c.text, b: s.text, key });
+                // Score all sources by overlap
+                const sourcesWithOverlap = sources.map(s => ({
+                    source: s,
+                    overlap: quickOverlap(s.text, c.text),
+                    key: cache.makeKey("gnd", c.text, s.text)
+                }));
+                // Sort by overlap, take top K
+                sourcesWithOverlap.sort((a, b) => b.overlap - a.overlap);
+                const topSources = sourcesWithOverlap.slice(0, maxGroundingPerClaim);
+                const skipped = sourcesWithOverlap.slice(maxGroundingPerClaim);
+                // Add top sources to pairs for NLI scoring, or mark as 0 if no overlap
+                for (const { source, key, overlap } of topSources) {
+                    if (!cache.get(key) && !groundingResultsMap.has(key)) {
+                        if (overlap > 0) {
+                            pairs.push({ task: "grounding", a: source.text, b: c.text, key });
+                        }
+                        else {
+                            // No overlap - store 0 score without calling NLI
+                            groundingResultsMap.set(key, { score: 0, quote: undefined });
+                        }
+                    }
+                }
+                // Mark skipped sources (beyond top K) as 0 score
+                for (const { key } of skipped) {
+                    if (!groundingResultsMap.has(key)) {
+                        groundingResultsMap.set(key, { score: 0, quote: undefined });
+                        skippedByCandidate++;
+                    }
                 }
             }
-            const scoreBatchFn = scorer.scoreBatch;
+            const totalPossible = claims.length * sources.length;
+            console.log(`🔍 Grounding: ${claims.length} claims × ${sources.length} sources = ${totalPossible} possible`);
+            console.log(`   Candidate generation: top ${maxGroundingPerClaim}/claim → ${pairs.length} to score (${skippedByCandidate} skipped)`);
+            // Log first 2 pairs to verify format
+            if (pairs.length > 0) {
+                console.log(`📋 Sample grounding pairs:`);
+                for (let i = 0; i < Math.min(2, pairs.length); i++) {
+                    console.log(`   [${i}] premise (source): "${pairs[i].a.substring(0, 50)}..."`);
+                    console.log(`       hypothesis (claim): "${pairs[i].b.substring(0, 50)}..."`);
+                }
+            }
+            // CRITICAL: Call scoreBatch as a method on scorer to preserve 'this' context
+            const scorerWithBatch = scorer;
+            let batchScoresReceived = 0;
+            // Track score distribution for diagnostics
+            const scoreDistribution = { high: 0, medium: 0, low: 0 };
+            let highestScore = 0;
+            let lowestScore = 1;
+            let nliCallCount = 0;
             await runBatches(pairs, batchSize, async (batch) => {
-                const out = await scoreBatchFn(batch);
-                for (const r of out)
-                    cache.set(r.key, r.score, r.quote);
+                try {
+                    nliCallCount++;
+                    timer?.count('num_nli_calls');
+                    timer?.count('num_nli_pairs', batch.length);
+                    const batchStart = Date.now();
+                    const out = await scorerWithBatch.scoreBatch(batch);
+                    const batchTime = Date.now() - batchStart;
+                    console.log(`  📤 NLI batch ${nliCallCount}: ${batch.length} pairs → ${out.length} scores (${batchTime}ms, ${(batchTime / batch.length).toFixed(0)}ms/pair)`);
+                    for (const r of out) {
+                        // Store in BOTH cache AND local map to ensure we don't lose results
+                        cache.set(r.key, r.score, r.quote);
+                        groundingResultsMap.set(r.key, { score: r.score, quote: r.quote });
+                        batchScoresReceived++;
+                        // Track distribution
+                        if (r.score >= 0.5)
+                            scoreDistribution.high++;
+                        else if (r.score >= 0.25)
+                            scoreDistribution.medium++;
+                        else
+                            scoreDistribution.low++;
+                        if (r.score > highestScore)
+                            highestScore = r.score;
+                        if (r.score < lowestScore)
+                            lowestScore = r.score;
+                        // Log first 3 scores
+                        if (batchScoresReceived <= 3) {
+                            console.log(`    Score ${batchScoresReceived}: ${r.score.toFixed(3)}`);
+                        }
+                    }
+                }
+                catch (batchErr) {
+                    console.error(`❌ Grounding batch scoring error: ${batchErr.message}`);
+                    console.error(`   Stack: ${batchErr.stack}`);
+                }
             });
+            console.log(`✅ Grounding batch scoring complete: ${batchScoresReceived}/${pairs.length} scores received`);
+            console.log(`   Score distribution: high(≥0.5)=${scoreDistribution.high}, medium(≥0.25)=${scoreDistribution.medium}, low(<0.25)=${scoreDistribution.low}`);
+            console.log(`   Range: ${lowestScore.toFixed(3)} - ${highestScore.toFixed(3)}`);
+            if (batchScoresReceived === 0 && pairs.length > 0) {
+                console.error(`❌ CRITICAL: No grounding scores received! NLI service may be failing.`);
+            }
         }
+        // Diagnostic: track max scores per claim
+        const groundingDiagnostic = [];
         for (const c of claims) {
             const scored = [];
             for (const s of sources) {
                 const key = cache.makeKey("gnd", c.text, s.text);
-                const hit = cache.get(key);
-                if (hit) {
-                    scored.push({ sid: s.id, sc: hit.v, quote: hit.quote });
+                // Check local map FIRST (has batch results even when cache is NoopCache)
+                const localHit = groundingResultsMap.get(key);
+                if (localHit) {
+                    scored.push({ sid: s.id, sc: localHit.score, quote: localHit.quote });
+                    continue;
                 }
-                else {
-                    const r = await scorer.grounding(c.text, s.text);
-                    cache.set(key, r.score, r.quote);
-                    scored.push({ sid: s.id, sc: r.score, quote: r.quote });
+                // Then check cache
+                const cacheHit = cache.get(key);
+                if (cacheHit) {
+                    scored.push({ sid: s.id, sc: cacheHit.v, quote: cacheHit.quote });
+                    continue;
                 }
+                // Fallback to individual scoring (should rarely happen now)
+                console.warn(`⚠️ Cache miss for grounding ${c.id} - scoring individually`);
+                const r = await scorer.grounding(c.text, s.text);
+                cache.set(key, r.score, r.quote);
+                groundingResultsMap.set(key, { score: r.score, quote: r.quote });
+                scored.push({ sid: s.id, sc: r.score, quote: r.quote });
             }
             scored.sort((a, b) => b.sc - a.sc);
             const top = scored.slice(0, Math.max(1, topGroundingK));
+            const maxScore = top[0]?.sc || 0;
+            let passed = false;
             for (const t of top) {
                 if (t.sc >= tGnd) {
                     grounding.push({ claimId: c.id, sourceId: t.sid, weight: clamp01(t.sc), quote: t.quote });
                     groundedClaimIds.push(c.id);
+                    passed = true;
                 }
                 else {
                     filteredBelowGrounding++;
                 }
             }
+            groundingDiagnostic.push({
+                claimText: c.text.substring(0, 50),
+                maxScore: maxScore,
+                passed
+            });
         }
+        // Log grounding diagnostic (first 5 and summary)
+        console.log(`📊 GROUNDING DIAGNOSTIC (threshold=${tGnd}):`);
+        console.log(`   Sample scores:`, groundingDiagnostic.slice(0, 5).map(d => `"${d.claimText}..." → ${d.maxScore.toFixed(3)} ${d.passed ? '✓' : '✗'}`));
+        const passedCount = groundingDiagnostic.filter(d => d.passed).length;
+        const avgMaxScore = groundingDiagnostic.reduce((a, d) => a + d.maxScore, 0) / groundingDiagnostic.length;
+        console.log(`   Total: ${passedCount}/${groundingDiagnostic.length} passed, avg max score: ${avgMaxScore.toFixed(3)}`);
     }
     // -----------------------------
     // Pair generation: brute force for small n, ANN for large n
@@ -360,6 +484,8 @@ export async function buildClaimGraph(claims, sources, opts = {}) {
     // -----------------------------
     const supports = [];
     const contradictions = [];
+    // CRITICAL FIX: Use local Map for batch results when cache is disabled (NoopCache)
+    const pairResultsMap = new Map();
     // Debug tracking (continued)
     let pairsScored = 0;
     let filteredBelowSupport = 0;
@@ -368,38 +494,59 @@ export async function buildClaimGraph(claims, sources, opts = {}) {
     let supportsAdded = 0;
     let contradictionsAdded = 0;
     // Batch score contradictions + entailments with cache
+    // Apply same pre-filtering as grounding to reduce NLI calls
     const pairsToScore = [];
     let cacheHits = 0;
+    let claimPairsSkipped = 0;
     for (const { i, j } of finalPairs) {
         const A = claims[i].text;
         const B = claims[j].text;
+        // OPTIMIZATION: Pre-filter claim pairs with no overlap
+        // Claims need SOME overlap to potentially support/contradict each other
+        const overlap = quickOverlap(A, B);
+        if (overlap < MIN_OVERLAP_FOR_NLI) {
+            // No overlap - store 0 scores and skip NLI
+            const kCon = cache.makeKey("con", A, B);
+            const kEnt = cache.makeKey("ent", A, B);
+            pairResultsMap.set(kCon, 0);
+            pairResultsMap.set(kEnt, 0);
+            claimPairsSkipped++;
+            continue;
+        }
         const kCon = cache.makeKey("con", A, B);
-        if (!cache.get(kCon)) {
+        if (!cache.get(kCon) && !pairResultsMap.has(kCon)) {
             pairsToScore.push({ task: "contradiction", a: A, b: B, key: kCon });
         }
         else {
             cacheHits++;
         }
         const kEnt = cache.makeKey("ent", A, B);
-        if (!cache.get(kEnt)) {
+        if (!cache.get(kEnt) && !pairResultsMap.has(kEnt)) {
             pairsToScore.push({ task: "entailment", a: A, b: B, key: kEnt });
         }
         else {
             cacheHits++;
         }
     }
-    console.log(`🎯 Pair scoring: ${finalPairs.length} pairs → ${pairsToScore.length} need scoring, ${cacheHits} cache hits`);
+    console.log(`🎯 Claim pairs: ${finalPairs.length} total → ${claimPairsSkipped} skipped → ${pairsToScore.length} to score, ${cacheHits} cache hits`);
     // Check if scorer has scoreBatch method
     if (scorer && 'scoreBatch' in scorer && typeof scorer.scoreBatch === 'function' && pairsToScore.length) {
-        console.log(`  Running batch scoring with ${scorer.id} (${pairsToScore.length} pairs, batch size: ${batchSize})...`);
-        const scoreBatchFn = scorer.scoreBatch;
+        console.log(`  Claim-pair batch scoring: ${pairsToScore.length} pairs, batch size: ${batchSize}`);
+        const scorerWithBatch = scorer;
         const startTime = Date.now();
         let batchScoresStored = 0;
         let batchErrors = 0;
+        let claimNliCalls = 0;
         try {
             await runBatches(pairsToScore, batchSize, async (batch) => {
                 try {
-                    const out = await scoreBatchFn(batch);
+                    claimNliCalls++;
+                    timer?.count('num_nli_calls');
+                    timer?.count('num_nli_pairs', batch.length);
+                    const batchStart = Date.now();
+                    const out = await scorerWithBatch.scoreBatch(batch);
+                    const batchTime = Date.now() - batchStart;
+                    console.log(`  📤 Claim NLI batch ${claimNliCalls}: ${batch.length} pairs → ${out.length} scores (${batchTime}ms)`);
                     if (!out || out.length === 0) {
                         console.error(`  ❌ Batch scoring returned empty results for batch of ${batch.length} pairs`);
                         return;
@@ -410,13 +557,10 @@ export async function buildClaimGraph(claims, sources, opts = {}) {
                             batchErrors++;
                             continue;
                         }
+                        // Store in BOTH cache AND local map to ensure we don't lose results
                         cache.set(r.key, r.score, r.quote);
+                        pairResultsMap.set(r.key, r.score);
                         batchScoresStored++;
-                        // Verify cache storage worked
-                        const verify = cache.get(r.key);
-                        if (!verify) {
-                            console.error(`  ❌ Cache storage failed for key ${r.key.substring(0, 20)}...`);
-                        }
                         // Log first few scores to verify they're different
                         if (batchScoresStored <= 5) {
                             const pair = pairsToScore.find(p => p.key === r.key);
@@ -450,20 +594,25 @@ export async function buildClaimGraph(claims, sources, opts = {}) {
     for (const { i, j } of finalPairs) {
         const A = claims[i];
         const B = claims[j];
-        // Score contradiction
+        // Score contradiction - check local map FIRST (has batch results even when cache is NoopCache)
         const kCon = cache.makeKey("con", A.text, B.text);
+        const conFromMap = pairResultsMap.get(kCon);
         const conHit = cache.get(kCon);
         let con;
         try {
-            if (conHit) {
+            if (conFromMap !== undefined) {
+                con = conFromMap;
+            }
+            else if (conHit) {
                 con = conHit.v;
             }
             else {
                 // Cache miss - should have been scored in batch, but fallback to individual
-                console.warn(`  ⚠️ Cache miss for contradiction ${A.id} vs ${B.id} - scoring individually (key: ${kCon.substring(0, 20)}...)`);
+                console.warn(`  ⚠️ Cache miss for contradiction ${A.id} vs ${B.id} - scoring individually`);
                 con = await scorer.contradiction(A.text, B.text);
                 if (cacheEnabled)
                     cache.set(kCon, con);
+                pairResultsMap.set(kCon, con);
             }
         }
         catch (error) {
@@ -485,20 +634,25 @@ export async function buildClaimGraph(claims, sources, opts = {}) {
                 console.log(`  ❌ Below threshold: ${A.id} vs ${B.id} contradiction = ${con.toFixed(3)} < ${tCon.toFixed(3)}`);
             }
         }
-        // Score entailment (support)
+        // Score entailment (support) - check local map FIRST
         const kEnt = cache.makeKey("ent", A.text, B.text);
+        const entFromMap = pairResultsMap.get(kEnt);
         const entHit = cache.get(kEnt);
         let ent;
         try {
-            if (entHit) {
+            if (entFromMap !== undefined) {
+                ent = entFromMap;
+            }
+            else if (entHit) {
                 ent = entHit.v;
             }
             else {
                 // Cache miss - should have been scored in batch, but fallback to individual
-                console.warn(`  ⚠️ Cache miss for entailment ${A.id} → ${B.id} - scoring individually (key: ${kEnt.substring(0, 20)}...)`);
+                console.warn(`  ⚠️ Cache miss for entailment ${A.id} → ${B.id} - scoring individually`);
                 ent = await scorer.entailment(A.text, B.text);
                 if (cacheEnabled)
                     cache.set(kEnt, ent);
+                pairResultsMap.set(kEnt, ent);
             }
         }
         catch (error) {
