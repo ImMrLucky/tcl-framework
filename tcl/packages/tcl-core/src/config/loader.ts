@@ -7,6 +7,7 @@
 import { readFileSync } from 'fs';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
+import { createHash } from 'crypto';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -156,13 +157,12 @@ export function getTaxonomyConfig(): TaxonomyConfig {
  * Compute hash of config bundle for reproducibility
  */
 export function computeConfigHash(): string {
-  const crypto = require('crypto');
   const configBundle = JSON.stringify({
     scoring: scoringConfig,
     templates: templatesConfig,
     taxonomy: taxonomyConfig
   });
-  return crypto.createHash('sha256').update(configBundle).digest('hex').substring(0, 16);
+  return createHash('sha256').update(configBundle).digest('hex').substring(0, 16);
 }
 
 /**
