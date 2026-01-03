@@ -872,9 +872,22 @@ export class EvaluationResultsComponent implements OnInit {
       }
       
       // Get speaker from first evidence quote or scope
-      const speaker = firstQuote?.speaker || 
-                     (narrative.scope?.speakerFocus === 'AGENT' ? 'AGENT' : 
-                      narrative.scope?.speakerFocus === 'CUSTOMER' ? 'CUSTOMER' : 'UNKNOWN');
+      // Normalize to uppercase to match Issue type
+      let speaker: 'AGENT' | 'CUSTOMER' | 'UNKNOWN' | 'SYSTEM' = 'UNKNOWN';
+      if (firstQuote?.speaker) {
+        const quoteSpeaker = firstQuote.speaker;
+        if (quoteSpeaker === 'Agent') {
+          speaker = 'AGENT';
+        } else if (quoteSpeaker === 'Customer') {
+          speaker = 'CUSTOMER';
+        } else if (quoteSpeaker === 'System') {
+          speaker = 'SYSTEM';
+        }
+      } else if (narrative.scope?.speakerFocus) {
+        speaker = narrative.scope.speakerFocus === 'AGENT' ? 'AGENT' : 
+                  narrative.scope.speakerFocus === 'CUSTOMER' ? 'CUSTOMER' : 
+                  narrative.scope.speakerFocus === 'SYSTEM' ? 'SYSTEM' : 'UNKNOWN';
+      }
       
       const issue: Issue = {
         claimId: firstClaimId,
@@ -884,7 +897,7 @@ export class EvaluationResultsComponent implements OnInit {
         
         // Nested structure
         who: {
-          speaker: speaker as 'AGENT' | 'CUSTOMER' | 'UNKNOWN' | 'SYSTEM',
+          speaker: speaker,
           speakerLabel: speaker === 'AGENT' ? 'Agent' : speaker === 'CUSTOMER' ? 'Customer' : 'Unknown'
         },
         what: {
@@ -916,7 +929,7 @@ export class EvaluationResultsComponent implements OnInit {
         nodeBlameNorm: narrative.scoring?.riskScore ? narrative.scoring.riskScore / 100 : 0,
         importance: narrative.scoring?.compositeScore ? narrative.scoring.compositeScore / 100 : 0,
         issueType: categoryToIssueType[narrative.category] || 'UNSUPPORTED' as any,
-        speaker: speaker as 'AGENT' | 'CUSTOMER' | 'UNKNOWN' | 'SYSTEM',
+        speaker: speaker,
         speakerLabel: speaker === 'AGENT' ? 'Agent' : speaker === 'CUSTOMER' ? 'Customer' : 'Unknown',
         turnStartIdx: narrative.scope?.turnRange?.[0],
         turnEndIdx: narrative.scope?.turnRange?.[1],
