@@ -710,23 +710,30 @@ async function validateOnce(input: ValidateInput, adapter?: LLMAdapter, startTim
 
     // 6) scores - compute truth score incorporating contradictions
     // FIX: Use graph-based truth score that incorporates contradictions
-    const engineConfig = getEngineConfig();
-    const mode = sources && sources.length > 0 ? 'with_external_docs' : 'transcript_only';
-    const graphBasedTruth = computeTruthFromGraph(
-      evidenceRes.claims,
-      uniqueContradictions,
-      graph.supports,
-      graph.grounding,
-      mode
-    );
+    let truthScore: number | null = null;
+    try {
+      const engineConfig = getEngineConfig();
+      const mode = sources && sources.length > 0 ? 'with_external_docs' : 'transcript_only';
+      const graphBasedTruth = computeTruthFromGraph(
+        evidenceRes.claims,
+        uniqueContradictions,
+        graph.supports,
+        graph.grounding,
+        mode
+      );
+      
+      // Use graph-based truth score (incorporates contradictions)
+      if (graphBasedTruth.truth !== undefined && !isNaN(graphBasedTruth.truth)) {
+        truthScore = graphBasedTruth.truth;
+      }
+    } catch (error) {
+      console.warn('Error computing graph-based truth score, falling back:', error);
+    }
     
-    // Use graph-based truth score (incorporates contradictions)
-    // Fallback to evidenceRes.truthScore only if graph has no data
-    const truthScore = graphBasedTruth.truth !== undefined
-      ? graphBasedTruth.truth
-      : (evidenceRes.truthScore !== undefined 
-          ? Math.max(0, Math.min(100, Math.round(evidenceRes.truthScore)))
-          : null);
+    // Fallback to evidenceRes.truthScore if graph-based computation failed
+    if (truthScore === null && evidenceRes.truthScore !== undefined) {
+      truthScore = Math.max(0, Math.min(100, Math.round(evidenceRes.truthScore)));
+    }
     const pairsScored = graph.debug?.pairsScored || 0;
     const finalConsistencyScore = pairsScored > 0 && consistencyScore !== undefined
       ? Math.max(0, Math.min(100, Math.round(consistencyScore)))

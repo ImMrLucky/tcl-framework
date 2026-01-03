@@ -835,8 +835,13 @@ app.post("/validate", async (req, res) => {
                 transcript: transcript || "",
               });
               
-              // Store issue narratives in report
+              // Store issue narratives in report (both formats for compatibility)
               (out.report as any).issueNarratives = {
+                narratives: narrativesResult.narratives,
+                summary: narrativesResult.summary,
+              };
+              // Also store as issueAnalysis for UI compatibility
+              (out.report as any).issueAnalysis = {
                 narratives: narrativesResult.narratives,
                 summary: narrativesResult.summary,
               };

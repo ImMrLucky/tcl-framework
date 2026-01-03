@@ -100,30 +100,17 @@ export function computeHeadlineCounts(input: ComputeCountsInput): HeadlineCounts
       contradictionClaimIds.has(claim.id);
     
     // Check if claim is ungrounded
-    // In transcript-only mode: claims with transcript evidence are NOT ungrounded
-    // They should be "unverified" instead
-    const mode = engineConfig.mode;
-    const hasTranscriptEvidence = claim.grounding?.kind === "transcript" || 
-                                  (claim.grounding?.evidenceIds && claim.grounding.evidenceIds.length > 0);
-    
+    // Use truthState from spectral if available, otherwise check grounding
     const isUngrounded = 
-      (truthState === "Ungrounded" && !hasTranscriptEvidence) ||
-      (mode === 'transcript_only' && (claim.grounding?.kind === "none" || !claim.grounding) && 
-       (!claim.grounding?.evidenceIds || claim.grounding.evidenceIds.length === 0)) ||
-      (mode === 'with_external_docs' && 
-       (claim.grounding?.kind === "none" || !claim.grounding) &&
-       (!claim.grounding?.evidenceIds || claim.grounding.evidenceIds.length === 0));
+      truthState === "Ungrounded" ||
+      (claim.grounding?.kind === "none" || !claim.grounding) ||
+      (claim.grounding?.evidenceIds && claim.grounding.evidenceIds.length === 0) ||
+      (claim.evidence && claim.evidence.length === 0);
     
     // Check if claim is supported (and not contradicted)
-    // Must also check that contradiction weight is below threshold
-    const maxContradictionWeight = contradictions
-      .filter(c => c.claimA === claim.id || c.claimB === claim.id)
-      .reduce((max, c) => Math.max(max, c.weight || 0), 0);
-    
     const isSupported = 
       truthState === "Supported" &&
       !isContradicted &&
-      maxContradictionWeight < contradictedThreshold &&
       !highBadnessContradictionClaims.has(claim.id);
     
     if (isContradicted) {
