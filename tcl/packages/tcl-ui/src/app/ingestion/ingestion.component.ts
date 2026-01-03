@@ -139,13 +139,15 @@ export class IngestionComponent implements OnInit {
       if (this.isAudioFile) {
         // For audio files, we'll transcribe on submit
         this.transcript = '';
-        this.snackBar.open('Audio file selected. Transcription will occur when you submit.', 'Close', { duration: 4000 });
+        const snackBarRef = this.snackBar.open('Audio file selected. Transcription will occur when you submit.', 'Close', { duration: 4000 });
+        snackBarRef.onAction().subscribe(() => snackBarRef.dismiss());
       } else {
         // For text/subtitle files, read and preview
         try {
           const text = await file.text();
           this.transcript = text;
-          this.snackBar.open('File loaded successfully', 'Close', { duration: 3000 });
+          const snackBarRef = this.snackBar.open('File loaded successfully', 'Close', { duration: 3000 });
+          snackBarRef.onAction().subscribe(() => snackBarRef.dismiss());
           
           // Auto-preview for supported formats
           if (this.textExtensions.includes(fileExt)) {
@@ -153,7 +155,8 @@ export class IngestionComponent implements OnInit {
           }
         } catch (error: any) {
           this.errorMessage = `Failed to read file: ${error.message}`;
-          this.snackBar.open(this.errorMessage, 'Close', { duration: 5000 });
+          const snackBarRef = this.snackBar.open(this.errorMessage, 'Close', { duration: 5000 });
+          snackBarRef.onAction().subscribe(() => snackBarRef.dismiss());
         }
       }
     }
@@ -171,9 +174,11 @@ export class IngestionComponent implements OnInit {
       if (this.audioExtensions.includes(fileExt)) {
         this.audioFile = file;
         this.audioFileName = file.name;
-        this.snackBar.open('Audio file selected for linking', 'Close', { duration: 3000 });
+        const snackBarRef = this.snackBar.open('Audio file selected for linking', 'Close', { duration: 3000 });
+        snackBarRef.onAction().subscribe(() => snackBarRef.dismiss());
       } else {
-        this.snackBar.open('Please select a valid audio file', 'Close', { duration: 3000 });
+        const snackBarRef = this.snackBar.open('Please select a valid audio file', 'Close', { duration: 3000 });
+        snackBarRef.onAction().subscribe(() => snackBarRef.dismiss());
       }
     }
   }
@@ -196,9 +201,11 @@ export class IngestionComponent implements OnInit {
         this.transcript = text;
         await this.previewNormalization();
         
-        this.snackBar.open('Transcript file loaded for linking', 'Close', { duration: 3000 });
+        const snackBarRef = this.snackBar.open('Transcript file loaded for linking', 'Close', { duration: 3000 });
+        snackBarRef.onAction().subscribe(() => snackBarRef.dismiss());
       } else {
-        this.snackBar.open('Please select a valid transcript file', 'Close', { duration: 3000 });
+        const snackBarRef = this.snackBar.open('Please select a valid transcript file', 'Close', { duration: 3000 });
+        snackBarRef.onAction().subscribe(() => snackBarRef.dismiss());
       }
     }
   }
@@ -230,7 +237,8 @@ export class IngestionComponent implements OnInit {
       this.showPreview = true;
       
       if (result.warnings && result.warnings.length > 0) {
-        this.snackBar.open(`Preview ready (${result.warnings.length} warnings)`, 'Close', { duration: 3000 });
+        const snackBarRef = this.snackBar.open(`Preview ready (${result.warnings.length} warnings)`, 'Close', { duration: 3000 });
+        snackBarRef.onAction().subscribe(() => snackBarRef.dismiss());
       }
     } catch (error: any) {
       console.error('Preview error:', error);
@@ -271,7 +279,8 @@ export class IngestionComponent implements OnInit {
 
     if (!this.transcript || this.transcript.trim().length === 0) {
       this.errorMessage = 'Please enter or upload a transcript, or select an audio file';
-      this.snackBar.open(this.errorMessage, 'Close', { duration: 3000 });
+      const snackBarRef = this.snackBar.open(this.errorMessage, 'Close', { duration: 3000 });
+      snackBarRef.onAction().subscribe(() => snackBarRef.dismiss());
       return;
     }
 
@@ -347,7 +356,8 @@ export class IngestionComponent implements OnInit {
     } catch (error: any) {
       console.error('Ingestion error:', error);
       this.errorMessage = error.error?.error || error.message || 'An unexpected error occurred';
-      this.snackBar.open(this.errorMessage, 'Close', { duration: 5000 });
+      const snackBarRef = this.snackBar.open(this.errorMessage, 'Close', { duration: 5000 });
+      snackBarRef.onAction().subscribe(() => snackBarRef.dismiss());
     } finally {
       this.loading = false;
     }
@@ -359,7 +369,8 @@ export class IngestionComponent implements OnInit {
   async submitLinkedFiles() {
     if (!this.audioFile || !this.transcriptFile) {
       this.errorMessage = 'Please select both an audio file and a transcript file';
-      this.snackBar.open(this.errorMessage, 'Close', { duration: 3000 });
+      const snackBarRef = this.snackBar.open(this.errorMessage, 'Close', { duration: 3000 });
+      snackBarRef.onAction().subscribe(() => snackBarRef.dismiss());
       return;
     }
 
@@ -417,7 +428,8 @@ export class IngestionComponent implements OnInit {
         })
       );
 
-      this.snackBar.open('Audio and transcript linked successfully', 'Close', { duration: 3000 });
+      const snackBarRef = this.snackBar.open('Audio and transcript linked successfully', 'Close', { duration: 3000 });
+      snackBarRef.onAction().subscribe(() => snackBarRef.dismiss());
 
       // Step 3: Run evaluation
       // Use evaluation URL (Railway direct) to bypass Netlify timeout
@@ -452,7 +464,8 @@ export class IngestionComponent implements OnInit {
     } catch (error: any) {
       console.error('Linking error:', error);
       this.errorMessage = error.error?.error || error.message || 'Failed to link files';
-      this.snackBar.open(this.errorMessage, 'Close', { duration: 5000 });
+      const snackBarRef = this.snackBar.open(this.errorMessage, 'Close', { duration: 5000 });
+      snackBarRef.onAction().subscribe(() => snackBarRef.dismiss());
     } finally {
       this.loading = false;
     }
@@ -464,7 +477,8 @@ export class IngestionComponent implements OnInit {
   async transcribeAudio(): Promise<void> {
     if (!this.selectedFile) {
       this.errorMessage = 'No audio file selected';
-      this.snackBar.open(this.errorMessage, 'Close', { duration: 3000 });
+      const snackBarRef = this.snackBar.open(this.errorMessage, 'Close', { duration: 3000 });
+      snackBarRef.onAction().subscribe(() => snackBarRef.dismiss());
       return;
     }
 
@@ -491,14 +505,17 @@ export class IngestionComponent implements OnInit {
       
       if (!this.transcript || this.transcript.trim().length === 0) {
         this.errorMessage = 'Transcription returned empty result';
-        this.snackBar.open(this.errorMessage, 'Close', { duration: 5000 });
+        const snackBarRef = this.snackBar.open(this.errorMessage, 'Close', { duration: 5000 });
+      snackBarRef.onAction().subscribe(() => snackBarRef.dismiss());
         return;
       }
 
-      this.snackBar.open('Audio transcribed successfully', 'Close', { duration: 3000 });
+        const snackBarRef = this.snackBar.open('Audio transcribed successfully', 'Close', { duration: 3000 });
+        snackBarRef.onAction().subscribe(() => snackBarRef.dismiss());
     } catch (error: any) {
       this.errorMessage = error.error?.error || error.message || 'Failed to transcribe audio';
-      this.snackBar.open(this.errorMessage, 'Close', { duration: 5000 });
+      const snackBarRef = this.snackBar.open(this.errorMessage, 'Close', { duration: 5000 });
+      snackBarRef.onAction().subscribe(() => snackBarRef.dismiss());
     } finally {
       this.transcriptionInProgress = false;
     }

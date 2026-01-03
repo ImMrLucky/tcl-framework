@@ -216,11 +216,29 @@ export class EvaluationResultsComponent implements OnInit {
       }
       
       // Load issue narratives (QA-Manager Grade) from report - PRIMARY
-      const issueNarrativesData = (this.evaluation?.report as any)?.issueNarratives;
+      // Try multiple possible locations in the report structure
+      const report = this.evaluation?.report as any;
+      let issueNarrativesData = report?.issueNarratives;
+      
+      // Also check if narratives are directly in report
+      if (!issueNarrativesData && Array.isArray(report?.narratives)) {
+        issueNarrativesData = { narratives: report.narratives, summary: report.summary };
+      }
+      
+      // Also check if it's in issueAnalysis
+      if (!issueNarrativesData && report?.issueAnalysis?.narratives) {
+        issueNarrativesData = report.issueAnalysis;
+      }
+      
       if (issueNarrativesData) {
-        this.issueNarratives = issueNarrativesData.narratives || [];
+        // Handle both { narratives: [...] } and direct array
+        const narratives = Array.isArray(issueNarrativesData) 
+          ? issueNarrativesData 
+          : (issueNarrativesData.narratives || []);
+        
+        this.issueNarratives = narratives;
         this.issueNarrativesSummary = {
-          totalIssues: issueNarrativesData.summary?.totalIssues || 0,
+          totalIssues: issueNarrativesData.summary?.totalIssues || narratives.length,
           bySeverity: issueNarrativesData.summary?.bySeverity || { LOW: 0, MEDIUM: 0, HIGH: 0, CRITICAL: 0 },
           byCategory: issueNarrativesData.summary?.byCategory || {},
           primaryRiskCategories: issueNarrativesData.summary?.topCategories || [],
@@ -228,7 +246,14 @@ export class EvaluationResultsComponent implements OnInit {
         };
         console.log('📊 Loaded issue narratives:', {
           count: this.issueNarratives.length,
-          summary: this.issueNarrativesSummary
+          summary: this.issueNarrativesSummary,
+          firstNarrative: this.issueNarratives[0] ? {
+            issueId: this.issueNarratives[0].issueId,
+            title: this.issueNarratives[0].title,
+            evidenceQuotesCount: this.issueNarratives[0].evidenceQuotes?.length || 0,
+            traceabilityEdgesCount: this.issueNarratives[0].traceability?.topEdges?.length || 0,
+            hasScoring: !!this.issueNarratives[0].scoring
+          } : null
         });
       }
       
@@ -245,7 +270,8 @@ export class EvaluationResultsComponent implements OnInit {
     } catch (error: any) {
       console.error('Load evaluation error:', error);
       this.errorMessage = error.error?.error || error.message || 'Failed to load evaluation';
-      this.snackBar.open(this.errorMessage, 'Close', { duration: 5000 });
+      const snackBarRef = this.snackBar.open(this.errorMessage, 'Close', { duration: 5000 });
+      snackBarRef.onAction().subscribe(() => snackBarRef.dismiss());
     } finally {
       this.loading = false;
     }
@@ -378,10 +404,12 @@ export class EvaluationResultsComponent implements OnInit {
       const result = await this.auditService.exportClaimsCSV(this.evaluationId).toPromise();
       if (result?.downloadUrl) {
         window.open(result.downloadUrl, '_blank');
-        this.snackBar.open('Claims CSV exported successfully', 'Close', { duration: 3000 });
+        const snackBarRef = this.snackBar.open('Claims CSV exported successfully', 'Close', { duration: 3000 });
+        snackBarRef.onAction().subscribe(() => snackBarRef.dismiss());
       }
     } catch (error: any) {
-      this.snackBar.open('Failed to export CSV: ' + (error.error?.error || error.message), 'Close', { duration: 5000 });
+      const snackBarRef = this.snackBar.open('Failed to export CSV: ' + (error.error?.error || error.message), 'Close', { duration: 5000 });
+      snackBarRef.onAction().subscribe(() => snackBarRef.dismiss());
     }
   }
 
@@ -390,10 +418,12 @@ export class EvaluationResultsComponent implements OnInit {
       const result = await this.auditService.exportRunJSON(this.evaluationId).toPromise();
       if (result?.downloadUrl) {
         window.open(result.downloadUrl, '_blank');
-        this.snackBar.open('Run JSON exported successfully', 'Close', { duration: 3000 });
+        const snackBarRef = this.snackBar.open('Run JSON exported successfully', 'Close', { duration: 3000 });
+        snackBarRef.onAction().subscribe(() => snackBarRef.dismiss());
       }
     } catch (error: any) {
-      this.snackBar.open('Failed to export JSON: ' + (error.error?.error || error.message), 'Close', { duration: 5000 });
+      const snackBarRef = this.snackBar.open('Failed to export JSON: ' + (error.error?.error || error.message), 'Close', { duration: 5000 });
+      snackBarRef.onAction().subscribe(() => snackBarRef.dismiss());
     }
   }
 
@@ -402,10 +432,12 @@ export class EvaluationResultsComponent implements OnInit {
       const result = await this.auditService.exportIssuePDF(this.evaluationId, claimId).toPromise();
       if (result?.downloadUrl) {
         window.open(result.downloadUrl, '_blank');
-        this.snackBar.open('Issue PDF exported successfully', 'Close', { duration: 3000 });
+        const snackBarRef = this.snackBar.open('Issue PDF exported successfully', 'Close', { duration: 3000 });
+        snackBarRef.onAction().subscribe(() => snackBarRef.dismiss());
       }
     } catch (error: any) {
-      this.snackBar.open('Failed to export PDF: ' + (error.error?.error || error.message), 'Close', { duration: 5000 });
+      const snackBarRef = this.snackBar.open('Failed to export PDF: ' + (error.error?.error || error.message), 'Close', { duration: 5000 });
+      snackBarRef.onAction().subscribe(() => snackBarRef.dismiss());
     }
   }
 
@@ -418,11 +450,15 @@ export class EvaluationResultsComponent implements OnInit {
   }
 
   selectClusteredIssue(issue: ClusteredIssue) {
+    console.log('Opening clustered issue modal:', issue);
     this.dialog.open(IssueDetailModalComponent, {
       width: '900px',
       maxWidth: '90vw',
       maxHeight: '90vh',
-      data: issue,
+      data: { 
+        issue: issue, 
+        isNarrative: false 
+      },
       panelClass: 'issue-detail-modal-container'
     });
   }
@@ -525,11 +561,15 @@ export class EvaluationResultsComponent implements OnInit {
   // ============================================================================
 
   selectIssueNarrative(narrative: IssueNarrative) {
+    console.log('Opening issue narrative modal:', narrative);
     this.dialog.open(IssueDetailModalComponent, {
       width: '900px',
       maxWidth: '90vw',
       maxHeight: '90vh',
-      data: narrative,
+      data: { 
+        issue: narrative, 
+        isNarrative: true 
+      },
       panelClass: 'issue-detail-modal-container'
     });
   }
@@ -880,10 +920,12 @@ export class EvaluationResultsComponent implements OnInit {
           this.issues[issueIndex].status = newStatus;
           this.sortAndProcessIssues();
         }
-        this.snackBar.open('Status updated successfully', 'Close', { duration: 3000 });
+        const snackBarRef = this.snackBar.open('Status updated successfully', 'Close', { duration: 3000 });
+        snackBarRef.onAction().subscribe(() => snackBarRef.dismiss());
       }
     } catch (error: any) {
-      this.snackBar.open('Failed to update status: ' + (error.error?.error || error.message), 'Close', { duration: 5000 });
+      const snackBarRef = this.snackBar.open('Failed to update status: ' + (error.error?.error || error.message), 'Close', { duration: 5000 });
+      snackBarRef.onAction().subscribe(() => snackBarRef.dismiss());
     }
   }
 
@@ -1003,7 +1045,8 @@ export class EvaluationResultsComponent implements OnInit {
       if (!modifications) return;
       
       try {
-        this.snackBar.open('Running simulation...', '', { duration: 0 });
+        const snackBarRef = this.snackBar.open('Running simulation...', '', { duration: 0 });
+        snackBarRef.onAction().subscribe(() => snackBarRef.dismiss());
         
         const result = await this.auditService.createSimulation(
           this.evaluationId,
@@ -1017,12 +1060,13 @@ export class EvaluationResultsComponent implements OnInit {
         ).toPromise();
         
         if (result?.evaluationId) {
-          this.snackBar.open('Simulation created! Redirecting...', 'Close', { duration: 2000 });
+          const snackBarRef2 = this.snackBar.open('Simulation created! Redirecting...', 'Close', { duration: 2000 });
+          snackBarRef2.onAction().subscribe(() => snackBarRef2.dismiss());
           // Navigate to the new simulation evaluation
           this.router.navigate(['/evaluations', result.evaluationId]);
         }
       } catch (error: any) {
-        this.snackBar.open(
+        const snackBarRef3 = this.snackBar.open(
           'Simulation failed: ' + (error.error?.error || error.message),
           'Close',
           { duration: 5000 }
@@ -1058,10 +1102,12 @@ export class EvaluationResultsComponent implements OnInit {
     }
 
     if (result.success) {
-      this.snackBar.open('Evaluation deleted successfully', 'Close', { duration: 3000 });
+      const snackBarRef = this.snackBar.open('Evaluation deleted successfully', 'Close', { duration: 3000 });
+      snackBarRef.onAction().subscribe(() => snackBarRef.dismiss());
       this.router.navigate(['/evaluations']);
     } else {
-      this.snackBar.open('Failed to delete evaluation: ' + (result.error || 'Unknown error'), 'Close', { duration: 5000 });
+      const snackBarRef = this.snackBar.open('Failed to delete evaluation: ' + (result.error || 'Unknown error'), 'Close', { duration: 5000 });
+      snackBarRef.onAction().subscribe(() => snackBarRef.dismiss());
     }
   }
 }

@@ -127,24 +127,61 @@ export class IssueDetailModalComponent {
 
   constructor(
     public dialogRef: MatDialogRef<IssueDetailModalComponent>,
-    @Inject(MAT_DIALOG_DATA) data: IssueData | null | undefined
+    @Inject(MAT_DIALOG_DATA) data: { issue: IssueData; isNarrative: boolean } | IssueData | null | undefined
   ) {
-    // Check if it's an IssueNarrative (has issueId and evidenceQuotes)
-    this.isNarrative = !!(data && typeof data === 'object' && 'issueId' in data && 'evidenceQuotes' in data);
+    // Handle new data format: { issue: IssueData, isNarrative: boolean }
+    // or legacy format: IssueData directly
+    let issueData: IssueData | null = null;
+    
+    if (data && typeof data === 'object') {
+      if ('issue' in data && 'isNarrative' in data) {
+        // New format
+        issueData = (data as { issue: IssueData; isNarrative: boolean }).issue;
+        this.isNarrative = (data as { issue: IssueData; isNarrative: boolean }).isNarrative;
+      } else {
+        // Legacy format - check if it's an IssueNarrative (has issueId and evidenceQuotes)
+        issueData = data as IssueData;
+        this.isNarrative = !!(issueData && typeof issueData === 'object' && 'issueId' in issueData && 'evidenceQuotes' in issueData);
+      }
+    }
     
     // Ensure issue is always defined, provide defaults if missing
-    if (!data) {
+    if (!issueData) {
       this.issue = this.getDefaultClustered();
       this.isNarrative = false;
     } else if (this.isNarrative) {
-      this.issue = data as IssueNarrative;
+      this.issue = issueData as IssueNarrative;
     } else {
-      this.issue = data as ClusteredIssue;
+      this.issue = issueData as ClusteredIssue;
     }
     
     // Debug: log the issue data to see what we're receiving
-    console.log('IssueDetailModal - Received issue data:', this.issue);
+    console.log('IssueDetailModal - Received data:', JSON.stringify(data, null, 2));
+    console.log('IssueDetailModal - Extracted issue:', JSON.stringify(this.issue, null, 2));
     console.log('IssueDetailModal - Is narrative:', this.isNarrative);
+    
+    if (this.isNarrative) {
+      const narrative = this.issue as IssueNarrative;
+      console.log('IssueDetailModal - Narrative details:', {
+        issueId: narrative.issueId,
+        title: narrative.title,
+        evidenceQuotesCount: narrative.evidenceQuotes?.length || 0,
+        evidenceQuotes: narrative.evidenceQuotes,
+        traceabilityEdgesCount: narrative.traceability?.topEdges?.length || 0,
+        traceabilityEdges: narrative.traceability?.topEdges,
+        scoring: narrative.scoring,
+        contradictionPairsCount: narrative.contradictionPairs?.length || 0
+      });
+    } else {
+      const clustered = this.issue as ClusteredIssue;
+      console.log('IssueDetailModal - Clustered issue details:', {
+        id: clustered.id,
+        title: clustered.title,
+        primaryEvidenceCount: clustered.primaryEvidence?.length || 0,
+        primaryEvidence: clustered.primaryEvidence,
+        metrics: clustered.metrics
+      });
+    }
   }
   
   private getDefaultNarrative(): IssueNarrative {
@@ -442,20 +479,27 @@ export class IssueDetailModalComponent {
 
   // Helper to get tags
   getTags(): string[] {
-    if (!this.isNarrative) {
+    if (!this.issue) return [];
+    if (this.isNarrative) {
+      const narrative = this.issue as IssueNarrative;
+      // IssueNarrative doesn't have tags in the current spec, but check anyway
+      return (narrative as any).tags || [];
+    } else {
       const clustered = this.issue as ClusteredIssue;
       return clustered.tags || [];
     }
-    return [];
   }
 
   // Helper to check if has tags
   hasTags(): boolean {
-    if (!this.isNarrative) {
+    if (!this.issue) return false;
+    if (this.isNarrative) {
+      const narrative = this.issue as IssueNarrative;
+      return !!((narrative as any).tags && (narrative as any).tags.length > 0);
+    } else {
       const clustered = this.issue as ClusteredIssue;
       return !!(clustered.tags && clustered.tags.length > 0);
     }
-    return false;
   }
 
   // Helper to get flags
