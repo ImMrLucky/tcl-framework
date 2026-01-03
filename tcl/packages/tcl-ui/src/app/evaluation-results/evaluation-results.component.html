@@ -102,9 +102,18 @@
         <mat-card-subtitle>What compliance needs to know at a glance</mat-card-subtitle>
       </mat-card-header>
       <mat-card-content>
-        <!-- NEW: Issue Summary Grid (use issueNarrativesSummary if available, fallback to issueSummary) -->
+        <!-- Clean Transcript Banner - show when 0 issues -->
+        <div class="clean-transcript-banner" *ngIf="(issueNarrativesSummary?.totalIssues || 0) === 0 && (issues?.length ?? 0) === 0">
+          <mat-icon>check_circle</mat-icon>
+          <div class="banner-content">
+            <strong>Clean Transcript</strong>
+            <span>No compliance issues detected in this conversation</span>
+          </div>
+        </div>
+
+        <!-- Issue Summary Grid (use issueNarrativesSummary if available, fallback to issueSummary) -->
         <div class="executive-grid" *ngIf="issueNarrativesSummary || issueSummary">
-          <div class="exec-metric total">
+          <div class="exec-metric total" [class.zero-issues]="(issueNarrativesSummary || issueSummary)?.totalIssues === 0">
             <div class="exec-value">{{ (issueNarrativesSummary || issueSummary)?.totalIssues || 0 }}</div>
             <div class="exec-label">Total Issues</div>
           </div>
@@ -284,8 +293,7 @@
     <div class="main-layout">
       <!-- B) Issues Section with Toggle -->
       <div class="main-content">
-        <!-- View Toggle -->
-        <!-- PART 4: Show toggle if we have any issues data (narratives, clustered, or per-claim) -->
+        <!-- View Toggle - show if we have any issues -->
         <div class="view-toggle" *ngIf="issueNarratives.length > 0 || clusteredIssues.length > 0 || (issues?.length ?? 0) > 0">
           <button mat-button [class.active]="showClusteredView" (click)="showClusteredView = true" *ngIf="issueNarratives.length > 0 || clusteredIssues.length > 0">
             <mat-icon>category</mat-icon>
@@ -296,6 +304,35 @@
             Per-Claim Issues ({{ issues?.length ?? 0 }})
           </button>
         </div>
+
+        <!-- No Issues Found State - show when everything is empty -->
+        <mat-card class="no-issues-card" *ngIf="issueNarratives.length === 0 && clusteredIssues.length === 0 && (issues?.length ?? 0) === 0">
+          <mat-card-content>
+            <div class="no-issues-state">
+              <mat-icon class="success-icon">check_circle</mat-icon>
+              <h3>No Issues Detected</h3>
+              <p>This conversation passed all quality checks. All claims are supported and grounded in the transcript.</p>
+              <div class="summary-stats" *ngIf="evaluation?.report?.claims?.length">
+                <div class="stat">
+                  <strong>{{ evaluation.report.claims.length }}</strong>
+                  <span>Claims Analyzed</span>
+                </div>
+                <div class="stat" *ngIf="getCounts().supports > 0">
+                  <strong>{{ getCounts().supports }}</strong>
+                  <span>Support Edges</span>
+                </div>
+                <div class="stat">
+                  <strong>{{ getCounts().contradictions ?? 0 }}</strong>
+                  <span>Contradictions</span>
+                </div>
+                <div class="stat">
+                  <strong>{{ evaluation.scores?.coherence ?? getSpectralScores().coherenceScore ?? 'N/A' }}</strong>
+                  <span>Coherence Score</span>
+                </div>
+              </div>
+            </div>
+          </mat-card-content>
+        </mat-card>
 
         <!-- PRIMARY: Issue Narratives View (QA-Manager Grade) -->
         <!-- PART 4: Only show if narratives exist and view is set to clustered -->
@@ -580,12 +617,51 @@
             </table>
           </mat-card-content>
         </mat-card>
+
+        <!-- Claims Viewer - shows all analyzed claims even when no issues -->
+        <mat-card class="claims-viewer-card" *ngIf="evaluation?.report?.claims?.length > 0">
+          <mat-card-header>
+            <mat-card-title>
+              <mat-icon>format_list_bulleted</mat-icon>
+              Analyzed Claims ({{ evaluation.report.claims.length }})
+            </mat-card-title>
+            <mat-card-subtitle>All claims extracted from the conversation</mat-card-subtitle>
+          </mat-card-header>
+          <mat-card-content>
+            <div class="claims-list">
+              <div 
+                class="claim-item" 
+                *ngFor="let claim of evaluation.report.claims"
+                [class.agent]="claim.meta?.speaker?.toLowerCase() === 'agent'"
+                [class.customer]="claim.meta?.speaker?.toLowerCase() === 'customer'"
+              >
+                <span class="claim-id">{{ claim.id }}</span>
+                <span 
+                  class="claim-speaker"
+                  [class.agent]="claim.meta?.speaker?.toLowerCase() === 'agent'"
+                  [class.customer]="claim.meta?.speaker?.toLowerCase() === 'customer'"
+                >
+                  {{ claim.meta?.speaker || 'Unknown' }}
+                </span>
+                <span class="claim-text">{{ claim.text }}</span>
+                <span class="claim-turn" *ngIf="claim.meta?.turnIndex !== undefined">
+                  Turn {{ claim.meta.turnIndex }}
+                </span>
+                <span class="claim-grounding" *ngIf="claim.confidenceMetrics?.groundingScore > 0.5">
+                  <mat-icon>check_circle</mat-icon>
+                  Grounded
+                </span>
+              </div>
+            </div>
+          </mat-card-content>
+        </mat-card>
       </div>
 
-      <!-- C) Top Offenders Side Panel -->
-      <!-- PART 4: Defensive guard -->
-      <div class="side-panel" *ngIf="(topOffenders?.length ?? 0) > 0">
-        <mat-card class="offenders-card">
+      <!-- C) Side Panel - Spectral Analysis -->
+      <!-- Show when we have spectral data or grounding data -->
+      <div class="side-panel" *ngIf="evaluation?.report?.spectral || evaluation?.report?.graph?.grounding?.length > 0">
+        <!-- Top Offenders - only if we have offenders with blame -->
+        <mat-card class="offenders-card" *ngIf="(topOffenders?.length ?? 0) > 0">
           <mat-card-header>
             <mat-card-title>
               <mat-icon>gavel</mat-icon>
@@ -594,7 +670,7 @@
             <mat-card-subtitle>Most blamed claims</mat-card-subtitle>
           </mat-card-header>
           <mat-card-content>
-            <div class="offender-list" *ngIf="topOffenders && topOffenders.length > 0">
+            <div class="offender-list">
               <div class="offender-item" *ngFor="let offender of topOffenders; let i = index">
                 <div class="offender-rank">#{{ i + 1 }}</div>
                 <div class="offender-content">
@@ -610,8 +686,28 @@
                 </div>
               </div>
             </div>
-            <div *ngIf="topOffenders.length === 0" class="no-offenders">
-              No offender data available
+          </mat-card-content>
+        </mat-card>
+
+        <!-- Grounding Summary - show if we have grounding data -->
+        <mat-card class="grounding-card" *ngIf="evaluation?.report?.graph?.grounding?.length > 0">
+          <mat-card-header>
+            <mat-card-title>
+              <mat-icon>verified</mat-icon>
+              Grounding Summary
+            </mat-card-title>
+            <mat-card-subtitle>{{ evaluation.report.graph.grounding.length }} claims grounded in transcript</mat-card-subtitle>
+          </mat-card-header>
+          <mat-card-content>
+            <div class="grounding-stats">
+              <div class="grounding-stat">
+                <strong>{{ evaluation.report.graph.grounding.length }}</strong>
+                <span>Grounded Claims</span>
+              </div>
+              <div class="grounding-stat">
+                <strong>{{ (getAverageGroundingScore() * 100).toFixed(0) }}%</strong>
+                <span>Avg. Grounding</span>
+              </div>
             </div>
           </mat-card-content>
         </mat-card>

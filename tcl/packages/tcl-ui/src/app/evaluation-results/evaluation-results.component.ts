@@ -887,6 +887,18 @@ export class EvaluationResultsComponent implements OnInit {
     return counts;
   }
 
+  /**
+   * Calculate average grounding score from graph grounding edges
+   */
+  getAverageGroundingScore(): number {
+    const grounding = this.evaluation?.report?.graph?.grounding;
+    if (!grounding || !Array.isArray(grounding) || grounding.length === 0) {
+      return 0;
+    }
+    const sum = grounding.reduce((acc: number, g: any) => acc + (g.weight || 0), 0);
+    return sum / grounding.length;
+  }
+
   getRunInfo() {
     // Try report.run first, then construct from other sources
     const run = this.evaluation?.report?.run || {};

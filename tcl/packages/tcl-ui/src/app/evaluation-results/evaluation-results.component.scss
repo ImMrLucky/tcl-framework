@@ -1035,3 +1035,221 @@
   height: 48px;
   margin-bottom: 16px;
 }
+
+/* No Issues Found State */
+.no-issues-card {
+  margin-bottom: 20px;
+  border-left: 4px solid #10b981;
+}
+
+.no-issues-state {
+  text-align: center;
+  padding: 40px 20px;
+}
+
+.no-issues-state .success-icon {
+  font-size: 64px;
+  width: 64px;
+  height: 64px;
+  color: #10b981;
+  margin-bottom: 16px;
+}
+
+.no-issues-state h3 {
+  margin: 0 0 8px 0;
+  font-size: 24px;
+  font-weight: 600;
+  color: #1f2937;
+}
+
+.no-issues-state p {
+  margin: 0 0 24px 0;
+  color: #6b7280;
+  max-width: 500px;
+  margin-left: auto;
+  margin-right: auto;
+}
+
+.no-issues-state .summary-stats {
+  display: flex;
+  justify-content: center;
+  gap: 32px;
+  flex-wrap: wrap;
+}
+
+.no-issues-state .summary-stats .stat {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+}
+
+.no-issues-state .summary-stats .stat strong {
+  font-size: 28px;
+  font-weight: 700;
+  color: #1f2937;
+}
+
+.no-issues-state .summary-stats .stat span {
+  font-size: 12px;
+  color: #6b7280;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+/* Claims Viewer Section */
+.claims-viewer-card {
+  margin-top: 20px;
+}
+
+.claims-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.claim-item {
+  display: flex;
+  gap: 12px;
+  padding: 12px;
+  background: #f9fafb;
+  border-radius: 8px;
+  border-left: 3px solid #e5e7eb;
+}
+
+.claim-item.agent {
+  border-left-color: #3b82f6;
+}
+
+.claim-item.customer {
+  border-left-color: #10b981;
+}
+
+.claim-id {
+  font-family: monospace;
+  font-size: 12px;
+  color: #9ca3af;
+  min-width: 40px;
+}
+
+.claim-speaker {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  padding: 2px 8px;
+  border-radius: 4px;
+  min-width: 70px;
+  text-align: center;
+}
+
+.claim-speaker.agent {
+  background: #dbeafe;
+  color: #1d4ed8;
+}
+
+.claim-speaker.customer {
+  background: #d1fae5;
+  color: #047857;
+}
+
+.claim-text {
+  flex: 1;
+  font-size: 14px;
+  color: #374151;
+}
+
+.claim-turn {
+  font-size: 12px;
+  color: #9ca3af;
+}
+
+.claim-grounding {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  color: #10b981;
+}
+
+.claim-grounding mat-icon {
+  font-size: 16px;
+  width: 16px;
+  height: 16px;
+}
+
+/* Grounding Card */
+.grounding-card {
+  margin-bottom: 16px;
+}
+
+.grounding-stats {
+  display: flex;
+  gap: 24px;
+}
+
+.grounding-stat {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+}
+
+.grounding-stat strong {
+  font-size: 24px;
+  font-weight: 700;
+  color: #10b981;
+}
+
+.grounding-stat span {
+  font-size: 11px;
+  color: #6b7280;
+  text-transform: uppercase;
+}
+
+/* Clean Transcript Banner */
+.clean-transcript-banner {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 16px 20px;
+  background: linear-gradient(135deg, #10b981, #059669);
+  color: white;
+  border-radius: 12px;
+  margin-bottom: 20px;
+}
+
+.clean-transcript-banner mat-icon {
+  font-size: 32px;
+  width: 32px;
+  height: 32px;
+}
+
+.clean-transcript-banner .banner-content {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.clean-transcript-banner .banner-content strong {
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.clean-transcript-banner .banner-content span {
+  font-size: 14px;
+  opacity: 0.9;
+}
+
+/* Zero Issues Styling */
+.exec-metric.zero-issues .exec-value {
+  color: #10b981;
+}
+
+.exec-metric.zero-issues::after {
+  content: '✓';
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  font-size: 12px;
+  color: #10b981;
+}
