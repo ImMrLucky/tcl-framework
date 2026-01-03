@@ -134,7 +134,10 @@ export function buildIssueNarratives(
       whatIsWrong: narrative.whatIsWrong,
       whyWrong: narrative.whyWrong,
       whyItMatters: narrative.whyItMatters,
-      recommendedActions: narrative.recommendedActions,
+      recommendedActions: narrative.recommendedActions.map(action => ({
+        type: action.type as "COACHING" | "PROCESS" | "COMPLIANCE" | "SYSTEM_FIX",
+        action: action.action,
+      })),
       evidenceQuotes: evidenceQuotes.map(q => ({
         quoteId: q.quoteId,
         claimId: q.claimId,

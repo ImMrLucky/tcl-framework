@@ -7,8 +7,9 @@
 
 import { createHash } from "crypto";
 import type { TruthEngineConfig, SubjectSchema } from "../config/types.js";
-import type { EnhancedClaim, Fact, Modality, Polarity, Speaker } from "./types.js";
+import type { EnhancedClaim, Fact, Modality, Polarity, Speaker, ClaimKind, Intent, ValueType, CertaintyLevel, TimeframeNormalized } from "./types.js";
 import { DEFAULT_CONFIG } from "../config/types.js";
+import { classifyClaimKind } from "../../claim_classifier.js";
 
 /**
  * Parse raw transcript into enhanced claims with modality, polarity, entities.
@@ -58,6 +59,10 @@ export function extractEnhancedClaims(
       new RegExp(`\\b${word}\\b`, 'i').test(text)
     );
     
+    // NEW: Classify claim kind and detect intent
+    const claimKind = classifyClaimKind(text, speakerMatch[1]);
+    const intent = detectIntent(text, speaker);
+    
     claims.push({
       id: generateClaimId(i, text),
       speaker,
@@ -66,6 +71,8 @@ export function extractEnhancedClaims(
       modality,
       polarity,
       topics,
+      claimKind,  // NEW
+      intent,     // NEW
       entities,
       numbers,
       hasNegation,
@@ -115,6 +122,13 @@ export function extractFacts(
       // Extract timeframe cues
       const timeframe = extractTimeframe(claim.text);
       
+      // NEW: Normalize fields
+      const subjectNormalized = normalizeSubject(schema.id, config.normalization);
+      const predicateNormalized = normalizePredicate(predicate, config.normalization);
+      const { valueType, normalizedValue } = normalizeValue(value, factPolarity, claim, config.normalization);
+      const certainty = deriveCertainty(claim.modality, claim.hasAbsoluteLanguage, claim.hasConditionalLanguage);
+      const timeframeNormalized = normalizeTimeframe(timeframe, config.normalization);
+      
       facts.push({
         id: generateFactId(claim.id, schema.id, predicate),
         claimId: claim.id,
@@ -123,9 +137,17 @@ export function extractFacts(
         subject: schema.id,
         predicate,
         value: factPolarity === 'deny' ? false : (factPolarity === 'affirm' ? true : value),
+        // NEW: Normalized fields
+        subjectNormalized,
+        predicateNormalized,
+        valueType,
+        normalizedValue,
+        polarity: factPolarity,
+        certainty,
         conditions,
         timeframe: timeframe || undefined,
-        certainty: "stated",
+        timeframeNormalized,
+        sourceCertainty: "stated",  // Renamed from certainty
       });
     }
   }
@@ -136,6 +158,33 @@ export function extractFacts(
 // ============================================================================
 // Helper functions
 // ============================================================================
+
+/**
+ * Detect intent from claim text and speaker
+ */
+function detectIntent(text: string, speaker: Speaker): Intent | undefined {
+  if (speaker !== 'agent') return undefined;
+  
+  const lower = text.toLowerCase();
+  
+  if (/send.*email|email.*send|email.*copy|email.*agreement|email.*document/i.test(lower)) {
+    return 'send_document';
+  }
+  if (/call.*back|call.*you|follow.*up|get.*back/i.test(lower)) {
+    return 'call_back';
+  }
+  if (/refund|reimburse|return.*money/i.test(lower)) {
+    return 'refund';
+  }
+  if (/cancel|cancellation/i.test(lower)) {
+    return 'cancel';
+  }
+  if (/change.*plan|modify.*plan|switch.*plan/i.test(lower)) {
+    return 'change_plan';
+  }
+  
+  return undefined;
+}
 
 function detectModality(text: string, lexicon: TruthEngineConfig['modalityLexicon']): Modality {
   const lower = text.toLowerCase();
@@ -359,6 +408,155 @@ function extractNumbers(text: string): Array<{ raw: string; value?: number; unit
   }
   
   return numbers;
+}
+
+// ============================================================================
+// Normalization functions
+// ============================================================================
+
+/**
+ * Normalize subject using synonym mapping
+ */
+function normalizeSubject(subject: string, normConfig: TruthEngineConfig['normalization']): string {
+  // Check if subject has synonyms - use first synonym as normalized, or keep original
+  for (const [normalized, synonyms] of Object.entries(normConfig.subjectSynonyms)) {
+    if (synonyms.includes(subject) || subject === normalized) {
+      return normalized;
+    }
+  }
+  return subject.toLowerCase().replace(/\s+/g, '_');
+}
+
+/**
+ * Normalize predicate using synonym mapping
+ */
+function normalizePredicate(predicate: string, normConfig: TruthEngineConfig['normalization']): string {
+  for (const [normalized, synonyms] of Object.entries(normConfig.predicateSynonyms)) {
+    if (synonyms.includes(predicate) || predicate === normalized) {
+      return normalized;
+    }
+  }
+  return predicate.toLowerCase();
+}
+
+/**
+ * Normalize value and determine its type
+ */
+function normalizeValue(
+  value: string | number | boolean | null,
+  polarity: Polarity,
+  claim: EnhancedClaim,
+  normConfig: TruthEngineConfig['normalization']
+): { valueType: ValueType; normalizedValue: string | number | boolean | null } {
+  // Handle boolean/null
+  if (value === null || value === undefined) {
+    return { valueType: 'unknown', normalizedValue: null };
+  }
+  
+  if (typeof value === 'boolean') {
+    return { valueType: 'boolean', normalizedValue: value };
+  }
+  
+  // Handle money
+  if (typeof value === 'number' && claim.numbers.some(n => n.unit === 'USD')) {
+    return { valueType: 'money', normalizedValue: Math.round(value * 100) / 100 }; // Round to 2 decimals
+  }
+  
+  // Handle numbers
+  if (typeof value === 'number') {
+    return { valueType: 'number', normalizedValue: value };
+  }
+  
+  // Handle string values
+  if (typeof value === 'string') {
+    const lower = value.toLowerCase();
+    
+    // Check enum lexicon
+    for (const [enumKey, terms] of Object.entries(normConfig.enumLexicon)) {
+      if (terms.some(term => lower.includes(term))) {
+        return { valueType: 'enum', normalizedValue: enumKey };
+      }
+    }
+    
+    // Boolean-like strings
+    if (['yes', 'true', 'has', 'exists', 'present'].includes(lower)) {
+      return { valueType: 'boolean', normalizedValue: true };
+    }
+    if (['no', 'false', "doesn't", "don't", 'absent', 'none'].includes(lower)) {
+      return { valueType: 'boolean', normalizedValue: false };
+    }
+    
+    // Default to string
+    return { valueType: 'string', normalizedValue: lower };
+  }
+  
+  return { valueType: 'unknown', normalizedValue: value };
+}
+
+/**
+ * Derive certainty from modality and language flags
+ */
+function deriveCertainty(
+  modality: Modality,
+  hasAbsoluteLanguage: boolean,
+  hasConditionalLanguage: boolean
+): CertaintyLevel {
+  if (hasAbsoluteLanguage || modality === 'absolute') {
+    return 'high';
+  }
+  if (hasConditionalLanguage || modality === 'conditional') {
+    return 'low';
+  }
+  return 'medium';
+}
+
+/**
+ * Normalize timeframe to canonical bucket
+ */
+function normalizeTimeframe(
+  timeframe: { start?: string; end?: string; relative?: string } | null,
+  normConfig: TruthEngineConfig['normalization']
+): TimeframeNormalized | undefined {
+  if (!timeframe || !timeframe.relative) {
+    return undefined;
+  }
+  
+  const relative = timeframe.relative.toLowerCase();
+  
+  // Check if relative matches a bucket
+  for (const bucket of normConfig.timeframeBuckets) {
+    if (relative.includes(bucket) || bucket.includes(relative)) {
+      return {
+        bucket,
+        relative: timeframe.relative,
+      };
+    }
+  }
+  
+  // Default mapping for common phrases
+  const defaultMapping: Record<string, string> = {
+    'this_cycle': 'this_cycle',
+    'this month': 'this_month',
+    'today': 'today',
+    'yesterday': 'yesterday',
+    'promo': 'promo_period',
+    'promotional': 'promo_period',
+  };
+  
+  for (const [phrase, bucket] of Object.entries(defaultMapping)) {
+    if (relative.includes(phrase)) {
+      return {
+        bucket,
+        relative: timeframe.relative,
+      };
+    }
+  }
+  
+  // Fallback: use relative as bucket
+  return {
+    bucket: relative.replace(/\s+/g, '_'),
+    relative: timeframe.relative,
+  };
 }
 
 function generateClaimId(turnIndex: number, text: string): string {

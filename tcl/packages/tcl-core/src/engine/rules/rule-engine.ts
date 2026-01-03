@@ -126,10 +126,21 @@ export function runRuleEngine(
     }
   }
   
+  // Merge duplicate edges before pruning (if enabled)
+  let mergedContradictions = config.pruning.mergeBeforePrune 
+    ? mergeEdges(contradictionEdges)
+    : contradictionEdges;
+  let mergedSupports = config.pruning.mergeBeforePrune
+    ? mergeEdges(supportEdges)
+    : supportEdges;
+  let mergedStructure = config.pruning.mergeBeforePrune
+    ? mergeEdges(structureEdges)
+    : structureEdges;
+  
   // Prune edges according to config
-  const prunedContradictions = pruneEdges(contradictionEdges, 'contradiction', config);
-  const prunedSupports = pruneEdges(supportEdges, 'support', config);
-  const prunedStructure = pruneEdges(structureEdges, 'structure', config);
+  const prunedContradictions = pruneEdges(mergedContradictions, 'contradiction', config);
+  const prunedSupports = pruneEdges(mergedSupports, 'support', config);
+  const prunedStructure = pruneEdges(mergedStructure, 'structure', config);
   
   return {
     contradictionEdges: prunedContradictions,
@@ -150,53 +161,126 @@ function findPolarityConflicts(
 ): TruthEdge[] {
   const edges: TruthEdge[] = [];
   const claimMap = new Map(claims.map(c => [c.id, c]));
+  const ruleConfig = config.rules["POLARITY_CONFLICT"];
+  const maxTurnDistance = ruleConfig?.maxTurnDistance ?? 20;
   
   // Sort facts by turn index
   const sorted = [...subjectFacts].sort((a, b) => a.turnIndex - b.turnIndex);
   
-  // Compare each pair
+  // Compare each pair with turn distance gating
   for (let i = 0; i < sorted.length; i++) {
     for (let j = i + 1; j < sorted.length; j++) {
       const earlier = sorted[i];
       const later = sorted[j];
       
-      // Check for polarity conflict (true vs false on same subject+predicate)
-      if (earlier.predicate === later.predicate) {
-        const earlierValue = Boolean(earlier.value);
-        const laterValue = Boolean(later.value);
+      // Turn distance gating
+      const turnDistance = later.turnIndex - earlier.turnIndex;
+      if (turnDistance > maxTurnDistance) continue;
+      
+      // Get claims for gating checks
+      const srcClaim = claimMap.get(earlier.claimId);
+      const dstClaim = claimMap.get(later.claimId);
+      if (!srcClaim || !dstClaim) continue;
+      
+      // Contradiction gating: skip non-auditable claim kinds
+      // Adapt EnhancedClaim to Claim format for shouldConsiderContradiction
+      const srcClaimAdapted: any = {
+        id: srcClaim.id,
+        text: srcClaim.text,
+        claimKind: srcClaim.claimKind,
+        confidence: 0.5,
+        evidence: [],
+        meta: { speaker: srcClaim.speaker, turnIndex: srcClaim.turnIndex },
+      };
+      const dstClaimAdapted: any = {
+        id: dstClaim.id,
+        text: dstClaim.text,
+        claimKind: dstClaim.claimKind,
+        confidence: 0.5,
+        evidence: [],
+        meta: { speaker: dstClaim.speaker, turnIndex: dstClaim.turnIndex },
+      };
+      
+      const gateResult = shouldConsiderContradiction(srcClaimAdapted, dstClaimAdapted);
+      if (!gateResult.shouldCreate) {
+        continue;
+      }
+      
+      // Use normalized semantic keys for comparison
+      const sameSubject = earlier.subjectNormalized === later.subjectNormalized;
+      const samePredicate = earlier.predicateNormalized === later.predicateNormalized;
+      
+      if (!sameSubject || !samePredicate) continue;
+      
+      // Semantic value comparison using normalized values and value types
+      const isConflict = valuesConflict(
+        earlier.normalizedValue,
+        later.normalizedValue,
+        earlier.valueType,
+        later.valueType,
+        earlier.polarity,
+        later.polarity,
+        config.normalization
+      );
+      
+      if (isConflict) {
+        // Calculate topic overlap for gating (pass claim text, not topics array)
+        const overlapScore = calculateTopicOverlap(srcClaim.text, dstClaim.text);
+        const minOverlap = ruleConfig?.topicOverlapMin ?? 0.3;
         
-        if (earlierValue !== laterValue) {
-          // Polarity conflict detected
-          const srcClaim = claimMap.get(earlier.claimId);
-          const dstClaim = claimMap.get(later.claimId);
-          
-          // Calculate weight from config
-          let weight = config.edgeWeights.contradictionBase;
-          weight *= config.edgeWeights.polarityConflictMultiplier;
-          
-          // Boost if agent speaker
-          if (later.speaker === 'agent') {
-            weight *= config.edgeWeights.agentSpeakerMultiplier;
-          }
-          
+        if (overlapScore < minOverlap) {
+          // Low overlap - create edge but mark as low_overlap
           edges.push({
             id: generateEdgeId('contra', earlier.claimId, later.claimId),
             type: 'contradiction',
             srcId: earlier.claimId,
             dstId: later.claimId,
-            weight: clamp01(weight),
-            reason: `Conflicting statements about ${earlier.subject}: first ${earlierValue ? 'affirms' : 'denies'}, then ${laterValue ? 'affirms' : 'denies'}`,
-            ruleId: `POLARITY_CONFLICT.${earlier.subject.toUpperCase()}`,
+            weight: clamp01(config.edgeWeights.contradictionBase * 0.5), // Lower weight
+            reason: `Conflicting statements about ${earlier.subjectNormalized} (low topic overlap: ${overlapScore.toFixed(2)})`,
+            ruleId: `POLARITY_CONFLICT.${earlier.subjectNormalized.toUpperCase()}`,
             provenance: 'rules',
+            contradictionType: 'low_overlap',
+            overlapScore,
+            reasonCodes: ['LOW_OVERLAP'],
             metadata: {
-              subject: earlier.subject,
-              predicate: earlier.predicate,
+              subject: earlier.subjectNormalized,
+              predicate: earlier.predicateNormalized,
               polarityConflict: true,
-              srcText: srcClaim?.text.substring(0, 100),
-              dstText: dstClaim?.text.substring(0, 100),
+              srcText: srcClaim.text.substring(0, 100),
+              dstText: dstClaim.text.substring(0, 100),
             },
           });
+          continue;
         }
+        
+        // Direct contradiction with sufficient overlap
+        let weight = config.edgeWeights.contradictionBase;
+        weight *= config.edgeWeights.polarityConflictMultiplier;
+        
+        // Boost if agent speaker
+        if (later.speaker === 'agent') {
+          weight *= config.edgeWeights.agentSpeakerMultiplier;
+        }
+        
+        edges.push({
+          id: generateEdgeId('contra', earlier.claimId, later.claimId),
+          type: 'contradiction',
+          srcId: earlier.claimId,
+          dstId: later.claimId,
+          weight: clamp01(weight),
+          reason: `Conflicting statements about ${earlier.subjectNormalized}: ${earlier.polarity} vs ${later.polarity}`,
+          ruleId: `POLARITY_CONFLICT.${earlier.subjectNormalized.toUpperCase()}`,
+          provenance: 'rules',
+          contradictionType: 'direct',
+          overlapScore,
+          metadata: {
+            subject: earlier.subjectNormalized,
+            predicate: earlier.predicateNormalized,
+            polarityConflict: true,
+            srcText: srcClaim.text.substring(0, 100),
+            dstText: dstClaim.text.substring(0, 100),
+          },
+        });
       }
     }
   }
@@ -210,6 +294,9 @@ function findModalityShifts(
   config: TruthEngineConfig
 ): TruthEdge[] {
   const edges: TruthEdge[] = [];
+  const ruleConfig = config.rules["ABSOLUTE_TO_CONDITIONAL"];
+  const maxTurnDistance = ruleConfig?.maxTurnDistance ?? 15;
+  const mode = ruleConfig?.mode ?? 'qualification';
   
   // Group claims by topic
   const claimsByTopic = new Map<string, EnhancedClaim[]>();
@@ -234,28 +321,67 @@ function findModalityShifts(
       for (let j = i + 1; j < sorted.length; j++) {
         const later = sorted[j];
         
+        // Turn distance gating
+        const turnDistance = later.turnIndex - earlier.turnIndex;
+        if (turnDistance > maxTurnDistance) continue;
+        
         // Check for conditional modifier on same topic
         if (later.modality === 'conditional' || later.hasConditionalLanguage) {
-          // Absolute → Conditional shift detected
-          let weight = config.edgeWeights.contradictionBase;
-          weight *= 0.9; // Slightly lower than pure polarity conflict
+        // Contradiction gating
+        const earlierAdapted: any = {
+          id: earlier.id,
+          text: earlier.text,
+          claimKind: earlier.claimKind,
+          confidence: 0.5,
+          evidence: [],
+          meta: { speaker: earlier.speaker, turnIndex: earlier.turnIndex },
+        };
+        const laterAdapted: any = {
+          id: later.id,
+          text: later.text,
+          claimKind: later.claimKind,
+          confidence: 0.5,
+          evidence: [],
+          meta: { speaker: later.speaker, turnIndex: later.turnIndex },
+        };
+        
+        const gateResult = shouldConsiderContradiction(earlierAdapted, laterAdapted);
+        if (!gateResult.shouldCreate) {
+          continue;
+        }
+        
+        // Calculate topic overlap (pass claim text, not topics array)
+        const overlapScore = calculateTopicOverlap(earlier.text, later.text);
+          const minOverlap = ruleConfig?.topicOverlapMin ?? 0.3;
+          
+          if (overlapScore < minOverlap) continue;
+          
+          // Create qualification edge (weakening) or contradiction based on mode
+          const isQualification = mode === 'qualification';
+          let weight = isQualification 
+            ? config.edgeWeights.contradictionBase * config.edgeWeights.qualificationEdgeMultiplier
+            : config.edgeWeights.contradictionBase * 0.9;
           
           if (later.speaker === 'agent') {
             weight *= config.edgeWeights.agentSpeakerMultiplier;
           }
           
           edges.push({
-            id: generateEdgeId('modal', earlier.id, later.id),
-            type: 'contradiction',
+            id: generateEdgeId(isQualification ? 'qual' : 'modal', earlier.id, later.id),
+            type: isQualification ? 'structure' : 'contradiction', // Qualification as structure edge
             srcId: earlier.id,
             dstId: later.id,
             weight: clamp01(weight),
-            reason: `Absolute statement "${earlier.text.substring(0, 50)}..." followed by conditional qualifier`,
+            reason: isQualification
+              ? `Absolute statement weakened by conditional qualifier: "${earlier.text.substring(0, 50)}..." → "${later.text.substring(0, 50)}..."`
+              : `Absolute statement "${earlier.text.substring(0, 50)}..." followed by conditional qualifier`,
             ruleId: `ABSOLUTE_TO_CONDITIONAL.${topic.toUpperCase()}`,
             provenance: 'rules',
+            overlapScore,
             metadata: {
               topic,
               modalityShift: true,
+              isQualification,
               srcText: earlier.text.substring(0, 100),
               dstText: later.text.substring(0, 100),
             },
@@ -274,6 +400,8 @@ function findAgentSelfContradictions(
   config: TruthEngineConfig
 ): TruthEdge[] {
   const edges: TruthEdge[] = [];
+  const ruleConfig = config.rules["AGENT_SELF_CONTRADICTION"];
+  const maxTurnDistance = ruleConfig?.maxTurnDistance ?? 10;
   
   // Only look at agent claims
   const agentClaims = claims.filter(c => c.speaker === 'agent');
@@ -298,9 +426,42 @@ function findAgentSelfContradictions(
       for (let j = i + 1; j < sorted.length; j++) {
         const later = sorted[j];
         
+        // Turn distance gating
+        const turnDistance = later.turnIndex - earlier.turnIndex;
+        if (turnDistance > maxTurnDistance) continue;
+        
+        // Contradiction gating
+        const earlierAdapted: any = {
+          id: earlier.id,
+          text: earlier.text,
+          claimKind: earlier.claimKind,
+          confidence: 0.5,
+          evidence: [],
+          meta: { speaker: earlier.speaker, turnIndex: earlier.turnIndex },
+        };
+        const laterAdapted: any = {
+          id: later.id,
+          text: later.text,
+          claimKind: later.claimKind,
+          confidence: 0.5,
+          evidence: [],
+          meta: { speaker: later.speaker, turnIndex: later.turnIndex },
+        };
+        
+        const gateResult = shouldConsiderContradiction(earlierAdapted, laterAdapted);
+        if (!gateResult.shouldCreate) {
+          continue;
+        }
+        
         // Check for polarity flip
         if (earlier.polarity !== 'unknown' && later.polarity !== 'unknown' &&
             earlier.polarity !== later.polarity) {
+          
+          // Calculate topic overlap (pass claim text, not topics array)
+          const overlapScore = calculateTopicOverlap(earlier.text, later.text);
+          const minOverlap = ruleConfig?.topicOverlapMin ?? 0.6;
+          
+          if (overlapScore < minOverlap) continue;
           
           let weight = config.edgeWeights.contradictionBase;
           weight *= config.edgeWeights.agentSpeakerMultiplier;
@@ -315,6 +476,8 @@ function findAgentSelfContradictions(
             reason: `Agent contradicts own statement about ${topic}`,
             ruleId: `AGENT_SELF_CONTRADICTION.${topic.toUpperCase()}`,
             provenance: 'rules',
+            contradictionType: 'direct',
+            overlapScore,
             metadata: {
               topic,
               polarityConflict: true,
@@ -337,9 +500,11 @@ function findTimeframeConflicts(
 ): TruthEdge[] {
   const edges: TruthEdge[] = [];
   const claimMap = new Map(claims.map(c => [c.id, c]));
+  const ruleConfig = config.rules["TIMEFRAME_CONFLICT"];
+  const maxTurnDistance = ruleConfig?.maxTurnDistance ?? 7;
   
-  // Find facts with timeframe info
-  const factsWithTime = subjectFacts.filter(f => f.timeframe);
+  // Find facts with normalized timeframe info
+  const factsWithTime = subjectFacts.filter(f => f.timeframeNormalized || f.timeframe);
   
   for (let i = 0; i < factsWithTime.length; i++) {
     const earlier = factsWithTime[i];
@@ -347,12 +512,58 @@ function findTimeframeConflicts(
     for (let j = i + 1; j < factsWithTime.length; j++) {
       const later = factsWithTime[j];
       
-      // Check for overlapping timeframes with conflicting values
-      if (timeframesOverlap(earlier.timeframe, later.timeframe)) {
-        if (Boolean(earlier.value) !== Boolean(later.value)) {
-          const srcClaim = claimMap.get(earlier.claimId);
-          const dstClaim = claimMap.get(later.claimId);
-          
+      // Turn distance gating
+      const turnDistance = later.turnIndex - earlier.turnIndex;
+      if (turnDistance > maxTurnDistance) continue;
+      
+      // Get claims for gating
+      const srcClaim = claimMap.get(earlier.claimId);
+      const dstClaim = claimMap.get(later.claimId);
+      if (!srcClaim || !dstClaim) continue;
+      
+      // Contradiction gating
+      const srcClaimAdapted: any = {
+        id: srcClaim.id,
+        text: srcClaim.text,
+        claimKind: srcClaim.claimKind,
+        confidence: 0.5,
+        evidence: [],
+        meta: { speaker: srcClaim.speaker, turnIndex: srcClaim.turnIndex },
+      };
+      const dstClaimAdapted: any = {
+        id: dstClaim.id,
+        text: dstClaim.text,
+        claimKind: dstClaim.claimKind,
+        confidence: 0.5,
+        evidence: [],
+        meta: { speaker: dstClaim.speaker, turnIndex: dstClaim.turnIndex },
+      };
+      
+      const gateResult = shouldConsiderContradiction(srcClaimAdapted, dstClaimAdapted);
+      if (!gateResult.shouldCreate) {
+        continue;
+      }
+      
+      // Use normalized timeframe buckets for overlap detection
+      const overlap = timeframesOverlapNormalized(
+        earlier.timeframeNormalized,
+        later.timeframeNormalized,
+        config.normalization.timeframeOverlapMap
+      );
+      
+      if (overlap) {
+        // Check for conflicting values using semantic comparison
+        const isConflict = valuesConflict(
+          earlier.normalizedValue,
+          later.normalizedValue,
+          earlier.valueType,
+          later.valueType,
+          earlier.polarity,
+          later.polarity,
+          config.normalization
+        );
+        
+        if (isConflict) {
           let weight = config.edgeWeights.contradictionBase;
           weight *= config.edgeWeights.timeframeConflictMultiplier;
           
@@ -362,14 +573,17 @@ function findTimeframeConflicts(
             srcId: earlier.claimId,
             dstId: later.claimId,
             weight: clamp01(weight),
-            reason: `Conflicting states for "${earlier.subject}" in overlapping timeframes`,
-            ruleId: `TIMEFRAME_CONFLICT.${earlier.subject.toUpperCase()}`,
+            reason: `Conflicting states for "${earlier.subjectNormalized}" in overlapping timeframes (${earlier.timeframeNormalized?.bucket || 'unknown'} vs ${later.timeframeNormalized?.bucket || 'unknown'})`,
+            ruleId: `TIMEFRAME_CONFLICT.${earlier.subjectNormalized.toUpperCase()}`,
             provenance: 'rules',
+            contradictionType: 'direct',
             metadata: {
-              subject: earlier.subject,
+              subject: earlier.subjectNormalized,
               timeframeOverlap: true,
-              srcText: srcClaim?.text.substring(0, 100),
-              dstText: dstClaim?.text.substring(0, 100),
+              earlierBucket: earlier.timeframeNormalized?.bucket,
+              laterBucket: later.timeframeNormalized?.bucket,
+              srcText: srcClaim.text.substring(0, 100),
+              dstText: dstClaim.text.substring(0, 100),
             },
           });
         }
@@ -386,17 +600,21 @@ function findSupportEdges(
   config: TruthEngineConfig
 ): TruthEdge[] {
   const edges: TruthEdge[] = [];
+  const claimMap = new Map(claims.map(c => [c.id, c]));
+  const ruleConfig = config.rules["SUPPORT_REPETITION"];
+  const maxTurnDistance = ruleConfig?.maxTurnDistance ?? 4;
   
-  // Group facts by subject+predicate+value
+  // Group facts by normalized subject+predicate+value (semantic key)
   const factGroups = new Map<string, Fact[]>();
   for (const fact of facts) {
-    const key = `${fact.subject}:${fact.predicate}:${fact.value}`;
+    // Use normalized keys for semantic matching
+    const key = `${fact.subjectNormalized}:${fact.predicateNormalized}:${fact.normalizedValue}`;
     const existing = factGroups.get(key) || [];
     existing.push(fact);
     factGroups.set(key, existing);
   }
   
-  // Facts in the same group support each other
+  // Facts with same semantic key support each other (exact match)
   for (const [key, group] of factGroups) {
     if (group.length < 2) continue;
     
@@ -405,6 +623,10 @@ function findSupportEdges(
     for (let i = 0; i < sorted.length - 1; i++) {
       const earlier = sorted[i];
       const later = sorted[i + 1];
+      
+      // Turn distance gating
+      const turnDistance = later.turnIndex - earlier.turnIndex;
+      if (turnDistance > maxTurnDistance) continue;
       
       let weight = config.edgeWeights.supportBase;
       
@@ -419,14 +641,112 @@ function findSupportEdges(
         srcId: earlier.claimId,
         dstId: later.claimId,
         weight: clamp01(weight),
-        reason: `Consistent statements about ${earlier.subject}`,
+        reason: `Consistent statements about ${earlier.subjectNormalized}`,
         ruleId: 'SUPPORT_REPETITION',
         provenance: 'rules',
         metadata: {
-          subject: earlier.subject,
-          predicate: earlier.predicate,
+          subject: earlier.subjectNormalized,
+          predicate: earlier.predicateNormalized,
+          supportType: 'entailed',
         },
       });
+    }
+  }
+  
+  // NEW: Agent confirms customer (agent affirms customer's statement)
+  for (let i = 0; i < claims.length; i++) {
+    const customerClaim = claims[i];
+    if (customerClaim.speaker !== 'customer' || customerClaim.claimKind !== 'assertion') continue;
+    
+    // Look for agent response within window
+    for (let j = i + 1; j < Math.min(i + 3, claims.length); j++) {
+      const agentClaim = claims[j];
+      if (agentClaim.speaker !== 'agent') continue;
+      
+      // Check if agent confirms customer's statement (same topic, same polarity)
+      const overlapScore = calculateTopicOverlap(customerClaim.text, agentClaim.text);
+      if (overlapScore > 0.5 && customerClaim.polarity === agentClaim.polarity && 
+          customerClaim.polarity !== 'unknown') {
+        
+        let weight = config.edgeWeights.supportBase;
+        weight *= config.edgeWeights.agentConfirmMultiplier;
+        
+        edges.push({
+          id: generateEdgeId('confirm', customerClaim.id, agentClaim.id),
+          type: 'support',
+          srcId: customerClaim.id,
+          dstId: agentClaim.id,
+          weight: clamp01(weight),
+          reason: `Agent confirms customer's statement about ${customerClaim.topics[0] || 'topic'}`,
+          ruleId: 'AGENT_CONFIRMS_CUSTOMER',
+          provenance: 'rules',
+          metadata: {
+            supportType: 'agent_confirm',
+            overlapScore,
+          },
+        });
+      }
+    }
+  }
+  
+  // NEW: Paraphrase support (same semantic key, compatible values)
+  // This is handled by the normalized key matching above, but we can add
+  // additional paraphrase detection using topic overlap for similar facts
+  const factPairs = new Map<string, Fact[]>();
+  for (const fact of facts) {
+    const key = `${fact.subjectNormalized}:${fact.predicateNormalized}`;
+    const existing = factPairs.get(key) || [];
+    existing.push(fact);
+    factPairs.set(key, existing);
+  }
+  
+  for (const [key, group] of factPairs) {
+    if (group.length < 2) continue;
+    
+    const sorted = [...group].sort((a, b) => a.turnIndex - b.turnIndex);
+    
+    for (let i = 0; i < sorted.length - 1; i++) {
+      const earlier = sorted[i];
+      const later = sorted[i + 1];
+      
+      const turnDistance = later.turnIndex - earlier.turnIndex;
+      if (turnDistance > maxTurnDistance) continue;
+      
+      // Check if values are compatible (not conflicting, but similar)
+      const srcClaim = claimMap.get(earlier.claimId);
+      const dstClaim = claimMap.get(later.claimId);
+      if (!srcClaim || !dstClaim) continue;
+      
+      const overlapScore = calculateTopicOverlap(srcClaim.text, dstClaim.text);
+      if (overlapScore > 0.7 && !valuesConflict(
+        earlier.normalizedValue,
+        later.normalizedValue,
+        earlier.valueType,
+        later.valueType,
+        earlier.polarity,
+        later.polarity,
+        config.normalization
+      )) {
+        // Paraphrase support
+        let weight = config.edgeWeights.supportBase;
+        weight *= config.edgeWeights.paraphraseSupportMultiplier;
+        
+        edges.push({
+          id: generateEdgeId('para', earlier.claimId, later.claimId),
+          type: 'support',
+          srcId: earlier.claimId,
+          dstId: later.claimId,
+          weight: clamp01(weight),
+          reason: `Paraphrased statements about ${earlier.subjectNormalized}`,
+          ruleId: 'SUPPORT_PARAPHRASE',
+          provenance: 'rules',
+          metadata: {
+            subject: earlier.subjectNormalized,
+            supportType: 'paraphrase',
+            overlapScore,
+          },
+        });
+      }
     }
   }
   
@@ -472,31 +792,33 @@ function findRequestFulfillmentEdges(
   config: TruthEngineConfig
 ): TruthEdge[] {
   const edges: TruthEdge[] = [];
+  const ruleConfig = config.rules["REQUEST_FULFILLMENT"];
+  const windowTurns = ruleConfig?.windowTurns ?? 3;
   
   for (let i = 0; i < claims.length - 1; i++) {
     const current = claims[i];
     
-    // Look for customer request
-    if (current.speaker === 'customer' && current.modality === 'request') {
-      // Find agent response with promise
-      for (let j = i + 1; j < Math.min(i + 4, claims.length); j++) {
+    // Look for customer request (using claimKind and intent, not string matching)
+    if (current.speaker === 'customer' && 
+        (current.claimKind === 'intent' || current.modality === 'request')) {
+      
+      // Find agent response with promise within window
+      for (let j = i + 1; j < Math.min(i + windowTurns + 1, claims.length); j++) {
         const later = claims[j];
         
-        if (later.speaker === 'agent' && 
-            (later.text.toLowerCase().includes('will') ||
-             later.text.toLowerCase().includes("i'll") ||
-             later.text.toLowerCase().includes('yes'))) {
-          
+        // Use claimKind='promise' instead of string matching
+        if (later.speaker === 'agent' && later.claimKind === 'promise') {
           edges.push({
             id: generateEdgeId('rf', current.id, later.id),
             type: 'structure',
             srcId: current.id,
             dstId: later.id,
             weight: config.edgeWeights.structureBase * 1.1,
-            reason: 'Customer request with agent promise',
+            reason: `Customer ${current.intent ? `request (${current.intent})` : 'request'} with agent promise`,
             ruleId: 'REQUEST_FULFILLMENT',
             provenance: 'structure',
             metadata: {
+              customerIntent: current.intent,
               srcText: current.text.substring(0, 100),
               dstText: later.text.substring(0, 100),
             },
@@ -532,6 +854,151 @@ function timeframesOverlap(
   }
   
   return false;
+}
+
+/**
+ * Check if normalized timeframes overlap using bucket-based mapping.
+ */
+function timeframesOverlapNormalized(
+  a?: { bucket?: string; startEpoch?: number; endEpoch?: number },
+  b?: { bucket?: string; startEpoch?: number; endEpoch?: number },
+  overlapMap?: Record<string, string[]>
+): boolean {
+  if (!a || !b) return false;
+  
+  // If both have explicit epoch ranges, check numeric overlap
+  if (a.startEpoch !== undefined && a.endEpoch !== undefined &&
+      b.startEpoch !== undefined && b.endEpoch !== undefined) {
+    return !(a.endEpoch < b.startEpoch || b.endEpoch < a.startEpoch);
+  }
+  
+  // Use bucket-based overlap
+  if (a.bucket && b.bucket) {
+    // Same bucket = overlap
+    if (a.bucket === b.bucket) return true;
+    
+    // Check overlap map
+    if (overlapMap) {
+      const aOverlaps = overlapMap[a.bucket] || [];
+      const bOverlaps = overlapMap[b.bucket] || [];
+      if (aOverlaps.includes(b.bucket) || bOverlaps.includes(a.bucket)) {
+        return true;
+      }
+    }
+  }
+  
+  return false;
+}
+
+/**
+ * Check if two values conflict semantically (not just boolean).
+ */
+function valuesConflict(
+  valA: string | number | boolean | null,
+  valB: string | number | boolean | null,
+  typeA: string,
+  typeB: string,
+  polarityA: string,
+  polarityB: string,
+  normalization: TruthEngineConfig['normalization']
+): boolean {
+  // Polarity conflict (affirm vs deny) is always a conflict
+  if (polarityA !== 'unknown' && polarityB !== 'unknown' && polarityA !== polarityB) {
+    return true;
+  }
+  
+  // Type mismatch - no conflict if types are different (unless both are boolean)
+  if (typeA !== typeB && !(typeA === 'boolean' && typeB === 'boolean')) {
+    return false;
+  }
+  
+  // Boolean conflict
+  if (typeA === 'boolean' && typeB === 'boolean') {
+    return valA !== valB;
+  }
+  
+  // Money conflict (with tolerance)
+  if (typeA === 'money' && typeB === 'money') {
+    const numA = typeof valA === 'number' ? valA : parseFloat(String(valA)) || 0;
+    const numB = typeof valB === 'number' ? valB : parseFloat(String(valB)) || 0;
+    const tolerance = normalization.moneyTolerance || 0.01;
+    return Math.abs(numA - numB) > tolerance;
+  }
+  
+  // Number conflict (with tolerance)
+  if (typeA === 'number' && typeB === 'number') {
+    const numA = typeof valA === 'number' ? valA : parseFloat(String(valA)) || 0;
+    const numB = typeof valB === 'number' ? valB : parseFloat(String(valB)) || 0;
+    const tolerance = normalization.numericTolerance || 0.1;
+    const percentDiff = Math.abs(numA - numB) / Math.max(Math.abs(numA), Math.abs(numB), 1);
+    return percentDiff > tolerance;
+  }
+  
+  // String/enum conflict (check antonyms)
+  if (typeA === 'string' || typeA === 'enum') {
+    const strA = String(valA).toLowerCase();
+    const strB = String(valB).toLowerCase();
+    
+    // Check antonyms (array of [word1, word2] pairs)
+    const antonyms = normalization.antonyms || [];
+    for (const [word1, word2] of antonyms) {
+      const w1 = word1.toLowerCase();
+      const w2 = word2.toLowerCase();
+      if ((strA.includes(w1) && strB.includes(w2)) ||
+          (strA.includes(w2) && strB.includes(w1))) {
+        return true;
+      }
+    }
+    
+    // Different strings are not necessarily conflicting (could be different values)
+    return false;
+  }
+  
+  return false;
+}
+
+/**
+ * Merge duplicate edges (same type, srcId, dstId) keeping max weight and accumulating ruleIds.
+ */
+function mergeEdges(edges: TruthEdge[]): TruthEdge[] {
+  const edgeMap = new Map<string, TruthEdge>();
+  
+  for (const edge of edges) {
+    const key = `${edge.type}:${edge.srcId}:${edge.dstId}`;
+    const existing = edgeMap.get(key);
+    
+    if (!existing || edge.weight > existing.weight) {
+      // Keep the edge with higher weight, but merge metadata
+      const merged: TruthEdge = {
+        ...edge,
+        ruleId: existing ? `${existing.ruleId},${edge.ruleId}` : edge.ruleId,
+        reason: existing 
+          ? `${existing.reason}; ${edge.reason}`
+          : edge.reason,
+        reasonCodes: existing && existing.reasonCodes && edge.reasonCodes
+          ? [...new Set([...existing.reasonCodes, ...edge.reasonCodes])]
+          : edge.reasonCodes || existing?.reasonCodes,
+        metadata: {
+          ...existing?.metadata,
+          ...edge.metadata,
+        },
+      };
+      edgeMap.set(key, merged);
+    } else {
+      // Existing has higher weight, merge into it
+      existing.ruleId = `${existing.ruleId},${edge.ruleId}`;
+      existing.reason = `${existing.reason}; ${edge.reason}`;
+      if (edge.reasonCodes) {
+        existing.reasonCodes = [...new Set([...(existing.reasonCodes || []), ...edge.reasonCodes])];
+      }
+      existing.metadata = {
+        ...existing.metadata,
+        ...edge.metadata,
+      };
+    }
+  }
+  
+  return Array.from(edgeMap.values());
 }
 
 function pruneEdges(

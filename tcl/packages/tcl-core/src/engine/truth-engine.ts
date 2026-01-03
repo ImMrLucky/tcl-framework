@@ -123,6 +123,13 @@ export function runTruthEngine(input: TruthEngineInput): TruthEngineOutput {
   };
   
   // Build spectral.py compatible input
+  // Grounding semantics: in transcript_only mode, no claims are "grounded" (they're unverified)
+  // In evidence_corpus mode, only claims with grounding edges are grounded
+  const evidenceMode = config.analysis?.evidenceMode ?? 'transcript_only';
+  const groundedClaimIds = evidenceMode === 'transcript_only'
+    ? [] // No claims are grounded in transcript-only mode (they're unverified)
+    : graph.groundingEdges.map(e => e.srcId);
+  
   const spectralInput = {
     claims: sortedClaims.map(c => ({ id: c.id, text: c.text })),
     supports: ruleResult.supportEdges.map(e => ({
@@ -135,7 +142,7 @@ export function runTruthEngine(input: TruthEngineInput): TruthEngineOutput {
       claimB: e.dstId,
       weight: e.weight,
     })),
-    grounded: [], // All claims considered grounded in transcript-only mode
+    grounded: groundedClaimIds, // Empty in transcript_only mode
   };
   
   console.log(`✅ Truth Engine complete: ${totalTime}ms`);
@@ -185,6 +192,7 @@ export function toLegacyGraph(output: TruthEngineOutput): {
 
 /**
  * Build issues from truth graph for UI display.
+ * Clusters contradictions by topic/subject for manager-grade problem statements.
  */
 export function buildIssuesFromGraph(graph: TruthGraph): Array<{
   issueId: string;
@@ -194,6 +202,9 @@ export function buildIssuesFromGraph(graph: TruthGraph): Array<{
   description: string;
   ruleId: string;
   relatedClaims: string[];
+  topic?: string;
+  subject?: string;
+  turnRange?: [number, number];
 }> {
   const issues: Array<{
     issueId: string;
@@ -203,41 +214,139 @@ export function buildIssuesFromGraph(graph: TruthGraph): Array<{
     description: string;
     ruleId: string;
     relatedClaims: string[];
+    topic?: string;
+    subject?: string;
+    turnRange?: [number, number];
   }> = [];
   
-  // Each contradiction edge = one issue
+  // Create claim map for quick lookup
+  const claimMap = new Map(graph.claims.map(c => [c.id, c]));
+  
+  // Cluster contradictions by topic/subject for better grouping
+  const clusters = new Map<string, typeof graph.contradictionEdges>();
+  
   for (const edge of graph.contradictionEdges) {
-    // Determine severity from rule
-    let severity: 'critical' | 'high' | 'medium' | 'low' = 'medium';
-    if (edge.ruleId.includes('AGENT_SELF_CONTRADICTION')) {
-      severity = 'critical';
-    } else if (edge.ruleId.includes('POLARITY_CONFLICT')) {
-      severity = 'high';
-    } else if (edge.ruleId.includes('ABSOLUTE_TO_CONDITIONAL')) {
-      severity = 'high';
-    } else if (edge.ruleId.includes('TIMEFRAME_CONFLICT')) {
-      severity = 'medium';
+    // Only include direct contradictions (skip low_overlap, topic_mismatch)
+    if (edge.contradictionType && edge.contradictionType !== 'direct') {
+      continue;
     }
     
-    // Boost severity if high weight
-    if (edge.weight > 0.9 && severity === 'high') {
-      severity = 'critical';
-    }
+    const srcClaim = claimMap.get(edge.srcId);
+    const dstClaim = claimMap.get(edge.dstId);
+    if (!srcClaim || !dstClaim) continue;
     
-    issues.push({
-      issueId: `issue_${edge.id}`,
-      claimId: edge.dstId, // The later claim is the "problem"
-      type: edge.ruleId.split('.')[0], // e.g., "POLARITY_CONFLICT"
-      severity,
-      description: edge.reason,
-      ruleId: edge.ruleId,
-      relatedClaims: [edge.srcId, edge.dstId],
-    });
+    // Cluster key: topic + subject from metadata
+    const topic = edge.metadata?.topic || srcClaim.topics[0] || 'general';
+    const subject = edge.metadata?.subject || 'unknown';
+    const clusterKey = `${topic}|${subject}`;
+    
+    const existing = clusters.get(clusterKey) || [];
+    existing.push(edge);
+    clusters.set(clusterKey, existing);
   }
   
-  // Sort by severity then weight
+  // Build issues from clusters (one issue per cluster, or per edge if cluster is small)
+  for (const [clusterKey, edges] of clusters) {
+    const [topic, subject] = clusterKey.split('|');
+    
+    // If cluster has multiple edges, create one aggregated issue
+    if (edges.length > 1) {
+      // Find the strongest edge in the cluster
+      const strongest = edges.reduce((max, e) => e.weight > max.weight ? e : max);
+      const allClaimIds = new Set<string>();
+      const turnIndices: number[] = [];
+      
+      for (const edge of edges) {
+        allClaimIds.add(edge.srcId);
+        allClaimIds.add(edge.dstId);
+        const srcClaim = claimMap.get(edge.srcId);
+        const dstClaim = claimMap.get(edge.dstId);
+        if (srcClaim) turnIndices.push(srcClaim.turnIndex);
+        if (dstClaim) turnIndices.push(dstClaim.turnIndex);
+      }
+      
+      // Determine severity from strongest edge
+      let severity: 'critical' | 'high' | 'medium' | 'low' = 'medium';
+      if (strongest.ruleId.includes('AGENT_SELF_CONTRADICTION')) {
+        severity = 'critical';
+      } else if (strongest.ruleId.includes('POLARITY_CONFLICT')) {
+        severity = 'high';
+      } else if (strongest.ruleId.includes('TIMEFRAME_CONFLICT')) {
+        severity = 'medium';
+      }
+      
+      if (strongest.weight > 0.9 && severity === 'high') {
+        severity = 'critical';
+      }
+      
+      const minTurn = Math.min(...turnIndices);
+      const maxTurn = Math.max(...turnIndices);
+      
+      issues.push({
+        issueId: `issue_cluster_${clusterKey.replace(/[^a-zA-Z0-9]/g, '_')}`,
+        claimId: strongest.dstId,
+        type: strongest.ruleId.split('.')[0],
+        severity,
+        description: `${edges.length} contradictions about ${subject} (${topic}): ${strongest.reason}`,
+        ruleId: strongest.ruleId,
+        relatedClaims: Array.from(allClaimIds),
+        topic,
+        subject,
+        turnRange: [minTurn, maxTurn],
+      });
+    } else {
+      // Single edge = single issue
+      const edge = edges[0];
+      const srcClaim = claimMap.get(edge.srcId);
+      const dstClaim = claimMap.get(edge.dstId);
+      
+      let severity: 'critical' | 'high' | 'medium' | 'low' = 'medium';
+      if (edge.ruleId.includes('AGENT_SELF_CONTRADICTION')) {
+        severity = 'critical';
+      } else if (edge.ruleId.includes('POLARITY_CONFLICT')) {
+        severity = 'high';
+      } else if (edge.ruleId.includes('TIMEFRAME_CONFLICT')) {
+        severity = 'medium';
+      }
+      
+      if (edge.weight > 0.9 && severity === 'high') {
+        severity = 'critical';
+      }
+      
+      issues.push({
+        issueId: `issue_${edge.id}`,
+        claimId: edge.dstId,
+        type: edge.ruleId.split('.')[0],
+        severity,
+        description: edge.reason,
+        ruleId: edge.ruleId,
+        relatedClaims: [edge.srcId, edge.dstId],
+        topic,
+        subject,
+        turnRange: srcClaim && dstClaim ? [
+          Math.min(srcClaim.turnIndex, dstClaim.turnIndex),
+          Math.max(srcClaim.turnIndex, dstClaim.turnIndex)
+        ] : undefined,
+      });
+    }
+  }
+  
+  // Sort by severity then weight (use strongest edge weight for clusters)
   const severityOrder = { critical: 0, high: 1, medium: 2, low: 3 };
-  issues.sort((a, b) => severityOrder[a.severity] - severityOrder[b.severity]);
+  issues.sort((a, b) => {
+    const severityDiff = severityOrder[a.severity] - severityOrder[b.severity];
+    if (severityDiff !== 0) return severityDiff;
+    
+    // Find max weight for each issue's related claims
+    const aMaxWeight = Math.max(...graph.contradictionEdges
+      .filter(e => a.relatedClaims.includes(e.srcId) || a.relatedClaims.includes(e.dstId))
+      .map(e => e.weight), 0);
+    const bMaxWeight = Math.max(...graph.contradictionEdges
+      .filter(e => b.relatedClaims.includes(e.srcId) || b.relatedClaims.includes(e.dstId))
+      .map(e => e.weight), 0);
+    
+    return bMaxWeight - aMaxWeight;
+  });
   
   return issues;
 }

@@ -15,6 +15,30 @@ export type Polarity = "affirm" | "deny" | "unknown";
 export type Speaker = "agent" | "customer" | "system";
 
 /**
+ * Claim kind for contradiction gating
+ */
+export type ClaimKind = 
+  | "assertion"  // Factual statement that can be contradicted
+  | "intent"     // "I want to...", "I'd like to..." - customer goals
+  | "question"   // Ends with "?" or interrogative
+  | "meta"       // References docs/agreements, conversation control
+  | "emotion"    // Expresses feelings: frustrated, upset, confused
+  | "promise"    // Agent commitment: "I will...", "I'll send..."
+  | "unknown";   // Fallback
+
+/**
+ * Intent classification for request fulfillment
+ */
+export type Intent = 
+  | "send_document"
+  | "email"
+  | "call_back"
+  | "refund"
+  | "cancel"
+  | "change_plan"
+  | "unknown";
+
+/**
  * Enhanced Claim with deterministic classification.
  */
 export interface EnhancedClaim {
@@ -28,6 +52,8 @@ export interface EnhancedClaim {
   modality: Modality;
   polarity: Polarity;
   topics: string[];
+  claimKind: ClaimKind;      // NEW: For contradiction gating
+  intent?: Intent;            // NEW: For request fulfillment detection
   
   // Extracted entities
   entities: Array<{ type: string; value: string }>;
@@ -40,6 +66,26 @@ export interface EnhancedClaim {
 }
 
 /**
+ * Value type for semantic comparison
+ */
+export type ValueType = 'boolean' | 'number' | 'money' | 'string' | 'enum' | 'unknown';
+
+/**
+ * Certainty level derived from modality language
+ */
+export type CertaintyLevel = 'high' | 'medium' | 'low';
+
+/**
+ * Normalized timeframe bucket
+ */
+export interface TimeframeNormalized {
+  bucket: string;           // e.g., "this_cycle", "last_cycle", "today", "promo_period"
+  startEpoch?: number;      // Unix timestamp if explicit date
+  endEpoch?: number;        // Unix timestamp if explicit date
+  relative?: string;       // Original relative phrase for display
+}
+
+/**
  * Normalized Fact extracted from a Claim.
  * Facts are the basis for contradiction/support detection.
  */
@@ -49,10 +95,18 @@ export interface Fact {
   turnIndex: number;
   speaker: Speaker;
   
-  // Normalized semantic content
+  // Original semantic content
   subject: string;         // e.g., "cancellation_fee"
-  predicate: string;       // e.g., "exists", "amount", "applies"
+  predicate: string;      // e.g., "exists", "amount", "applies"
   value: string | number | boolean | null;
+  
+  // NEW: Normalized fields for semantic comparison
+  subjectNormalized: string;      // Normalized subject (synonym-resolved)
+  predicateNormalized: string;    // Normalized predicate (synonym-resolved)
+  valueType: ValueType;           // Semantic type of value
+  normalizedValue: string | number | boolean | null;  // Normalized value for comparison
+  polarity: Polarity;              // Separate from truthiness: 'affirm' | 'deny' | 'unknown'
+  certainty: CertaintyLevel;      // Derived from modality: 'high' | 'medium' | 'low'
   
   // Context
   conditions: string[];    // e.g., ["promo_period", "before_end"]
@@ -61,9 +115,10 @@ export interface Fact {
     end?: string;
     relative?: string;     // e.g., "this cycle", "today"
   };
+  timeframeNormalized?: TimeframeNormalized;  // NEW: Canonical timeframe for overlap detection
   
   // Source tracking
-  certainty: "stated" | "inferred";
+  sourceCertainty: "stated" | "inferred";  // Renamed from certainty to avoid conflict
   sourceSpan?: { start: number; end: number };
 }
 
@@ -113,6 +168,13 @@ export interface TruthEdge {
     topic?: string;
     srcText?: string;
     dstText?: string;
+    // NEW: Additional metadata fields
+    isQualification?: boolean;
+    earlierBucket?: string;
+    laterBucket?: string;
+    supportType?: 'entailed' | 'paraphrase' | 'agent_confirm' | 'weak';
+    customerIntent?: string;
+    overlapScore?: number;
   };
 }
 

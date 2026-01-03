@@ -16,6 +16,11 @@ export interface EdgeWeightConfig {
   timeframeConflictMultiplier: number;
   agentSpeakerMultiplier: number;
   customerSpeakerMultiplier: number;
+  
+  // NEW: Additional multipliers
+  paraphraseSupportMultiplier: number;  // For paraphrase support edges
+  agentConfirmMultiplier: number;            // For agent confirms customer
+  qualificationEdgeMultiplier: number;       // For qualification edges (weakening)
 }
 
 export interface PruningConfig {
@@ -24,6 +29,7 @@ export interface PruningConfig {
   minWeightSupport: number;
   minWeightGrounding: number;
   minWeightStructure: number;
+  mergeBeforePrune: boolean;  // NEW: Merge duplicate edges before pruning
 }
 
 export interface ModalityLexicon {
@@ -58,6 +64,53 @@ export interface RuleConfig {
   priority: number;
   severity: 'critical' | 'high' | 'medium' | 'low';
   description: string;
+  // NEW: Rule-specific parameters
+  maxTurnDistance?: number;        // Only compare within N turns
+  topicOverlapMin?: number;         // Minimum topic overlap (0-1)
+  mode?: 'qualification' | 'contradiction';  // For ABSOLUTE_TO_CONDITIONAL
+  windowTurns?: number;            // For REQUEST_FULFILLMENT
+  bucketOverlapMap?: Record<string, string[]>;  // For TIMEFRAME_CONFLICT
+}
+
+export interface NormalizationConfig {
+  // Subject/predicate normalization
+  subjectSynonyms: Record<string, string[]>;  // e.g., { "cancellation_fee": ["cancel fee", "termination charge"] }
+  predicateSynonyms: Record<string, string[]>;  // e.g., { "exists": ["present", "applies", "charged"] }
+  
+  // Value normalization
+  enumLexicon: Record<string, string[]>;  // Domain terms: { "fee_present": ["fee", "charge", "cost"] }
+  antonyms: Array<[string, string]>;     // Strong antonym pairs for string conflict detection
+  moneyTolerance: number;                 // e.g., 0.01 (1 cent) for money comparisons
+  numericTolerance: number;               // e.g., 0.1 for numeric comparisons
+  numericConflictTolerance: number;       // Difference threshold for numeric conflicts
+  
+  // Timeframe normalization
+  timeframeBuckets: string[];             // e.g., ["this_cycle", "last_cycle", "today", "promo_period"]
+  timeframeOverlapMap: Record<string, string[]>;  // Which buckets overlap: { "this_cycle": ["today", "promo_period"] }
+  
+  // Negation tokens
+  negationTokens: string[];
+  
+  // Modality tokens
+  modalityTokens: {
+    absolute: string[];
+    conditional: string[];
+  };
+}
+
+export interface IssueScoringConfig {
+  ruleSeverityWeights: Record<string, number>;  // Map ruleIdPrefix -> weight
+  agentBoost: number;                           // Multiplier for agent-involved issues
+  recurrenceBoost: number;                      // Multiplier for recurring issues
+  confidenceWeights: {
+    high: number;
+    medium: number;
+    low: number;
+  };
+}
+
+export interface AnalysisModeConfig {
+  evidenceMode: 'transcript_only' | 'evidence_corpus';
 }
 
 export interface TruthEngineConfig {
@@ -69,6 +122,15 @@ export interface TruthEngineConfig {
   subjectSchemas: SubjectSchema[];
   evidenceRetrieval: EvidenceRetrievalConfig;
   rules: Record<string, RuleConfig>;
+  
+  // NEW: Normalization configuration
+  normalization: NormalizationConfig;
+  
+  // NEW: Issue scoring configuration
+  issueScoring: IssueScoringConfig;
+  
+  // NEW: Analysis mode
+  analysis: AnalysisModeConfig;
 }
 
 /**
@@ -90,6 +152,9 @@ export const DEFAULT_CONFIG: TruthEngineConfig = {
     timeframeConflictMultiplier: 1.1,
     agentSpeakerMultiplier: 1.2,
     customerSpeakerMultiplier: 0.9,
+    paraphraseSupportMultiplier: 0.9,
+    agentConfirmMultiplier: 1.1,
+    qualificationEdgeMultiplier: 0.7,
   },
   
   pruning: {
@@ -98,6 +163,7 @@ export const DEFAULT_CONFIG: TruthEngineConfig = {
     minWeightSupport: 0.4,
     minWeightGrounding: 0.3,
     minWeightStructure: 0.2,
+    mergeBeforePrune: true,
   },
   
   modalityLexicon: {
@@ -211,6 +277,8 @@ export const DEFAULT_CONFIG: TruthEngineConfig = {
       priority: 1,
       severity: "high",
       description: "Same subject with conflicting polarity (affirm vs deny)",
+      maxTurnDistance: 20,  // Only compare within 20 turns
+      topicOverlapMin: 0.3,  // Minimum topic overlap
     },
     "ABSOLUTE_TO_CONDITIONAL": {
       id: "ABSOLUTE_TO_CONDITIONAL",
@@ -218,6 +286,8 @@ export const DEFAULT_CONFIG: TruthEngineConfig = {
       priority: 2,
       severity: "high",
       description: "Absolute statement followed by conditional qualifier",
+      mode: "qualification",  // Default to qualification edge, not contradiction
+      maxTurnDistance: 15,
     },
     "TIMEFRAME_CONFLICT": {
       id: "TIMEFRAME_CONFLICT",
@@ -225,6 +295,7 @@ export const DEFAULT_CONFIG: TruthEngineConfig = {
       priority: 3,
       severity: "medium",
       description: "Overlapping timeframes with conflicting states",
+      bucketOverlapMap: {},  // Will use normalization.timeframeOverlapMap
     },
     "AGENT_SELF_CONTRADICTION": {
       id: "AGENT_SELF_CONTRADICTION",
@@ -253,7 +324,114 @@ export const DEFAULT_CONFIG: TruthEngineConfig = {
       priority: 4,
       severity: "low",
       description: "Customer request followed by agent promise",
+      windowTurns: 4,
     },
+    "SUPPORT_COMPATIBLE": {
+      id: "SUPPORT_COMPATIBLE",
+      enabled: true,
+      priority: 5,
+      severity: "low",
+      description: "Compatible values support each other",
+      maxTurnDistance: 10,
+    },
+    "SUPPORT_PARAPHRASE": {
+      id: "SUPPORT_PARAPHRASE",
+      enabled: true,
+      priority: 5,
+      severity: "low",
+      description: "Paraphrased statements support each other",
+      maxTurnDistance: 10,
+    },
+    "SUPPORT_AGENT_CONFIRM": {
+      id: "SUPPORT_AGENT_CONFIRM",
+      enabled: true,
+      priority: 4,
+      severity: "low",
+      description: "Agent confirms customer statement",
+      maxTurnDistance: 5,
+    },
+  },
+  
+  // NEW: Normalization configuration
+  normalization: {
+    subjectSynonyms: {
+      "cancellation_fee": ["cancel fee", "termination charge", "cancellation charge"],
+      "early_termination_fee": ["early termination", "termination fee", "early exit fee"],
+      "adjustment_fee": ["service adjustment", "adjustment charge", "monthly adjustment"],
+      "rate_change": ["price change", "cost change", "bill change", "rate increase", "rate decrease"],
+      "plan_change": ["package change", "subscription change", "plan modification"],
+    },
+    predicateSynonyms: {
+      "exists": ["present", "applies", "charged", "incurred"],
+      "amount": ["cost", "price", "value", "charge"],
+      "applies": ["active", "relevant", "in effect"],
+      "changed": ["modified", "updated", "altered"],
+    },
+    enumLexicon: {
+      "fee_present": ["fee", "charge", "cost", "payment"],
+      "cancellation_fee_present": ["cancellation fee", "cancel fee", "termination charge"],
+      "promo_period_active": ["promo", "promotional", "promotion period"],
+      "plan_changed": ["plan change", "package change", "subscription change"],
+    },
+    antonyms: [
+      ["yes", "no"],
+      ["has", "hasn't"],
+      ["changed", "unchanged"],
+      ["exists", "doesn't exist"],
+      ["present", "absent"],
+      ["active", "inactive"],
+    ],
+    moneyTolerance: 0.01,
+    numericTolerance: 0.1,
+    numericConflictTolerance: 0.5,
+    timeframeBuckets: [
+      "this_cycle",
+      "last_cycle",
+      "today",
+      "yesterday",
+      "promo_period",
+      "contract_term",
+      "this_month",
+      "last_month",
+    ],
+    timeframeOverlapMap: {
+      "this_cycle": ["today", "this_month", "promo_period"],
+      "today": ["this_cycle", "this_month"],
+      "promo_period": ["this_cycle", "this_month"],
+      "this_month": ["this_cycle", "today", "promo_period"],
+      "last_cycle": ["last_month"],
+      "last_month": ["last_cycle"],
+    },
+    negationTokens: ["no", "not", "none", "never", "don't", "doesn't", "didn't", "won't", "can't", "cannot", "without", "zero", "nothing"],
+    modalityTokens: {
+      absolute: ["never", "always", "guarantee", "guaranteed", "definitely", "certainly", "will not", "won't", "cannot", "can't", "without", "free", "zero", "unlimited"],
+      conditional: ["may", "might", "could", "depends", "depending", "in some cases", "if", "unless", "when", "sometimes", "potentially", "possibly"],
+    },
+  },
+  
+  // NEW: Issue scoring configuration
+  issueScoring: {
+    ruleSeverityWeights: {
+      "AGENT_SELF_CONTRADICTION": 1.5,
+      "POLARITY_CONFLICT": 1.2,
+      "ABSOLUTE_TO_CONDITIONAL": 1.1,
+      "TIMEFRAME_CONFLICT": 1.0,
+      "SUPPORT_REPETITION": 0.5,
+      "QUESTION_ANSWER": 0.3,
+      "REQUEST_FULFILLMENT": 0.3,
+    },
+    agentBoost: 1.3,
+    recurrenceBoost: 1.2,
+    confidenceWeights: {
+      high: 1.0,
+      medium: 0.7,
+      low: 0.4,
+    },
+  },
+  
+  // NEW: Analysis mode
+  analysis: {
+    evidenceMode: 'transcript_only',  // Default to transcript-only mode
   },
 };
 

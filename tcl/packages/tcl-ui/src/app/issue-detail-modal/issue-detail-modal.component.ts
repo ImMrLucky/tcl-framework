@@ -6,37 +6,37 @@ import { MatTabsModule } from '@angular/material/tabs';
 import { MatIconModule } from '@angular/material/icon';
 import { MatButtonModule } from '@angular/material/button';
 import { MatChipsModule } from '@angular/material/chips';
-
-// Issue Narrative type (QA-Manager Grade)
+// IssueNarrative type - matches packages/tcl-core/src/types.ts
+// Defined locally to avoid cross-package import path issues in TypeScript
 interface IssueNarrative {
   issueId: string;
-  category: string;
-  subcategory?: string;
-  title: string;
-  severity: 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL';
-  confidence: 'LOW' | 'MEDIUM' | 'HIGH';
-  status: 'OPEN' | 'RESOLVED' | 'DISMISSED';
+  category: string; // e.g., "BILLING"
+  subcategory?: string; // e.g., "Cancellation Fees"
+  title: string; // Human-friendly (no "discrepancy about X and Y")
+  severity: "LOW" | "MEDIUM" | "HIGH" | "CRITICAL";
+  confidence: "LOW" | "MEDIUM" | "HIGH";
+  status: "OPEN" | "RESOLVED" | "DISMISSED";
   scope: {
     turnRange: [number, number];
     claimIds: string[];
-    speakerFocus: 'AGENT' | 'SYSTEM' | 'CUSTOMER';
+    speakerFocus: "AGENT" | "SYSTEM" | "CUSTOMER"; // Default "AGENT"
   };
-  whatIsWrong: string;
-  whyWrong: string[];
-  whyItMatters: string[];
+  whatIsWrong: string; // 1–3 sentences, specific
+  whyWrong: string[]; // Bullet reasons (policy/logic)
+  whyItMatters: string[]; // Business impact bullets
   recommendedActions: Array<{
-    type: 'COACHING' | 'PROCESS' | 'COMPLIANCE' | 'SYSTEM_FIX';
+    type: "COACHING" | "PROCESS" | "COMPLIANCE" | "SYSTEM_FIX";
     action: string;
   }>;
   evidenceQuotes: Array<{
     quoteId: string;
     claimId: string;
-    speaker: 'Agent' | 'Customer' | 'System';
+    speaker: "Agent" | "Customer" | "System";
     turnIndex: number;
     lineSpan?: [number, number];
-    text: string;
+    text: string; // Exact quote (not truncated)
     evidenceRef?: {
-      type: 'Call' | 'Policy' | 'KB';
+      type: "Call" | "Policy" | "KB";
       ref: string;
     };
   }>;
@@ -44,12 +44,12 @@ interface IssueNarrative {
     claimAId: string;
     claimBId: string;
     score: number;
-    explanation: string;
-    quoteIds: [string, string];
+    explanation: string; // Auto-generated: "These cannot both be true because…"
+    quoteIds: [string, string]; // References into evidenceQuotes
   }>;
   traceability: {
     topEdges: Array<{
-      type: 'support' | 'contradiction' | 'grounding';
+      type: "support" | "contradiction" | "grounding";
       fromClaimId: string;
       toClaimId: string;
       weight: number;
@@ -57,15 +57,15 @@ interface IssueNarrative {
     }>;
   };
   scoring: {
-    riskScore: number;
-    impactScore: number;
-    fixabilityScore: number;
-    compositeScore: number;
-    rationale: string[];
+    riskScore: number; // 0–100 (configurable mapping)
+    impactScore: number; // 0–100
+    fixabilityScore: number; // 0–100
+    compositeScore: number; // Used for ranking
+    rationale: string[]; // Bullet explanation of score drivers
   };
 }
 
-// Legacy clustered issue type
+// Legacy clustered issue type (for backward compatibility)
 interface ClusteredIssue {
   id: string;
   title: string;
@@ -127,16 +127,19 @@ export class IssueDetailModalComponent {
 
   constructor(
     public dialogRef: MatDialogRef<IssueDetailModalComponent>,
-    @Inject(MAT_DIALOG_DATA) data: IssueData
+    @Inject(MAT_DIALOG_DATA) data: IssueData | null | undefined
   ) {
     // Check if it's an IssueNarrative (has issueId and evidenceQuotes)
-    this.isNarrative = !!(data && 'issueId' in data && 'evidenceQuotes' in data);
+    this.isNarrative = !!(data && typeof data === 'object' && 'issueId' in data && 'evidenceQuotes' in data);
     
     // Ensure issue is always defined, provide defaults if missing
-    if (this.isNarrative) {
-      this.issue = data as IssueNarrative || this.getDefaultNarrative();
+    if (!data) {
+      this.issue = this.getDefaultClustered();
+      this.isNarrative = false;
+    } else if (this.isNarrative) {
+      this.issue = data as IssueNarrative;
     } else {
-      this.issue = data as ClusteredIssue || this.getDefaultClustered();
+      this.issue = data as ClusteredIssue;
     }
     
     // Debug: log the issue data to see what we're receiving
@@ -272,6 +275,7 @@ export class IssueDetailModalComponent {
 
   // Helper to get evidence (works for both types)
   getEvidence(): any[] {
+    if (!this.issue) return [];
     if (this.isNarrative) {
       const narrative = this.issue as IssueNarrative;
       return narrative.evidenceQuotes || [];
@@ -292,38 +296,43 @@ export class IssueDetailModalComponent {
 
   // Helper to get metrics/scoring (works for both types)
   getMetrics(): any {
+    if (!this.issue) return {};
     if (this.isNarrative) {
-      return (this.issue as IssueNarrative).scoring;
+      return (this.issue as IssueNarrative).scoring || {};
     } else {
-      return (this.issue as ClusteredIssue).metrics;
+      return (this.issue as ClusteredIssue).metrics || {};
     }
   }
 
   // Helper to get title
   getTitle(): string {
+    if (!this.issue) return 'Issue Details';
     return this.isNarrative 
-      ? (this.issue as IssueNarrative).title 
-      : (this.issue as ClusteredIssue).title;
+      ? (this.issue as IssueNarrative).title || 'Issue Details'
+      : (this.issue as ClusteredIssue).title || 'Issue Details';
   }
 
   // Helper to get problem statement/whatIsWrong
   getProblemStatement(): string {
+    if (!this.issue) return 'No data available';
     return this.isNarrative 
-      ? (this.issue as IssueNarrative).whatIsWrong 
-      : (this.issue as ClusteredIssue).problemStatement;
+      ? (this.issue as IssueNarrative).whatIsWrong || 'No data available'
+      : (this.issue as ClusteredIssue).problemStatement || 'No data available';
   }
 
   // Helper to get whyWrong
   getWhyWrong(): string[] {
+    if (!this.issue) return [];
     return this.isNarrative 
-      ? (this.issue as IssueNarrative).whyWrong 
-      : (this.issue as ClusteredIssue).whyWrong;
+      ? (this.issue as IssueNarrative).whyWrong || []
+      : (this.issue as ClusteredIssue).whyWrong || [];
   }
 
   // Helper to get whyItMatters/impact
   getWhyItMatters(): string[] {
+    if (!this.issue) return [];
     if (this.isNarrative) {
-      return (this.issue as IssueNarrative).whyItMatters;
+      return (this.issue as IssueNarrative).whyItMatters || [];
     } else {
       const clustered = this.issue as ClusteredIssue;
       return clustered.impact ? [clustered.impact] : [];
@@ -340,19 +349,23 @@ export class IssueDetailModalComponent {
 
   // Helper to get recommended actions (normalized to consistent format)
   getRecommendedActions(): Array<{ type: string; action: string }> {
+    if (!this.issue) return [];
     if (this.isNarrative) {
-      return (this.issue as IssueNarrative).recommendedActions;
+      return (this.issue as IssueNarrative).recommendedActions || [];
     } else {
       const clustered = this.issue as ClusteredIssue;
-      return clustered.recommendedAction.map(action => ({ type: 'COACHING', action }));
+      return (clustered.recommendedAction || []).map(action => ({ type: 'COACHING', action }));
     }
   }
 
   // Helper to get turn range
   getTurnRange(): string {
+    if (!this.issue) return '';
     if (this.isNarrative) {
       const narrative = this.issue as IssueNarrative;
-      const [min, max] = narrative.scope.turnRange;
+      const turnRange = narrative.scope?.turnRange;
+      if (!turnRange) return '';
+      const [min, max] = turnRange;
       const minDisplay = min + 1;
       const maxDisplay = max + 1;
       if (minDisplay === maxDisplay) {
@@ -372,6 +385,115 @@ export class IssueDetailModalComponent {
       }
       return `Turns ${minTurn}-${maxTurn}`;
     }
+  }
+
+  // Helper to get confidence explanation
+  getConfidenceExplanation(): string {
+    if (!this.isNarrative) {
+      const clustered = this.issue as ClusteredIssue;
+      return clustered.confidenceExplanation || 'No explanation available.';
+    }
+    return 'Based on spectral analysis and evidence strength.';
+  }
+
+  // Helper to get contradiction pairs
+  getContradictionPairs(): Array<{ claimAId: string; claimBId: string; score: number; explanation: string; quoteIds: [string, string] }> {
+    if (!this.issue || !this.isNarrative) return [];
+    const narrative = this.issue as IssueNarrative;
+    return narrative.contradictionPairs || [];
+  }
+
+  // Helper to get claim count
+  getClaimCount(): number {
+    if (!this.issue) return 0;
+    if (this.isNarrative) {
+      const narrative = this.issue as IssueNarrative;
+      return narrative.scope?.claimIds?.length || 0;
+    } else {
+      const clustered = this.issue as ClusteredIssue;
+      return clustered.metrics?.claimCount || 0;
+    }
+  }
+
+  // Helper to get traceability edges
+  getTraceabilityEdges(): Array<{ type: string; fromClaimId: string; toClaimId: string; weight: number; reason?: string }> {
+    if (!this.issue || !this.isNarrative) return [];
+    const narrative = this.issue as IssueNarrative;
+    return narrative.traceability?.topEdges || [];
+  }
+
+  // Helper to check if traceability exists
+  hasTraceability(): boolean {
+    if (this.isNarrative) {
+      const narrative = this.issue as IssueNarrative;
+      return !!(narrative.traceability && narrative.traceability.topEdges && narrative.traceability.topEdges.length > 0);
+    }
+    return false;
+  }
+
+  // Helper to get evidence text (works for both types)
+  getEvidenceText(ev: any): string {
+    if (this.isNarrative) {
+      return ev.text || 'No quote available';
+    } else {
+      return ev.quote || 'No quote available';
+    }
+  }
+
+  // Helper to get tags
+  getTags(): string[] {
+    if (!this.isNarrative) {
+      const clustered = this.issue as ClusteredIssue;
+      return clustered.tags || [];
+    }
+    return [];
+  }
+
+  // Helper to check if has tags
+  hasTags(): boolean {
+    if (!this.isNarrative) {
+      const clustered = this.issue as ClusteredIssue;
+      return !!(clustered.tags && clustered.tags.length > 0);
+    }
+    return false;
+  }
+
+  // Helper to get flags
+  getFlags(): { sensitiveData?: boolean; financialImpact?: boolean; policyConflict?: boolean; regulatoryRisk?: boolean } | null {
+    if (!this.isNarrative) {
+      const clustered = this.issue as ClusteredIssue;
+      return clustered.flags || null;
+    }
+    return null;
+  }
+
+  // Helper to check if has flags
+  hasFlags(): boolean {
+    if (!this.isNarrative) {
+      const clustered = this.issue as ClusteredIssue;
+      return !!clustered.flags;
+    }
+    return false;
+  }
+
+  // Helper to get severity (safe access)
+  getSeverity(): string {
+    return this.issue?.severity || 'UNKNOWN';
+  }
+
+  // Helper to get confidence (safe access)
+  getConfidence(): string {
+    return this.issue?.confidence || 'UNKNOWN';
+  }
+
+  // Helper to get category (safe access)
+  getCategory(): string | null {
+    return this.issue?.category || null;
+  }
+
+  // Helper to get evidence ref
+  getEvidenceRef(ev: any): string | null {
+    return ev?.evidenceRef?.ref || null;
   }
 }
 
