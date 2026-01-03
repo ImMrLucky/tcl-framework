@@ -192,8 +192,11 @@ export function extractKeywords(text: string, config?: ScoringConfig): Set<strin
 }
 
 /**
- * Calculate topic overlap between two claims using Jaccard similarity.
+ * Calculate topic overlap between two claims using NLP-enhanced similarity.
  * Returns 0-1 where 1 = identical topics.
+ * 
+ * IMPROVED: Uses synonym-aware tokenization and entity matching
+ * instead of simple keyword Jaccard.
  */
 export function calculateTopicOverlap(
   claimA: string | { text: string },
@@ -203,6 +206,26 @@ export function calculateTopicOverlap(
   const textA = typeof claimA === 'string' ? claimA : claimA.text;
   const textB = typeof claimB === 'string' ? claimB : claimB.text;
   
+  // Try NLP-enhanced similarity first
+  try {
+    // Dynamic import to avoid circular dependency
+    const { computeSemanticSimilarity, sharesPrimaryEntity } = require('./nlp/semantic-similarity.js');
+    
+    // Check entity alignment (strongest signal)
+    const entityMatch = sharesPrimaryEntity(textA, textB);
+    if (entityMatch.shares) {
+      // Same entity = high overlap
+      return 0.7;
+    }
+    
+    // Use synonym-aware semantic similarity
+    const result = computeSemanticSimilarity(textA, textB);
+    return result.score;
+  } catch {
+    // Fall back to keyword-based if NLP module not available
+  }
+  
+  // FALLBACK: Original keyword-based Jaccard
   const keywordsA = extractKeywords(textA, config);
   const keywordsB = extractKeywords(textB, config);
   
