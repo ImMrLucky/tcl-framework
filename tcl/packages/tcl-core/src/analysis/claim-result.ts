@@ -219,15 +219,24 @@ export function createClaimResult(
     }
   }
   
+  // Extract speaker from meta, defaulting to UNKNOWN
+  let speaker: 'AGENT' | 'CUSTOMER' | 'SYSTEM' | 'UNKNOWN' = 'UNKNOWN';
+  if (claim.meta?.speaker) {
+    const speakerUpper = claim.meta.speaker.toUpperCase();
+    if (speakerUpper === 'AGENT' || speakerUpper === 'CUSTOMER' || speakerUpper === 'SYSTEM') {
+      speaker = speakerUpper as 'AGENT' | 'CUSTOMER' | 'SYSTEM';
+    }
+  }
+  
   const result: ClaimResult = {
     claimId: claim.id,
-    speaker: claim.speaker || 'UNKNOWN',
+    speaker,
     text: claim.text,
-    turnIndex: claim.turnIndex,
+    turnIndex: claim.meta?.turnIndex,
     grounding: {
       kind: groundingKind,
       evidenceIds: graphData.evidenceIds || [],
-      groundingScore: graphData.groundingEdges?.length > 0
+      groundingScore: (graphData.groundingEdges && graphData.groundingEdges.length > 0)
         ? Math.max(...graphData.groundingEdges.map(e => e.weight))
         : 0,
     },

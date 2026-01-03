@@ -5,7 +5,8 @@
  * All scoring formulas must take weights from EngineConfig (no literals).
  */
 
-import type { ClaimResult, DerivedCounts } from './counts-from-claims.js';
+import type { ClaimResult } from './claim-result.js';
+import type { DerivedCounts } from './counts-from-claims.js';
 import type { EngineConfig } from '../config/engine-config.js';
 
 export interface TruthScores {
@@ -150,7 +151,7 @@ function computeContradictionPenalty(
   
   // Penalty component 3: Contradiction energy (weighted sum of all contradictions)
   const totalContradictionEnergy = claimResults.reduce(
-    (sum, r) => sum + r.edges.contradictionEdges.reduce((s, e) => s + e.weight, 0),
+    (sum: number, r: ClaimResult) => sum + r.edges.contradictionEdges.reduce((s: number, e: { weight: number }) => s + e.weight, 0),
     0
   );
   const energyPenalty = Math.min(20, (totalContradictionEnergy / claimResults.length) * 20); // Max 20 points
