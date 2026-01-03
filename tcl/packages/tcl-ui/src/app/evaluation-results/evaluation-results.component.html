@@ -182,8 +182,8 @@
 
           <div class="summary-metric">
             <div class="metric-label">Total Issues</div>
-            <div class="metric-value" [class.has-issues]="issues.length > 0">
-              {{ issues.length }}
+            <div class="metric-value" [class.has-issues]="issues?.length > 0">
+              {{ issues?.length || 0 }}
             </div>
             <div class="metric-sublabel">requiring review</div>
           </div>
@@ -292,7 +292,7 @@
           </button>
           <button mat-button [class.active]="!showClusteredView" (click)="showClusteredView = false">
             <mat-icon>list</mat-icon>
-            Per-Claim Issues ({{ issues.length }})
+            Per-Claim Issues ({{ issues?.length || 0 }})
           </button>
         </div>
 
@@ -441,7 +441,8 @@
         <!-- Selected Issue Detail Panel (Replaced by Modal - see IssueDetailModalComponent) -->
 
         <!-- Original Per-Claim Issues Table (when toggled) -->
-        <mat-card class="issues-card" *ngIf="!showClusteredView || clusteredIssues.length === 0">
+        <!-- PART 4: Defensive guard - only render if issues exist -->
+        <mat-card class="issues-card" *ngIf="(!showClusteredView || clusteredIssues.length === 0) && issues?.length > 0">
           <mat-card-header>
             <mat-card-title>Top Claim Issues (Ranked by Risk)</mat-card-title>
             <mat-card-subtitle>Actionable findings from conversation analysis</mat-card-subtitle>
@@ -580,7 +581,8 @@
       </div>
 
       <!-- C) Top Offenders Side Panel -->
-      <div class="side-panel">
+      <!-- PART 4: Defensive guard -->
+      <div class="side-panel" *ngIf="topOffenders?.length > 0">
         <mat-card class="offenders-card">
           <mat-card-header>
             <mat-card-title>
@@ -590,7 +592,7 @@
             <mat-card-subtitle>Most blamed claims</mat-card-subtitle>
           </mat-card-header>
           <mat-card-content>
-            <div class="offender-list" *ngIf="topOffenders.length > 0">
+            <div class="offender-list" *ngIf="topOffenders && topOffenders.length > 0">
               <div class="offender-item" *ngFor="let offender of topOffenders; let i = index">
                 <div class="offender-rank">#{{ i + 1 }}</div>
                 <div class="offender-content">

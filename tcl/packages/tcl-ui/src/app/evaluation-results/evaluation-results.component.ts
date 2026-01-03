@@ -161,7 +161,18 @@ export class EvaluationResultsComponent implements OnInit {
   loading = true;
   errorMessage = '';
 
-  displayedColumns: string[] = ['severity', 'issueType', 'claim', 'speaker', 'where', 'evidence', 'importance', 'status', 'actions'];
+  // PART 1: Fixed displayedColumns to match HTML column definitions exactly
+  displayedColumns: string[] = [
+    'severity',
+    'issueType',
+    'claim',
+    'speaker',
+    'where',
+    'evidence',
+    'importance',
+    'status',
+    'actions'
+  ];
   
   sortedIssues: Issue[] = [];
   topOffenders: Array<{ claimId: string; text: string; nodeBlameNorm: number }> = [];
@@ -207,9 +218,25 @@ export class EvaluationResultsComponent implements OnInit {
       }
       this.evaluation = evalResponse.evaluation;
 
+      // PART 4: Defensive guard: ensure report exists
+      if (!this.evaluation?.report) {
+        console.warn('Evaluation report is missing');
+        // Initialize empty state
+        this.issues = [];
+        this.issueNarratives = [];
+        this.issueNarrativesSummary = {
+          totalIssues: 0,
+          bySeverity: { LOW: 0, MEDIUM: 0, HIGH: 0, CRITICAL: 0 },
+          byCategory: {},
+          primaryRiskCategories: [],
+          auditReady: false
+        };
+        return;
+      }
+
       // Load issue narratives (QA-Manager Grade) from report - PRIMARY
       // Try multiple possible locations in the report structure
-      const report = this.evaluation?.report as any;
+      const report = this.evaluation.report as any;
       let issueNarrativesData = report?.issueNarratives;
       
       // Also check if narratives are directly in report
@@ -253,17 +280,47 @@ export class EvaluationResultsComponent implements OnInit {
         this.sortAndProcessIssues();
         this.extractTopOffenders();
       } else {
-        // Fallback: Load issues from API if narratives not available
-        const issuesResponse = await this.auditService.getIssues(this.evaluationId).toPromise();
-        if (issuesResponse) {
-          this.issues = issuesResponse.issues;
+        // PART 3: Fallback to report.issues if narratives are empty
+        const reportIssues = Array.isArray(report?.issues) ? report.issues : [];
+        
+        if (reportIssues.length > 0) {
+          // Use issues directly from report
+          this.issues = reportIssues;
+          this.issueNarrativesSummary = this.buildIssueSummaryFromIssues(reportIssues);
           this.sortAndProcessIssues();
           this.extractTopOffenders();
+          console.log('📊 Loaded issues from report.issues:', {
+            count: this.issues.length,
+            summary: this.issueNarrativesSummary
+          });
+        } else {
+          // Final fallback: Load issues from API if not in report
+          const issuesResponse = await this.auditService.getIssues(this.evaluationId).toPromise();
+          if (issuesResponse && Array.isArray(issuesResponse.issues) && issuesResponse.issues.length > 0) {
+            this.issues = issuesResponse.issues;
+            this.issueNarrativesSummary = this.buildIssueSummaryFromIssues(issuesResponse.issues);
+            this.sortAndProcessIssues();
+            this.extractTopOffenders();
+            console.log('📊 Loaded issues from API:', {
+              count: this.issues.length,
+              summary: this.issueNarrativesSummary
+            });
+          } else {
+            // No issues found anywhere - initialize empty state
+            this.issues = [];
+            this.issueNarrativesSummary = {
+              totalIssues: 0,
+              bySeverity: { LOW: 0, MEDIUM: 0, HIGH: 0, CRITICAL: 0 },
+              byCategory: {},
+              primaryRiskCategories: [],
+              auditReady: false
+            };
+          }
         }
       }
       
       // Load clustered issues (legacy manager-grade) from report - FALLBACK
-      const issueAnalysis = (this.evaluation?.report as any)?.issueAnalysis;
+      const issueAnalysis = report?.issueAnalysis;
       if (issueAnalysis && this.issueNarratives.length === 0) {
         this.clusteredIssues = issueAnalysis.clusteredIssues || [];
         this.issueSummary = issueAnalysis.summary || null;
@@ -735,6 +792,54 @@ export class EvaluationResultsComponent implements OnInit {
     };
   }
 
+  /**
+   * PART 3: Build issue summary from issues array
+   * Derives summary statistics from issues without hard-coding values
+   */
+  buildIssueSummaryFromIssues(issues: Issue[]): IssueSummary {
+    if (!Array.isArray(issues) || issues.length === 0) {
+      return {
+        totalIssues: 0,
+        bySeverity: { LOW: 0, MEDIUM: 0, HIGH: 0, CRITICAL: 0 },
+        byCategory: {},
+        primaryRiskCategories: [],
+        auditReady: false
+      };
+    }
+
+    // Count by severity (use getSeverity helper to handle nested structure)
+    const bySeverity = { LOW: 0, MEDIUM: 0, HIGH: 0, CRITICAL: 0 };
+    const byCategory: Record<string, number> = {};
+    const categories = new Set<string>();
+
+    for (const issue of issues) {
+      // Get severity using existing helper
+      const severity = this.getSeverity(issue);
+      const severityUpper = severity.toUpperCase() as 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL';
+      if (bySeverity[severityUpper] !== undefined) {
+        bySeverity[severityUpper]++;
+      }
+
+      // Get category from risk.category or riskCategory
+      const category = (issue as any).risk?.category || issue.riskCategory || 'OTHER';
+      byCategory[category] = (byCategory[category] || 0) + 1;
+      categories.add(category);
+    }
+
+    // Get top categories (sorted by count, take top 3)
+    const primaryRiskCategories = Array.from(categories)
+      .sort((a, b) => (byCategory[b] || 0) - (byCategory[a] || 0))
+      .slice(0, 3);
+
+    return {
+      totalIssues: issues.length,
+      bySeverity,
+      byCategory,
+      primaryRiskCategories,
+      auditReady: true // Assume audit-ready if we have issues data
+    };
+  }
+
   getCounts() {
     const counts = this.evaluation?.scores?.counts || {};
     
@@ -783,7 +888,11 @@ export class EvaluationResultsComponent implements OnInit {
    * Sort issues: Contradicted first, then Ungrounded, then Inconclusive
    * Within each: by nodeBlameNorm desc, then by importance desc
    */
+  // PART 4: Defensive guard - ensure issues is always an array
   sortAndProcessIssues() {
+    if (!Array.isArray(this.issues)) {
+      this.issues = [];
+    }
     const truthStateOrder: Record<string, number> = {
       'Contradicted': 1,
       'Ungrounded': 2,
@@ -963,15 +1072,21 @@ export class EvaluationResultsComponent implements OnInit {
 
   /**
    * Extract top offenders from spectral output
+   * PART 4: Defensive guards added
    */
   extractTopOffenders() {
+    // Initialize empty array if not set
+    if (!Array.isArray(this.topOffenders)) {
+      this.topOffenders = [];
+    }
+    
     const spectral = this.evaluation?.report?.spectral;
     // Try both claim locations
     const claims = this.evaluation?.report?.inputs?.claims || 
                    this.evaluation?.report?.claims || 
                    [];
     
-    if (spectral?.nodeBlameNorm && claims.length > 0) {
+    if (spectral?.nodeBlameNorm && Array.isArray(claims) && claims.length > 0) {
       // Create array of claim + blame pairs
       const claimBlame = claims.map((claim: any, idx: number) => ({
         claimId: claim.id,
@@ -987,7 +1102,7 @@ export class EvaluationResultsComponent implements OnInit {
     }
     
     // If no spectral nodeBlameNorm, try to derive from issues
-    if (this.topOffenders.length === 0 && this.issues.length > 0) {
+    if (this.topOffenders.length === 0 && Array.isArray(this.issues) && this.issues.length > 0) {
       // Use issues with highest importance as top offenders (handles nested structure)
       this.topOffenders = [...this.issues]
         .sort((a, b) => {
