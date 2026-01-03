@@ -814,12 +814,28 @@ export function buildIssuesList(
     const riskResult = computeRiskScore(riskSignals, riskConfig);
     
     // Determine if this claim should be flagged based on risk score
-    // Threshold: flag if riskScore >= medium threshold OR special conditions
+    // IMPROVED: Only flag claims with actual issues, not just UNVERIFIED in transcript-only mode
+    // 
+    // A claim should be flagged if:
+    // 1. Risk score exceeds medium threshold (real problems), OR
+    // 2. It's contradicted (by spectral analysis), OR
+    // 3. It has high blame from spectral analysis, OR
+    // 4. It's in destructive claims AND has actual reasons (not just ranked)
+    //
+    // Claims that are just "UNVERIFIED" in transcript-only mode should NOT be flagged
+    // unless they have other risk signals (promises, absolute language, etc.)
+    
+    const destructiveClaim = (destructiveClaims || []).find(dc => dc.claimId === claim.id);
+    const hasDestructiveReasons = destructiveClaim && 
+      Array.isArray(destructiveClaim.reasons) && 
+      destructiveClaim.reasons.length > 0;
+    
     const shouldFlag = 
       riskResult.riskScore >= riskConfig.severityThresholds.medium ||
       truthState === "Contradicted" ||
+      truthState === "Ungrounded" ||
       blame > 0.3 ||
-      destructiveClaimIds.has(claim.id);
+      hasDestructiveReasons;
     
     if (!shouldFlag) {
       continue;

@@ -284,7 +284,15 @@ export class EvaluationResultsComponent implements OnInit {
         this.extractTopOffenders();
       } else {
         // PART 3: Fallback to report.issues if narratives are empty
+        // Explicitly set issueNarratives to empty array
+        this.issueNarratives = [];
         const reportIssues = Array.isArray(report?.issues) ? report.issues : [];
+        
+        console.log('📊 No narratives found, falling back to report.issues:', {
+          narrativesLength: narratives.length,
+          reportIssuesLength: reportIssues.length,
+          issueNarrativesDataExists: !!issueNarrativesData
+        });
         
         if (reportIssues.length > 0) {
           // Use issues directly from report
@@ -296,8 +304,16 @@ export class EvaluationResultsComponent implements OnInit {
           this.extractTopOffenders();
           console.log('📊 Loaded issues from report.issues:', {
             count: this.issues.length,
+            sortedCount: this.sortedIssues.length,
+            showClusteredView: this.showClusteredView,
             summary: this.issueNarrativesSummary,
-            bySeverity: this.issueNarrativesSummary.bySeverity
+            bySeverity: this.issueNarrativesSummary.bySeverity,
+            topOffendersCount: this.topOffenders.length,
+            firstIssue: this.issues[0] ? {
+              claimId: this.issues[0].claimId,
+              issueType: (this.issues[0] as any).what?.issueType || this.issues[0].issueType,
+              severity: this.getSeverity(this.issues[0])
+            } : null
           });
         } else {
           // Final fallback: Load issues from API if not in report
