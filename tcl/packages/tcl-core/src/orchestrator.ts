@@ -2,7 +2,7 @@ import { ValidateInput, ValidateOutput, SpectralReport, Source, RunManifest, Cla
 import { extractClaims, extractClaimsWithTypes, type ExtractedClaim } from "./claim_extractor.js";
 import { attachEvidenceAndFindViolations } from "./evidence.js";
 import { findLogicViolations } from "./logic.js";
-import { blendScores, shouldRefuse } from "./scoring.js";
+import { blendScores, shouldRefuse, assessRunQuality } from "./scoring.js";
 import { collectFailingClaimIds, repairOnce } from "./repair.js";
 import type { LLMAdapter } from "./adapters/llm_adapter.js";
 import { buildClaimGraph, HttpNliScorer, TokenHeuristicScorer } from "./graph/edge_builder.js";
@@ -487,8 +487,16 @@ async function validateOnce(input: ValidateInput, adapter?: LLMAdapter, startTim
     // For N claims and M sources:
     //   - Old: N*M grounding pairs + N*(N-1)/2 claim pairs = O(N*M + N²)
     //   - New: N*K grounding pairs + N*K claim pairs = O(N*K) where K << M
-    const MAX_GROUNDING_PAIRS_PER_CLAIM = 10; // Only ground against top 10 sources
-    const MAX_CLAIM_PAIRS = 100; // Limit total claim-to-claim pairs
+    // 
+    // FIX: The old MAX_CLAIM_PAIRS=100 was WAY too low for N=62 claims.
+    // This caused 0 support edges because almost no pairs got scored.
+    // New approach: per-claim budget, not global cap.
+    const MAX_GROUNDING_PAIRS_PER_CLAIM = 15; // Ground against top 15 sources per claim
+    const PAIRS_PER_CLAIM = 10; // Score top 10 claim pairs per claim
+    const numClaims = evidenceRes.claims.length;
+    // Total pairs = N * PAIRS_PER_CLAIM, capped at N*(N-1)/2 (all pairs)
+    const maxPossiblePairs = numClaims > 1 ? (numClaims * (numClaims - 1)) / 2 : 0;
+    const MAX_CLAIM_PAIRS = Math.min(numClaims * PAIRS_PER_CLAIM, maxPossiblePairs, 5000); // Cap at 5000 for very large transcripts
     
     let graph;
     timer.start('graph_build');
@@ -746,9 +754,23 @@ async function validateOnce(input: ValidateInput, adapter?: LLMAdapter, startTim
       finalConsistencyScore ?? null, 
       finalCoherenceScore
     );
-    const refusal = shouldRefuse(overall, truthScore ?? null, finalConsistencyScore ?? null, options?.thresholds);
+    // Assess run quality with detailed reasons (replaces simple boolean refusal)
+    const runQuality = assessRunQuality(
+      overall, 
+      truthScore ?? null, 
+      finalConsistencyScore ?? null,
+      {
+        supportsCount: graph.supports.length,
+        contradictionsCount: uniqueContradictions.length,
+        groundingCount: graph.grounding.length,
+        claimsCount: evidenceRes.claims.length
+      },
+      options?.thresholds
+    );
+    const refusal = runQuality.refusal; // Legacy compatibility
     
-    console.log(`Final scores: truth=${truthScore}, consistency=${finalConsistencyScore}, coherence=${finalCoherenceScore}, overall=${overall}, refusal=${refusal}`);
+    console.log(`Final scores: truth=${truthScore}, consistency=${finalConsistencyScore}, coherence=${finalCoherenceScore}, overall=${overall}`);
+    console.log(`Run quality: status=${runQuality.status}, reasons=${runQuality.degradedReasons.join(', ') || 'none'}`);
 
     // Calculate latency
     const latency = Date.now() - validationStartTime;
@@ -874,7 +896,11 @@ async function validateOnce(input: ValidateInput, adapter?: LLMAdapter, startTim
     
     const result = {
       answer,
-      refusal,
+      refusal, // Legacy boolean (deprecated)
+      runQuality: {
+        status: runQuality.status,
+        degradedReasons: runQuality.degradedReasons
+      },
       scores: { truth: truthScore, consistency: finalConsistencyScore, coherence: finalCoherenceScore, overall },
       scorerId: scorer.id,
       latency,

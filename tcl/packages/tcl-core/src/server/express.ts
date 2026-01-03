@@ -964,10 +964,13 @@ app.post("/validate", async (req, res) => {
         // Calculate coherence - use spectral if available, fallback to orchestrator score
         const coherenceScore = spectralReport.coherenceScore ?? out.scores?.coherence;
         
-        // Compute headline counts with configurable thresholds
+        // Compute headline counts using ACTUAL edges from graph builder
+        // IMPORTANT: Pass all edge types so we can properly count supported/grounded claims
         const headlineCounts = computeHeadlineCounts({
           claims: out.report?.claims || [],
           contradictions: out.report?.graph?.contradictions || [],
+          supports: out.report?.graph?.supports || [],
+          grounding: out.report?.graph?.grounding || [],
           spectral: spectralReport,
         });
         
@@ -990,11 +993,12 @@ app.post("/validate", async (req, res) => {
             cycleMass: spectralReport.cycleMass,
             heatTrace: spectralReport.heatTrace
           },
-          // Counts (computed with configurable thresholds)
+          // Counts (computed from actual graph edges)
           counts: {
             claims: headlineCounts.total,
             contradicted: headlineCounts.contradicted,
             ungrounded: headlineCounts.ungrounded,
+            unverified: headlineCounts.unverified, // NEW: has evidence but not externally verified
             supported: headlineCounts.supported,
             supports: out.report?.graph?.supports?.length || 0,
             contradictions: out.report?.graph?.contradictions?.length || 0,

@@ -46,8 +46,108 @@ export function blendScores(truth: number | null, consistency: number | null, co
 }
 
 /**
+ * Run status for evaluations - replaces boolean "refusal"
+ */
+export type RunStatus = 'OK' | 'DEGRADED' | 'FAILED';
+
+/**
+ * Detailed run quality assessment with reasons
+ */
+export interface RunQualityResult {
+  status: RunStatus;
+  degradedReasons: string[];
+  /** Legacy boolean for backward compatibility */
+  refusal: boolean;
+}
+
+/**
+ * Determines run quality based on scores and graph health.
+ * Returns detailed status with reasons instead of just a boolean.
+ */
+export function assessRunQuality(
+  overall: number | null,
+  truth: number | null,
+  consistency: number | null,
+  graphHealth?: {
+    supportsCount?: number;
+    contradictionsCount?: number;
+    groundingCount?: number;
+    claimsCount?: number;
+  },
+  thresholds?: { truth?: number; consistency?: number; overall?: number }
+): RunQualityResult {
+  const degradedReasons: string[] = [];
+  
+  // Ensure inputs are valid numbers
+  const safeOverall = overall !== null ? Number(overall) : null;
+  const safeTruth = truth !== null ? Number(truth) : null;
+  const safeConsistency = consistency !== null ? Number(consistency) : null;
+  
+  const tTruth = thresholds?.truth ?? 50;
+  const tCons = thresholds?.consistency ?? 50;
+  const tOverall = thresholds?.overall ?? 60;
+  
+  // Check score thresholds
+  if (safeOverall !== null && safeOverall < tOverall) {
+    degradedReasons.push(`OVERALL_SCORE_LOW (${safeOverall} < ${tOverall})`);
+  }
+  if (safeTruth !== null && safeTruth < tTruth) {
+    degradedReasons.push(`TRUTH_SCORE_LOW (${safeTruth} < ${tTruth})`);
+  }
+  if (safeConsistency !== null && safeConsistency < tCons) {
+    degradedReasons.push(`CONSISTENCY_SCORE_LOW (${safeConsistency} < ${tCons})`);
+  }
+  
+  // Check graph health
+  if (graphHealth) {
+    const { supportsCount = 0, contradictionsCount = 0, groundingCount = 0, claimsCount = 0 } = graphHealth;
+    
+    // Empty supports graph is a problem
+    if (supportsCount === 0 && claimsCount > 1) {
+      degradedReasons.push('NO_SUPPORT_EDGES');
+    }
+    
+    // No grounding when claims exist is a problem
+    if (groundingCount === 0 && claimsCount > 0) {
+      degradedReasons.push('NO_GROUNDING_EDGES');
+    }
+    
+    // Very high ungrounded rate
+    if (claimsCount > 0) {
+      const groundedRate = groundingCount / claimsCount;
+      if (groundedRate < 0.5) {
+        degradedReasons.push(`LOW_GROUNDING_RATE (${(groundedRate * 100).toFixed(0)}%)`);
+      }
+    }
+  }
+  
+  // Determine status
+  let status: RunStatus = 'OK';
+  if (degradedReasons.length > 0) {
+    status = 'DEGRADED';
+    // Escalate to FAILED if multiple critical issues
+    const criticalIssues = degradedReasons.filter(r => 
+      r.includes('NO_SUPPORT_EDGES') || 
+      r.includes('NO_GROUNDING_EDGES') ||
+      r.includes('TRUTH_SCORE_LOW')
+    );
+    if (criticalIssues.length >= 2) {
+      status = 'FAILED';
+    }
+  }
+  
+  return {
+    status,
+    degradedReasons,
+    refusal: status === 'FAILED' // Legacy compatibility
+  };
+}
+
+/**
  * Determines if an answer should be refused based on score thresholds.
  * Returns true if any score is below its threshold.
+ * 
+ * @deprecated Use assessRunQuality() instead for more detailed status
  */
 export function shouldRefuse(
   overall: number | null,
