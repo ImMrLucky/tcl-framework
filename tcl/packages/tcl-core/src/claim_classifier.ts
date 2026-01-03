@@ -232,21 +232,103 @@ export interface ContradictionGateResult {
   contradictionType: ContradictionType;
   reasonCodes: string[];
   overlapScore: number;
+  /**
+   * Polarity/opposition signal strength (0-1)
+   * Only set if shouldCreate is true
+   */
+  polarityOppositionScore?: number;
+  /**
+   * Whether timeframe overlap check passed (if applicable)
+   */
+  timeframeOverlap?: boolean;
+}
+
+/**
+ * Map ClaimKind to semantic claim type for compatibility checking
+ */
+function getSemanticClaimType(kind: ClaimKind, text: string): 'fact' | 'policy' | 'amount' | 'promise' | 'intent' | 'question' | 'offer' | 'other' {
+  if (kind === 'question') return 'question';
+  if (kind === 'intent') return 'intent';
+  if (kind === 'promise') return 'promise';
+  
+  // Check for amount/money references
+  if (/\$\d+|\d+\s*(dollar|cent|percent|%)/i.test(text)) {
+    return 'amount';
+  }
+  
+  // Check for policy references
+  if (/policy|terms|agreement|contract|plan|subscription/i.test(text)) {
+    return 'policy';
+  }
+  
+  // Check for offers
+  if (/offer|deal|discount|promotion|special/i.test(text)) {
+    return 'offer';
+  }
+  
+  // Default to fact for assertions
+  if (kind === 'assertion') return 'fact';
+  
+  return 'other';
+}
+
+/**
+ * Check if two semantic claim types are compatible for contradiction
+ */
+function areClaimTypesCompatible(typeA: string, typeB: string): boolean {
+  // Compatible pairs
+  const compatible: Record<string, string[]> = {
+    'fact': ['fact', 'policy', 'amount'],
+    'policy': ['fact', 'policy'],
+    'amount': ['fact', 'amount'],
+    'promise': ['promise'],
+  };
+  
+  return compatible[typeA]?.includes(typeB) || compatible[typeB]?.includes(typeA) || false;
+}
+
+/**
+ * Check for polarity/opposition signal between two claims
+ * Returns score 0-1 indicating how strongly one negates the other
+ */
+function checkPolarityOpposition(textA: string, textB: string): number {
+  const negationWords = /\b(not|no|never|none|nothing|nobody|nowhere|neither|cannot|can't|won't|wouldn't|shouldn't|doesn't|don't|isn't|aren't|wasn't|weren't)\b/i;
+  const affirmationWords = /\b(is|are|was|were|will|would|can|could|should|does|do|has|have|always|all|every|any)\b/i;
+  
+  const hasNegationA = negationWords.test(textA);
+  const hasNegationB = negationWords.test(textB);
+  const hasAffirmationA = affirmationWords.test(textA);
+  const hasAffirmationB = affirmationWords.test(textB);
+  
+  // If one has negation and other has affirmation on same topic, that's opposition
+  if ((hasNegationA && hasAffirmationB) || (hasNegationB && hasAffirmationA)) {
+    return 0.7; // Strong opposition signal
+  }
+  
+  // Both have negation or both have affirmation = not opposition
+  if ((hasNegationA && hasNegationB) || (hasAffirmationA && hasAffirmationB)) {
+    return 0.1; // Weak opposition signal
+  }
+  
+  // Default: moderate signal (needs further analysis)
+  return 0.4;
 }
 
 /**
  * Determine if two claims should be considered for contradiction.
- * This is the main fix for false contradictions.
+ * Enhanced version with all gating requirements from spec.
  * 
  * Returns:
  * - shouldCreate: false if this pair should NOT create any contradiction edge
  * - contradictionType: "direct" | "topic_mismatch" | "low_overlap" | "needs_review"
  * - reasonCodes: why this decision was made
+ * - overlapScore: topic overlap score (0-1)
+ * - polarityOppositionScore: how strongly one negates the other (0-1)
  */
 export function shouldConsiderContradiction(
   claimA: Claim,
   claimB: Claim,
-  config?: ScoringConfig
+  config?: ScoringConfig & { thresholds?: { topicOverlapThreshold?: number; polarityOppositionThreshold?: number } }
 ): ContradictionGateResult {
   const cfg = config || getScoringConfig();
   const reasonCodes: string[] = [];
@@ -254,7 +336,25 @@ export function shouldConsiderContradiction(
   const kindA = claimA.claimKind || "assertion";
   const kindB = claimB.claimKind || "assertion";
   
-  // 1. Check if either claim is a non-contradictory kind
+  // ========================================================================
+  // GATE 1: Claim-type compatibility
+  // ========================================================================
+  const typeA = getSemanticClaimType(kindA, claimA.text);
+  const typeB = getSemanticClaimType(kindB, claimB.text);
+  
+  if (!areClaimTypesCompatible(typeA, typeB)) {
+    reasonCodes.push(`INCOMPATIBLE_TYPES:${typeA}_vs_${typeB}`);
+    return {
+      shouldCreate: false,
+      contradictionType: "needs_review",
+      reasonCodes,
+      overlapScore: 0,
+    };
+  }
+  
+  // ========================================================================
+  // GATE 2: Non-contradictory kinds (intent, question, emotion, meta)
+  // ========================================================================
   const nonContradictory = cfg.classification.nonContradictoryKinds;
   
   if (nonContradictory.includes(kindA)) {
@@ -274,7 +374,9 @@ export function shouldConsiderContradiction(
     };
   }
   
-  // 2. Promise can only contradict other promises
+  // ========================================================================
+  // GATE 3: Self-contradictory kinds (promise can only contradict promise)
+  // ========================================================================
   const selfContradictory = cfg.classification.selfContradictoryKinds;
   if (selfContradictory.includes(kindA) || selfContradictory.includes(kindB)) {
     if (kindA !== kindB) {
@@ -288,11 +390,13 @@ export function shouldConsiderContradiction(
     }
   }
   
-  // 3. Calculate topic overlap
+  // ========================================================================
+  // GATE 4: Topic overlap
+  // ========================================================================
   const overlapScore = calculateTopicOverlap(claimA, claimB, cfg);
+  const topicThreshold = (config?.thresholds?.topicOverlapThreshold ?? cfg.thresholds.minTopicOverlapForAnyEdge);
   
-  // 4. Gate by overlap threshold
-  if (overlapScore < cfg.thresholds.minTopicOverlapForAnyEdge) {
+  if (overlapScore < topicThreshold) {
     reasonCodes.push("LOW_OVERLAP");
     return {
       shouldCreate: false,
@@ -302,22 +406,56 @@ export function shouldConsiderContradiction(
     };
   }
   
-  if (overlapScore < cfg.thresholds.minTopicOverlapForContradiction) {
+  // ========================================================================
+  // GATE 5: Polarity/opposition signal
+  // ========================================================================
+  const polarityScore = checkPolarityOpposition(claimA.text, claimB.text);
+  const polarityThreshold = (config?.thresholds?.polarityOppositionThreshold ?? 0.3);
+  
+  if (polarityScore < polarityThreshold) {
+    reasonCodes.push("WEAK_POLARITY_OPPOSITION");
+    // Don't create contradiction, but could create "related" edge
+    return {
+      shouldCreate: false,
+      contradictionType: "needs_review",
+      reasonCodes,
+      overlapScore,
+      polarityOppositionScore: polarityScore,
+    };
+  }
+  
+  // ========================================================================
+  // GATE 6: Timeframe overlap (if both claims have temporal scope)
+  // TODO: Implement timeframe extraction and overlap check
+  // ========================================================================
+  // For now, assume timeframe overlap if topic overlap is high enough
+  const timeframeOverlap = overlapScore > 0.5;
+  
+  // ========================================================================
+  // DECISION: All gates passed
+  // ========================================================================
+  const directThreshold = cfg.thresholds.minTopicOverlapForContradiction;
+  
+  if (overlapScore < directThreshold) {
     reasonCodes.push("TOPIC_MISMATCH");
     return {
       shouldCreate: true, // Create edge, but NOT as "direct"
       contradictionType: "topic_mismatch",
       reasonCodes,
       overlapScore,
+      polarityOppositionScore: polarityScore,
+      timeframeOverlap,
     };
   }
   
-  // 5. Passed all gates -> direct contradiction
+  // Passed all gates -> direct contradiction
   return {
     shouldCreate: true,
     contradictionType: "direct",
     reasonCodes: [],
     overlapScore,
+    polarityOppositionScore: polarityScore,
+    timeframeOverlap,
   };
 }
 
