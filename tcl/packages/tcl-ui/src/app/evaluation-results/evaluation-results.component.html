@@ -453,7 +453,7 @@
                 <th mat-header-cell *matHeaderCellDef>Rank</th>
                 <td mat-cell *matCellDef="let issue; let i = index">
                   <div class="rank-cell">
-                    <span class="rank-number">{{ i + 1 }}</span>
+                    <span class="rank-number">{{ getIssueRank(issue, i) }}</span>
                     <mat-chip 
                       [style.background-color]="getSeverityColor(getSeverity(issue))" 
                       [style.color]="'white'"
@@ -508,9 +508,14 @@
               <ng-container matColumnDef="evidence">
                 <th mat-header-cell *matHeaderCellDef>Risk</th>
                 <td mat-cell *matCellDef="let issue">
-                  <span [class]="'risk-badge risk-' + getSeverity(issue)">
-                    {{ getSeverityLabel(getSeverity(issue)) }}
-                  </span>
+                  <div class="risk-cell">
+                    <span [class]="'risk-badge risk-' + getSeverity(issue)">
+                      {{ getSeverityLabel(getSeverity(issue)) }}
+                    </span>
+                    <span class="risk-score" *ngIf="getRiskScore(issue) !== null">
+                      ({{ getRiskScore(issue) }})
+                    </span>
+                  </div>
                 </td>
               </ng-container>
 

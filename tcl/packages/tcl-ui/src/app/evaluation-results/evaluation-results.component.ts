@@ -207,14 +207,6 @@ export class EvaluationResultsComponent implements OnInit {
       }
       this.evaluation = evalResponse.evaluation;
 
-      // Load issues
-      const issuesResponse = await this.auditService.getIssues(this.evaluationId).toPromise();
-      if (issuesResponse) {
-        this.issues = issuesResponse.issues;
-        this.sortAndProcessIssues();
-        this.extractTopOffenders();
-      }
-      
       // Load issue narratives (QA-Manager Grade) from report - PRIMARY
       // Try multiple possible locations in the report structure
       const report = this.evaluation?.report as any;
@@ -255,6 +247,19 @@ export class EvaluationResultsComponent implements OnInit {
             hasScoring: !!this.issueNarratives[0].scoring
           } : null
         });
+        
+        // Convert issue narratives to Issue[] format for the table
+        this.issues = this.convertNarrativesToIssues(this.issueNarratives);
+        this.sortAndProcessIssues();
+        this.extractTopOffenders();
+      } else {
+        // Fallback: Load issues from API if narratives not available
+        const issuesResponse = await this.auditService.getIssues(this.evaluationId).toPromise();
+        if (issuesResponse) {
+          this.issues = issuesResponse.issues;
+          this.sortAndProcessIssues();
+          this.extractTopOffenders();
+        }
       }
       
       // Load clustered issues (legacy manager-grade) from report - FALLBACK
@@ -786,26 +791,161 @@ export class EvaluationResultsComponent implements OnInit {
       'Supported': 4
     };
     
+    const severityOrder: Record<string, number> = {
+      'critical': 1,
+      'high': 2,
+      'medium': 3,
+      'low': 4
+    };
+    
     this.sortedIssues = [...this.issues].sort((a, b) => {
-      // First by truth state (handles nested structure)
+      // First by severity (if available from narratives)
+      const severityA = severityOrder[this.getSeverity(a)] || 99;
+      const severityB = severityOrder[this.getSeverity(b)] || 99;
+      if (severityA !== severityB) {
+        return severityA - severityB;
+      }
+      
+      // Then by truth state (handles nested structure)
       const stateA = truthStateOrder[(a as any).what?.truthState || a.truthState] || 99;
       const stateB = truthStateOrder[(b as any).what?.truthState || b.truthState] || 99;
       if (stateA !== stateB) {
         return stateA - stateB;
       }
       
+      // Then by importance/compositeScore desc (handles nested structure)
+      const importanceA = (a as any).confidence?.importance || a.importance || 0;
+      const importanceB = (b as any).confidence?.importance || b.importance || 0;
+      if (importanceA !== importanceB) {
+        return importanceB - importanceA;
+      }
+      
       // Then by nodeBlameNorm desc (handles nested structure)
       const blameA = (a as any).confidence?.nodeBlameNorm || a.nodeBlameNorm || 0;
       const blameB = (b as any).confidence?.nodeBlameNorm || b.nodeBlameNorm || 0;
-      if (blameA !== blameB) {
-        return blameB - blameA;
+      return blameB - blameA;
+    });
+  }
+
+  /**
+   * Convert IssueNarratives to Issue[] format for the table
+   */
+  convertNarrativesToIssues(narratives: IssueNarrative[]): Issue[] {
+    return narratives.map((narrative, index) => {
+      // Get the first claim ID from scope
+      const firstClaimId = narrative.scope?.claimIds?.[0] || narrative.issueId;
+      
+      // Get the first evidence quote for claim text
+      const firstQuote = narrative.evidenceQuotes?.[0];
+      const claimText = firstQuote?.text || narrative.whatIsWrong || '';
+      
+      // Map severity from narrative to Issue format
+      const severityMap: Record<string, 'critical' | 'high' | 'medium' | 'low'> = {
+        'CRITICAL': 'critical',
+        'HIGH': 'high',
+        'MEDIUM': 'medium',
+        'LOW': 'low'
+      };
+      
+      // Map category to issue type
+      const categoryToIssueType: Record<string, string> = {
+        'BILLING': 'POLICY_VIOLATION',
+        'DISCLOSURE': 'POLICY_MISS',
+        'MISREPRESENTATION': 'POLICY_VIOLATION',
+        'PRIVACY': 'POLICY_VIOLATION',
+        'SECURITY': 'POLICY_VIOLATION',
+        'PROCESS': 'POLICY_MISS',
+        'CUSTOMER_HARM': 'POLICY_VIOLATION',
+        'REGULATORY': 'POLICY_VIOLATION',
+        'PROMISE_BREACH': 'CONTRADICTION',
+        'OTHER': 'UNSUPPORTED'
+      };
+      
+      // Determine truth state from contradiction pairs
+      let truthState: 'Contradicted' | 'Supported' | 'Ungrounded' | 'Inconclusive' = 'Inconclusive';
+      if (narrative.contradictionPairs && narrative.contradictionPairs.length > 0) {
+        truthState = 'Contradicted';
+      } else if (narrative.traceability?.topEdges?.some(e => e.type === 'support')) {
+        truthState = 'Supported';
+      } else if (narrative.evidenceQuotes && narrative.evidenceQuotes.length === 0) {
+        truthState = 'Ungrounded';
       }
       
-      // Then by importance desc (handles nested structure)
-      const importanceA = (a as any).confidence?.importance || a.importance || 0;
-      const importanceB = (b as any).confidence?.importance || b.importance || 0;
-      return importanceB - importanceA;
+      // Get speaker from first evidence quote or scope
+      const speaker = firstQuote?.speaker || 
+                     (narrative.scope?.speakerFocus === 'AGENT' ? 'AGENT' : 
+                      narrative.scope?.speakerFocus === 'CUSTOMER' ? 'CUSTOMER' : 'UNKNOWN');
+      
+      const issue: Issue = {
+        claimId: firstClaimId,
+        issueId: narrative.issueId,
+        status: narrative.status === 'RESOLVED' ? 'RESOLVED' : 
+                narrative.status === 'DISMISSED' ? 'FALSE_POSITIVE' : 'OPEN',
+        
+        // Nested structure
+        who: {
+          speaker: speaker as 'AGENT' | 'CUSTOMER' | 'UNKNOWN' | 'SYSTEM',
+          speakerLabel: speaker === 'AGENT' ? 'Agent' : speaker === 'CUSTOMER' ? 'Customer' : 'Unknown'
+        },
+        what: {
+          claimText: claimText,
+          claimSummary: narrative.title,
+          issueType: categoryToIssueType[narrative.category] || 'UNSUPPORTED' as any,
+          truthState: truthState,
+          description: narrative.whatIsWrong,
+          whyFlagged: narrative.whyWrong?.join('; ') || narrative.whatIsWrong
+        },
+        where: {
+          turnStartIdx: narrative.scope?.turnRange?.[0],
+          turnEndIdx: narrative.scope?.turnRange?.[1],
+          excerpt: firstQuote?.text || narrative.whatIsWrong
+        },
+        risk: {
+          severity: severityMap[narrative.severity] || 'medium',
+          category: narrative.category,
+          explanation: narrative.whyItMatters?.join('; ') || narrative.whatIsWrong
+        },
+        confidence: {
+          nodeBlameNorm: narrative.scoring?.riskScore ? narrative.scoring.riskScore / 100 : 0,
+          importance: narrative.scoring?.compositeScore ? narrative.scoring.compositeScore / 100 : 0,
+          groundingScore: narrative.scoring?.fixabilityScore ? narrative.scoring.fixabilityScore / 100 : undefined
+        },
+        
+        // Legacy flat fields for backward compatibility
+        truthState: truthState,
+        nodeBlameNorm: narrative.scoring?.riskScore ? narrative.scoring.riskScore / 100 : 0,
+        importance: narrative.scoring?.compositeScore ? narrative.scoring.compositeScore / 100 : 0,
+        issueType: categoryToIssueType[narrative.category] || 'UNSUPPORTED' as any,
+        speaker: speaker as 'AGENT' | 'CUSTOMER' | 'UNKNOWN' | 'SYSTEM',
+        speakerLabel: speaker === 'AGENT' ? 'Agent' : speaker === 'CUSTOMER' ? 'Customer' : 'Unknown',
+        turnStartIdx: narrative.scope?.turnRange?.[0],
+        turnEndIdx: narrative.scope?.turnRange?.[1],
+        claimText: claimText,
+        claimSummary: narrative.title,
+        description: narrative.whatIsWrong,
+        whyFlagged: narrative.whyWrong?.join('; ') || narrative.whatIsWrong,
+        severity: severityMap[narrative.severity] || 'medium',
+        riskCategory: narrative.category,
+        riskExplanation: narrative.whyItMatters?.join('; ') || narrative.whatIsWrong,
+        evidenceLocation: this.getNarrativeEvidenceLocation(narrative)
+      };
+      
+      return issue;
     });
+  }
+  
+  /**
+   * Get evidence location string from narrative
+   */
+  getNarrativeEvidenceLocation(narrative: IssueNarrative): string {
+    if (!narrative.scope?.turnRange) return 'N/A';
+    const [min, max] = narrative.scope.turnRange;
+    const minDisplay = min + 1;
+    const maxDisplay = max + 1;
+    if (minDisplay === maxDisplay) {
+      return `Call · Line ${minDisplay}`;
+    }
+    return `Call · Lines ${minDisplay}-${maxDisplay}`;
   }
 
   /**
@@ -958,6 +1098,46 @@ export class EvaluationResultsComponent implements OnInit {
       'LATE_DISCLAIMER': 'Late Disclaimer'
     };
     return labels[issueType] || issueType;
+  }
+  
+  /**
+   * Get issue rank - use compositeScore if available, otherwise use index
+   */
+  getIssueRank(issue: Issue, index: number): number {
+    // If we have issueNarratives, use their compositeScore for ranking
+    if (this.issueNarratives.length > 0) {
+      // Find the narrative that matches this issue
+      const narrative = this.issueNarratives.find(n => 
+        n.issueId === issue.issueId || 
+        n.scope?.claimIds?.includes(issue.claimId)
+      );
+      if (narrative?.scoring?.compositeScore !== undefined) {
+        // Rank by compositeScore (higher = better rank = lower number)
+        const sortedByScore = [...this.issueNarratives].sort((a, b) => 
+          (b.scoring?.compositeScore || 0) - (a.scoring?.compositeScore || 0)
+        );
+        const rankIndex = sortedByScore.findIndex(n => 
+          n.issueId === narrative.issueId
+        );
+        return rankIndex >= 0 ? rankIndex + 1 : index + 1;
+      }
+    }
+    // Fallback to index-based ranking
+    return index + 1;
+  }
+  
+  /**
+   * Get risk score from narrative if available
+   */
+  getRiskScore(issue: Issue): number | null {
+    if (this.issueNarratives.length > 0) {
+      const narrative = this.issueNarratives.find(n => 
+        n.issueId === issue.issueId || 
+        n.scope?.claimIds?.includes(issue.claimId)
+      );
+      return narrative?.scoring?.riskScore ?? null;
+    }
+    return null;
   }
 
   /**
