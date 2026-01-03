@@ -285,19 +285,21 @@
       <!-- B) Issues Section with Toggle -->
       <div class="main-content">
         <!-- View Toggle -->
-        <div class="view-toggle" *ngIf="issueNarratives.length > 0 || clusteredIssues.length > 0">
-          <button mat-button [class.active]="showClusteredView" (click)="showClusteredView = true">
+        <!-- PART 4: Show toggle if we have any issues data (narratives, clustered, or per-claim) -->
+        <div class="view-toggle" *ngIf="issueNarratives.length > 0 || clusteredIssues.length > 0 || (issues?.length ?? 0) > 0">
+          <button mat-button [class.active]="showClusteredView" (click)="showClusteredView = true" *ngIf="issueNarratives.length > 0 || clusteredIssues.length > 0">
             <mat-icon>category</mat-icon>
             Problem Statements ({{ issueNarratives.length || clusteredIssues.length }})
           </button>
           <button mat-button [class.active]="!showClusteredView" (click)="showClusteredView = false">
             <mat-icon>list</mat-icon>
-            Per-Claim Issues ({{ issues?.length || 0 }})
+            Per-Claim Issues ({{ issues?.length ?? 0 }})
           </button>
         </div>
 
         <!-- PRIMARY: Issue Narratives View (QA-Manager Grade) -->
-        <mat-card class="issues-card issue-narratives" *ngIf="showClusteredView && issueNarratives.length > 0">
+        <!-- PART 4: Only show if narratives exist and view is set to clustered -->
+        <mat-card class="issues-card issue-narratives" *ngIf="showClusteredView && (issueNarratives.length > 0 || clusteredIssues.length > 0)">
           <mat-card-header>
             <mat-card-title>
               <mat-icon>assignment</mat-icon>
@@ -373,7 +375,7 @@
             </div>
 
             <!-- Empty state -->
-            <div class="empty-state" *ngIf="issueNarratives.length === 0">
+            <div class="empty-state" *ngIf="issueNarratives.length === 0 && clusteredIssues.length === 0">
               <mat-icon>check_circle</mat-icon>
               <p>No significant issues detected</p>
             </div>
@@ -440,9 +442,9 @@
 
         <!-- Selected Issue Detail Panel (Replaced by Modal - see IssueDetailModalComponent) -->
 
-        <!-- Original Per-Claim Issues Table (when toggled) -->
-        <!-- PART 4: Defensive guard - only render if issues exist -->
-        <mat-card class="issues-card" *ngIf="(!showClusteredView || clusteredIssues.length === 0) && (issues?.length ?? 0) > 0">
+        <!-- Original Per-Claim Issues Table (when toggled or if no narratives) -->
+        <!-- PART 4: Show table if: not in clustered view, OR no narratives/clustered issues exist -->
+        <mat-card class="issues-card" *ngIf="(!showClusteredView || (issueNarratives.length === 0 && clusteredIssues.length === 0)) && (issues?.length ?? 0) > 0">
           <mat-card-header>
             <mat-card-title>Top Claim Issues (Ranked by Risk)</mat-card-title>
             <mat-card-subtitle>Actionable findings from conversation analysis</mat-card-subtitle>

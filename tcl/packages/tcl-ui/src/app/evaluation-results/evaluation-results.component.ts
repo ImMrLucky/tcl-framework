@@ -249,12 +249,15 @@ export class EvaluationResultsComponent implements OnInit {
         issueNarrativesData = report.issueAnalysis;
       }
       
-      if (issueNarrativesData) {
-        // Handle both { narratives: [...] } and direct array
-        const narratives = Array.isArray(issueNarrativesData) 
-          ? issueNarrativesData 
-          : (issueNarrativesData.narratives || []);
-        
+      // Extract narratives array and check if it's actually populated
+      const narratives = issueNarrativesData
+        ? (Array.isArray(issueNarrativesData) 
+            ? issueNarrativesData 
+            : (issueNarrativesData.narratives || []))
+        : [];
+      
+      // Only use narratives if they're actually populated (not empty array)
+      if (narratives.length > 0) {
         this.issueNarratives = narratives;
         this.issueNarrativesSummary = {
           totalIssues: issueNarrativesData.summary?.totalIssues || narratives.length,
@@ -287,11 +290,14 @@ export class EvaluationResultsComponent implements OnInit {
           // Use issues directly from report
           this.issues = reportIssues;
           this.issueNarrativesSummary = this.buildIssueSummaryFromIssues(reportIssues);
+          // Default to per-claim view when we only have issues (no narratives)
+          this.showClusteredView = false;
           this.sortAndProcessIssues();
           this.extractTopOffenders();
           console.log('📊 Loaded issues from report.issues:', {
             count: this.issues.length,
-            summary: this.issueNarrativesSummary
+            summary: this.issueNarrativesSummary,
+            bySeverity: this.issueNarrativesSummary.bySeverity
           });
         } else {
           // Final fallback: Load issues from API if not in report
@@ -299,11 +305,14 @@ export class EvaluationResultsComponent implements OnInit {
           if (issuesResponse && Array.isArray(issuesResponse.issues) && issuesResponse.issues.length > 0) {
             this.issues = issuesResponse.issues;
             this.issueNarrativesSummary = this.buildIssueSummaryFromIssues(issuesResponse.issues);
+            // Default to per-claim view when we only have issues (no narratives)
+            this.showClusteredView = false;
             this.sortAndProcessIssues();
             this.extractTopOffenders();
             console.log('📊 Loaded issues from API:', {
               count: this.issues.length,
-              summary: this.issueNarrativesSummary
+              summary: this.issueNarrativesSummary,
+              bySeverity: this.issueNarrativesSummary.bySeverity
             });
           } else {
             // No issues found anywhere - initialize empty state
