@@ -342,16 +342,23 @@ export class IngestionComponent implements OnInit {
       );
       
       // Step 3: Navigate to evaluation results
-      await new Promise(resolve => setTimeout(resolve, 500));
-      
-      const evaluationsResponse = await firstValueFrom(
-        this.auditService.getConversationEvaluations(conversationId, { limit: 1 })
-      );
-      
-      if (evaluationsResponse?.evaluations?.length > 0) {
-        this.router.navigate(['/evaluations', evaluationsResponse.evaluations[0].id]);
+      // Use evaluation ID from response if available, otherwise fetch it
+      if (evaluationData?.evaluationId) {
+        // Evaluation ID is in the response - no need for extra API call
+        this.router.navigate(['/evaluations', evaluationData.evaluationId]);
       } else {
-        this.router.navigate(['/conversations', conversationId]);
+        // Fallback: fetch latest evaluation for this conversation
+        await new Promise(resolve => setTimeout(resolve, 500));
+        
+        const evaluationsResponse = await firstValueFrom(
+          this.auditService.getConversationEvaluations(conversationId, { limit: 1 })
+        );
+        
+        if (evaluationsResponse?.evaluations?.length > 0) {
+          this.router.navigate(['/evaluations', evaluationsResponse.evaluations[0].id]);
+        } else {
+          this.router.navigate(['/conversations', conversationId]);
+        }
       }
     } catch (error: any) {
       console.error('Ingestion error:', error);
@@ -434,7 +441,7 @@ export class IngestionComponent implements OnInit {
       // Step 3: Run evaluation
       // Use evaluation URL (Railway direct) to bypass Netlify timeout
       const evalUrl = this.auditService.getEvaluationBaseUrl();
-      await firstValueFrom(
+      const evaluationData = await firstValueFrom(
         this.http.post<any>(`${evalUrl}/validate`, {
           question: transcriptContent,
           answer: '',
@@ -450,16 +457,23 @@ export class IngestionComponent implements OnInit {
       );
 
       // Navigate to results
-      await new Promise(resolve => setTimeout(resolve, 500));
-      
-      const evaluationsResponse = await firstValueFrom(
-        this.auditService.getConversationEvaluations(conversationId, { limit: 1 })
-      );
-      
-      if (evaluationsResponse?.evaluations?.length > 0) {
-        this.router.navigate(['/evaluations', evaluationsResponse.evaluations[0].id]);
+      // Use evaluation ID from response if available, otherwise fetch it
+      if (evaluationData?.evaluationId) {
+        // Evaluation ID is in the response - no need for extra API call
+        this.router.navigate(['/evaluations', evaluationData.evaluationId]);
       } else {
-        this.router.navigate(['/conversations', conversationId]);
+        // Fallback: fetch latest evaluation for this conversation
+        await new Promise(resolve => setTimeout(resolve, 500));
+        
+        const evaluationsResponse = await firstValueFrom(
+          this.auditService.getConversationEvaluations(conversationId, { limit: 1 })
+        );
+        
+        if (evaluationsResponse?.evaluations?.length > 0) {
+          this.router.navigate(['/evaluations', evaluationsResponse.evaluations[0].id]);
+        } else {
+          this.router.navigate(['/conversations', conversationId]);
+        }
       }
     } catch (error: any) {
       console.error('Linking error:', error);

@@ -998,7 +998,7 @@ app.post("/validate", async (req, res) => {
           }
         };
         
-        const { error: dbError } = await supabaseAdmin
+        const { data: insertedEvaluation, error: dbError } = await supabaseAdmin
           .from('evaluations')
           .insert({
             org_id: context.orgId,
@@ -1011,7 +1011,9 @@ app.post("/validate", async (req, res) => {
             engine_version: process.env.ENGINE_VERSION || '0.2.0',
             latency_ms: latency,
             report: reportWithIssues
-          });
+          })
+          .select('id')
+          .single();
         
         if (dbError) {
           console.error('Failed to store evaluation:', dbError);
@@ -1026,6 +1028,9 @@ app.post("/validate", async (req, res) => {
             targetType: 'evaluation',
             meta: { question: input.question.substring(0, 100), latency, env: context.env }
           });
+          
+          // Include evaluation ID in response
+          (out as any).evaluationId = insertedEvaluation?.id;
         }
       } catch (dbErr: any) {
         console.error('Database error (non-fatal):', dbErr);
