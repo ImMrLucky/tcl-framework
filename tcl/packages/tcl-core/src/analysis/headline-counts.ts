@@ -136,6 +136,7 @@ export function computeHeadlineCounts(input: ComputeCountsInput): HeadlineCounts
   }
   
   // Generate definitions for tooltips - use same thresholds as computation
+  const mode = engineConfig.mode;
   const definitions = {
     supported: `Claims with truthState="Supported" that are not involved in high-badness contradictions (badness >= ${highBadnessThreshold}) and have contradiction edge weight < ${contradictedThreshold.toFixed(2)} AND support edge weight >= ${supportThreshold.toFixed(2)}.`,
     contradicted: `Claims with truthState="Contradicted" OR claims with contradiction edges above threshold (weight >= ${contradictedThreshold.toFixed(2)}).`,
