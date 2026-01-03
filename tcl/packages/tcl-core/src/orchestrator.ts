@@ -26,6 +26,8 @@ import {
   getModelFingerprint,
   computeFullConfigHash
 } from "./analysis/reproducibility.js";
+import { computeTruthFromGraph } from "./analysis/compute-truth-from-graph.js";
+import { getEngineConfig } from "./config/engine-config.js";
 
 // Cache for scorer to avoid re-initialization on every request
 let cachedScorer: { scorer: any; url: string; timestamp: number } | null = null;
@@ -706,11 +708,25 @@ async function validateOnce(input: ValidateInput, adapter?: LLMAdapter, startTim
       console.log("Spectral disabled in options");
     }
 
-    // 6) scores - ensure all scores are valid numbers in 0-100 range
-    // Only compute from real data - no fallbacks
-    const truthScore = evidenceRes.truthScore !== undefined 
-      ? Math.max(0, Math.min(100, Math.round(evidenceRes.truthScore)))
-      : null; // null if not computed
+    // 6) scores - compute truth score incorporating contradictions
+    // FIX: Use graph-based truth score that incorporates contradictions
+    const engineConfig = getEngineConfig();
+    const mode = sources && sources.length > 0 ? 'with_external_docs' : 'transcript_only';
+    const graphBasedTruth = computeTruthFromGraph(
+      evidenceRes.claims,
+      uniqueContradictions,
+      graph.supports,
+      graph.grounding,
+      mode
+    );
+    
+    // Use graph-based truth score (incorporates contradictions)
+    // Fallback to evidenceRes.truthScore only if graph has no data
+    const truthScore = graphBasedTruth.truth !== undefined
+      ? graphBasedTruth.truth
+      : (evidenceRes.truthScore !== undefined 
+          ? Math.max(0, Math.min(100, Math.round(evidenceRes.truthScore)))
+          : null);
     const pairsScored = graph.debug?.pairsScored || 0;
     const finalConsistencyScore = pairsScored > 0 && consistencyScore !== undefined
       ? Math.max(0, Math.min(100, Math.round(consistencyScore)))

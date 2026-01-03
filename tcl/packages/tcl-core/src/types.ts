@@ -325,7 +325,10 @@ export type ContradictionType =
   | "low_overlap"    // Insufficient topic overlap
   | "needs_review";  // Uncertain, flag for human review
 
-export type ContradictionEdge = { 
+export type ContradictionEdge = {
+  contradictionType?: 'direct' | 'topic_mismatch' | 'low_overlap' | 'needs_review';
+  reasonCodes?: string[];
+  overlapScore?: number; 
   claimA: string; 
   claimB: string; 
   weight: number;

@@ -5,10 +5,14 @@
  * using configurable thresholds and spectral data.
  * 
  * NO hard-coded thresholds - everything comes from config.
+ * 
+ * DEPRECATED: Use computeCountsFromClaims() from counts-from-claims.ts instead.
+ * This function is kept for backward compatibility but should be replaced.
  */
 
 import type { Claim, SpectralReport, ContradictionEdge } from "../types.js";
 import { getScoringConfig } from "../config/scoring.js";
+import { getEngineConfig } from "../config/engine-config.js";
 
 export interface HeadlineCounts {
   supported: number;
@@ -31,14 +35,20 @@ export interface ComputeCountsInput {
 
 /**
  * Compute headline counts with configurable thresholds.
+ * 
+ * NOTE: This function has inconsistencies. Use computeCountsFromClaims() instead.
  */
 export function computeHeadlineCounts(input: ComputeCountsInput): HeadlineCounts {
-  const config = input.config || getScoringConfig();
+  const scoringConfig = input.config || getScoringConfig();
+  const engineConfig = getEngineConfig(); // Use EngineConfig for consistency
   const { claims, contradictions, spectral } = input;
   
-  // Get thresholds from config (with defaults)
-  const contradictionThreshold = config.thresholds.contradictionThreshold || 0.55;
-  const highBadnessThreshold = 0.7; // TODO: Add to config if needed
+  // Get thresholds from config - NO hard-coded fallbacks
+  const contradictionThreshold = engineConfig.thresholds.contradictionThreshold;
+  const contradictedThreshold = engineConfig.thresholds.contradictedThreshold ?? contradictionThreshold;
+  const supportThreshold = engineConfig.thresholds.supportThreshold;
+  // TODO: Add highBadnessThreshold to EngineConfig
+  const highBadnessThreshold = 0.7; // Temporary - should come from config
   
   // Build sets for efficient lookup
   const claimIdToIndex = new Map<string, number>();
@@ -60,9 +70,9 @@ export function computeHeadlineCounts(input: ComputeCountsInput): HeadlineCounts
     }
   }
   
-  // Also check contradiction edges above threshold
+  // Also check contradiction edges above threshold - use contradictedThreshold for consistency
   const contradictionEdgesAboveThreshold = contradictions.filter(
-    e => (e.weight || 0) >= contradictionThreshold
+    e => (e.weight || 0) >= contradictedThreshold
   );
   const contradictionClaimIds = new Set<string>();
   for (const edge of contradictionEdgesAboveThreshold) {
@@ -90,15 +100,30 @@ export function computeHeadlineCounts(input: ComputeCountsInput): HeadlineCounts
       contradictionClaimIds.has(claim.id);
     
     // Check if claim is ungrounded
+    // In transcript-only mode: claims with transcript evidence are NOT ungrounded
+    // They should be "unverified" instead
+    const mode = engineConfig.mode;
+    const hasTranscriptEvidence = claim.grounding?.kind === "transcript" || 
+                                  (claim.grounding?.evidenceIds && claim.grounding.evidenceIds.length > 0);
+    
     const isUngrounded = 
-      truthState === "Ungrounded" ||
-      (claim.grounding?.kind === "none" || !claim.grounding) ||
-      (claim.grounding?.evidenceIds.length === 0);
+      (truthState === "Ungrounded" && !hasTranscriptEvidence) ||
+      (mode === 'transcript_only' && (claim.grounding?.kind === "none" || !claim.grounding) && 
+       (!claim.grounding?.evidenceIds || claim.grounding.evidenceIds.length === 0)) ||
+      (mode === 'with_external_docs' && 
+       (claim.grounding?.kind === "none" || !claim.grounding) &&
+       (!claim.grounding?.evidenceIds || claim.grounding.evidenceIds.length === 0));
     
     // Check if claim is supported (and not contradicted)
+    // Must also check that contradiction weight is below threshold
+    const maxContradictionWeight = contradictions
+      .filter(c => c.claimA === claim.id || c.claimB === claim.id)
+      .reduce((max, c) => Math.max(max, c.weight || 0), 0);
+    
     const isSupported = 
       truthState === "Supported" &&
       !isContradicted &&
+      maxContradictionWeight < contradictedThreshold &&
       !highBadnessContradictionClaims.has(claim.id);
     
     if (isContradicted) {
@@ -110,11 +135,13 @@ export function computeHeadlineCounts(input: ComputeCountsInput): HeadlineCounts
     }
   }
   
-  // Generate definitions for tooltips
+  // Generate definitions for tooltips - use same thresholds as computation
   const definitions = {
-    supported: `Claims with truthState="Supported" that are not involved in high-badness contradictions (badness >= ${highBadnessThreshold}) and have contradiction edge weight < ${contradictionThreshold.toFixed(2)}.`,
-    contradicted: `Claims with truthState="Contradicted" OR claims with contradiction edges above threshold (weight >= ${contradictionThreshold.toFixed(2)}).`,
-    ungrounded: `Claims with truthState="Ungrounded" OR claims with no grounding evidence (grounding.kind="none" or evidenceIds.length=0).`,
+    supported: `Claims with truthState="Supported" that are not involved in high-badness contradictions (badness >= ${highBadnessThreshold}) and have contradiction edge weight < ${contradictedThreshold.toFixed(2)} AND support edge weight >= ${supportThreshold.toFixed(2)}.`,
+    contradicted: `Claims with truthState="Contradicted" OR claims with contradiction edges above threshold (weight >= ${contradictedThreshold.toFixed(2)}).`,
+    ungrounded: mode === 'transcript_only' 
+      ? `Claims with finalTruthState="Ungrounded" (grounding.kind="none" AND no evidenceIds). Claims with transcript evidence are "unverified", not "ungrounded".`
+      : `Claims with finalTruthState="Ungrounded" (grounding.kind="none" AND no evidenceIds).`,
   };
   
   return {

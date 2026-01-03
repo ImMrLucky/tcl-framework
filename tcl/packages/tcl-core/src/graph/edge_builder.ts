@@ -2,6 +2,8 @@ import { Claim, Source, SupportEdge, ContradictionEdge, GroundingEdge } from "..
 import { EmbeddingProvider, SparseHashEmbeddingProvider, CandidateIndex, BruteForceIndex, HnswIndex } from "./ann.js";
 import { SemanticCache, NoopCache, type CacheLike } from "./cache.js";
 import { createHash } from "crypto";
+import { shouldConsiderContradiction } from "../claim_classifier.js";
+import { getScoringConfig } from "../config/scoring.js";
 
 /**
  * PRODUCTION EDGE BUILDER (ANN + CACHE)
@@ -654,6 +656,7 @@ export async function buildClaimGraph(
   let pairsScored = 0;
   let filteredBelowSupport = 0;
   let filteredBelowContradiction = 0;
+  let filteredByGating = 0; // Track contradictions filtered by eligibility gating
   let droppedByMaxEdges = 0;
   let supportsAdded = 0;
   let contradictionsAdded = 0;
@@ -785,17 +788,37 @@ export async function buildClaimGraph(
     }
     
     pairsScored++;
-    if (con >= tCon) {
-      contradictions.push({ claimA: A.id, claimB: B.id, weight: clamp01(con) });
+    
+    // Apply contradiction eligibility gating BEFORE checking threshold
+    const config = getScoringConfig();
+    const gateResult = shouldConsiderContradiction(A, B, config);
+    
+    // Only create contradiction edge if gating passes AND score is above threshold
+    if (gateResult.shouldCreate && con >= tCon) {
+      contradictions.push({ 
+        claimA: A.id, 
+        claimB: B.id, 
+        weight: clamp01(con),
+        contradictionType: gateResult.contradictionType,
+        reasonCodes: gateResult.reasonCodes,
+        overlapScore: gateResult.overlapScore
+      });
       contradictionsAdded++;
       if (contradictionsAdded <= 5) {
-        console.log(`  ✅ Contradiction: ${A.id} → ${B.id} (${con.toFixed(3)} >= ${tCon.toFixed(3)})`);
+        console.log(`  ✅ Contradiction: ${A.id} → ${B.id} (${con.toFixed(3)} >= ${tCon.toFixed(3)}, type=${gateResult.contradictionType})`);
         console.log(`     "${A.text.substring(0, 60)}..." vs "${B.text.substring(0, 60)}..."`);
       }
     } else {
-      filteredBelowContradiction++;
-      if (pairsScored <= 3) {
-        console.log(`  ❌ Below threshold: ${A.id} vs ${B.id} contradiction = ${con.toFixed(3)} < ${tCon.toFixed(3)}`);
+      if (!gateResult.shouldCreate) {
+        filteredByGating = (filteredByGating || 0) + 1;
+        if (pairsScored <= 3) {
+          console.log(`  🚫 Gated out: ${A.id} vs ${B.id} (${gateResult.reasonCodes.join(', ')})`);
+        }
+      } else {
+        filteredBelowContradiction++;
+        if (pairsScored <= 3) {
+          console.log(`  ❌ Below threshold: ${A.id} vs ${B.id} contradiction = ${con.toFixed(3)} < ${tCon.toFixed(3)}`);
+        }
       }
     }
 
@@ -895,6 +918,7 @@ export async function buildClaimGraph(
       belowSupportThreshold: filteredBelowSupport,
       belowContradictionThreshold: filteredBelowContradiction,
       belowGroundingThreshold: filteredBelowGrounding,
+      filteredByContradictionGating: filteredByGating,
       droppedByMaxEdges: droppedByMaxEdges
     },
     model: {
