@@ -182,8 +182,8 @@
 
           <div class="summary-metric">
             <div class="metric-label">Total Issues</div>
-            <div class="metric-value" [class.has-issues]="issues?.length > 0">
-              {{ issues?.length || 0 }}
+            <div class="metric-value" [class.has-issues]="(issues?.length ?? 0) > 0">
+              {{ issues?.length ?? 0 }}
             </div>
             <div class="metric-sublabel">requiring review</div>
           </div>
@@ -442,7 +442,7 @@
 
         <!-- Original Per-Claim Issues Table (when toggled) -->
         <!-- PART 4: Defensive guard - only render if issues exist -->
-        <mat-card class="issues-card" *ngIf="(!showClusteredView || clusteredIssues.length === 0) && issues?.length > 0">
+        <mat-card class="issues-card" *ngIf="(!showClusteredView || clusteredIssues.length === 0) && (issues?.length ?? 0) > 0">
           <mat-card-header>
             <mat-card-title>Top Claim Issues (Ranked by Risk)</mat-card-title>
             <mat-card-subtitle>Actionable findings from conversation analysis</mat-card-subtitle>
@@ -582,7 +582,7 @@
 
       <!-- C) Top Offenders Side Panel -->
       <!-- PART 4: Defensive guard -->
-      <div class="side-panel" *ngIf="topOffenders?.length > 0">
+      <div class="side-panel" *ngIf="(topOffenders?.length ?? 0) > 0">
         <mat-card class="offenders-card">
           <mat-card-header>
             <mat-card-title>
