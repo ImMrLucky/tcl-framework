@@ -441,23 +441,43 @@ export type GraphDebugInfo = {
   annEnabled: boolean;
   cacheEnabled: boolean;
   spectralEnabled: boolean;
-  neighborK: number;
+  neighborK?: number;
+  graphBuilderMode?: 'unified' | 'legacy' | 'truth-engine';
   supportThreshold: number;
   contradictionThreshold: number;
   groundingThreshold: number;
   pairsGenerated: number;
   pairsScored: number;
+  edgesCreated?: number;
+  claimsWithZeroCandidates?: number;
   edges: {
     supportsAdded: number;
     contradictionsAdded: number;
     groundingAdded: number;
   };
-  filtered: {
+  filtered?: {
     belowSupportThreshold: number;
     belowContradictionThreshold: number;
     belowGroundingThreshold: number;
     droppedByMaxEdges: number;
   };
+  /** NEW: Detailed breakdown of WHY pairs were rejected (unified graph builder) */
+  rejectionBreakdown?: {
+    bySlotGating: number;
+    byTopicGating: number;
+    byPolarityGating: number;
+    byThreshold: number;
+  };
+  /** NEW: Sample rejected pairs for debugging */
+  sampleRejections?: Array<{
+    claimA: string;
+    claimB: string;
+    reason: string;
+    slotA: string;
+    slotB: string;
+    textA: string;
+    textB: string;
+  }>;
   model: {
     scorerId: string;
     labelMap?: Record<string, string>;

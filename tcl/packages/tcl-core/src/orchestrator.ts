@@ -401,27 +401,34 @@ async function runUnifiedGraphPath(
           annEnabled: false,
           cacheEnabled: false,
           spectralEnabled,
-          neighborK: 0,
-          supportThreshold: 0.5,
-          contradictionThreshold: 0.55,
-          groundingThreshold: 0.4,
-          pairsGenerated: graphResult.metrics.pipelineSteps.candidateGeneration ?? 0,
-          pairsScored: graphResult.metrics.totalEdges,
+          graphBuilderMode: 'unified',
+          supportThreshold: 0.65, // From template config
+          contradictionThreshold: 0.70, // From template config
+          groundingThreshold: 0.60, // From template config
+          // Candidate generation stats
+          pairsGenerated: graphResult.metrics.candidateGeneration?.totalCandidatesGenerated ?? 0,
+          claimsWithZeroCandidates: graphResult.metrics.candidateGeneration?.claimsWithZeroCandidates ?? 0,
+          // Edge scoring stats
+          pairsScored: graphResult.metrics.edgeClassification?.candidatesProcessed ?? 0,
+          edgesCreated: graphResult.metrics.edgeClassification?.edgesCreated ?? 0,
+          // Rejection breakdown (WHY pairs were filtered)
+          rejectionBreakdown: {
+            bySlotGating: graphResult.metrics.edgeClassification?.rejectedBySlotGating ?? 0,
+            byTopicGating: graphResult.metrics.edgeClassification?.rejectedByTopicGating ?? 0,
+            byPolarityGating: graphResult.metrics.edgeClassification?.rejectedByPolarityGating ?? 0,
+            byThreshold: graphResult.metrics.edgeClassification?.rejectedByThreshold ?? 0,
+          },
+          // Sample of first 20 rejected pairs for debugging
+          sampleRejections: graphResult.metrics.edgeClassification?.sampleRejections?.slice(0, 10) ?? [],
           edges: {
             supportsAdded: graphResult.legacy.supports.length,
             contradictionsAdded: graphResult.legacy.contradictions.length,
             groundingAdded: graphResult.legacy.grounding.length,
           },
-          filtered: {
-            belowSupportThreshold: 0,
-            belowContradictionThreshold: 0,
-            belowGroundingThreshold: 0,
-            droppedByMaxEdges: 0,
-          },
           model: {
             scorerId: 'unified-graph-v1',
           },
-          reasonIfEmptyGraph: graphResult.metrics.totalEdges === 0 ? 'No edges created by unified graph builder' : null,
+          reasonIfEmptyGraph: graphResult.metrics.totalEdges === 0 ? 'Check sampleRejections for why pairs were filtered' : null,
         },
       },
       destructiveClaims,

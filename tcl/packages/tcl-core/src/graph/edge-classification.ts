@@ -34,9 +34,21 @@ export interface EdgeClassificationResult {
   diagnostics: {
     candidatesProcessed: number;
     edgesCreated: number;
+    // Rejection counters by reason
     rejectedBySlotGating: number;
+    rejectedByTopicGating: number;
     rejectedByPolarityGating: number;
     rejectedByThreshold: number;
+    // Debug: first N rejected pairs for inspection
+    sampleRejections: Array<{
+      claimA: string;
+      claimB: string;
+      reason: string;
+      slotA: string;
+      slotB: string;
+      textA: string;
+      textB: string;
+    }>;
   };
 }
 
@@ -57,23 +69,56 @@ export function classifyEdges(
   const groundings: GraphEdge[] = [];
   
   let rejectedBySlotGating = 0;
+  let rejectedByTopicGating = 0;
   let rejectedByPolarityGating = 0;
   let rejectedByThreshold = 0;
   
+  // Track sample rejections for debugging (first 20)
+  const sampleRejections: EdgeClassificationResult['diagnostics']['sampleRejections'] = [];
+  const MAX_SAMPLE_REJECTIONS = 20;
+  
   // Process contradiction candidates
+  console.log(`🔍 Processing ${contradictionCandidates.length} contradiction candidates...`);
+  
   for (const candidate of contradictionCandidates) {
     const result = classifyContradiction(candidate, config);
     
     if (result.rejected) {
       if (result.reason === 'slot') rejectedBySlotGating++;
+      if (result.reason === 'topic') rejectedByTopicGating++;
       if (result.reason === 'polarity') rejectedByPolarityGating++;
       if (result.reason === 'threshold') rejectedByThreshold++;
+      
+      // Sample first N rejections for debugging
+      if (sampleRejections.length < MAX_SAMPLE_REJECTIONS) {
+        sampleRejections.push({
+          claimA: candidate.claimA.id,
+          claimB: candidate.claimB.id,
+          reason: result.reason || 'unknown',
+          slotA: `${candidate.claimA.slot.slotType}:${candidate.claimA.slot.entityKey}`,
+          slotB: `${candidate.claimB.slot.slotType}:${candidate.claimB.slot.entityKey}`,
+          textA: candidate.claimA.text.substring(0, 60) + (candidate.claimA.text.length > 60 ? '...' : ''),
+          textB: candidate.claimB.text.substring(0, 60) + (candidate.claimB.text.length > 60 ? '...' : ''),
+        });
+      }
       continue;
     }
     
     if (result.edge) {
+      console.log(`✅ Contradiction edge: ${candidate.claimA.id} <-> ${candidate.claimB.id} (weight: ${result.edge.weight.toFixed(2)})`);
       contradictions.push(result.edge);
     }
+  }
+  
+  // Log rejection summary
+  console.log(`📊 Contradiction gating: slot=${rejectedBySlotGating}, topic=${rejectedByTopicGating}, polarity=${rejectedByPolarityGating}, threshold=${rejectedByThreshold}, created=${contradictions.length}`);
+  if (sampleRejections.length > 0) {
+    console.log(`🔍 Sample rejections (first ${sampleRejections.length}):`);
+    sampleRejections.slice(0, 5).forEach(r => {
+      console.log(`   ${r.claimA} <-> ${r.claimB}: ${r.reason}`);
+      console.log(`     A: ${r.textA}`);
+      console.log(`     B: ${r.textB}`);
+    });
   }
   
   // Process claim-to-claim support candidates
@@ -138,8 +183,10 @@ export function classifyEdges(
         deduplicatedSupports.length + 
         deduplicatedGroundings.length,
       rejectedBySlotGating,
+      rejectedByTopicGating,
       rejectedByPolarityGating,
       rejectedByThreshold,
+      sampleRejections,
     },
   };
 }
@@ -160,17 +207,31 @@ function classifyContradiction(
 ): ClassificationResult {
   const { claimA, claimB, signals } = candidate;
   
-  // GATE 1: Slot match (REQUIRED for contradiction)
+  // GATE 1: Slot compatibility (relaxed - same slotType OR high overlap)
+  // We use a relaxed check: either exact slot match OR same slotType with shared entity references
+  const exactSlotMatch = slotsMatch(claimA.slot, claimB.slot);
+  const sameSlotType = claimA.slot.slotType === claimB.slot.slotType;
+  const hasSharedSubject = hasSharedSubjectReference(claimA, claimB);
+  
   if (config.gating.contradictionRequiresSameSlot) {
-    if (!slotsMatch(claimA.slot, claimB.slot)) {
+    // Relaxed: allow if slotType matches OR there's a shared subject reference
+    if (!exactSlotMatch && !sameSlotType && !hasSharedSubject) {
       return { rejected: true, reason: 'slot' };
     }
   }
   
-  // GATE 2: Topic match (if configured)
+  // GATE 2: Topic match (if configured) - but allow adjacent topics
   if (config.gating.contradictionRequiresSameTopic) {
     if (claimA.topicId && claimB.topicId && claimA.topicId !== claimB.topicId) {
-      return { rejected: true, reason: 'topic' };
+      // Check if they're temporally close (within 5 turns)
+      const turnA = parseTurnIndex(claimA.span.turnId);
+      const turnB = parseTurnIndex(claimB.span.turnId);
+      const turnDistance = Math.abs(turnA - turnB);
+      
+      // Allow cross-topic if very close in conversation
+      if (turnDistance > 5) {
+        return { rejected: true, reason: 'topic' };
+      }
     }
   }
   
@@ -181,8 +242,11 @@ function classifyContradiction(
     }
   }
   
-  // Compute contradiction score
-  const contradictionScore = computeContradictionScore(claimA, claimB, signals);
+  // Compute contradiction score (boost for exact slot match)
+  let contradictionScore = computeContradictionScore(claimA, claimB, signals);
+  if (exactSlotMatch) {
+    contradictionScore = Math.min(1.0, contradictionScore + 0.1); // Bonus for exact slot
+  }
   
   // GATE 4: Threshold check
   if (contradictionScore < config.thresholds.contradiction) {
@@ -195,6 +259,57 @@ function classifyContradiction(
   return { edge, rejected: false };
 }
 
+// Helper: Parse turn index from turnId string
+function parseTurnIndex(turnId: string): number {
+  const match = turnId.match(/\d+/);
+  return match ? parseInt(match[0], 10) : 0;
+}
+
+// Helper: Check if claims share a subject reference (for pronouns like "that")
+function hasSharedSubjectReference(a: ClaimNode, b: ClaimNode): boolean {
+  const aText = a.text.toLowerCase();
+  const bText = b.text.toLowerCase();
+  
+  // Check for pronouns in one that could reference the other
+  const pronounPatterns = [
+    /\bthat\b/,
+    /\bit\b/,
+    /\bthis\b/,
+    /\bthose\b/,
+    /\bthese\b/,
+  ];
+  
+  // If one has a pronoun and the other has a specific entity...
+  const aHasPronoun = pronounPatterns.some(p => p.test(aText));
+  const bHasPronoun = pronounPatterns.some(p => p.test(bText));
+  
+  if (aHasPronoun !== bHasPronoun) {
+    // One has pronoun, one doesn't - check if they're close in conversation
+    const turnA = parseTurnIndex(a.span.turnId);
+    const turnB = parseTurnIndex(b.span.turnId);
+    const turnDistance = Math.abs(turnA - turnB);
+    
+    // If within 3 turns, likely a reference
+    if (turnDistance <= 3) {
+      return true;
+    }
+  }
+  
+  // Check for shared keywords (entities) between the claims
+  const aWords = new Set(aText.split(/\s+/).filter(w => w.length > 3));
+  const bWords = new Set(bText.split(/\s+/).filter(w => w.length > 3));
+  
+  let sharedCount = 0;
+  for (const word of aWords) {
+    if (bWords.has(word)) {
+      sharedCount++;
+    }
+  }
+  
+  // If they share 2+ significant words, consider them related
+  return sharedCount >= 2;
+}
+
 // =============================================================================
 // POLARITY DETECTION
 // =============================================================================
@@ -203,6 +318,9 @@ function hasOpposingPolarity(a: ClaimNode, b: ClaimNode): boolean {
   // Check modality opposition
   if (a.modality === 'assert' && b.modality === 'deny') return true;
   if (a.modality === 'deny' && b.modality === 'assert') return true;
+  
+  const aText = a.text.toLowerCase();
+  const bText = b.text.toLowerCase();
   
   // Check for negation patterns in text
   const negationPatterns = [
@@ -221,13 +339,50 @@ function hasOpposingPolarity(a: ClaimNode, b: ClaimNode): boolean {
     /\baren't\b/i,
     /\bwasn't\b/i,
     /\bweren't\b/i,
+    /\bhaven't\b/i,
+    /\bhasn't\b/i,
   ];
   
-  const aHasNegation = negationPatterns.some(p => p.test(a.text));
-  const bHasNegation = negationPatterns.some(p => p.test(b.text));
+  const aHasNegation = negationPatterns.some(p => p.test(aText));
+  const bHasNegation = negationPatterns.some(p => p.test(bText));
   
-  // One negated, one not = opposing
-  if (aHasNegation !== bHasNegation) return true;
+  // One negated, one not = potential opposing
+  // But we need to check if they're about the same ACTION
+  if (aHasNegation !== bHasNegation) {
+    // Check if they share an action verb
+    const actionVerbs = [
+      'add', 'added', 'adding',
+      'remove', 'removed', 'removing',
+      'change', 'changed', 'changing',
+      'authorize', 'authorized', 'authorizing',
+      'order', 'ordered', 'ordering',
+      'request', 'requested', 'requesting',
+      'pay', 'paid', 'paying',
+      'charge', 'charged', 'charging',
+      'waive', 'waived', 'waiving',
+      'cancel', 'cancelled', 'cancelling',
+      'sign', 'signed', 'signing',
+      'agree', 'agreed', 'agreeing',
+    ];
+    
+    const aVerbs = actionVerbs.filter(v => aText.includes(v));
+    const bVerbs = actionVerbs.filter(v => bText.includes(v));
+    
+    // If they share a verb root, it's likely a contradiction
+    for (const aVerb of aVerbs) {
+      for (const bVerb of bVerbs) {
+        // Check if same verb root (e.g., "add" matches "added")
+        const aRoot = aVerb.replace(/(ed|ing|s)$/, '');
+        const bRoot = bVerb.replace(/(ed|ing|s)$/, '');
+        if (aRoot === bRoot || aRoot.includes(bRoot) || bRoot.includes(aRoot)) {
+          return true;
+        }
+      }
+    }
+    
+    // Even without shared verbs, negation asymmetry is significant
+    return true;
+  }
   
   // Check for value contradiction
   if (valuesContradict(a.slot, b.slot)) return true;
@@ -246,18 +401,53 @@ function hasOpposingPolarity(a: ClaimNode, b: ClaimNode): boolean {
     ['was', "wasn't"],
     ['have', "haven't"],
     ['has', "hasn't"],
+    ['true', 'false'],
+    ['yes', 'no'],
+    ['correct', 'incorrect'],
+    ['right', 'wrong'],
+    ['always', 'never'],
+    ['every', 'no'],
+    ['before', 'after'], // Date contradictions
+    ['increase', 'decrease'],
+    ['up', 'down'],
+    ['started', 'ended'],
   ];
-  
-  const aLower = a.text.toLowerCase();
-  const bLower = b.text.toLowerCase();
   
   for (const [word1, word2] of opposingPairs) {
     if (
-      (aLower.includes(word1) && bLower.includes(word2)) ||
-      (aLower.includes(word2) && bLower.includes(word1))
+      (aText.includes(word1) && bText.includes(word2)) ||
+      (aText.includes(word2) && bText.includes(word1))
     ) {
       return true;
     }
+  }
+  
+  // Check for customer denial patterns
+  // "I never added that" vs "was added" is a classic contradiction
+  const denialPatterns = [
+    /i (never|didn't|don't|haven't)/i,
+    /i did not/i,
+    /that's not true/i,
+    /that's wrong/i,
+    /that's incorrect/i,
+  ];
+  
+  const assertionPatterns = [
+    /was (added|changed|authorized|ordered|signed|agreed)/i,
+    /you (added|changed|authorized|ordered|signed|agreed)/i,
+    /it shows/i,
+    /the record shows/i,
+    /our records show/i,
+    /i see (that )?.*was/i,
+  ];
+  
+  const aIsDenial = denialPatterns.some(p => p.test(aText));
+  const bIsAssertion = assertionPatterns.some(p => p.test(bText));
+  const bIsDenial = denialPatterns.some(p => p.test(bText));
+  const aIsAssertion = assertionPatterns.some(p => p.test(aText));
+  
+  if ((aIsDenial && bIsAssertion) || (bIsDenial && aIsAssertion)) {
+    return true;
   }
   
   return false;

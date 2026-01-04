@@ -133,6 +133,30 @@ export interface GraphBuilderOutput {
     totalEdges: number;
     processingTimeMs: number;
     pipelineSteps: Record<string, number>;
+    /** Edge classification diagnostics (for debugging) */
+    edgeClassification?: {
+      candidatesProcessed: number;
+      edgesCreated: number;
+      rejectedBySlotGating: number;
+      rejectedByTopicGating: number;
+      rejectedByPolarityGating: number;
+      rejectedByThreshold: number;
+      sampleRejections: Array<{
+        claimA: string;
+        claimB: string;
+        reason: string;
+        slotA: string;
+        slotB: string;
+        textA: string;
+        textB: string;
+      }>;
+    };
+    /** Candidate generation diagnostics */
+    candidateGeneration?: {
+      totalCandidatesGenerated: number;
+      claimsWithZeroCandidates: number;
+      budgetExhausted: boolean;
+    };
   };
 }
 
@@ -308,6 +332,22 @@ export function buildGraph(input: GraphBuilderInput): GraphBuilderOutput {
         calibratedGroundings.length,
       processingTimeMs: totalTime,
       pipelineSteps,
+      // Edge classification diagnostics
+      edgeClassification: {
+        candidatesProcessed: classified.diagnostics.candidatesProcessed,
+        edgesCreated: classified.diagnostics.edgesCreated,
+        rejectedBySlotGating: classified.diagnostics.rejectedBySlotGating,
+        rejectedByTopicGating: classified.diagnostics.rejectedByTopicGating,
+        rejectedByPolarityGating: classified.diagnostics.rejectedByPolarityGating,
+        rejectedByThreshold: classified.diagnostics.rejectedByThreshold,
+        sampleRejections: classified.diagnostics.sampleRejections,
+      },
+      // Candidate generation diagnostics
+      candidateGeneration: {
+        totalCandidatesGenerated: candidates.diagnostics.totalCandidatesGenerated,
+        claimsWithZeroCandidates: candidates.diagnostics.claimsWithZeroCandidates,
+        budgetExhausted: candidates.diagnostics.budgetExhausted,
+      },
     },
   };
 }
