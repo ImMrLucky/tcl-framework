@@ -85,7 +85,7 @@ interface IssueV2 {
     </h2>
     
     <mat-dialog-content>
-      <mat-tabs>
+      <mat-tab-group>
         <!-- Overview Tab -->
         <mat-tab label="Overview">
           <div class="issue-overview">
@@ -244,7 +244,7 @@ interface IssueV2 {
             </table>
           </div>
         </mat-tab>
-      </mat-tabs>
+      </mat-tab-group>
     </mat-dialog-content>
     
     <mat-dialog-actions>

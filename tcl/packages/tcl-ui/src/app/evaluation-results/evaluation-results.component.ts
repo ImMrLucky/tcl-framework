@@ -468,8 +468,8 @@ export class EvaluationResultsComponent implements OnInit {
           allIssuesCount: this.allIssuesV2.length,
           topIssuesCount: this.topIssuesV2.length,
           summary: this.issueSummaryV2,
-          byType: this.issueSummaryV2.byType,
-          bySeverity: this.issueSummaryV2.bySeverity,
+          byType: this.issueSummaryV2?.byType || {},
+          bySeverity: this.issueSummaryV2?.bySeverity || { low: 0, medium: 0, high: 0, critical: 0 },
         });
       } else {
         // Initialize empty if not present
