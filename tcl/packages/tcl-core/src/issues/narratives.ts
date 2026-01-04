@@ -118,6 +118,11 @@ export function buildIssueNarratives(
     // Get top edges for traceability
     const topEdges = getTopEdgesForCluster(cluster, edges, 5);
     
+    // Determine support basis - check if any claims in this cluster are grounded
+    const hasGrounding = cluster.groundingMass > 0;
+    const supportBasis: 'TRANSCRIPT' | 'EXTERNAL' | 'NONE' = hasGrounding ? 'TRANSCRIPT' : 'NONE';
+    const verificationLevel: 'TRANSCRIPT_ONLY' | 'EXTERNALLY_VERIFIED' = 'TRANSCRIPT_ONLY'; // Default for this path
+    
     const issueNarrative: IssueNarrative = {
       issueId: `issue_${cluster.id}`,
       category: cluster.category,
@@ -126,6 +131,8 @@ export function buildIssueNarratives(
       severity: mapToSeverity(scores.riskScore, scoringConfig),
       confidence: mapToConfidence(scores.compositeScore, scoringConfig),
       status: 'OPEN',
+      supportBasis,
+      verificationLevel,
       scope: {
         turnRange: cluster.turnRange,
         claimIds: cluster.claimIds,

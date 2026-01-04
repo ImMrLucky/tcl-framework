@@ -249,6 +249,12 @@ export interface RunReproducibility {
  * IssueNarrative - The new QA-manager-grade finding format.
  * Replaces the generic Issue type with specific fields for audit-ready findings.
  */
+/** Support basis for a claim - where is it supported from? */
+export type SupportBasis = 'TRANSCRIPT' | 'EXTERNAL' | 'NONE';
+
+/** Verification level based on available evidence */
+export type VerificationLevel = 'TRANSCRIPT_ONLY' | 'EXTERNALLY_VERIFIED';
+
 export interface IssueNarrative {
   issueId: string;
   category: string;              // e.g., BILLING
@@ -257,6 +263,12 @@ export interface IssueNarrative {
   severity: "LOW"|"MEDIUM"|"HIGH"|"CRITICAL";
   confidence: "LOW"|"MEDIUM"|"HIGH";
   status: "OPEN"|"RESOLVED"|"DISMISSED";
+  
+  // FIX C: Support basis and verification level
+  /** Where the claims are supported from */
+  supportBasis: SupportBasis;
+  /** Verification level based on available evidence */
+  verificationLevel: VerificationLevel;
   
   scope: {
     turnRange: [number, number];

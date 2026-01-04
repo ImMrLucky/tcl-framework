@@ -770,110 +770,113 @@ app.post("/validate", async (req, res) => {
               quote: g?.quote
             })).filter((g: any) => g.claimId && g.sourceId);
             
-            const issueAnalysis = analyzeForIssues({
+            // =================================================================
+            // FIX A: CANONICAL ISSUE GENERATION (single source of truth)
+            // =================================================================
+            // Generate ONLY issueNarratives as the canonical issue list.
+            // issueAnalysis is kept as an alias for backward compatibility.
+            // =================================================================
+            
+            // Use the transcript variable already declared above
+            
+            // Determine evidence mode (transcript-only vs external)
+            const hasExternalEvidence = (input.sources?.length ?? 0) > 0;
+            const evidenceMode = hasExternalEvidence ? 'TRANSCRIPT_PLUS_EXTERNAL' : 'TRANSCRIPT_ONLY';
+            
+            // Build grounded claim IDs from grounding edges
+            const groundedClaimIds = [...new Set(safeGrounding.map((g: any) => g.claimId || g.claimA).filter(Boolean))];
+            
+            const narrativesResult = buildIssueNarratives({
+              claims: claimsForIssues.map((c: any) => ({
+                id: c.id,
+                text: c.text,
+                confidence: c.confidence || 0,
+                evidence: c.evidence || [],
+                claimKind: c.claimKind,
+                grounding: c.grounding,
+                verification: c.verification,
+                consistency: c.consistency,
+                confidenceMetrics: c.confidenceMetrics,
+                meta: c.meta,
+                truthState: c.truthState,
+                // FIX C: Add supportBasis and verificationLevel
+                supportBasis: groundedClaimIds.includes(c.id) 
+                  ? (hasExternalEvidence ? 'EXTERNAL' : 'TRANSCRIPT') 
+                  : 'NONE',
+                verificationLevel: evidenceMode === 'TRANSCRIPT_ONLY' ? 'TRANSCRIPT_ONLY' : 'EXTERNALLY_VERIFIED',
+              })),
+              contradictions: graphContradictions,
+              supports: graphSupports,
+              grounding: safeGrounding.map((g: any) => ({
+                claimId: g.claimId || g.claimA,
+                sourceId: g.sourceId || g.evidenceId || g.claimB,
+                weight: g.weight || 1,
+                quote: g.quote,
+              })),
+              spectral: out.report?.spectral,
+              destructiveClaims: out.report?.destructiveClaims,
               transcript: transcript || "",
-              claims: claimsForIssues,
-              edges: {
-                contradictions: safeContradictions,
-                supports: safeSupports,
-                grounding: safeGrounding
-              }
+              // Pass evidence mode for proper labeling
+              evidenceMode,
             });
             
-            // Store the clustered issues analysis alongside the per-claim issues
-            // This is ADDITIVE - it doesn't modify existing report structure
-            (out.report as any).issueAnalysis = {
-              summary: issueAnalysis.summary,
-              clusteredIssues: issueAnalysis.issues,
-              reproducibility: issueAnalysis.reproducibility,
-              processingTimeMs: issueAnalysis.processingTimeMs
+            // FIX B: Ensure ALL narratives are included (no truncation)
+            // The narrativesResult.narratives contains the FULL list
+            const canonicalNarratives = narrativesResult.narratives;
+            const canonicalSummary = {
+              ...narrativesResult.summary,
+              // Ensure totalIssues matches actual narratives length
+              totalIssues: canonicalNarratives.length,
+              evidenceMode,
             };
             
-            console.log("8️⃣ CLUSTERED ISSUES (Manager-grade):", {
-              totalIssues: issueAnalysis.summary.totalIssues,
-              bySeverity: issueAnalysis.summary.bySeverity,
-              primaryCategories: issueAnalysis.summary.primaryRiskCategories,
-              topIssue: issueAnalysis.issues[0] ? {
-                title: issueAnalysis.issues[0].title,
-                severity: issueAnalysis.issues[0].severity,
-                riskScore: issueAnalysis.issues[0].metrics.riskScore
+            // CANONICAL issue payload - single source of truth
+            (out.report as any).issueNarratives = {
+              narratives: canonicalNarratives,
+              summary: canonicalSummary,
+            };
+            
+            // issueAnalysis is NOW an alias to issueNarratives (same object, same totals)
+            // This ensures UI compatibility while maintaining consistency
+            (out.report as any).issueAnalysis = {
+              narratives: canonicalNarratives,
+              summary: canonicalSummary,
+            };
+            
+            // FIX D: Add grounded claim IDs to graph for consistency
+            if (out.report?.graph) {
+              (out.report.graph as any).grounded = groundedClaimIds;
+              (out.report.graph as any).groundedClaimIds = groundedClaimIds;
+            }
+            
+            // Add evidenceMode to manifest
+            if (out.report?.manifest) {
+              (out.report.manifest as any).evidenceMode = evidenceMode;
+            }
+            
+            console.log("8️⃣ CANONICAL ISSUES (single source of truth):", {
+              totalNarratives: canonicalNarratives.length,
+              summaryTotal: canonicalSummary.totalIssues,
+              bySeverity: canonicalSummary.bySeverity,
+              topCategories: canonicalSummary.topCategories,
+              evidenceMode,
+              groundedClaimsCount: groundedClaimIds.length,
+              topNarrative: canonicalNarratives[0] ? {
+                title: canonicalNarratives[0].title,
+                severity: canonicalNarratives[0].severity,
+                category: canonicalNarratives[0].category,
+                compositeScore: canonicalNarratives[0].scoring?.compositeScore,
               } : "none"
             });
           } else {
-            console.log("8️⃣ CLUSTERED ISSUES: Skipped (no claims or edges available)");
+            console.log("8️⃣ CANONICAL ISSUES: Skipped (no claims or edges available)");
           }
-          
-          // NEW: Generate QA-Manager Grade Issue Narratives
-          try {
-            if (claimsForIssues.length > 0 && (graphContradictions.length > 0 || graphSupports.length > 0 || graphGrounding.length > 0)) {
-              const transcript = (input.answer && input.answer.trim().length > 0) ? input.answer : input.question;
-              
-              const narrativesResult = buildIssueNarratives({
-                claims: claimsForIssues.map((c: any) => ({
-                  id: c.id,
-                  text: c.text,
-                  confidence: c.confidence || 0,
-                  evidence: c.evidence || [],
-                  claimKind: c.claimKind,
-                  grounding: c.grounding,
-                  verification: c.verification,
-                  consistency: c.consistency,
-                  confidenceMetrics: c.confidenceMetrics,
-                  meta: c.meta,
-                  truthState: c.truthState,
-                })),
-                contradictions: graphContradictions,
-                supports: graphSupports,
-                grounding: graphGrounding.map((g: any) => ({
-                  claimId: g.claimId || g.claimA,
-                  sourceId: g.sourceId || g.evidenceId || g.claimB,
-                  weight: g.weight || 1,
-                  quote: g.quote,
-                })),
-                spectral: out.report?.spectral,
-                destructiveClaims: out.report?.destructiveClaims,
-                transcript: transcript || "",
-              });
-              
-              // Store issue narratives in report (both formats for compatibility)
-              (out.report as any).issueNarratives = {
-                narratives: narrativesResult.narratives,
-                summary: narrativesResult.summary,
-              };
-              // Also store as issueAnalysis for UI compatibility
-              (out.report as any).issueAnalysis = {
-                narratives: narrativesResult.narratives,
-                summary: narrativesResult.summary,
-              };
-              
-              console.log("9️⃣ ISSUE NARRATIVES (QA-Manager Grade):", {
-                totalNarratives: narrativesResult.narratives.length,
-                bySeverity: narrativesResult.summary.bySeverity,
-                topCategories: narrativesResult.summary.topCategories,
-                topNarrative: narrativesResult.narratives[0] ? {
-                  title: narrativesResult.narratives[0].title,
-                  severity: narrativesResult.narratives[0].severity,
-                  category: narrativesResult.narratives[0].category,
-                  compositeScore: narrativesResult.narratives[0].scoring.compositeScore,
-                } : "none"
-              });
-            } else {
-              console.log("9️⃣ ISSUE NARRATIVES: Skipped (no claims or edges available)");
-            }
-          } catch (narrativeErr: any) {
-            // Log error but don't break the main flow
-            console.error('Failed to generate issue narratives:', narrativeErr);
-            console.error('Error stack:', narrativeErr.stack);
-            // Don't throw - this is optional functionality
-          }
-        } catch (clusterErr: any) {
-          // Log error but don't break the main flow
-          console.error('Failed to generate clustered issues:', clusterErr);
-          console.error('Error stack:', clusterErr.stack);
-          // Don't throw - this is optional functionality
+        } catch (issueErr: any) {
+          console.warn('Failed to build canonical issues:', issueErr.message);
+          console.error('Error stack:', issueErr.stack);
         }
-      } catch (issueErr: any) {
-        console.warn('Failed to build issues list:', issueErr.message);
+      } catch (outerErr: any) {
+        console.warn('Failed to build issues list:', outerErr.message);
       }
     }
 

@@ -459,6 +459,9 @@ async function runUnifiedGraphPath(
         supports: graphResult.legacy.supports,
         contradictions: graphResult.legacy.contradictions,
         grounding: graphResult.legacy.grounding,
+        // FIX D: Add grounded claim IDs for consistency
+        grounded: graphResult.legacy.grounding.map(g => g.claimId),
+        groundedClaimIds: graphResult.legacy.grounding.map(g => g.claimId),
         debug: {
           numClaims: claims.length,
           numSources: externalSources?.length ?? 0,
@@ -526,15 +529,20 @@ async function runUnifiedGraphPath(
         inputHash: graphResult.graph.meta.inputHash,
         configHash: graphResult.graph.meta.configHash,
         timestamp: new Date().toISOString(),
+        // FIX C: Add evidenceMode to manifest
+        evidenceMode: hasExternalEvidence ? 'TRANSCRIPT_PLUS_EXTERNAL' : 'TRANSCRIPT_ONLY',
         diagnostics: {
           status: graphResult.graph.diagnostics.status,
           reasons: graphResult.graph.diagnostics.reasons,
           transcriptEvidenceNodes: graphResult.graph.nodes.evidence.filter(e => e.evidenceKind === 'transcript').length,
           supportsAdded: graphResult.legacy.supports.length,
           groundingAdded: graphResult.legacy.grounding.length,
+          groundedClaimCount: graphResult.legacy.grounding.length,
           contradictionsAdded: graphResult.legacy.contradictions.length,
           spectralDegraded,
           spectralDegradedReason,
+          // FIX E: Add notes for transcript-only mode
+          notes: !hasExternalEvidence ? ['TRANSCRIPT_ONLY_NO_EXTERNAL'] : [],
         },
         truthDerivationSummary: {
           supported: graphResult.truthDerivation.summary.supported,

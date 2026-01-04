@@ -112,6 +112,15 @@ export type ContradictionPair = {
   quoteIds: [string, string]; // References into evidenceQuotes
 };
 
+/** Support basis for a claim - where is it supported from? */
+export type SupportBasis = 'TRANSCRIPT' | 'EXTERNAL' | 'NONE';
+
+/** Verification level based on available evidence */
+export type VerificationLevel = 'TRANSCRIPT_ONLY' | 'EXTERNALLY_VERIFIED';
+
+/** Evidence mode for the evaluation run */
+export type EvidenceMode = 'TRANSCRIPT_ONLY' | 'TRANSCRIPT_PLUS_EXTERNAL';
+
 export type IssueNarrative = {
   issueId: string;
   category: string; // e.g., "BILLING"
@@ -120,6 +129,11 @@ export type IssueNarrative = {
   severity: "LOW" | "MEDIUM" | "HIGH" | "CRITICAL";
   confidence: "LOW" | "MEDIUM" | "HIGH";
   status: "OPEN" | "RESOLVED" | "DISMISSED";
+  
+  /** Support basis for claims in this issue */
+  supportBasis: SupportBasis;
+  /** Verification level based on available evidence */
+  verificationLevel: VerificationLevel;
   
   scope: {
     turnRange: [number, number];
@@ -548,6 +562,8 @@ export type RunManifest = {
   timestamp?: string;
   /** Legacy: createdAt */
   createdAt?: string;
+  /** Evidence mode: TRANSCRIPT_ONLY or TRANSCRIPT_PLUS_EXTERNAL */
+  evidenceMode?: EvidenceMode;
   /** Model fingerprint (all model versions used) */
   modelFingerprint?: {
     nliModel?: string;
@@ -574,9 +590,13 @@ export type RunManifest = {
     transcriptEvidenceNodes: number;
     supportsAdded: number;
     groundingAdded: number;
+    /** Count of grounded claims (for consistency check) */
+    groundedClaimCount?: number;
     contradictionsAdded: number;
     spectralDegraded?: boolean;
     spectralDegradedReason?: string | null;
+    /** Notes for transcript-only mode */
+    notes?: string[];
   };
   /** NEW: Truth derivation summary from graph */
   truthDerivationSummary?: {
@@ -616,6 +636,10 @@ export type ValidateOutput = {
       supports: SupportEdge[];
       contradictions: ContradictionEdge[];
       grounding: GroundingEdge[];
+      /** Grounded claim IDs (for consistency check) */
+      grounded?: string[];
+      /** Alias for grounded (for spectral input) */
+      groundedClaimIds?: string[];
       debug?: GraphDebugInfo;
     };
     

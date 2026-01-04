@@ -14,6 +14,7 @@ import type {
   DestructiveClaim,
 } from "../types.js";
 import type { ContradictionEdge, SupportEdge } from "../types.js";
+import type { SupportBasis, VerificationLevel } from "../issues/types.js";
 import { getTemplates, substituteTemplate } from "../config/templates.js";
 import { getTaxonomy, getSeverity, getConfidence, getRiskMultiplier } from "../config/taxonomy.js";
 import { getScoringConfig } from "../config/scoring.js";
@@ -26,6 +27,8 @@ export interface BuildNarrativesInput {
   spectral?: SpectralReport;
   destructiveClaims?: DestructiveClaim[];
   transcript?: string; // Full transcript for quote extraction
+  /** Evidence mode: TRANSCRIPT_ONLY or TRANSCRIPT_PLUS_EXTERNAL */
+  evidenceMode?: 'TRANSCRIPT_ONLY' | 'TRANSCRIPT_PLUS_EXTERNAL';
 }
 
 export interface BuildNarrativesOutput {
@@ -49,6 +52,10 @@ export function buildIssueNarratives(input: BuildNarrativesInput): BuildNarrativ
   const narratives: IssueNarrative[] = [];
   const claimMap = new Map(input.claims.map(c => [c.id, c]));
   
+  // Determine evidence mode and grounded claim IDs
+  const evidenceMode = input.evidenceMode || 'TRANSCRIPT_ONLY';
+  const groundedClaimIds = new Set(input.grounding.map(g => g.claimId));
+  
   // 1. Cluster claims into issues
   const clusters = clusterClaimsIntoIssues(
     input.claims,
@@ -71,7 +78,9 @@ export function buildIssueNarratives(input: BuildNarrativesInput): BuildNarrativ
       taxonomy,
       config,
       input.spectral,
-      input.claims
+      input.claims,
+      evidenceMode,
+      groundedClaimIds
     );
     
     if (narrative) {
@@ -80,6 +89,7 @@ export function buildIssueNarratives(input: BuildNarrativesInput): BuildNarrativ
   }
   
   // 3. Sort by composite score (highest risk first)
+  // FIX B: NO truncation - return ALL narratives
   narratives.sort((a, b) => b.scoring.compositeScore - a.scoring.compositeScore);
   
   // 4. Generate summary
@@ -227,7 +237,9 @@ function buildNarrativeForCluster(
   taxonomy: any,
   config: any,
   spectral?: SpectralReport,
-  allClaims?: Claim[]
+  allClaims?: Claim[],
+  evidenceMode: 'TRANSCRIPT_ONLY' | 'TRANSCRIPT_PLUS_EXTERNAL' = 'TRANSCRIPT_ONLY',
+  groundedClaimIds: Set<string> = new Set()
 ): IssueNarrative | null {
   const claims = cluster.claimIds.map(id => claimMap.get(id)).filter(Boolean) as Claim[];
   
@@ -320,6 +332,15 @@ function buildNarrativeForCluster(
   // Build traceability edges
   const topEdges = buildTraceabilityEdges(cluster, claims);
   
+  // Determine support basis for this issue's claims
+  const hasGrounding = cluster.claimIds.some(id => groundedClaimIds.has(id));
+  const supportBasis: SupportBasis = hasGrounding 
+    ? (evidenceMode === 'TRANSCRIPT_PLUS_EXTERNAL' ? 'EXTERNAL' : 'TRANSCRIPT')
+    : 'NONE';
+  const verificationLevel: VerificationLevel = evidenceMode === 'TRANSCRIPT_PLUS_EXTERNAL' 
+    ? 'EXTERNALLY_VERIFIED' 
+    : 'TRANSCRIPT_ONLY';
+  
   return {
     issueId: `issue_${cluster.claimIds.join("_")}`,
     category: cluster.category,
@@ -328,6 +349,9 @@ function buildNarrativeForCluster(
     severity: getSeverity(scores.riskScore, taxonomy),
     confidence: getConfidence(confidenceScore, taxonomy),
     status: "OPEN",
+    // FIX C: Add supportBasis and verificationLevel
+    supportBasis,
+    verificationLevel,
     scope: {
       turnRange: cluster.turnRange,
       claimIds: cluster.claimIds,
