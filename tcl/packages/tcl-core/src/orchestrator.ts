@@ -29,6 +29,14 @@ import {
 import { computeTruthFromGraph } from "./analysis/compute-truth-from-graph.js";
 import { getEngineConfig } from "./config/engine-config.js";
 
+// NEW: Unified Graph Builder (3-stage pipeline with subject slots)
+import { 
+  buildGraph as buildUnifiedGraph, 
+  toSpectralInput,
+  setTemplateConfig,
+  type GraphBuilderOutput 
+} from "./graph/graph-builder.js";
+
 // Cache for scorer to avoid re-initialization on every request
 let cachedScorer: { scorer: any; url: string; timestamp: number } | null = null;
 const SCORER_CACHE_TTL = 5 * 60 * 1000; // 5 minutes
@@ -36,6 +44,10 @@ const SCORER_CACHE_TTL = 5 * 60 * 1000; // 5 minutes
 // Feature flag: Use deterministic Truth Engine instead of NLI
 // Set via environment variable or options
 const USE_TRUTH_ENGINE = process.env.TCL_USE_TRUTH_ENGINE === "true";
+
+// Feature flag: Use new unified graph builder (3-stage pipeline with subject slots)
+// This is the preferred method - produces semantically correct edges
+const USE_UNIFIED_GRAPH_BUILDER = process.env.TCL_USE_UNIFIED_GRAPH === "true";
 
 async function callSpectralService(
   spectralServiceUrl: string,
