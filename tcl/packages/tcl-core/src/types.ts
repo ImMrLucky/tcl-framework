@@ -266,7 +266,28 @@ export type ValidationOptions = {
   llmAdapter?: LLMAdapter;
   requireCitations?: boolean;
 
-  // Production knobs (graph)
+  // ==========================================================================
+  // GRAPH BUILDER SELECTION (Critical for spectral.py quality)
+  // ==========================================================================
+  /**
+   * Graph builder mode:
+   * - "unified" (DEFAULT): 3-stage pipeline with Subject Slots
+   *   - Prevents nonsense contradictions via slot matching
+   *   - Config-driven thresholds and gating
+   *   - Best edge quality for spectral.py
+   * - "legacy": NLI-based edge scoring (slower, ML model calls)
+   * - "truth-engine": Deterministic rule-based (no ML, reproducible)
+   */
+  graphBuilder?: 'unified' | 'legacy' | 'truth-engine';
+  
+  /**
+   * Template ID for unified graph builder.
+   * Options: "generic" | "telco" | "loans" | "ai_chat"
+   * Auto-detected from transcript content if not specified.
+   */
+  template?: string;
+
+  // Production knobs (graph) - Used by legacy mode
   nliEndpoint?: string;   // optional HTTP scorer endpoint for entail/contradiction
   nliApiKey?: string;     // optional auth
   nliModelId?: string;    // optional model ID for NLI scorer
