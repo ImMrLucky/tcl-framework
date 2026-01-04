@@ -21,6 +21,7 @@ import { AuditService, Evaluation, Issue } from '../audit.service';
 import { EvidenceViewerComponent } from '../evidence-viewer/evidence-viewer.component';
 import { SimulationDialogComponent, SimulationModifications } from '../simulation-dialog/simulation-dialog.component';
 import { IssueDetailModalComponent } from '../issue-detail-modal/issue-detail-modal.component';
+import { IssueV2DetailModalComponent } from '../issue-v2-detail-modal/issue-v2-detail-modal.component';
 import { SensitiveActionService } from '../sensitive-action.service';
 
 // Issue Narrative type (QA-Manager Grade)
@@ -79,6 +80,73 @@ interface IssueNarrative {
     compositeScore: number;
     rationale: string[];
   };
+}
+
+// IssueV2 type (Enterprise-Grade)
+interface IssueV2 {
+  issueId: string;
+  issueKey: string;
+  runId: string;
+  conversationId: string;
+  type: 'CONTRADICTION' | 'UNVERIFIED_CLAIM' | 'UNSUPPORTED_CLAIM' | 'NUMERIC_MISMATCH' | 'COMMITMENT_INCONSISTENCY' | 'FEE_DISCLOSURE_RISK' | 'DATA_INTEGRITY' | 'OTHER';
+  category: 'evidence' | 'consistency' | 'compliance' | 'billing' | 'disclosure' | 'data_integrity' | 'other';
+  severity: 'low' | 'medium' | 'high' | 'critical';
+  riskScore: number;
+  confidence: number;
+  reviewRequired: boolean;
+  verification: {
+    level: 'EXTERNAL_VERIFIED' | 'TRANSCRIPT_ONLY' | 'NONE';
+    reasonCodes: string[];
+  };
+  who: {
+    speaker: 'AGENT' | 'CUSTOMER' | 'SYSTEM' | 'UNKNOWN';
+    turnIndex?: number;
+  };
+  what: {
+    primaryClaimId: string;
+    relatedClaimIds?: string[];
+    claimText?: string;
+    issueSummary: string;
+    issueDetail: string;
+  };
+  evidence: {
+    refs: Array<{
+      sourceType: 'TRANSCRIPT' | 'POLICY' | 'DOC' | 'SYSTEM_FACT';
+      sourceId: string;
+      quote: string;
+      weight?: number;
+      turnIndex?: number;
+    }>;
+    edges?: Array<{
+      kind: 'grounding' | 'support' | 'contradiction';
+      claimA: string;
+      claimB?: string;
+      weight: number;
+    }>;
+  };
+  compliance: {
+    tags: string[];
+    impactedPolicies?: Array<{ policyId: string; section?: string }>;
+    legalHoldSuggested?: boolean;
+    disclaimers: string[];
+  };
+  audit: {
+    createdAt: string;
+    engineVersion: string;
+    scorerId: string;
+    modelFingerprint?: any;
+    configHash?: string;
+    inputHash?: string;
+  };
+}
+
+interface IssueSummaryV2 {
+  totalIssues: number;
+  byType: Record<string, number>;
+  bySeverity: Record<'low' | 'medium' | 'high' | 'critical', number>;
+  byCategory: Record<string, number>;
+  topIssuesCount: number;
+  allIssuesCount: number;
 }
 
 // Legacy clustered issue type (for backward compatibility)
@@ -182,9 +250,15 @@ export class EvaluationResultsComponent implements OnInit {
   // NEW: Manager-grade issue narratives (QA-Manager Grade)
   issueNarratives: IssueNarrative[] = [];
   issueNarrativesSummary: IssueSummary | null = null;
-  
+
   // Legacy: Manager-grade clustered issues (for backward compatibility)
   clusteredIssues: ClusteredIssue[] = [];
+  
+  // NEW: IssueV2 (Enterprise-Grade)
+  allIssuesV2: IssueV2[] = [];
+  topIssuesV2: IssueV2[] = [];
+  issueSummaryV2: IssueSummaryV2 | null = null;
+  showIssueV2View: boolean = false; // Toggle between legacy and V2 view
   issueSummary: IssueSummary | null = null;
   showClusteredView = true; // Toggle between clustered and per-claim view
 
@@ -234,9 +308,32 @@ export class EvaluationResultsComponent implements OnInit {
         return;
       }
 
-      // Load issue narratives (QA-Manager Grade) from report - PRIMARY
-      // Try multiple possible locations in the report structure
+      // Load IssueV2 (Enterprise-Grade) - PRIMARY
       const report = this.evaluation.report as any;
+      
+      // Load allIssuesV2 and topIssuesV2
+      if (report?.allIssuesV2 && Array.isArray(report.allIssuesV2)) {
+        this.allIssuesV2 = report.allIssuesV2;
+        console.log('✅ Loaded allIssuesV2:', this.allIssuesV2.length);
+      }
+      
+      if (report?.topIssuesV2 && Array.isArray(report.topIssuesV2)) {
+        this.topIssuesV2 = report.topIssuesV2;
+        console.log('✅ Loaded topIssuesV2:', this.topIssuesV2.length);
+      }
+      
+      if (report?.issueSummaryV2) {
+        this.issueSummaryV2 = report.issueSummaryV2;
+        console.log('✅ Loaded issueSummaryV2:', this.issueSummaryV2);
+      }
+      
+      // Default to IssueV2 view if available
+      if (this.allIssuesV2.length > 0) {
+        this.showIssueV2View = true;
+      }
+      
+      // Load issue narratives (QA-Manager Grade) from report - LEGACY/FALLBACK
+      // Try multiple possible locations in the report structure
       let issueNarrativesData = report?.issueNarratives;
       
       // Also check if narratives are directly in report
@@ -266,7 +363,7 @@ export class EvaluationResultsComponent implements OnInit {
           primaryRiskCategories: issueNarrativesData.summary?.topCategories || [],
           auditReady: true, // Issue narratives include full reproducibility
         };
-        console.log('📊 Loaded issue narratives:', {
+        console.log('📊 Loaded issue narratives (legacy):', {
           count: this.issueNarratives.length,
           summary: this.issueNarrativesSummary,
           firstNarrative: this.issueNarratives[0] ? {
@@ -353,6 +450,32 @@ export class EvaluationResultsComponent implements OnInit {
           count: this.clusteredIssues.length,
           summary: this.issueSummary
         });
+      }
+      
+      // Load IssueV2 (Enterprise-Grade) from report
+      if (report?.allIssuesV2 && Array.isArray(report.allIssuesV2)) {
+        this.allIssuesV2 = report.allIssuesV2;
+        this.topIssuesV2 = report.topIssuesV2 || report.allIssuesV2.slice(0, 4);
+        this.issueSummaryV2 = report.issueSummaryV2 || {
+          totalIssues: this.allIssuesV2.length,
+          byType: {},
+          bySeverity: { low: 0, medium: 0, high: 0, critical: 0 },
+          byCategory: {},
+          topIssuesCount: this.topIssuesV2.length,
+          allIssuesCount: this.allIssuesV2.length,
+        };
+        console.log('📊 Loaded IssueV2 (Enterprise-Grade):', {
+          allIssuesCount: this.allIssuesV2.length,
+          topIssuesCount: this.topIssuesV2.length,
+          summary: this.issueSummaryV2,
+          byType: this.issueSummaryV2.byType,
+          bySeverity: this.issueSummaryV2.bySeverity,
+        });
+      } else {
+        // Initialize empty if not present
+        this.allIssuesV2 = [];
+        this.topIssuesV2 = [];
+        this.issueSummaryV2 = null;
       }
     } catch (error: any) {
       console.error('Load evaluation error:', error);
@@ -753,6 +876,41 @@ export class EvaluationResultsComponent implements OnInit {
     return supportsCount === 0 && unverifiedCount > 0;
   }
   
+  /**
+   * Get IssueV2 type summary for display
+   */
+  getIssueV2TypeSummary(): string {
+    if (!this.issueSummaryV2) return '';
+    const types = Object.entries(this.issueSummaryV2.byType)
+      .filter(([_, count]) => count > 0)
+      .map(([type, count]) => `${type}: ${count}`)
+      .join(', ');
+    return types || 'None';
+  }
+  
+  /**
+   * Get IssueV2 severity summary for display
+   */
+  getIssueV2SeveritySummary(): string {
+    if (!this.issueSummaryV2) return '';
+    const severities = Object.entries(this.issueSummaryV2.bySeverity)
+      .filter(([_, count]) => count > 0)
+      .map(([severity, count]) => `${severity}: ${count}`)
+      .join(', ');
+    return severities || 'None';
+  }
+  
+  /**
+   * Open IssueV2 detail modal
+   */
+  openIssueV2Detail(issue: IssueV2) {
+    this.dialog.open(IssueV2DetailModalComponent, {
+      width: '90%',
+      maxWidth: '1200px',
+      data: { issue, evaluation: this.evaluation }
+    });
+  }
+  
   // Tooltip for issue narrative scores
   getNarrativeScoreTooltip(scoreType: string): string {
     const tooltips: Record<string, string> = {
@@ -808,6 +966,31 @@ export class EvaluationResultsComponent implements OnInit {
   exportNarrativesJSON() {
     // Trigger issue narratives JSON export
     window.open(`/api/evaluations/${this.evaluationId}/export/narratives/json`, '_blank');
+  }
+
+  // IssueV2 Export Functions
+  exportIssuesV2CSV() {
+    if (!this.evaluationId || this.allIssuesV2.length === 0) {
+      this.snackBar.open('No IssueV2 data available to export', 'Close', { duration: 3000 });
+      return;
+    }
+    window.open(`/api/evaluations/${this.evaluationId}/export/issues-v2/csv`, '_blank');
+  }
+
+  exportIssuesV2JSON() {
+    if (!this.evaluationId || this.allIssuesV2.length === 0) {
+      this.snackBar.open('No IssueV2 data available to export', 'Close', { duration: 3000 });
+      return;
+    }
+    window.open(`/api/evaluations/${this.evaluationId}/export/issues-v2/json`, '_blank');
+  }
+
+  exportIssuesV2PDF() {
+    if (!this.evaluationId || this.allIssuesV2.length === 0) {
+      this.snackBar.open('No IssueV2 data available to export', 'Close', { duration: 3000 });
+      return;
+    }
+    window.open(`/api/evaluations/${this.evaluationId}/export/issues-v2/pdf`, '_blank');
   }
 
   exportNarrativesHTML() {

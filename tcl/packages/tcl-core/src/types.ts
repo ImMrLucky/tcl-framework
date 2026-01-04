@@ -172,6 +172,108 @@ export type IssueNarrative = {
   };
 };
 
+// ============================================================================
+// ISSUE V2 - Enterprise-Grade Schema
+// ============================================================================
+
+export type IssueTypeV2 =
+  | "CONTRADICTION"
+  | "UNVERIFIED_CLAIM"
+  | "UNSUPPORTED_CLAIM"
+  | "NUMERIC_MISMATCH"
+  | "COMMITMENT_INCONSISTENCY"
+  | "FEE_DISCLOSURE_RISK"
+  | "DATA_INTEGRITY"
+  | "OTHER";
+
+export type IssueCategoryV2 =
+  | "evidence"
+  | "consistency"
+  | "compliance"
+  | "billing"
+  | "disclosure"
+  | "data_integrity"
+  | "other";
+
+export type SeverityV2 = "low" | "medium" | "high" | "critical";
+
+export type SpeakerV2 = "AGENT" | "CUSTOMER" | "SYSTEM" | "UNKNOWN";
+
+export type VerificationLevelV2 = "EXTERNAL_VERIFIED" | "TRANSCRIPT_ONLY" | "NONE";
+
+export interface IssueV2 {
+  issueId: string;                 // stable hash from (runId + issueKey)
+  issueKey: string;                // stable dedupe key
+  runId: string;                   // evaluation.id
+  conversationId: string;
+
+  type: IssueTypeV2;
+  category: IssueCategoryV2;
+  severity: SeverityV2;            // computed via ranking
+  riskScore: number;               // 0..1 normalized (computed)
+  confidence: number;              // 0..1 (based on edge weights / extractor confidence)
+  reviewRequired: boolean;
+
+  verification: {
+    level: VerificationLevelV2;
+    reasonCodes: string[];         // e.g. ["NO_EXTERNAL_EVIDENCE"]
+  };
+
+  who: {
+    speaker: SpeakerV2;
+    turnIndex?: number;
+  };
+
+  what: {
+    primaryClaimId: string;
+    relatedClaimIds?: string[];
+    claimText?: string;            // snapshot
+    issueSummary: string;          // short, UI safe
+    issueDetail: string;           // longer, compliance safe
+  };
+
+  evidence: {
+    refs: Array<{
+      sourceType: "TRANSCRIPT" | "POLICY" | "DOC" | "SYSTEM_FACT";
+      sourceId: string;            // e-transcript-#
+      quote: string;
+      weight?: number;             // grounding/support score
+      turnIndex?: number;
+    }>;
+    edges?: Array<{
+      kind: "grounding" | "support" | "contradiction";
+      claimA: string;
+      claimB?: string;
+      weight: number;
+    }>;
+  };
+
+  compliance: {
+    tags: string[];                // e.g. ["billing", "fee_disclosure", "misrepresentation_risk"]
+    impactedPolicies?: Array<{ policyId: string; section?: string }>; // empty in transcript-only
+    legalHoldSuggested?: boolean;  // config-driven for high severity
+    disclaimers: string[];         // required in transcript-only: "Not externally verified"
+  };
+
+  audit: {
+    createdAt: string;             // ISO
+    engineVersion: string;
+    scorerId: string;
+    modelFingerprint?: any;
+    configHash?: string;
+    inputHash?: string;
+  };
+}
+
+export interface IssueSummaryV2 {
+  totalIssues: number;
+  byType: Record<IssueTypeV2, number>;
+  bySeverity: Record<SeverityV2, number>;
+  byCategory: Record<IssueCategoryV2, number>;
+  topIssuesCount: number;
+  allIssuesCount: number;
+}
+
 export type Violation =
   | { type: "MISSING_EVIDENCE"; claimId: string; detail: string }
   | { type: "CONTRADICTION"; claimA: string; claimB: string; detail: string }

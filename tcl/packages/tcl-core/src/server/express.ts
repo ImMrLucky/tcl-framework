@@ -868,6 +868,63 @@ app.post("/validate", async (req, res) => {
                 compositeScore: canonicalNarratives[0].scoring?.compositeScore,
               } : "none"
             });
+            
+            // =================================================================
+            // ISSUE V2 EXPANSION (Enterprise-Grade)
+            // =================================================================
+            // Expand graph edges into allIssuesV2 (uncapped)
+            // Then rank and slice topIssuesV2
+            // =================================================================
+            try {
+              const { expandIssueCandidates } = await import('../analysis/issue-expansion.js');
+              const { rankIssuesV2 } = await import('../analysis/risk-ranking.js');
+              
+              // Get evaluation ID for runId (will be set later, use placeholder for now)
+              const evaluationIdPlaceholder = 'pending';
+              
+              // Expand issues from graph
+              const expansionResult = expandIssueCandidates({
+                claims: claimsForIssues,
+                contradictions: graphContradictions,
+                supports: graphSupports,
+                grounding: safeGrounding,
+                runId: evaluationIdPlaceholder,
+                conversationId: (input as any).conversationId || '',
+                evidenceMode,
+                audit: {
+                  engineVersion: out.engineVersion || 'unknown',
+                  scorerId: out.scorerId || 'unknown',
+                  modelFingerprint: out.report?.manifest?.modelFingerprint,
+                  configHash: out.report?.manifest?.configHash,
+                  inputHash: out.report?.manifest?.inputHash,
+                },
+              });
+              
+              // Rank issues (deterministic)
+              const rankedResult = rankIssuesV2(expansionResult.allIssues);
+              
+              // Store in report
+              (out.report as any).allIssuesV2 = rankedResult.allIssues;
+              (out.report as any).topIssuesV2 = rankedResult.topIssues;
+              (out.report as any).issueSummaryV2 = rankedResult.summary;
+              
+              console.log("9️⃣ ISSUE V2 EXPANSION:", {
+                allIssuesCount: rankedResult.allIssues.length,
+                topIssuesCount: rankedResult.topIssues.length,
+                byType: rankedResult.summary.byType,
+                bySeverity: rankedResult.summary.bySeverity,
+                topIssue: rankedResult.topIssues[0] ? {
+                  type: rankedResult.topIssues[0].type,
+                  severity: rankedResult.topIssues[0].severity,
+                  riskScore: rankedResult.topIssues[0].riskScore,
+                  issueKey: rankedResult.topIssues[0].issueKey,
+                } : "none"
+              });
+            } catch (expansionErr: any) {
+              console.warn('Failed to expand IssueV2:', expansionErr.message);
+              console.error('Error stack:', expansionErr.stack);
+              // Don't fail the whole request - this is additive
+            }
           } else {
             console.log("8️⃣ CANONICAL ISSUES: Skipped (no claims or edges available)");
           }
@@ -1060,6 +1117,30 @@ app.post("/validate", async (req, res) => {
           
           // Include evaluation ID in response
           (out as any).evaluationId = insertedEvaluation?.id;
+          
+          // Update runId in allIssuesV2 and topIssuesV2 if they exist
+          if (insertedEvaluation?.id && out.report) {
+            const { createHash } = await import('crypto');
+            const updateRunId = (issue: any) => {
+              if (issue && issue.runId === 'pending') {
+                issue.runId = insertedEvaluation.id;
+                // Regenerate issueId with correct runId
+                const hash = createHash('sha256')
+                  .update(`${insertedEvaluation.id}:${issue.issueKey}`)
+                  .digest('hex')
+                  .substring(0, 16);
+                issue.issueId = `issue_${hash}`;
+              }
+              return issue;
+            };
+            
+            if ((out.report as any).allIssuesV2) {
+              (out.report as any).allIssuesV2 = (out.report as any).allIssuesV2.map(updateRunId);
+            }
+            if ((out.report as any).topIssuesV2) {
+              (out.report as any).topIssuesV2 = (out.report as any).topIssuesV2.map(updateRunId);
+            }
+          }
         }
       } catch (dbErr: any) {
         console.error('Database error (non-fatal):', dbErr);
@@ -2265,6 +2346,312 @@ app.get("/evaluations/:evaluationId/export/narratives/html", async (req, res) =>
     return res.send(exportNarrativesAsHTML(exportData));
   } catch (e: any) {
     console.error("Export narratives HTML error:", e);
+    res.status(500).json({ error: e?.message ?? "unknown error" });
+  }
+});
+
+// ============================================================================
+// ISSUE V2 EXPORTS (Enterprise-Grade)
+// ============================================================================
+
+// Export IssueV2 as CSV
+app.get("/evaluations/:evaluationId/export/issues-v2/csv", async (req, res) => {
+  try {
+    const { evaluationId } = req.params;
+    const context = await getOrgContext(req);
+    
+    if (!context || context.error) {
+      return res.status(401).json({ error: context?.error || "Authorization required" });
+    }
+    
+    if (!supabaseAdmin) {
+      return res.status(503).json({ error: "Supabase not configured" });
+    }
+    
+    const { data: evaluation, error: evalError } = await supabaseAdmin
+      .from('evaluations')
+      .select('*')
+      .eq('id', evaluationId)
+      .eq('org_id', context.orgId)
+      .single();
+    
+    if (evalError || !evaluation) {
+      return res.status(404).json({ error: "Evaluation not found" });
+    }
+    
+    const report = evaluation.report as any;
+    const allIssuesV2 = report?.allIssuesV2 || [];
+    
+    if (allIssuesV2.length === 0) {
+      return res.status(404).json({ error: "IssueV2 data not found for this evaluation" });
+    }
+    
+    // Build CSV
+    const headers = [
+      'Rank', 'Issue ID', 'Issue Key', 'Type', 'Category', 'Severity', 'Risk Score',
+      'Confidence', 'Review Required', 'Verification Level', 'Speaker', 'Turn Index',
+      'Primary Claim ID', 'Related Claim IDs', 'Issue Summary', 'Issue Detail',
+      'Evidence Count', 'Compliance Tags', 'Legal Hold Suggested', 'Disclaimers'
+    ];
+    
+    const rows = allIssuesV2.map((issue: any, idx: number): string[] => [
+      idx + 1,
+      issue.issueId || '',
+      issue.issueKey || '',
+      issue.type || '',
+      issue.category || '',
+      issue.severity || '',
+      (issue.riskScore * 100).toFixed(2),
+      (issue.confidence * 100).toFixed(2),
+      issue.reviewRequired ? 'Yes' : 'No',
+      issue.verification?.level || '',
+      issue.who?.speaker || '',
+      issue.who?.turnIndex || '',
+      issue.what?.primaryClaimId || '',
+      (issue.what?.relatedClaimIds || []).join('; '),
+      (issue.what?.issueSummary || '').replace(/"/g, '""'),
+      (issue.what?.issueDetail || '').replace(/"/g, '""'),
+      (issue.evidence?.refs || []).length,
+      (issue.compliance?.tags || []).join('; '),
+      issue.compliance?.legalHoldSuggested ? 'Yes' : 'No',
+      (issue.compliance?.disclaimers || []).join('; ').replace(/"/g, '""')
+    ]);
+    
+    const csv = [
+      headers.map((h: string) => `"${h}"`).join(','),
+      ...rows.map((row: string[]) => row.map((cell: string) => `"${cell}"`).join(','))
+    ].join('\n');
+    
+    res.setHeader('Content-Type', 'text/csv');
+    res.setHeader('Content-Disposition', `attachment; filename="evaluation-${evaluationId}-issues-v2.csv"`);
+    return res.send(csv);
+  } catch (e: any) {
+    console.error("Export IssueV2 CSV error:", e);
+    res.status(500).json({ error: e?.message ?? "unknown error" });
+  }
+});
+
+// Export IssueV2 as JSON
+app.get("/evaluations/:evaluationId/export/issues-v2/json", async (req, res) => {
+  try {
+    const { evaluationId } = req.params;
+    const context = await getOrgContext(req);
+    
+    if (!context || context.error) {
+      return res.status(401).json({ error: context?.error || "Authorization required" });
+    }
+    
+    if (!supabaseAdmin) {
+      return res.status(503).json({ error: "Supabase not configured" });
+    }
+    
+    const { data: evaluation, error: evalError } = await supabaseAdmin
+      .from('evaluations')
+      .select('*')
+      .eq('id', evaluationId)
+      .eq('org_id', context.orgId)
+      .single();
+    
+    if (evalError || !evaluation) {
+      return res.status(404).json({ error: "Evaluation not found" });
+    }
+    
+    const report = evaluation.report as any;
+    const allIssuesV2 = report?.allIssuesV2 || [];
+    const topIssuesV2 = report?.topIssuesV2 || [];
+    const issueSummaryV2 = report?.issueSummaryV2 || {};
+    const manifest = report?.manifest || {};
+    
+    if (allIssuesV2.length === 0) {
+      return res.status(404).json({ error: "IssueV2 data not found for this evaluation" });
+    }
+    
+    const exportData = {
+      evaluationId,
+      runId: evaluation.id,
+      conversationId: evaluation.conversation_id,
+      exportedAt: new Date().toISOString(),
+      allIssues: allIssuesV2,
+      topIssues: topIssuesV2,
+      summary: issueSummaryV2,
+      reproducibility: {
+        inputHash: manifest.inputHash,
+        configHash: manifest.configHash,
+        codeVersion: manifest.codeVersion,
+        engineVersion: manifest.engineVersion,
+        modelFingerprint: manifest.modelFingerprint,
+        evidenceMode: manifest.evidenceMode,
+      },
+    };
+    
+    res.setHeader('Content-Type', 'application/json');
+    res.setHeader('Content-Disposition', `attachment; filename="evaluation-${evaluationId}-issues-v2.json"`);
+    return res.json(exportData);
+  } catch (e: any) {
+    console.error("Export IssueV2 JSON error:", e);
+    res.status(500).json({ error: e?.message ?? "unknown error" });
+  }
+});
+
+// Export IssueV2 as PDF (HTML printable)
+app.get("/evaluations/:evaluationId/export/issues-v2/pdf", async (req, res) => {
+  try {
+    const { evaluationId } = req.params;
+    const context = await getOrgContext(req);
+    
+    if (!context || context.error) {
+      return res.status(401).json({ error: context?.error || "Authorization required" });
+    }
+    
+    if (!supabaseAdmin) {
+      return res.status(503).json({ error: "Supabase not configured" });
+    }
+    
+    const { data: evaluation, error: evalError } = await supabaseAdmin
+      .from('evaluations')
+      .select('*')
+      .eq('id', evaluationId)
+      .eq('org_id', context.orgId)
+      .single();
+    
+    if (evalError || !evaluation) {
+      return res.status(404).json({ error: "Evaluation not found" });
+    }
+    
+    const report = evaluation.report as any;
+    const allIssuesV2 = report?.allIssuesV2 || [];
+    const topIssuesV2 = report?.topIssuesV2 || [];
+    const issueSummaryV2 = report?.issueSummaryV2 || {};
+    const manifest = report?.manifest || {};
+    
+    if (allIssuesV2.length === 0) {
+      return res.status(404).json({ error: "IssueV2 data not found for this evaluation" });
+    }
+    
+    // Generate HTML report
+    const html = `<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Evaluation Issues V2 - ${evaluationId}</title>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 20px; }
+    h1 { color: #333; }
+    h2 { color: #666; border-bottom: 2px solid #ddd; padding-bottom: 5px; }
+    .summary { background: #f5f5f5; padding: 15px; border-radius: 5px; margin: 20px 0; }
+    .summary-item { margin: 5px 0; }
+    .issue { margin: 20px 0; padding: 15px; border-left: 4px solid #ddd; }
+    .issue.critical { border-left-color: #991b1b; }
+    .issue.high { border-left-color: #ea580c; }
+    .issue.medium { border-left-color: #2563eb; }
+    .issue.low { border-left-color: #16a34a; }
+    .issue-header { display: flex; gap: 15px; margin-bottom: 10px; }
+    .issue-meta { font-size: 0.9em; color: #666; }
+    .badge { display: inline-block; padding: 3px 8px; border-radius: 3px; font-size: 0.85em; margin-right: 5px; }
+    .badge-transcript-only { background: #e3f2fd; color: #1976d2; }
+    .evidence-section { margin-top: 10px; padding: 10px; background: #f9f9f9; }
+    .evidence-quote { margin: 5px 0; padding: 5px; background: white; border-left: 3px solid #ccc; }
+    .compliance-tags { margin-top: 10px; }
+    .compliance-tag { background: #e0e0e0; padding: 2px 6px; border-radius: 3px; font-size: 0.85em; margin-right: 5px; }
+    table { width: 100%; border-collapse: collapse; margin: 20px 0; }
+    th, td { padding: 8px; text-align: left; border-bottom: 1px solid #ddd; }
+    th { background: #f5f5f5; font-weight: bold; }
+    @media print { .no-print { display: none; } }
+  </style>
+</head>
+<body>
+  <h1>Evaluation Issues V2 Report</h1>
+  <div class="summary">
+    <h2>Summary</h2>
+    <div class="summary-item"><strong>Evaluation ID:</strong> ${evaluationId}</div>
+    <div class="summary-item"><strong>Total Issues:</strong> ${allIssuesV2.length}</div>
+    <div class="summary-item"><strong>Top Issues:</strong> ${topIssuesV2.length}</div>
+    <div class="summary-item"><strong>Evidence Mode:</strong> ${manifest.evidenceMode || 'N/A'}</div>
+    <div class="summary-item"><strong>Exported:</strong> ${new Date().toISOString()}</div>
+  </div>
+  
+  <h2>Top ${topIssuesV2.length} Issues (Ranked by Risk)</h2>
+  ${topIssuesV2.map((issue: any, idx: number) => `
+    <div class="issue ${issue.severity}">
+      <div class="issue-header">
+        <strong>#${idx + 1}: ${issue.type}</strong>
+        <span class="badge severity-${issue.severity}">${issue.severity.toUpperCase()}</span>
+        <span class="badge">Risk: ${(issue.riskScore * 100).toFixed(0)}%</span>
+        ${issue.verification.level === 'TRANSCRIPT_ONLY' ? '<span class="badge badge-transcript-only">TRANSCRIPT_ONLY</span>' : ''}
+        ${issue.reviewRequired ? '<span class="badge">Review Required</span>' : ''}
+      </div>
+      <div class="issue-meta">
+        <strong>Category:</strong> ${issue.category} | 
+        <strong>Speaker:</strong> ${issue.who.speaker} | 
+        <strong>Confidence:</strong> ${(issue.confidence * 100).toFixed(0)}%
+      </div>
+      <div><strong>Summary:</strong> ${issue.what.issueSummary}</div>
+      <div><strong>Detail:</strong> ${issue.what.issueDetail}</div>
+      ${issue.evidence.refs.length > 0 ? `
+        <div class="evidence-section">
+          <strong>Evidence (${issue.evidence.refs.length}):</strong>
+          ${issue.evidence.refs.map((ref: any) => `
+            <div class="evidence-quote">
+              <strong>${ref.sourceType}</strong> (${ref.sourceId}): "${ref.quote}"
+            </div>
+          `).join('')}
+        </div>
+      ` : ''}
+      ${issue.compliance.tags.length > 0 ? `
+        <div class="compliance-tags">
+          <strong>Compliance Tags:</strong>
+          ${issue.compliance.tags.map((tag: string) => `<span class="compliance-tag">${tag}</span>`).join('')}
+        </div>
+      ` : ''}
+      ${issue.compliance.disclaimers.length > 0 ? `
+        <div><strong>Disclaimers:</strong> ${issue.compliance.disclaimers.join('; ')}</div>
+      ` : ''}
+    </div>
+  `).join('')}
+  
+  ${allIssuesV2.length > topIssuesV2.length ? `
+    <h2>All Issues (${allIssuesV2.length})</h2>
+    <table>
+      <thead>
+        <tr>
+          <th>Rank</th>
+          <th>Type</th>
+          <th>Severity</th>
+          <th>Risk Score</th>
+          <th>Summary</th>
+          <th>Verification</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${allIssuesV2.map((issue: any, idx: number) => `
+          <tr>
+            <td>${idx + 1}</td>
+            <td>${issue.type}</td>
+            <td>${issue.severity.toUpperCase()}</td>
+            <td>${(issue.riskScore * 100).toFixed(0)}%</td>
+            <td>${issue.what.issueSummary}</td>
+            <td>${issue.verification.level}</td>
+          </tr>
+        `).join('')}
+      </tbody>
+    </table>
+  ` : ''}
+  
+  <div class="summary" style="margin-top: 40px;">
+    <h2>Reproducibility</h2>
+    <div class="summary-item"><strong>Engine Version:</strong> ${manifest.engineVersion || 'N/A'}</div>
+    <div class="summary-item"><strong>Input Hash:</strong> ${manifest.inputHash || 'N/A'}</div>
+    <div class="summary-item"><strong>Config Hash:</strong> ${manifest.configHash || 'N/A'}</div>
+    <div class="summary-item"><strong>Code Version:</strong> ${manifest.codeVersion || 'N/A'}</div>
+  </div>
+</body>
+</html>`;
+    
+    res.setHeader('Content-Type', 'text/html');
+    res.setHeader('Content-Disposition', `attachment; filename="evaluation-${evaluationId}-issues-v2.html"`);
+    res.send(html);
+  } catch (e: any) {
+    console.error("Export IssueV2 PDF error:", e);
     res.status(500).json({ error: e?.message ?? "unknown error" });
   }
 });
