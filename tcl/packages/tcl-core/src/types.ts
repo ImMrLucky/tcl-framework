@@ -437,12 +437,17 @@ export type SummaryStats = {
 export type GraphDebugInfo = {
   numClaims: number;
   numSources: number; // Renamed from numSourceClaims for clarity
-  transcriptSourcesGenerated?: number; // NEW: transcript-derived sources
+  transcriptSourcesGenerated?: number; // Legacy: transcript-derived sources
+  transcriptEvidenceNodes?: number; // NEW: unified graph builder transcript evidence nodes
   annEnabled: boolean;
   cacheEnabled: boolean;
   spectralEnabled: boolean;
+  spectralDegraded?: boolean; // NEW: true if spectral ran with degraded quality
+  spectralDegradedReason?: string; // NEW: reason for degraded spectral
   neighborK?: number;
   graphBuilderMode?: 'unified' | 'legacy' | 'truth-engine';
+  graphStatus?: 'OK' | 'DEGRADED' | 'FAILED'; // NEW: unified graph status
+  graphReasons?: string[]; // NEW: reasons for degraded/failed status
   supportThreshold: number;
   contradictionThreshold: number;
   groundingThreshold: number;

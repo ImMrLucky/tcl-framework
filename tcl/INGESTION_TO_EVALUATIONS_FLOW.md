@@ -96,19 +96,43 @@
   4. Returns evaluation results with report
 
 **Orchestrator Flow** (`packages/tcl-core/src/orchestrator.ts`):
-- **Function**: `validateOnce()` (line 47)
-- **Steps**:
-  1. **Claim Extraction**: `extractClaims()` from `claim_extractor.ts`
-  2. **Truth Engine** (if enabled): `runTruthEngine()` from `engine/index.ts`
+- **Function**: `validateOnce()` (line 487)
+- **Graph Builder Mode Selection** (line 501-510):
+  - Defaults to `unified` (best for spectral.py)
+  - Override via `TCL_GRAPH_BUILDER` env var or `options.graphBuilder`
+
+**UNIFIED GRAPH BUILDER (Default)** - `runUnifiedGraphPath()` (line 182):
+  1. **Claim Extraction**: `extractClaimsWithTypes()` from `claim_extractor.ts`
+  2. **Template Selection**: Auto-detects `telco`, `loans`, `ai_chat`, or `generic`
+  3. **Graph Building**: `buildGraph()` from `graph/graph-builder.ts`:
+     ```
+     Step 1: Build ClaimNodes (with Subject Slots)
+     Step 2: Build EvidenceNodes
+     Step 3: Topic Segmentation (assignTopicIds)
+     Step 4: Candidate Generation (per-claim budgets)
+     Step 5: Edge Classification (slot-first gating)
+     Step 6: Weight Calibration
+     Step 7: Truth State Derivation
+     Step 8: Run Diagnostics
+     ```
+  4. **Spectral Analysis**: Calls `POST /spectral/analyze`
+  5. **Destructive Claims**: `computeDestructiveClaims()`
+  6. **Report Generation**: Builds full report with graph, metrics, diagnostics
+
+**TRUTH ENGINE PATH** (if `TCL_GRAPH_BUILDER=truth-engine`):
+  1. **Truth Engine**: `runTruthEngine()` from `engine/index.ts`
      - Extracts enhanced claims
      - Extracts facts
      - Runs rule engine
      - Builds graph
-  3. **Graph Building** (if NLI): `buildClaimGraph()` from `graph/edge_builder.ts`
-  4. **Spectral Analysis**: Calls `spectral/analyze` or `spectral/score`
-  5. **Issue Analysis**: `analyzeForIssues()` from `issues/analyzer.ts`
-  6. **Reproducibility**: `generateReproducibilityMetadata()` from `analysis/reproducibility.js`
-  7. **Report Generation**: Builds full report with issues, metrics, manifest
+  2. **Spectral Analysis**: Calls `spectral/analyze`
+  3. **Report Generation**
+
+**LEGACY NLI PATH** (if `TCL_GRAPH_BUILDER=legacy`):
+  1. **Claim Extraction**: `extractClaims()` from `claim_extractor.ts`
+  2. **Graph Building**: `buildClaimGraph()` from `graph/edge_builder.ts`
+  3. **Spectral Analysis**: Calls `spectral/analyze`
+  4. **Report Generation**
 
 **Spectral Service**:
 - **URL**: `process.env.SPECTRAL_SERVICE_URL` (default: `http://localhost:8000`)
@@ -284,16 +308,28 @@
 ## Key Backend Files
 
 ### Orchestration
-- `packages/tcl-core/src/orchestrator.ts` - Main validation orchestrator
+- `packages/tcl-core/src/orchestrator.ts` - Main validation orchestrator (graph mode selection)
 - `packages/tcl-core/src/server/express.ts` - Express server & routes
 
-### Truth Engine (Deterministic)
+### Unified Graph Builder (DEFAULT - Best for spectral.py)
+- `packages/tcl-core/src/graph/graph-builder.ts` - Main entry point for unified pipeline
+- `packages/tcl-core/src/graph/candidate-generation.ts` - Stage A: High-recall candidate pairs
+- `packages/tcl-core/src/graph/edge-classification.ts` - Stage B: Slot-first edge gating
+- `packages/tcl-core/src/graph/weight-calibration.ts` - Stage C: Edge weight calibration
+- `packages/tcl-core/src/graph/subject-slot.ts` - Subject slot computation (THE KEY UPGRADE)
+- `packages/tcl-core/src/graph/topic-segmentation.ts` - Topic clustering & gating
+- `packages/tcl-core/src/graph/truth-state-derivation.ts` - Truth states from graph topology
+- `packages/tcl-core/src/graph/run-diagnostics.ts` - Run status (OK/DEGRADED/FAILED)
+- `packages/tcl-core/src/graph/template-config.ts` - Config-driven thresholds & lexicons
+- `packages/tcl-core/src/graph/types.ts` - Canonical node/edge types
+
+### Truth Engine (Deterministic, rule-based)
 - `packages/tcl-core/src/engine/truth-engine.ts` - Main truth engine
 - `packages/tcl-core/src/engine/facts/fact-extractor.ts` - Fact extraction
 - `packages/tcl-core/src/engine/rules/rule-engine.ts` - Rule-based edge generation
 - `packages/tcl-core/src/engine/config/types.ts` - Configuration types
 
-### Graph Building (NLI-based, legacy)
+### Legacy Graph Building (NLI-based)
 - `packages/tcl-core/src/graph/edge_builder.ts` - Graph construction
 - `packages/tcl-core/src/graph/transformers_scorer.ts` - Local NLI scorer
 - `packages/tcl-core/src/graph/spectral_nli_scorer.ts` - Spectral NLI scorer
@@ -470,7 +506,9 @@ Frontend                    Backend API              Spectral Service        Dat
 
 ### Environment Variables
 - `SPECTRAL_SERVICE_URL` - Spectral service URL
-- `TCL_USE_TRUTH_ENGINE` - Enable deterministic truth engine
+- `TCL_GRAPH_BUILDER` - Graph builder mode: `unified` (default) | `legacy` | `truth-engine`
+- `TCL_USE_TRUTH_ENGINE` - (Legacy) Enable deterministic truth engine
+- `TCL_USE_LEGACY_GRAPH` - (Legacy) Force legacy NLI-based graph
 - `SUPABASE_URL` - Supabase database URL
 - `SUPABASE_SERVICE_KEY` - Supabase service key
 

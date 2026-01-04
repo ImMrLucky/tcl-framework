@@ -592,10 +592,14 @@ function classifyGrounding(
     return { rejected: true, reason: 'threshold' };
   }
   
-  // Compute grounding score (primarily text match)
-  const groundingScore = signals.semanticSimilarity;
+  // Compute grounding score using text match AND temporal proximity
+  // Temporal proximity is key: claims should ground to their source turn
+  const groundingScore = (signals.semanticSimilarity * 0.6) + (signals.temporalProximity * 0.4);
   
-  if (groundingScore < config.thresholds.grounding) {
+  // Lower threshold for grounding - we want most claims to be grounded
+  const effectiveThreshold = Math.min(config.thresholds.grounding, 0.4);
+  
+  if (groundingScore < effectiveThreshold) {
     return { rejected: true, reason: 'threshold' };
   }
   

@@ -239,8 +239,10 @@ async function runUnifiedGraphPath(
   }));
   
   // Build the unified graph
+  // CRITICAL: Pass transcript so graph-builder can create transcript EvidenceNodes for grounding
   timer.start('graph_build');
   const graphResult = buildUnifiedGraph({
+    transcript,  // ✅ Required for grounding edges
     rawClaims,
     evidence: externalSources?.map(s => ({
       id: s.id,
@@ -280,21 +282,42 @@ async function runUnifiedGraphPath(
   let spectral: SpectralReport | undefined;
   let coherenceScore: number | null = null;
   
+  // Check grounding status BEFORE calling spectral
+  const groundingEdgeCount = graphResult.legacy.grounding.length;
+  const hasRealGrounding = groundingEdgeCount > 0;
+  let spectralDegraded = false;
+  let spectralDegradedReason: string | null = null;
+  
+  if (!hasRealGrounding) {
+    console.warn(`⚠️ No grounding edges created. Marking as DEGRADED.`);
+    console.warn(`   Transcript evidence nodes: ${graphResult.graph.nodes.evidence.filter(e => e.evidenceKind === 'transcript').length}`);
+    console.warn(`   Grounding candidates processed: ${graphResult.metrics.candidateGeneration?.totalCandidatesGenerated ?? 'unknown'}`);
+    spectralDegraded = true;
+    spectralDegradedReason = 'NO_GROUNDING_EDGES';
+    
+    // Update graph diagnostics to reflect degraded status
+    if (graphResult.graph.diagnostics.status === 'OK') {
+      graphResult.graph.diagnostics.status = 'DEGRADED';
+    }
+    if (!graphResult.graph.diagnostics.reasons.includes('NO_GROUNDING_EDGES')) {
+      graphResult.graph.diagnostics.reasons.push('NO_GROUNDING_EDGES');
+    }
+  }
+  
   if (spectralEnabled && spectralServiceUrl && claims.length > 0) {
     timer.start('spectral');
     try {
       const spectralInput = toSpectralInput(graphResult);
       
-      // Ground claims if none are grounded
-      let groundedForSpectral = spectralInput.grounded;
+      // Use ONLY real grounded claims - NO synthetic grounding
+      const groundedForSpectral = spectralInput.grounded;
+      
       if (groundedForSpectral.length === 0) {
-        // Ground agent claims as baseline
-        const agentClaims = claims
-          .filter(c => c.meta?.speaker === 'Agent')
-          .slice(0, 3)
-          .map(c => c.id);
-        groundedForSpectral = agentClaims.length > 0 ? agentClaims : [claims[0]?.id].filter(Boolean);
-        console.log(`📌 Synthetically grounding ${groundedForSpectral.length} claims for spectral`);
+        // Log warning but DO NOT fabricate grounding
+        console.warn(`⚠️ Spectral: 0 grounded claims. Results may be less meaningful.`);
+        console.warn(`   Run will proceed with degraded quality indicator.`);
+      } else {
+        console.log(`📌 Spectral: ${groundedForSpectral.length} claims grounded from transcript`);
       }
       
       spectral = await callSpectralAnalyzeService(
@@ -306,8 +329,15 @@ async function runUnifiedGraphPath(
         {}
       );
       coherenceScore = spectral.coherenceScore;
+      
+      // Mark spectral as degraded if no grounding
+      if (spectralDegraded) {
+        (spectral as any).degraded = true;
+        (spectral as any).degradedReason = spectralDegradedReason;
+      }
+      
       timer.end('spectral');
-      console.log(`✅ Spectral: coherence=${coherenceScore} (${timer.duration('spectral')}ms)`);
+      console.log(`✅ Spectral: coherence=${coherenceScore}${spectralDegraded ? ' (DEGRADED)' : ''} (${timer.duration('spectral')}ms)`);
     } catch (error: any) {
       timer.end('spectral');
       console.error("❌ Spectral error:", error?.message);
@@ -398,27 +428,32 @@ async function runUnifiedGraphPath(
         debug: {
           numClaims: claims.length,
           numSources: externalSources?.length ?? 0,
+          transcriptEvidenceNodes: graphResult.graph.nodes.evidence.filter(e => e.evidenceKind === 'transcript').length,
           annEnabled: false,
           cacheEnabled: false,
           spectralEnabled,
+          spectralDegraded,
+          spectralDegradedReason: spectralDegradedReason ?? undefined,
           graphBuilderMode: 'unified',
+          graphStatus: graphResult.graph.diagnostics.status,
+          graphReasons: graphResult.graph.diagnostics.reasons,
           supportThreshold: 0.65, // From template config
           contradictionThreshold: 0.70, // From template config
           groundingThreshold: 0.60, // From template config
           // Candidate generation stats
           pairsGenerated: graphResult.metrics.candidateGeneration?.totalCandidatesGenerated ?? 0,
           claimsWithZeroCandidates: graphResult.metrics.candidateGeneration?.claimsWithZeroCandidates ?? 0,
-          // Edge scoring stats
+          // Edge classification stats (NOT just scoring - this is where gating happens)
           pairsScored: graphResult.metrics.edgeClassification?.candidatesProcessed ?? 0,
           edgesCreated: graphResult.metrics.edgeClassification?.edgesCreated ?? 0,
-          // Rejection breakdown (WHY pairs were filtered)
+          // Rejection breakdown (WHY pairs were filtered in edge-classification.ts)
           rejectionBreakdown: {
             bySlotGating: graphResult.metrics.edgeClassification?.rejectedBySlotGating ?? 0,
             byTopicGating: graphResult.metrics.edgeClassification?.rejectedByTopicGating ?? 0,
             byPolarityGating: graphResult.metrics.edgeClassification?.rejectedByPolarityGating ?? 0,
             byThreshold: graphResult.metrics.edgeClassification?.rejectedByThreshold ?? 0,
           },
-          // Sample of first 20 rejected pairs for debugging
+          // Sample of first 10 rejected pairs for debugging
           sampleRejections: graphResult.metrics.edgeClassification?.sampleRejections?.slice(0, 10) ?? [],
           edges: {
             supportsAdded: graphResult.legacy.supports.length,
@@ -428,7 +463,9 @@ async function runUnifiedGraphPath(
           model: {
             scorerId: 'unified-graph-v1',
           },
-          reasonIfEmptyGraph: graphResult.metrics.totalEdges === 0 ? 'Check sampleRejections for why pairs were filtered' : null,
+          reasonIfEmptyGraph: graphResult.metrics.totalEdges === 0 
+            ? 'Check sampleRejections for why pairs were filtered; check transcriptEvidenceNodes for grounding' 
+            : null,
         },
       },
       destructiveClaims,

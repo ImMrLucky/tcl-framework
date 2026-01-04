@@ -201,9 +201,13 @@ export function buildGraph(input: GraphBuilderInput): GraphBuilderOutput {
   
   // Step 4: Candidate Generation
   const step4Start = Date.now();
+  const transcriptEvidenceCount = evidenceNodes.filter(e => e.evidenceKind === 'transcript').length;
+  console.log(`📊 Graph Builder: ${evidenceNodes.length} evidence nodes (${transcriptEvidenceCount} transcript)`);
+  
   const candidates = generateCandidates(claimNodes, evidenceNodes);
   pipelineSteps['candidateGeneration'] = Date.now() - step4Start;
   console.log(`🎯 Graph Builder: ${candidates.diagnostics.totalCandidatesGenerated} candidates (${pipelineSteps['candidateGeneration']}ms)`);
+  console.log(`   Breakdown: ${candidates.contradictionCandidates.length} contradiction, ${candidates.supportClaimCandidates.length} support-claim, ${candidates.supportEvidenceCandidates.length} support-evidence, ${candidates.groundingCandidates.length} grounding`);
   
   // Step 5: Edge Classification
   const step5Start = Date.now();
@@ -215,6 +219,7 @@ export function buildGraph(input: GraphBuilderInput): GraphBuilderOutput {
   );
   pipelineSteps['edgeClassification'] = Date.now() - step5Start;
   console.log(`🔗 Graph Builder: ${classified.diagnostics.edgesCreated} edges created (${pipelineSteps['edgeClassification']}ms)`);
+  console.log(`   Created: ${classified.contradictions.length} contradictions, ${classified.supports.length} supports, ${classified.groundings.length} groundings`);
   
   // Step 6: Weight Calibration
   const step6Start = Date.now();

@@ -306,11 +306,38 @@ function computeRetrievalSignals(a: ClaimNode, b: ClaimNode): CandidateSignals {
 function computeClaimEvidenceSignals(claim: ClaimNode, evidence: EvidenceNode): CandidateSignals {
   const evidenceText = evidence.content || evidence.title || '';
   
+  // For transcript evidence, compute temporal proximity using turn matching
+  let temporalProximity = 0;
+  if (evidence.evidenceKind === 'transcript' && evidence.anchors?.length) {
+    // Extract turn index from evidence anchor
+    const evidenceAnchor = evidence.anchors[0];
+    const evidenceTurnMatch = evidenceAnchor.ref?.match(/turn-(\d+)/);
+    const evidenceTurn = evidenceTurnMatch ? parseInt(evidenceTurnMatch[1], 10) : -1;
+    
+    // Extract turn index from claim
+    const claimTurnMatch = claim.span.turnId.match(/turn-(\d+)/);
+    const claimTurn = claimTurnMatch ? parseInt(claimTurnMatch[1], 10) : -1;
+    
+    if (evidenceTurn >= 0 && claimTurn >= 0) {
+      const turnDistance = Math.abs(claimTurn - evidenceTurn);
+      // Exact match (same turn) = 1.0, adjacent turns = 0.9, etc.
+      if (turnDistance === 0) {
+        temporalProximity = 1.0; // Same turn - perfect grounding
+      } else if (turnDistance === 1) {
+        temporalProximity = 0.8; // Adjacent turn - likely response
+      } else if (turnDistance <= 3) {
+        temporalProximity = 0.5;
+      } else {
+        temporalProximity = 0.2;
+      }
+    }
+  }
+  
   return {
     slotMatch: 0, // N/A for evidence
     entityOverlap: computeEntityOverlapWithEvidence(claim.entities, evidence),
     semanticSimilarity: computeTextSimilarity(claim.text, evidenceText),
-    temporalProximity: 0, // Could use retrievedAt vs timestamp
+    temporalProximity,
     speakerRole: 0, // N/A
   };
 }
