@@ -327,9 +327,11 @@ export class EvaluationResultsComponent implements OnInit {
         console.log('✅ Loaded issueSummaryV2:', this.issueSummaryV2);
       }
       
-      // Default to IssueV2 view if available
+      // Default to IssueV2 view if available (PRIMARY)
+      // IssueNarratives and per-claim issues are kept for backward compatibility only
       if (this.allIssuesV2.length > 0) {
         this.showIssueV2View = true;
+        this.showClusteredView = false; // Don't show legacy views by default
       }
       
       // Load issue narratives (QA-Manager Grade) from report - LEGACY/FALLBACK
