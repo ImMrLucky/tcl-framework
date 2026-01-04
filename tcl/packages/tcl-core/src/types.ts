@@ -41,6 +41,14 @@ export type Claim = {
   confidence: number; // 0..1 (calculated confidence score)
   evidence: { source_id: string; quote?: string; span?: string; weight?: number }[];
   
+  // NEW: Evidence refs from grounding edges (transcript citations)
+  evidenceRefs?: Array<{
+    sourceId: string;
+    quote?: string;
+    turnIndex?: number;
+    weight?: number;
+  }>;
+  
   // NEW: Claim classification for contradiction gating
   claimKind?: ClaimKind;
   grounding?: ClaimGrounding;
@@ -61,8 +69,15 @@ export type Claim = {
     turnIndex?: number;
   };
   
-  // NEW: QA-Manager Grade fields
-  truthState?: "Supported" | "Contradicted" | "Ungrounded" | "Inconclusive";
+  // Truth state derived from graph topology
+  // - SUPPORTED: Has external evidence support (non-transcript)
+  // - UNVERIFIED: Grounded in transcript but lacks external evidence
+  // - CONTRADICTED: Has contradiction edge on same slot
+  // - UNGROUNDED: No edges (isolated node)
+  truthState?: "SUPPORTED" | "CONTRADICTED" | "UNVERIFIED" | "UNGROUNDED" | 
+               // Legacy values (deprecated)
+               "Supported" | "Contradicted" | "Ungrounded" | "Inconclusive";
+  
   whyFlagged?: {
     reasons: string[];
     evidence: Array<{ source_id: string; quote?: string; span?: string }>;
@@ -497,52 +512,79 @@ export type GraphDebugInfo = {
  * Required for enterprise adoption and compliance.
  */
 export type RunManifest = {
+  /** Schema version for backward compatibility */
+  schemaVersion?: string;
   /** SHA-256 hash of input */
-  inputHash: string;
+  inputHash?: string;
   /** SHA-256 hash of config bundle (scoring + templates + taxonomy) */
-  configHash: string;
+  configHash?: string;
   /** Artifact ID if provided */
   artifactId?: string;
   /** Claim extractor version */
-  claimExtractorVersion: string;
-  /** NLI model ID */
-  nliModelId: string;
-  /** NLI thresholds used */
-  nliThresholds: {
+  claimExtractorVersion?: string;
+  /** NLI model ID (legacy, use graphBuilderMode for unified) */
+  nliModelId?: string;
+  /** NLI thresholds used (legacy) */
+  nliThresholds?: {
     support: number;
     contradiction: number;
     grounding: number;
   };
   /** Embedding model for retrieval */
-  embeddingModel: string;
+  embeddingModel?: string;
   /** Retrieval k (top-k chunks per claim) */
-  retrievalK: number;
+  retrievalK?: number;
   /** Spectral engine version */
   spectralEngineVersion?: string;
   /** Code version (git commit SHA) */
-  codeVersion: string;
+  codeVersion?: string;
   /** Engine version */
-  engineVersion: string;
+  engineVersion?: string;
+  /** Graph builder mode: unified (default) | legacy | truth-engine */
+  graphBuilderMode?: 'unified' | 'legacy' | 'truth-engine';
+  /** Template ID used for unified graph builder */
+  templateId?: string;
+  /** Timestamp */
+  timestamp?: string;
+  /** Legacy: createdAt */
+  createdAt?: string;
   /** Model fingerprint (all model versions used) */
-  modelFingerprint: {
+  modelFingerprint?: {
     nliModel?: string;
     claimExtractor?: string;
     embeddingModel?: string;
     spectralEngine?: string;
     configHash?: string;
   };
-  /** Timestamp */
-  createdAt: string;
-  /** Number of transcript sources generated */
-  transcriptSourcesCount: number;
-  /** Graph health check results */
-  graphHealth: {
+  /** Number of transcript sources generated (legacy) */
+  transcriptSourcesCount?: number;
+  /** Graph health check results (legacy) */
+  graphHealth?: {
     supportEdges: number;
     contradictionEdges: number;
     groundingEdges: number;
     totalEdges: number;
     healthy: boolean;
     reason?: string;
+  };
+  /** NEW: Unified graph builder diagnostics */
+  diagnostics?: {
+    status: 'OK' | 'DEGRADED' | 'FAILED';
+    reasons: string[];
+    transcriptEvidenceNodes: number;
+    supportsAdded: number;
+    groundingAdded: number;
+    contradictionsAdded: number;
+    spectralDegraded?: boolean;
+    spectralDegradedReason?: string | null;
+  };
+  /** NEW: Truth derivation summary from graph */
+  truthDerivationSummary?: {
+    supported: number;   // Claims with external evidence support
+    contradicted: number; // Claims with contradiction edges
+    unverified: number;   // Claims grounded in transcript but no external evidence
+    ungrounded: number;   // Claims with no edges (isolated)
+    total: number;
   };
 };
 

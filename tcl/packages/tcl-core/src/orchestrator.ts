@@ -260,20 +260,52 @@ async function runUnifiedGraphPath(
     console.log(`   Reasons: ${graphResult.graph.diagnostics.reasons.join(', ')}`);
   }
   
-  // Convert claims to the expected Claim type
-  const claims: Claim[] = graphResult.graph.nodes.claims.map(c => ({
-    id: c.id,
-    text: c.text,
-    confidence: c.confidence ?? 0.7,
-    evidence: [],
-    meta: {
-      speaker: c.speakerRole === 'agent' ? 'Agent' : c.speakerRole === 'customer' ? 'Customer' : undefined,
-      turnIndex: parseInt(c.span.turnId.replace(/[^\d]/g, ''), 10) || 0,
-    },
-    claimKind: c.modality === 'question' ? 'question' : 
-               c.modality === 'promise' ? 'promise' :
-               c.modality === 'deny' ? 'assertion' : 'assertion',
-  }));
+  // Build grounding lookup: claimId -> grounding edges
+  const groundingByClaimId = new Map<string, typeof graphResult.legacy.grounding>();
+  for (const g of graphResult.legacy.grounding) {
+    const existing = groundingByClaimId.get(g.claimId) || [];
+    existing.push(g);
+    groundingByClaimId.set(g.claimId, existing);
+  }
+  
+  // Convert claims to the expected Claim type WITH evidenceRefs from grounding
+  const claims: Claim[] = graphResult.graph.nodes.claims.map(c => {
+    const claimGrounding = groundingByClaimId.get(c.id) || [];
+    
+    // Build evidenceRefs from grounding edges
+    const evidenceRefs = claimGrounding.map(g => {
+      // Find the evidence node to get the quote
+      const evidenceNode = graphResult.graph.nodes.evidence.find(e => e.id === g.sourceId);
+      const turnMatch = g.sourceId.match(/turn-(\d+)/);
+      const turnIndex = turnMatch ? parseInt(turnMatch[1], 10) : undefined;
+      
+      return {
+        sourceId: g.sourceId,
+        quote: g.quote || evidenceNode?.content?.substring(0, 200),
+        turnIndex,
+        weight: g.weight,
+      };
+    });
+    
+    // Get truth state from derivation
+    const truthResult = graphResult.truthDerivation.results.find(r => r.claimId === c.id);
+    
+    return {
+      id: c.id,
+      text: c.text,
+      confidence: c.confidence ?? 0.7,
+      evidence: [], // Legacy field
+      evidenceRefs, // NEW: Actual grounding refs
+      truthState: truthResult?.truthState,
+      meta: {
+        speaker: c.speakerRole === 'agent' ? 'Agent' : c.speakerRole === 'customer' ? 'Customer' : undefined,
+        turnIndex: parseInt(c.span.turnId.replace(/[^\d]/g, ''), 10) || 0,
+      },
+      claimKind: c.modality === 'question' ? 'question' : 
+                 c.modality === 'promise' ? 'promise' :
+                 c.modality === 'deny' ? 'assertion' : 'assertion',
+    };
+  });
   
   // Call spectral with the unified graph
   const spectralEnabled = options?.spectral !== false;
@@ -483,6 +515,33 @@ async function runUnifiedGraphPath(
         undefined, // importanceByClaimId
         graphResult.legacy.grounding
       ),
+      // Manifest for reproducibility and schema versioning
+      manifest: {
+        schemaVersion: '2.0.0',
+        engineVersion: getEngineVersion(),
+        graphBuilderMode: 'unified',
+        templateId,
+        inputHash: graphResult.graph.meta.inputHash,
+        configHash: graphResult.graph.meta.configHash,
+        timestamp: new Date().toISOString(),
+        diagnostics: {
+          status: graphResult.graph.diagnostics.status,
+          reasons: graphResult.graph.diagnostics.reasons,
+          transcriptEvidenceNodes: graphResult.graph.nodes.evidence.filter(e => e.evidenceKind === 'transcript').length,
+          supportsAdded: graphResult.legacy.supports.length,
+          groundingAdded: graphResult.legacy.grounding.length,
+          contradictionsAdded: graphResult.legacy.contradictions.length,
+          spectralDegraded,
+          spectralDegradedReason,
+        },
+        truthDerivationSummary: {
+          supported: graphResult.truthDerivation.summary.supported,
+          contradicted: graphResult.truthDerivation.summary.contradicted,
+          unverified: graphResult.truthDerivation.summary.unverified,
+          ungrounded: graphResult.truthDerivation.summary.ungrounded,
+          total: graphResult.truthDerivation.summary.total,
+        },
+      },
     },
   };
 }
