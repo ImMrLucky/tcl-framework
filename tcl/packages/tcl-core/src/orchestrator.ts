@@ -388,6 +388,7 @@ async function runUnifiedGraphPath(
   const overall = blendScores(truthScore, consistencyScore, coherenceScore);
   
   // Assess run quality
+  const hasExternalEvidence = (externalSources?.length ?? 0) > 0;
   const runQualityResult = assessRunQuality(
     overall,
     truthScore,
@@ -397,6 +398,7 @@ async function runUnifiedGraphPath(
       supportsCount: graphResult.legacy.supports.length,
       contradictionsCount: graphResult.legacy.contradictions.length,
       groundingCount: graphResult.legacy.grounding.length,
+      hasExternalEvidence, // NEW: Pass whether external docs were provided
     },
     options?.thresholds
   );
@@ -1251,6 +1253,7 @@ async function validateOnce(input: ValidateInput, adapter?: LLMAdapter, startTim
       finalCoherenceScore
     );
     // Assess run quality with detailed reasons (replaces simple boolean refusal)
+    const hasExternalEvidenceLegacy = (externalSources?.length ?? 0) > 0;
     const runQuality = assessRunQuality(
       overall, 
       truthScore ?? null, 
@@ -1259,7 +1262,8 @@ async function validateOnce(input: ValidateInput, adapter?: LLMAdapter, startTim
         supportsCount: graph.supports.length,
         contradictionsCount: uniqueContradictions.length,
         groundingCount: graph.grounding.length,
-        claimsCount: evidenceRes.claims.length
+        claimsCount: evidenceRes.claims.length,
+        hasExternalEvidence: hasExternalEvidenceLegacy, // NEW: Pass whether external docs were provided
       },
       options?.thresholds
     );

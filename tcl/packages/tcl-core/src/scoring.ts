@@ -73,6 +73,7 @@ export function assessRunQuality(
     contradictionsCount?: number;
     groundingCount?: number;
     claimsCount?: number;
+    hasExternalEvidence?: boolean; // NEW: whether external docs were provided
   },
   thresholds?: { truth?: number; consistency?: number; overall?: number }
 ): RunQualityResult {
@@ -87,7 +88,7 @@ export function assessRunQuality(
   const tCons = thresholds?.consistency ?? 50;
   const tOverall = thresholds?.overall ?? 60;
   
-  // Check score thresholds
+  // Check score thresholds - but only flag low scores, don't treat as failure
   if (safeOverall !== null && safeOverall < tOverall) {
     degradedReasons.push(`OVERALL_SCORE_LOW (${safeOverall} < ${tOverall})`);
   }
@@ -100,46 +101,65 @@ export function assessRunQuality(
   
   // Check graph health
   if (graphHealth) {
-    const { supportsCount = 0, contradictionsCount = 0, groundingCount = 0, claimsCount = 0 } = graphHealth;
+    const { 
+      supportsCount = 0, 
+      contradictionsCount = 0, 
+      groundingCount = 0, 
+      claimsCount = 0,
+      hasExternalEvidence = false 
+    } = graphHealth;
     
-    // Empty supports graph is a problem
-    if (supportsCount === 0 && claimsCount > 1) {
-      degradedReasons.push('NO_SUPPORT_EDGES');
+    // CRITICAL FIX: NO_SUPPORT_EDGES is EXPECTED in transcript-only mode
+    // Only flag as a problem if external evidence was provided but no support edges were created
+    if (supportsCount === 0 && claimsCount > 1 && hasExternalEvidence) {
+      degradedReasons.push('NO_SUPPORT_EDGES_DESPITE_EVIDENCE');
+    }
+    // If no external evidence was provided, this is just "transcript-only mode" - not a problem
+    if (supportsCount === 0 && !hasExternalEvidence && claimsCount > 1) {
+      // This is informational, not degraded
+      // Don't add to degradedReasons - transcript-only is a valid mode
     }
     
-    // No grounding when claims exist is a problem
+    // No grounding when claims exist IS a problem (transcript should ground claims)
     if (groundingCount === 0 && claimsCount > 0) {
       degradedReasons.push('NO_GROUNDING_EDGES');
     }
     
-    // Very high ungrounded rate
-    if (claimsCount > 0) {
+    // Very low grounding rate (less than 30%) is concerning
+    if (claimsCount > 0 && groundingCount > 0) {
       const groundedRate = groundingCount / claimsCount;
-      if (groundedRate < 0.5) {
+      if (groundedRate < 0.3) {
         degradedReasons.push(`LOW_GROUNDING_RATE (${(groundedRate * 100).toFixed(0)}%)`);
       }
     }
   }
   
   // Determine status
+  // CRITICAL FIX: refusal should only be TRUE for actual failures, not transcript-only mode
   let status: RunStatus = 'OK';
   if (degradedReasons.length > 0) {
     status = 'DEGRADED';
-    // Escalate to FAILED if multiple critical issues
+    // Only escalate to FAILED for TRUE failures:
+    // - No grounding at all (processing failed)
+    // - External evidence provided but no supports created (evidence processing failed)
     const criticalIssues = degradedReasons.filter(r => 
-      r.includes('NO_SUPPORT_EDGES') || 
       r.includes('NO_GROUNDING_EDGES') ||
-      r.includes('TRUTH_SCORE_LOW')
+      r.includes('NO_SUPPORT_EDGES_DESPITE_EVIDENCE')
     );
     if (criticalIssues.length >= 2) {
       status = 'FAILED';
     }
   }
   
+  // CRITICAL: refusal = false for successful runs, even if degraded
+  // refusal should ONLY be true when we refuse to provide any results
+  // Transcript-only mode with grounding edges is NOT a refusal
+  const shouldRefuse = status === 'FAILED' && graphHealth?.groundingCount === 0;
+  
   return {
     status,
     degradedReasons,
-    refusal: status === 'FAILED' // Legacy compatibility
+    refusal: shouldRefuse // Only true when we actually can't produce results
   };
 }
 

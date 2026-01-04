@@ -964,15 +964,26 @@ app.post("/validate", async (req, res) => {
         // Calculate coherence - use spectral if available, fallback to orchestrator score
         const coherenceScore = spectralReport.coherenceScore ?? out.scores?.coherence;
         
-        // Compute headline counts using ACTUAL edges from graph builder
-        // IMPORTANT: Pass all edge types so we can properly count supported/grounded claims
-        const headlineCounts = computeHeadlineCounts({
-          claims: out.report?.claims || [],
-          contradictions: out.report?.graph?.contradictions || [],
-          supports: out.report?.graph?.supports || [],
-          grounding: out.report?.graph?.grounding || [],
-          spectral: spectralReport,
-        });
+        // Use truthDerivationSummary from unified graph builder as SINGLE SOURCE OF TRUTH
+        // This ensures counts are consistent with manifest.truthDerivationSummary
+        const manifest = out.report?.manifest;
+        const truthSummary = manifest?.truthDerivationSummary;
+        
+        // Get diagnostics info from manifest
+        const diagnostics = manifest?.diagnostics;
+        const graphStatus = diagnostics?.status || 'OK';
+        const isTranscriptOnly = (out.report?.graph?.supports?.length || 0) === 0;
+        
+        // Build definitions based on mode
+        const mode = isTranscriptOnly ? 'transcript_only' : 'verified';
+        const definitions = {
+          supported: `Claims with external evidence support (policy/document/system_fact). In transcript-only mode, this should be 0.`,
+          contradicted: `Claims involved in contradiction edges on the same subject slot.`,
+          ungrounded: `Claims with NO evidence at all (no grounding edges, isolated nodes).`,
+          unverified: mode === 'transcript_only' 
+            ? `Claims grounded in transcript but not externally verified. This is expected in transcript-only mode.`
+            : `Claims with transcript evidence but no external policy/document verification.`,
+        };
         
         const scoresForDb = {
           // Top-level scores from orchestrator
@@ -993,17 +1004,23 @@ app.post("/validate", async (req, res) => {
             cycleMass: spectralReport.cycleMass,
             heatTrace: spectralReport.heatTrace
           },
-          // Counts (computed from actual graph edges)
+          // Counts from truthDerivationSummary (SINGLE SOURCE OF TRUTH)
+          // These MUST match manifest.truthDerivationSummary exactly
           counts: {
-            claims: headlineCounts.total,
-            contradicted: headlineCounts.contradicted,
-            ungrounded: headlineCounts.ungrounded,
-            unverified: headlineCounts.unverified, // NEW: has evidence but not externally verified
-            supported: headlineCounts.supported,
+            claims: truthSummary?.total ?? out.report?.claims?.length ?? 0,
+            contradicted: truthSummary?.contradicted ?? 0,
+            ungrounded: truthSummary?.ungrounded ?? 0,
+            unverified: truthSummary?.unverified ?? 0, // Claims with transcript evidence only
+            supported: truthSummary?.supported ?? 0,   // Claims with EXTERNAL evidence
+            // Edge counts (for debugging)
             supports: out.report?.graph?.supports?.length || 0,
             contradictions: out.report?.graph?.contradictions?.length || 0,
+            grounding: out.report?.graph?.grounding?.length || 0,
             // Include definitions for tooltips
-            definitions: headlineCounts.definitions
+            definitions,
+            // Mode indicator
+            mode,
+            graphStatus,
           }
         };
         

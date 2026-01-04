@@ -189,12 +189,30 @@
             <div class="metric-sublabel">no supporting evidence</div>
           </div>
 
+          <!-- NEW: Unverified Claims (transcript-only mode) -->
+          <div class="summary-metric" *ngIf="(getCounts().unverified || 0) > 0" [matTooltip]="getMetricTooltip('unverified')">
+            <div class="metric-label">
+              Unverified Claims
+              <mat-icon class="info-icon">info</mat-icon>
+            </div>
+            <div class="metric-value info-value">
+              {{ getCounts().unverified ?? 0 }}
+            </div>
+            <div class="metric-sublabel">grounded in transcript only</div>
+          </div>
+
           <div class="summary-metric">
             <div class="metric-label">Total Issues</div>
             <div class="metric-value" [class.has-issues]="(issues?.length ?? 0) > 0">
               {{ issues?.length ?? 0 }}
             </div>
             <div class="metric-sublabel">requiring review</div>
+          </div>
+
+          <!-- NEW: Transcript-only mode indicator -->
+          <div class="mode-indicator" *ngIf="isTranscriptOnlyMode()">
+            <mat-icon>info_outline</mat-icon>
+            <span>Transcript-only mode: Claims are grounded in conversation, not externally verified.</span>
           </div>
 
           <div class="summary-metric" *ngIf="getCircularityWarning()">

@@ -210,6 +210,7 @@ export interface ClaimWithAnchors {
 export type IssueType = 
   | "contradiction"
   | "ungrounded"
+  | "unverified"  // NEW: Has transcript evidence but no external verification
   | "inconsistent_support"
   | "inconsistent_contradiction"
   | "needs_review";

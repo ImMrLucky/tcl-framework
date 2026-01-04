@@ -715,6 +715,9 @@ export class EvaluationResultsComponent implements OnInit {
       if (metric === 'ungrounded' && counts.definitions.ungrounded) {
         return counts.definitions.ungrounded;
       }
+      if (metric === 'unverified' && counts.definitions.unverified) {
+        return counts.definitions.unverified;
+      }
     }
     
     // Fallback to default definitions
@@ -724,11 +727,30 @@ export class EvaluationResultsComponent implements OnInit {
       'supportEnergy': 'Sum of support edge weights. Higher values indicate more supporting relationships.',
       'spectralGap': 'Difference between truth and falsehood propagation. Larger gaps indicate clearer truth/falsehood separation.',
       'circularityScore': 'Measures circular support chains. Higher scores indicate more circular reasoning.',
-      'supported': 'Claims with truthState="Supported" that are not involved in high-badness contradictions and have contradiction edge weight below threshold.',
-      'contradicted': 'Claims with truthState="Contradicted" OR claims with contradiction edges above threshold (weight >= 0.55).',
-      'ungrounded': 'Claims with truthState="Ungrounded" OR claims with no grounding evidence (grounding.kind="none" or evidenceIds.length=0).',
+      'supported': 'Claims with external evidence support (policy/document/system_fact). In transcript-only mode, this will be 0.',
+      'contradicted': 'Claims involved in contradiction edges on the same subject slot.',
+      'ungrounded': 'Claims with NO evidence at all (no grounding edges, isolated nodes).',
+      'unverified': 'Claims grounded in transcript but not externally verified. This is expected in transcript-only mode.',
     };
     return definitions[metric] || '';
+  }
+  
+  /**
+   * Check if we're in transcript-only mode (no external evidence provided)
+   * In this mode, claims are grounded in the conversation but not externally verified.
+   */
+  isTranscriptOnlyMode(): boolean {
+    const counts = this.evaluation?.scores?.counts;
+    if (!counts) return false;
+    
+    // Transcript-only mode: no support edges AND unverified count > 0
+    const mode = counts.mode;
+    if (mode === 'transcript_only') return true;
+    
+    // Fallback: check if supports=0 and unverified > 0
+    const supportsCount = counts.supports ?? 0;
+    const unverifiedCount = counts.unverified ?? 0;
+    return supportsCount === 0 && unverifiedCount > 0;
   }
   
   // Tooltip for issue narrative scores
