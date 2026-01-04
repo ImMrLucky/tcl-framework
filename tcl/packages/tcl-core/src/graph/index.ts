@@ -14,7 +14,14 @@ export * from './types.js';
 export * from './template-config.js';
 
 // Subject slot computation (THE KEY UPGRADE)
-export * from './subject-slot.js';
+// Note: slotsMatch and slotsCompatible are exported from types.js, 
+// so we selectively export from subject-slot.js to avoid conflicts
+export { 
+  extractEntities, 
+  computeSubjectSlot, 
+  computeSlotSimilarity,
+  valuesContradict,
+} from './subject-slot.js';
 
 // Topic segmentation & gating
 export * from './topic-segmentation.js';

@@ -323,8 +323,8 @@ function createContradictionEdge(
     provenance: {
       spanPairs: [
         {
-          fromSpan: a.span,
-          toSpan: b.span,
+          fromSpan: { start: a.span.startChar, end: a.span.endChar, text: a.text },
+          toSpan: { start: b.span.startChar, end: b.span.endChar, text: b.text },
         },
       ],
     },

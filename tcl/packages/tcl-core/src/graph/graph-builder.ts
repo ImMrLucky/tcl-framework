@@ -36,6 +36,9 @@ import {
 } from './types.js';
 import { extractEntities, computeSubjectSlot } from './subject-slot.js';
 import { getTemplateConfig, setTemplateConfig, TemplateConfig } from './template-config.js';
+
+// Re-export for convenience
+export { setTemplateConfig, getTemplateConfig, TemplateConfig };
 import { assignTopicIds, SegmentationResult } from './topic-segmentation.js';
 import { generateCandidates, CandidateGenerationResult } from './candidate-generation.js';
 import { classifyEdges, EdgeClassificationResult } from './edge-classification.js';

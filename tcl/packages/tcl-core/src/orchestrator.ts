@@ -212,16 +212,9 @@ async function runUnifiedGraphPath(
   const isCallTranscript = transcript.includes('Agent:') || transcript.includes('Customer:') ||
                            transcript.includes('AGENT:') || transcript.includes('CUSTOMER:');
   
-  let extractedClaims: Array<{ id: string; text: string; meta?: any }>;
-  if (isCallTranscript) {
-    extractedClaims = await extractClaimsWithTypes(transcript, { 
-      llmAdapter: adapter,
-      extractSpeaker: true,
-      extractTurnIndex: true,
-    });
-  } else {
-    extractedClaims = await extractClaims(transcript, adapter);
-  }
+  // extractClaimsWithTypes is synchronous and returns { claims, allItems, stats }
+  const extractResult = extractClaimsWithTypes(transcript);
+  const extractedClaims = extractResult.claims;
   timer.end('claim_extraction');
   console.log(`📝 Extracted ${extractedClaims.length} claims (${timer.duration('claim_extraction')}ms)`);
   
@@ -333,30 +326,34 @@ async function runUnifiedGraphPath(
   const overall = blendScores(truthScore, consistencyScore, coherenceScore);
   
   // Assess run quality
-  const { runQuality, refusal } = assessRunQuality(
+  const runQualityResult = assessRunQuality(
     overall,
     truthScore,
     consistencyScore,
-    options?.thresholds,
     {
-      numClaims: claims.length,
-      numSupports: graphResult.legacy.supports.length,
-      numContradictions: graphResult.legacy.contradictions.length,
-      numGrounding: graphResult.legacy.grounding.length,
-      coherenceScore,
-      overallScore: overall,
-    }
+      claimsCount: claims.length,
+      supportsCount: graphResult.legacy.supports.length,
+      contradictionsCount: graphResult.legacy.contradictions.length,
+      groundingCount: graphResult.legacy.grounding.length,
+    },
+    options?.thresholds
   );
+  const { refusal } = runQualityResult;
   
   // Compute destructive claims from spectral
   const destructiveClaims = spectral?.nodeBlameNorm 
-    ? computeDestructiveClaims(claims, spectral, [], [])
+    ? computeDestructiveClaims({
+        claims,
+        contradictions: graphResult.legacy.contradictions,
+        grounding: graphResult.legacy.grounding,
+        customRuleViolations: [],
+        spectral,
+      })
     : [];
   
   return {
     answer: input.answer,
     refusal,
-    runQuality,
     scores: { 
       truth: truthScore, 
       consistency: consistencyScore, 
@@ -428,7 +425,20 @@ async function runUnifiedGraphPath(
         },
       },
       destructiveClaims,
-      suggestions: generateSuggestions(claims, graphResult.legacy, spectral),
+      suggestions: generateSuggestions(
+        claims,
+        [], // violations
+        graphResult.legacy.contradictions.map(c => ({ 
+          claimA: c.claimA, 
+          claimB: c.claimB, 
+          reason: `Contradiction (weight ${c.weight.toFixed(2)})` 
+        })),
+        [], // missingEvidence
+        graphResult.legacy.supports,
+        undefined, // customRules
+        undefined, // importanceByClaimId
+        graphResult.legacy.grounding
+      ),
     },
   };
 }
