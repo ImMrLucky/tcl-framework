@@ -316,29 +316,34 @@
             </mat-card-subtitle>
           </mat-card-header>
           <mat-card-content>
-            <!-- Top Issues Summary -->
-            <div class="top-issues-summary" *ngIf="topIssuesV2.length > 0">
-              <h3>Top {{ topIssuesV2.length }} Issues (Ranked by Risk Score)</h3>
+            <!-- Top Issues Summary with Pagination -->
+            <div class="top-issues-summary" *ngIf="allIssuesV2.length > 0">
+              <h3>All Issues ({{ allIssuesV2.length }}) - Ranked by Risk Score</h3>
               <div class="issue-v2-list">
-                <div class="issue-v2-item" *ngFor="let issue of topIssuesV2; let i = index" 
+                <div class="issue-v2-item" *ngFor="let issue of paginatedTopIssues; let i = index" 
                      [class.critical]="issue.severity === 'critical'"
                      [class.high]="issue.severity === 'high'"
                      [class.medium]="issue.severity === 'medium'"
                      [class.low]="issue.severity === 'low'"
                      (click)="openIssueV2Detail(issue)">
                   <div class="issue-v2-header">
-                    <span class="issue-rank">#{{ i + 1 }}</span>
+                    <span class="issue-rank">#{{ pageIndex * pageSize + i + 1 }}</span>
                     <span class="issue-type">{{ issue.type }}</span>
-                    <span class="issue-severity" [class]="'severity-' + issue.severity">
-                      {{ issue.severity.toUpperCase() }}
+                    <span class="issue-severity" [class]="'severity-' + (issue.severityDisplay || issue.severity)">
+                      {{ getSeverityDisplay(issue) }}
                     </span>
-                    <span class="issue-risk-score">Risk: {{ (issue.riskScore * 100).toFixed(0) }}%</span>
+                    <span class="issue-impact" *ngIf="issue.impact">
+                      {{ getImpactLabel(issue) }}
+                    </span>
+                    <span class="issue-risk-score">Score: {{ ((issue.score || issue.riskScore * 100)).toFixed(0) }}</span>
                   </div>
                   <div class="issue-v2-body">
                     <div class="issue-summary">{{ issue.what.issueSummary }}</div>
                     <div class="issue-meta">
-                      <span class="verification-badge" [class.transcript-only]="issue.verification.level === 'TRANSCRIPT_ONLY'">
-                        {{ issue.verification.level }}
+                      <span class="verification-badge" 
+                            [class.transcript-only]="issue.verification.level === 'TRANSCRIPT_ONLY'"
+                            [class.verified]="issue.verification.level === 'EXTERNAL_VERIFIED'">
+                        {{ getVerificationLabel(issue) }}
                       </span>
                       <span class="speaker-badge">{{ issue.who.speaker }}</span>
                       <span class="category-badge">{{ issue.category }}</span>
@@ -347,14 +352,25 @@
                   </div>
                 </div>
               </div>
+              
+              <!-- Pagination -->
+              <mat-paginator
+                [length]="allIssuesV2.length"
+                [pageSize]="pageSize"
+                [pageIndex]="pageIndex"
+                [pageSizeOptions]="pageSizeOptions"
+                [showFirstLastButtons]="true"
+                (page)="onPageChange($event)"
+                aria-label="Select page of issues">
+              </mat-paginator>
             </div>
             
-            <!-- All Issues Table -->
-            <!-- Show if there are more issues than top, OR if we want to show all issues in a table -->
+            <!-- All Issues Table (Alternative View) -->
+            <!-- Optional table view for quick scanning - paginated view above is primary -->
             <div class="all-issues-section" *ngIf="allIssuesV2.length > 0">
-              <h3>All Issues ({{ allIssuesV2.length }})</h3>
-              <p *ngIf="topIssuesV2.length < allIssuesV2.length" class="info-text">
-                Showing top {{ topIssuesV2.length }} above, all {{ allIssuesV2.length }} below:
+              <h3>All Issues Table View ({{ allIssuesV2.length }})</h3>
+              <p class="info-text">
+                Alternative table view. Use pagination above to navigate through all issues.
               </p>
               <mat-table [dataSource]="allIssuesV2" class="issue-v2-table">
                 <ng-container matColumnDef="rank">

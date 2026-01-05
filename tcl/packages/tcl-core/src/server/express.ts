@@ -912,8 +912,15 @@ app.post("/validate", async (req, res) => {
                 },
               });
               
-              // Rank issues (deterministic)
-              const rankedResult = rankIssuesV2(expansionResult.allIssues);
+              // Rank issues (deterministic) with scoring context
+              const scoringContext = {
+                mode: evidenceMode === 'TRANSCRIPT_ONLY' ? 'transcript_only' : 'with_evidence',
+                numSources: (input.sources?.length ?? 0),
+                graphStatus: out.report?.graph?.status,
+                templateId: (out.report?.manifest as any)?.templateId,
+                isRegulatedTemplate: false, // TODO: detect from template
+              };
+              const rankedResult = rankIssuesV2(expansionResult.allIssues, undefined, scoringContext);
               
               // Store in report
               (out.report as any).allIssuesV2 = rankedResult.allIssues;

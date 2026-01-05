@@ -3,6 +3,7 @@ import { CommonModule } from '@angular/common';
 import { ActivatedRoute, Router } from '@angular/router';
 import { MatCardModule } from '@angular/material/card';
 import { MatTableModule } from '@angular/material/table';
+import { MatPaginatorModule, PageEvent } from '@angular/material/paginator';
 import { MatButtonModule } from '@angular/material/button';
 import { MatIconModule } from '@angular/material/icon';
 import { MatMenuModule } from '@angular/material/menu';
@@ -217,6 +218,7 @@ interface IssueSummary {
     MatExpansionModule,
     MatDividerModule,
     MatTabsModule,
+    MatPaginatorModule,
     AppHeaderComponent
   ],
   templateUrl: './evaluation-results.component.html',
@@ -249,6 +251,12 @@ export class EvaluationResultsComponent implements OnInit {
   allIssuesV2: IssueV2[] = [];
   topIssuesV2: IssueV2[] = [];
   issueSummaryV2: IssueSummaryV2 | null = null;
+  
+  // Pagination for top issues
+  paginatedTopIssues: IssueV2[] = [];
+  pageSize = 10;
+  pageIndex = 0;
+  pageSizeOptions = [5, 10, 25, 50];
 
   constructor(
     private route: ActivatedRoute,
@@ -306,6 +314,10 @@ export class EvaluationResultsComponent implements OnInit {
           topIssuesCount: this.topIssuesV2.length,
           allIssuesCount: this.allIssuesV2.length,
         };
+        
+        // Initialize pagination for top issues (use allIssuesV2 so user can see all issues)
+        this.updatePaginatedTopIssues();
+        
         console.log('✅ Loaded IssueV2 (Enterprise-Grade):', {
           allIssuesCount: this.allIssuesV2.length,
           topIssuesCount: this.topIssuesV2.length,
@@ -315,6 +327,7 @@ export class EvaluationResultsComponent implements OnInit {
         // Initialize empty if not present
         this.allIssuesV2 = [];
         this.topIssuesV2 = [];
+        this.paginatedTopIssues = [];
         this.issueSummaryV2 = null;
       }
       
@@ -328,6 +341,25 @@ export class EvaluationResultsComponent implements OnInit {
     } finally {
       this.loading = false;
     }
+  }
+
+  /**
+   * Update paginated top issues based on current page settings
+   */
+  updatePaginatedTopIssues(): void {
+    const startIndex = this.pageIndex * this.pageSize;
+    const endIndex = startIndex + this.pageSize;
+    // Use allIssuesV2 so user can paginate through all issues, not just top 10
+    this.paginatedTopIssues = this.allIssuesV2.slice(startIndex, endIndex);
+  }
+
+  /**
+   * Handle page change event from paginator
+   */
+  onPageChange(event: PageEvent): void {
+    this.pageIndex = event.pageIndex;
+    this.pageSize = event.pageSize;
+    this.updatePaginatedTopIssues();
   }
 
   getSeverity(issue: Issue): 'critical' | 'high' | 'medium' | 'low' {
@@ -975,6 +1007,44 @@ export class EvaluationResultsComponent implements OnInit {
 
   goToDashboard() {
     this.router.navigate(['/dashboard']);
+  }
+
+  /**
+   * Get severity display label for UI (respects transcript-only caps)
+   */
+  getSeverityDisplay(issue: IssueV2): string {
+    const severityDisplay = (issue as any).severityDisplay || issue.severity;
+    return severityDisplay.toUpperCase();
+  }
+
+  /**
+   * Get verification label for UI
+   */
+  getVerificationLabel(issue: IssueV2): string {
+    if (issue.verification.level === 'TRANSCRIPT_ONLY') {
+      return 'Unverified (Transcript-only)';
+    }
+    if (issue.verification.level === 'EXTERNAL_VERIFIED') {
+      return 'Verified';
+    }
+    return 'Unverified';
+  }
+
+  /**
+   * Get impact label (separate from severity display)
+   */
+  getImpactLabel(issue: IssueV2): string {
+    const impact = (issue as any).impact || 'medium';
+    return `Impact: ${impact.toUpperCase()}`;
+  }
+
+  /**
+   * Check if issue should show as "high risk" in UI
+   * In transcript-only mode, even high impact issues should not show as "high risk"
+   */
+  shouldShowAsHighRisk(issue: IssueV2): boolean {
+    const severityDisplay = (issue as any).severityDisplay || issue.severity;
+    return severityDisplay === 'high' || severityDisplay === 'critical';
   }
 
   /**

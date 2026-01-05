@@ -200,9 +200,20 @@ export type IssueCategoryV2 =
 
 export type SeverityV2 = "low" | "medium" | "high" | "critical";
 
+export type ImpactV2 = "low" | "medium" | "high";
+
+export type SeverityDisplayV2 = "low" | "medium" | "high";
+
 export type SpeakerV2 = "AGENT" | "CUSTOMER" | "SYSTEM" | "UNKNOWN";
 
 export type VerificationLevelV2 = "EXTERNAL_VERIFIED" | "TRANSCRIPT_ONLY" | "NONE";
+
+export type RecommendedActionType = 
+  | "NEEDS_EXTERNAL_EVIDENCE" 
+  | "QA_REVIEW" 
+  | "COACH_AGENT" 
+  | "LEGAL_ESCALATION" 
+  | "BILLING_FOLLOWUP";
 
 export interface IssueV2 {
   issueId: string;                 // stable hash from (runId + issueKey)
@@ -212,14 +223,40 @@ export interface IssueV2 {
 
   type: IssueTypeV2;
   category: IssueCategoryV2;
-  severity: SeverityV2;            // computed via ranking
-  riskScore: number;               // 0..1 normalized (computed)
+  severity: SeverityV2;            // computed via ranking (deprecated, use severityDisplay)
+  severityDisplay: SeverityDisplayV2; // What UI shows (capped in transcript-only)
+  impact: ImpactV2;                // How bad if true (not affected by mode)
+  riskScore: number;               // 0..1 normalized (computed) - deprecated, use score
+  score: number;                   // Numeric for sorting (0..100)
   confidence: number;              // 0..1 (based on edge weights / extractor confidence)
   reviewRequired: boolean;
 
   verification: {
     level: VerificationLevelV2;
     reasonCodes: string[];         // e.g. ["NO_EXTERNAL_EVIDENCE"]
+  };
+  
+  scoreBreakdown?: {
+    impactScore: number;
+    verificationScore: number;
+    disputeScore: number;
+    contradictionScore: number;
+    commitmentScore: number;
+    escalationScore: number;
+    templateScore: number;
+    penalties: {
+      transcriptOnlyCapPenalty?: number;
+      [key: string]: number | undefined;
+    };
+  };
+  
+  severityReason?: string[];        // Human-readable reasons for severity
+  capsApplied?: string[];           // e.g. ["TRANSCRIPT_ONLY_SEVERITY_CAP", "TRANSCRIPT_ONLY_EXCEPTION:escalation"]
+  
+  recommendedAction?: {
+    actionType: RecommendedActionType;
+    explanation: string;
+    requiredEvidence?: string[];     // e.g. ["billing ledger", "contract term", "policy doc"]
   };
 
   who: {

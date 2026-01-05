@@ -106,6 +106,16 @@ export function expandIssueCandidates(input: IssueExpansionInput): IssueExpansio
       const truthState = claim.truthState?.toUpperCase();
       const isUnverified = truthState === 'UNVERIFIED' || truthState === 'UNVERIFIED_CLAIM';
       const hasGrounding = groundedClaimIds.has(claim.id) || (claim.evidenceRefs?.length ?? 0) > 0;
+  
+  // Determine verification level
+  let verificationLevel: VerificationLevelV2 = 'NONE';
+  if (input.evidenceMode === 'TRANSCRIPT_PLUS_EXTERNAL' && hasGrounding) {
+    verificationLevel = 'EXTERNAL_VERIFIED';
+  } else if (input.evidenceMode === 'TRANSCRIPT_ONLY' && hasGrounding) {
+    verificationLevel = 'TRANSCRIPT_ONLY';
+  } else {
+    verificationLevel = 'NONE';
+  }
       const isAgent = claim.meta?.speaker === 'Agent' || claim.meta?.speaker === 'AGENT';
       
       // More lenient: if claimKind is not set, assume it's an assertion if it's from an agent
@@ -271,9 +281,16 @@ function createContradictionIssue(
   
   const turnIndex = claimA.meta?.turnIndex ?? claimB.meta?.turnIndex;
   
-  // Determine verification level
-  const verificationLevel: VerificationLevelV2 = 
-    input.evidenceMode === 'TRANSCRIPT_PLUS_EXTERNAL' ? 'EXTERNAL_VERIFIED' : 'TRANSCRIPT_ONLY';
+  // Determine verification level based on evidence mode and actual grounding
+  let verificationLevel: VerificationLevelV2 = 'NONE';
+  const hasGrounding = input.grounding.some(g => g.claimId === edge.claimA || g.claimId === edge.claimB);
+  if (input.evidenceMode === 'TRANSCRIPT_PLUS_EXTERNAL' && hasGrounding) {
+    verificationLevel = 'EXTERNAL_VERIFIED';
+  } else if (input.evidenceMode === 'TRANSCRIPT_ONLY' && hasGrounding) {
+    verificationLevel = 'TRANSCRIPT_ONLY';
+  } else {
+    verificationLevel = 'NONE';
+  }
   
   // Compliance tags
   const complianceTags = ['consistency', 'customer_dispute_risk'];
@@ -387,10 +404,24 @@ function createUnverifiedClaimIssue(
     complianceTags.push('fee_disclosure');
   }
   
+  // Determine verification level based on evidence mode and actual grounding
+  const hasGrounding = evidenceRefs.length > 0 || input.grounding.some(g => g.claimId === claim.id);
+  let verificationLevel: VerificationLevelV2 = 'NONE';
+  if (input.evidenceMode === 'TRANSCRIPT_PLUS_EXTERNAL' && hasGrounding) {
+    verificationLevel = 'EXTERNAL_VERIFIED';
+  } else if (input.evidenceMode === 'TRANSCRIPT_ONLY' && hasGrounding) {
+    verificationLevel = 'TRANSCRIPT_ONLY';
+  } else {
+    verificationLevel = 'NONE';
+  }
+  
   // Disclaimers
-  const disclaimers: string[] = [
-    'This finding is grounded in transcript content only and is not externally verified.',
-  ];
+  const disclaimers: string[] = [];
+  if (verificationLevel === 'TRANSCRIPT_ONLY') {
+    disclaimers.push('This finding is grounded in transcript content only and is not externally verified.');
+  } else if (verificationLevel === 'NONE') {
+    disclaimers.push('This finding has no grounding evidence.');
+  }
   
   return {
     issueId,
@@ -404,8 +435,9 @@ function createUnverifiedClaimIssue(
     confidence: claim.confidence || 0.7,
     reviewRequired: true, // Agent assertions/promises require review
     verification: {
-      level: 'TRANSCRIPT_ONLY',
-      reasonCodes: ['NO_EXTERNAL_EVIDENCE'],
+      level: verificationLevel,
+      reasonCodes: verificationLevel === 'TRANSCRIPT_ONLY' ? ['NO_EXTERNAL_EVIDENCE'] : 
+                   verificationLevel === 'NONE' ? ['NO_GROUNDING'] : [],
     },
     who: {
       speaker,

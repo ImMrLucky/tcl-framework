@@ -21,31 +21,49 @@ export interface RankedIssues {
   };
 }
 
+import { scoreIssues, type ScoringContext } from './issue-scoring.js';
+
 /**
  * Rank issues by risk score (deterministic)
+ * Now uses the new scoring system with transcript-only caps
  */
-export function rankIssuesV2(issues: IssueV2[], config?: RiskRankingConfig): RankedIssues {
+export function rankIssuesV2(
+  issues: IssueV2[], 
+  config?: RiskRankingConfig,
+  scoringContext?: ScoringContext
+): RankedIssues {
   const rankingConfig = config || getRiskRankingConfig();
   
-  // Compute risk scores for all issues
-  const scoredIssues = issues.map(issue => computeRiskScore(issue, rankingConfig));
+  // Use new scoring system if context provided, otherwise fall back to old system
+  let scoredIssues: IssueV2[];
+  if (scoringContext) {
+    const scoringResult = scoreIssues(issues, scoringContext);
+    scoredIssues = scoringResult.issues;
+  } else {
+    // Fallback to old scoring for backward compatibility
+    scoredIssues = issues.map(issue => computeRiskScore(issue, rankingConfig));
+  }
   
-  // Sort deterministically by composite score (riskScore * 100)
+  // Sort deterministically by score (new scoring system) or riskScore (fallback)
   const sorted = scoredIssues.sort((a, b) => {
-    // Primary: riskScore desc (this is effectively compositeScore)
-    if (b.riskScore !== a.riskScore) {
-      return b.riskScore - a.riskScore;
+    // Primary: score desc (new system) or riskScore desc (fallback)
+    const scoreA = (a as any).score ?? (a.riskScore * 100);
+    const scoreB = (b as any).score ?? (b.riskScore * 100);
+    if (scoreB !== scoreA) {
+      return scoreB - scoreA;
     }
     
-    // Secondary: severity priority (critical > high > medium > low)
-    const severityOrder: Record<SeverityV2, number> = {
+    // Secondary: severityDisplay priority (if available) or severity (fallback)
+    const severityDisplayA = (a as any).severityDisplay ?? a.severity;
+    const severityDisplayB = (b as any).severityDisplay ?? b.severity;
+    const severityOrder: Record<string, number> = {
       critical: 4,
       high: 3,
       medium: 2,
       low: 1,
     };
-    if (severityOrder[b.severity] !== severityOrder[a.severity]) {
-      return severityOrder[b.severity] - severityOrder[a.severity];
+    if (severityOrder[severityDisplayB] !== severityOrder[severityDisplayA]) {
+      return severityOrder[severityDisplayB] - severityOrder[severityDisplayA];
     }
     
     // Tertiary: type priority (from config)
