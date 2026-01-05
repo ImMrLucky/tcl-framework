@@ -296,7 +296,8 @@ export class EvaluationResultsComponent implements OnInit {
       // Load allIssuesV2 and topIssuesV2
       if (report?.allIssuesV2 && Array.isArray(report.allIssuesV2)) {
         this.allIssuesV2 = report.allIssuesV2;
-        this.topIssuesV2 = report.topIssuesV2 || report.allIssuesV2.slice(0, 4);
+        // Use topIssuesV2 from report, or default to first 10 (not 4)
+        this.topIssuesV2 = report.topIssuesV2 || report.allIssuesV2.slice(0, 10);
         this.issueSummaryV2 = report.issueSummaryV2 || {
           totalIssues: this.allIssuesV2.length,
           byType: {},

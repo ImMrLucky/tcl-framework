@@ -72,24 +72,47 @@ export function expandIssueCandidates(input: IssueExpansionInput): IssueExpansio
     contradictedClaimIds.add(edge.claimB);
   }
   
+  // Debug logging
+  console.log('🔍 ISSUE EXPANSION DEBUG:', {
+    totalClaims: input.claims.length,
+    contradictions: input.contradictions.length,
+    supports: input.supports.length,
+    grounding: input.grounding.length,
+    groundedClaimIds: groundedClaimIds.size,
+    contradictedClaimIds: contradictedClaimIds.size,
+    evidenceMode: input.evidenceMode,
+    claimsWithClaimKind: input.claims.filter(c => c.claimKind).length,
+    claimsWithTruthState: input.claims.filter(c => c.truthState).length,
+    agentClaims: input.claims.filter(c => c.meta?.speaker === 'Agent' || c.meta?.speaker === 'AGENT').length,
+  });
+  
   // Rule A: Contradiction edges → CONTRADICTION issues
+  let contradictionIssues = 0;
   for (const edge of input.contradictions) {
     const issue = createContradictionIssue(edge, claimMap, input, evidenceQuotesMax);
     if (issue && !issueKeys.has(issue.issueKey)) {
       issues.push(issue);
       issueKeys.add(issue.issueKey);
+      contradictionIssues++;
     }
   }
+  console.log(`  ✅ Rule A (Contradictions): ${contradictionIssues} issues`);
   
   // Rule B: Unverified claims → UNVERIFIED_CLAIM issues
   // Only in transcript-only mode, and only for agent assertions/promises
+  let unverifiedIssues = 0;
   if (input.evidenceMode === 'TRANSCRIPT_ONLY') {
     for (const claim of input.claims) {
       const truthState = claim.truthState?.toUpperCase();
-      const isUnverified = truthState === 'UNVERIFIED';
+      const isUnverified = truthState === 'UNVERIFIED' || truthState === 'UNVERIFIED_CLAIM';
       const hasGrounding = groundedClaimIds.has(claim.id) || (claim.evidenceRefs?.length ?? 0) > 0;
       const isAgent = claim.meta?.speaker === 'Agent' || claim.meta?.speaker === 'AGENT';
-      const isAssertionOrPromise = claim.claimKind === 'assertion' || claim.claimKind === 'promise';
+      
+      // More lenient: if claimKind is not set, assume it's an assertion if it's from an agent
+      // (agents typically make assertions/promises, not questions or emotions)
+      const isAssertionOrPromise = claim.claimKind === 'assertion' || 
+                                   claim.claimKind === 'promise' ||
+                                   (!claim.claimKind && isAgent); // Fallback: agent claims are likely assertions
       
       // Only flag agent assertions/promises that are unverified
       // Skip if already contradicted (handled by Rule A)
@@ -98,18 +121,26 @@ export function expandIssueCandidates(input: IssueExpansionInput): IssueExpansio
         if (issue && !issueKeys.has(issue.issueKey)) {
           issues.push(issue);
           issueKeys.add(issue.issueKey);
+          unverifiedIssues++;
         }
       }
     }
   }
+  console.log(`  ✅ Rule B (Unverified): ${unverifiedIssues} issues`);
   
   // Rule C: Ungrounded claims → UNGROUNDED issues
   // Claims with no grounding edges at all
+  let ungroundedIssues = 0;
   for (const claim of input.claims) {
     const truthState = claim.truthState?.toUpperCase();
-    const isUngrounded = truthState === 'UNGROUNDED' || (!groundedClaimIds.has(claim.id) && (claim.evidenceRefs?.length ?? 0) === 0);
+    const isUngrounded = truthState === 'UNGROUNDED' || 
+                         (!groundedClaimIds.has(claim.id) && (claim.evidenceRefs?.length ?? 0) === 0);
     const isAgent = claim.meta?.speaker === 'Agent' || claim.meta?.speaker === 'AGENT';
-    const isAssertionOrPromise = claim.claimKind === 'assertion' || claim.claimKind === 'promise';
+    
+    // More lenient: if claimKind is not set, assume it's an assertion if it's from an agent
+    const isAssertionOrPromise = claim.claimKind === 'assertion' || 
+                                 claim.claimKind === 'promise' ||
+                                 (!claim.claimKind && isAgent); // Fallback: agent claims are likely assertions
     
     // Only flag agent assertions/promises that are ungrounded
     // Skip if already contradicted or unverified (handled by Rules A & B)
@@ -120,15 +151,22 @@ export function expandIssueCandidates(input: IssueExpansionInput): IssueExpansio
       if (issue && !issueKeys.has(issue.issueKey)) {
         issues.push(issue);
         issueKeys.add(issue.issueKey);
+        ungroundedIssues++;
       }
     }
   }
+  console.log(`  ✅ Rule C (Ungrounded): ${ungroundedIssues} issues`);
   
   // Rule D: Risk signals → RISK_SIGNAL issues
   // High-impact assertions: money, fees, cancellation, refund promises, legal threats
+  let riskSignalIssues = 0;
   for (const claim of input.claims) {
     const isAgent = claim.meta?.speaker === 'Agent' || claim.meta?.speaker === 'AGENT';
-    const isAssertionOrPromise = claim.claimKind === 'assertion' || claim.claimKind === 'promise';
+    
+    // More lenient: if claimKind is not set, assume it's an assertion if it's from an agent
+    const isAssertionOrPromise = claim.claimKind === 'assertion' || 
+                                 claim.claimKind === 'promise' ||
+                                 (!claim.claimKind && isAgent); // Fallback: agent claims are likely assertions
     
     if (isAgent && isAssertionOrPromise) {
       const riskSignals = detectRiskSignals(claim);
@@ -137,10 +175,12 @@ export function expandIssueCandidates(input: IssueExpansionInput): IssueExpansio
         if (issue && !issueKeys.has(issue.issueKey)) {
           issues.push(issue);
           issueKeys.add(issue.issueKey);
+          riskSignalIssues++;
         }
       }
     }
   }
+  console.log(`  ✅ Rule D (Risk Signals): ${riskSignalIssues} issues`);
   
   // Rule E: Policy violations → POLICY issues
   // Placeholder for future policy matching (if enabled)
@@ -169,6 +209,9 @@ export function expandIssueCandidates(input: IssueExpansionInput): IssueExpansio
       issuesByClaim[claimId] = issuesByClaim[claimId].slice(0, perClaimMax);
     }
   }
+  
+  console.log(`  ✅ TOTAL ISSUES GENERATED: ${issues.length} (by type: ${Object.entries(issues.reduce((acc, i) => { acc[i.type] = (acc[i.type] || 0) + 1; return acc; }, {} as Record<string, number>)).map(([k, v]) => `${k}=${v}`).join(', ')})`);
+  console.log(`  ✅ ISSUES BY CLAIM: ${Object.keys(issuesByClaim).length} claims have issues`);
   
   return {
     allIssues: issues,

@@ -350,8 +350,12 @@
             </div>
             
             <!-- All Issues Table -->
-            <div class="all-issues-section" *ngIf="allIssuesV2.length > topIssuesV2.length">
+            <!-- Show if there are more issues than top, OR if we want to show all issues in a table -->
+            <div class="all-issues-section" *ngIf="allIssuesV2.length > 0">
               <h3>All Issues ({{ allIssuesV2.length }})</h3>
+              <p *ngIf="topIssuesV2.length < allIssuesV2.length" class="info-text">
+                Showing top {{ topIssuesV2.length }} above, all {{ allIssuesV2.length }} below:
+              </p>
               <mat-table [dataSource]="allIssuesV2" class="issue-v2-table">
                 <ng-container matColumnDef="rank">
                   <mat-header-cell *matHeaderCellDef>Rank</mat-header-cell>
