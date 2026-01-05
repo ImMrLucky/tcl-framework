@@ -106,7 +106,7 @@ interface IssueV2 {
               
               <div class="metrics">
                 <div class="metric">
-                  <strong>Risk Score:</strong> {{ (data.issue.riskScore * 100).toFixed(0) }}%
+                  <strong>Risk Score:</strong> {{ ((data.issue.score ?? (data.issue.riskScore * 100))).toFixed(0) }}%
                 </div>
                 <div class="metric">
                   <strong>Confidence:</strong> {{ (data.issue.confidence * 100).toFixed(0) }}%

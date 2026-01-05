@@ -335,7 +335,7 @@
                     <span class="issue-impact" *ngIf="issue.impact">
                       {{ getImpactLabel(issue) }}
                     </span>
-                    <span class="issue-risk-score">Score: {{ ((issue.score || issue.riskScore * 100)).toFixed(0) }}</span>
+                    <span class="issue-risk-score">Score: {{ ((issue.score ?? (issue.riskScore * 100))).toFixed(0) }}</span>
                   </div>
                   <div class="issue-v2-body">
                     <div class="issue-summary">{{ issue.what.issueSummary }}</div>
@@ -389,7 +389,7 @@
                 </ng-container>
                 <ng-container matColumnDef="riskScore">
                   <mat-header-cell *matHeaderCellDef>Risk Score</mat-header-cell>
-                  <mat-cell *matCellDef="let issue">{{ (issue.riskScore * 100).toFixed(0) }}%</mat-cell>
+                  <mat-cell *matCellDef="let issue">{{ ((issue.score ?? (issue.riskScore * 100))).toFixed(0) }}%</mat-cell>
                 </ng-container>
                 <ng-container matColumnDef="summary">
                   <mat-header-cell *matHeaderCellDef>Summary</mat-header-cell>

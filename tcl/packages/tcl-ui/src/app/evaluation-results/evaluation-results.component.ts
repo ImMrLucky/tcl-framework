@@ -1386,7 +1386,7 @@ export class EvaluationResultsComponent implements OnInit {
         i.what?.primaryClaimId === issue.claimId ||
         i.issueId === issue.issueId
       );
-      return issueV2?.riskScore ? issueV2.riskScore * 100 : null;
+      return issueV2?.score ?? (issueV2?.riskScore ? issueV2.riskScore * 100 : null);
     }
     return null;
   }

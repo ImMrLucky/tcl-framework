@@ -47,6 +47,9 @@ export interface IssueScoringConfig {
   };
   impactMapping: Record<string, "low" | "medium" | "high">;
   categoryImpactMapping: Record<string, "low" | "medium" | "high">;
+  normalization?: {
+    maxRawScore?: number;
+  };
 }
 
 let cachedConfig: IssueScoringConfig | null = null;

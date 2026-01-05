@@ -38,7 +38,23 @@ export function rankIssuesV2(
   let scoredIssues: IssueV2[];
   if (scoringContext) {
     const scoringResult = scoreIssues(issues, scoringContext);
-    scoredIssues = scoringResult.issues;
+    // Ensure riskScore and severity match the computed score
+    scoredIssues = scoringResult.issues.map((issue) => {
+      const score = (issue as any).score ?? Math.round((issue.riskScore ?? 0) * 100);
+      const riskScore = Math.max(0, Math.min(1, score / 100));
+      
+      // Derive severity from riskScore using severityThresholds
+      // Note: severityDisplay is already computed in issue-scoring.ts (capped in transcript-only)
+      // Use it for UI display, but keep severity for "true underlying severity"
+      const severity = computeSeverity(riskScore, rankingConfig.severityThresholds);
+      
+      return {
+        ...issue,
+        score,
+        riskScore,
+        severity,
+      };
+    });
   } else {
     // Fallback to old scoring for backward compatibility
     scoredIssues = issues.map(issue => computeRiskScore(issue, rankingConfig));
@@ -236,7 +252,9 @@ function generateSummary(issues: IssueV2[], topCount: number): RankedIssues['sum
   
   for (const issue of issues) {
     byType[issue.type] = (byType[issue.type] || 0) + 1;
-    bySeverity[issue.severity] = (bySeverity[issue.severity] || 0) + 1;
+    // Use severityDisplay for summary (capped in transcript-only), fallback to severity
+    const sevForSummary = (issue as any).severityDisplay ?? issue.severity;
+    bySeverity[sevForSummary] = (bySeverity[sevForSummary] || 0) + 1;
     byCategory[issue.category] = (byCategory[issue.category] || 0) + 1;
   }
   

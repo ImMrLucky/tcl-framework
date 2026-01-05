@@ -79,6 +79,9 @@
     "consistency": "medium",
     "evidence": "low",
     "other": "low"
+  },
+  "normalization": {
+    "maxRawScore": 3.6
   }
 }
 

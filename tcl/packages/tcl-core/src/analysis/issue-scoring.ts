@@ -137,11 +137,16 @@ function scoreSingleIssue(
   
   penalties.transcriptOnlyCapPenalty = transcriptOnlyCapPenalty;
   
-  // Step 7: Compute final score
+  // Step 7: Compute final score with normalization to prevent saturation
   const baseScore = impactScore + verificationScore;
   const boosts = disputeScore + contradictionScore + commitmentScore + escalationScore + templateScore;
   const penaltyTotal = Object.values(penalties).reduce((sum, p) => sum + (p || 0), 0);
-  const score = Math.max(0, Math.min(100, (baseScore + boosts - penaltyTotal) * 100));
+  const rawScore = baseScore + boosts - penaltyTotal;
+  
+  // Normalize to 0..100 using max raw score
+  const maxRaw = config.normalization?.maxRawScore ?? getMaxRawScore(config);
+  const normalized = maxRaw > 0 ? Math.max(0, rawScore / maxRaw) : 0;
+  const score = Math.max(0, Math.min(100, Math.round(normalized * 100)));
   
   // Step 8: Build severity reasons
   const severityReason: string[] = [];
@@ -186,6 +191,26 @@ function scoreSingleIssue(
     severity: severityDisplay === 'high' ? 'high' : severityDisplay === 'medium' ? 'medium' : 'low',
     riskScore: score / 100,
   };
+}
+
+/**
+ * Compute maximum possible raw score for normalization
+ * This prevents score saturation by ensuring scores spread across the 0-100 range
+ */
+function getMaxRawScore(config: IssueScoringConfig): number {
+  const maxImpact = config.weights.impact.high;
+  const maxVerification = config.weights.verification.EXTERNAL_VERIFIED;
+  
+  // Max boosts (assume worst case: all could apply)
+  const maxBoosts =
+    (config.weights.disputeBoost || 0) +
+    (config.weights.contradictionBoost || 0) +
+    (config.weights.commitmentBoost || 0) +
+    (config.weights.escalationBoost || 0) +
+    (config.weights.regulatedTemplateBoost || 0);
+  
+  // Penalties reduce score, so we don't include them in max (they're subtracted)
+  return maxImpact + maxVerification + maxBoosts;
 }
 
 function determineImpact(issue: IssueV2, config: IssueScoringConfig): ImpactV2 {
