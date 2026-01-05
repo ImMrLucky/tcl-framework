@@ -225,7 +225,6 @@ interface IssueSummary {
 export class EvaluationResultsComponent implements OnInit {
   evaluationId: string = '';
   evaluation: Evaluation | null = null;
-  issues: Issue[] = [];
   loading = true;
   errorMessage = '';
 
@@ -242,7 +241,6 @@ export class EvaluationResultsComponent implements OnInit {
     'actions'
   ];
   
-  sortedIssues: Issue[] = [];
   topOffenders: Array<{ claimId: string; text: string; nodeBlameNorm: number }> = [];
   topContradictions: Array<{ claimAId: string; claimBId: string; weight: number }> = [];
   topSupports: Array<{ claimAId: string; claimBId: string; weight: number }> = [];
@@ -940,8 +938,12 @@ export class EvaluationResultsComponent implements OnInit {
     if (!counts.claims && !counts.contradicted) {
       const claims = this.evaluation?.report?.inputs?.claims || 
                      this.evaluation?.report?.claims || [];
-      const contradictedIssues = this.issues.filter(i => i.truthState === 'Contradicted');
-      const ungroundedIssues = this.issues.filter(i => i.truthState === 'Ungrounded');
+      // Use IssueV2 data if available, otherwise use report counts
+      const contradictedCount = this.allIssuesV2.filter(i => i.type === 'CONTRADICTION').length;
+      const ungroundedCount = this.allIssuesV2.filter(i => i.verification.level === 'NONE').length;
+      const reportCounts = this.evaluation?.report?.scores?.counts || {};
+      const contradictedIssues = { length: contradictedCount || reportCounts.contradicted || 0 };
+      const ungroundedIssues = { length: ungroundedCount || reportCounts.ungrounded || 0 };
       
       return {
         claims: claims.length,
@@ -995,54 +997,13 @@ export class EvaluationResultsComponent implements OnInit {
    */
   // PART 4: Defensive guard - ensure issues is always an array
   sortAndProcessIssues() {
-    if (!Array.isArray(this.issues)) {
-      this.issues = [];
-    }
-    const truthStateOrder: Record<string, number> = {
-      'Contradicted': 1,
-      'Ungrounded': 2,
-      'Inconclusive': 3,
-      'Supported': 4
-    };
-    
-    const severityOrder: Record<string, number> = {
-      'critical': 1,
-      'high': 2,
-      'medium': 3,
-      'low': 4
-    };
-    
-    this.sortedIssues = [...this.issues].sort((a, b) => {
-      // First by severity (if available from narratives)
-      const severityA = severityOrder[this.getSeverity(a)] || 99;
-      const severityB = severityOrder[this.getSeverity(b)] || 99;
-      if (severityA !== severityB) {
-        return severityA - severityB;
-      }
-      
-      // Then by truth state (handles nested structure)
-      const stateA = truthStateOrder[(a as any).what?.truthState || a.truthState] || 99;
-      const stateB = truthStateOrder[(b as any).what?.truthState || b.truthState] || 99;
-      if (stateA !== stateB) {
-        return stateA - stateB;
-      }
-      
-      // Then by importance/compositeScore desc (handles nested structure)
-      const importanceA = (a as any).confidence?.importance || a.importance || 0;
-      const importanceB = (b as any).confidence?.importance || b.importance || 0;
-      if (importanceA !== importanceB) {
-        return importanceB - importanceA;
-      }
-      
-      // Then by nodeBlameNorm desc (handles nested structure)
-      const blameA = (a as any).confidence?.nodeBlameNorm || a.nodeBlameNorm || 0;
-      const blameB = (b as any).confidence?.nodeBlameNorm || b.nodeBlameNorm || 0;
-      return blameB - blameA;
-    });
+    // DEPRECATED: IssueV2 is already sorted by risk score
+    // This method is kept for backward compatibility but does nothing
   }
 
   /**
-   * Convert IssueNarratives to Issue[] format for the table
+   * Convert IssueNarratives to Issue[] format for the table - DEPRECATED
+   * Legacy method kept for backward compatibility but not used with IssueV2
    */
   convertNarrativesToIssues(narratives: IssueNarrative[]): Issue[] {
     return narratives.map((narrative, index) => {
@@ -1206,21 +1167,16 @@ export class EvaluationResultsComponent implements OnInit {
         .slice(0, 5);
     }
     
-    // If no spectral nodeBlameNorm, try to derive from issues
-    if (this.topOffenders.length === 0 && Array.isArray(this.issues) && this.issues.length > 0) {
-      // Use issues with highest importance as top offenders (handles nested structure)
-      this.topOffenders = [...this.issues]
-        .sort((a, b) => {
-          const importanceA = (a as any).confidence?.importance || a.importance || 0;
-          const importanceB = (b as any).confidence?.importance || b.importance || 0;
-          return importanceB - importanceA;
-        })
+    // If no spectral nodeBlameNorm, try to derive from IssueV2
+    if (this.topOffenders.length === 0 && this.allIssuesV2.length > 0) {
+      // Use IssueV2 with highest risk score as top offenders
+      this.topOffenders = [...this.allIssuesV2]
+        .sort((a, b) => (b.riskScore || 0) - (a.riskScore || 0))
         .slice(0, 5)
         .map(issue => ({
-          claimId: issue.claimId,
-          text: (issue as any).what?.claimText || issue.claimText || this.getClaimText(issue.claimId, issue),
-          nodeBlameNorm: (issue as any).confidence?.nodeBlameNorm || issue.nodeBlameNorm || 
-                         (issue as any).confidence?.importance || issue.importance || 0
+          claimId: issue.what.primaryClaimId,
+          text: issue.what.claimText || issue.what.issueSummary || '',
+          nodeBlameNorm: issue.riskScore || 0
         }));
     }
     
@@ -1283,15 +1239,18 @@ export class EvaluationResultsComponent implements OnInit {
   /**
    * Update issue status
    */
-  async updateStatus(issue: Issue, newStatus: 'OPEN' | 'ACKNOWLEDGED' | 'RESOLVED' | 'FALSE_POSITIVE') {
+  async updateStatus(issue: Issue | IssueV2, newStatus: 'OPEN' | 'ACKNOWLEDGED' | 'RESOLVED' | 'FALSE_POSITIVE') {
     try {
-      const result = await this.auditService.updateIssueStatus(this.evaluationId, issue.claimId, newStatus).toPromise();
+      const claimId = (issue as IssueV2).what?.primaryClaimId || (issue as Issue).claimId;
+      const result = await this.auditService.updateIssueStatus(this.evaluationId, claimId, newStatus).toPromise();
       if (result?.success) {
-        // Update local issue
-        const issueIndex = this.issues.findIndex(i => i.claimId === issue.claimId);
-        if (issueIndex !== -1) {
-          this.issues[issueIndex].status = newStatus;
-          this.sortAndProcessIssues();
+        // Update local IssueV2 if it exists
+        if ('issueId' in issue && this.allIssuesV2.length > 0) {
+          const issueIndex = this.allIssuesV2.findIndex(i => i.issueId === (issue as IssueV2).issueId);
+          if (issueIndex !== -1) {
+            // Note: IssueV2 doesn't have status field, but we can track it locally if needed
+            // For now, just show success message
+          }
         }
         const snackBarRef = this.snackBar.open('Status updated successfully', 'Close', { duration: 3000 });
         snackBarRef.onAction().subscribe(() => snackBarRef.dismiss());
