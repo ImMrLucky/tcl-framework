@@ -30,6 +30,12 @@ git push
      - `PORT` = `8787` (optional, Railway auto-assigns)
      - `TCL_SPECTRAL_URL` = `http://your-spectral:8080` (if using)
      - `OPENAI_API_KEY` = `your-key` (if using)
+     - **CRITICAL for Audio Transcription:**
+       - `USE_WASM` = `1`
+       - `ONNXRUNTIME_DISABLE_NATIVE` = `1`
+       - `TRANSFORMERS_USE_WASM` = `1`
+       - `USE_BROWSER` = `0`
+       - `USE_WASM_ONLY` = `1`
 
 3. **Get Your URL**:
    - Click on your service → Settings

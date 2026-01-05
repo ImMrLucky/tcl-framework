@@ -1,3 +1,15 @@
+// CRITICAL: Set WASM-only environment variables BEFORE any imports
+// This must happen before @xenova/transformers or any module that uses it is imported
+// to prevent onnxruntime-node from trying to load native bindings
+if (typeof process !== 'undefined' && process.env) {
+  if (!process.env.USE_WASM) process.env.USE_WASM = '1';
+  if (!process.env.ONNXRUNTIME_EXECUTION_PROVIDERS) process.env.ONNXRUNTIME_EXECUTION_PROVIDERS = '';
+  if (!process.env.ONNXRUNTIME_DISABLE_NATIVE) process.env.ONNXRUNTIME_DISABLE_NATIVE = '1';
+  if (!process.env.TRANSFORMERS_USE_WASM) process.env.TRANSFORMERS_USE_WASM = '1';
+  if (!process.env.USE_BROWSER) process.env.USE_BROWSER = '0';
+  if (!process.env.USE_WASM_ONLY) process.env.USE_WASM_ONLY = '1';
+}
+
 import express from "express";
 import { URL } from "url";
 import multer from "multer";

@@ -28,6 +28,10 @@ RUN npm run build
 # Expose port
 EXPOSE 8787
 
-# Start server
-CMD ["node", "dist/server/express.js"]
+# Copy startup script
+COPY start.sh ./
+RUN chmod +x start.sh
+
+# Start server using startup script (sets WASM env vars)
+CMD ["./start.sh"]
 

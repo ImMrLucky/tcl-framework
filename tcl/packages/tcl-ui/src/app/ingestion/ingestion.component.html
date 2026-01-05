@@ -57,6 +57,36 @@
             </mat-form-field>
           </div>
 
+            <div class="file-upload-section">
+                <input
+                        type="file"
+                        #fileInput
+                        (change)="onFileSelected($event)"
+                        accept=".txt,.csv,.json,.vtt,.srt,.wav,.mp3,.flac,.m4a,.ogg,.opus,.aac"
+                        style="display: none"
+                />
+                <button
+                        mat-stroked-button
+                        type="button"
+                        (click)="fileInput.click()"
+                        [disabled]="loading"
+                >
+                    <mat-icon>upload</mat-icon>
+                    Upload File
+                </button>
+                <div class="file-formats-hint">
+                    <strong>Text:</strong> .txt, .csv, .json &nbsp;|&nbsp;
+                    <strong>Subtitles:</strong> .vtt, .srt &nbsp;|&nbsp;
+                    <strong>Audio:</strong> .wav, .mp3, .flac, .m4a, .ogg, .opus
+                </div>
+                <div *ngIf="selectedFileName" class="selected-file">
+                    <mat-icon>{{ isAudioFile ? 'audiotrack' : (isSubtitleFile ? 'subtitles' : 'insert_drive_file') }}</mat-icon>
+                    {{ selectedFileName }}
+                    <mat-chip *ngIf="isAudioFile" class="file-type-chip">Audio</mat-chip>
+                    <mat-chip *ngIf="isSubtitleFile" class="file-type-chip">Subtitle</mat-chip>
+                </div>
+            </div>
+
           <!-- Single File Mode -->
           <ng-container *ngIf="!linkingMode">
             <div class="form-row">
@@ -76,35 +106,7 @@
               </mat-form-field>
             </div>
 
-            <div class="file-upload-section">
-              <input
-                type="file"
-                #fileInput
-                (change)="onFileSelected($event)"
-                accept=".txt,.csv,.json,.vtt,.srt,.wav,.mp3,.flac,.m4a,.ogg,.opus,.aac"
-                style="display: none"
-              />
-              <button
-                mat-stroked-button
-                type="button"
-                (click)="fileInput.click()"
-                [disabled]="loading"
-              >
-                <mat-icon>upload</mat-icon>
-                Upload File
-              </button>
-              <div class="file-formats-hint">
-                <strong>Text:</strong> .txt, .csv, .json &nbsp;|&nbsp;
-                <strong>Subtitles:</strong> .vtt, .srt &nbsp;|&nbsp;
-                <strong>Audio:</strong> .wav, .mp3, .flac, .m4a, .ogg, .opus
-              </div>
-              <div *ngIf="selectedFileName" class="selected-file">
-                <mat-icon>{{ isAudioFile ? 'audiotrack' : (isSubtitleFile ? 'subtitles' : 'insert_drive_file') }}</mat-icon>
-                {{ selectedFileName }}
-                <mat-chip *ngIf="isAudioFile" class="file-type-chip">Audio</mat-chip>
-                <mat-chip *ngIf="isSubtitleFile" class="file-type-chip">Subtitle</mat-chip>
-              </div>
-            </div>
+
           </ng-container>
 
           <!-- Linking Mode: Audio + Transcript -->

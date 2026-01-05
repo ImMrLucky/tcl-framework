@@ -48,24 +48,8 @@ export async function transcribeAudio(
 
     try {
       // Dynamic import - env vars are already set at module level
-      // Wrap in try-catch to handle onnxruntime-node loading errors
-      let pipeline: any;
-      let env: any;
-      
-      try {
-        const transformers = await import('@xenova/transformers');
-        pipeline = transformers.pipeline;
-        env = transformers.env;
-      } catch (importError: any) {
-        // If import fails due to onnxruntime-node, provide clearer error
-        if (importError.message?.includes('onnxruntime') || importError.message?.includes('ld-linux')) {
-          throw new Error(
-            'Failed to load transformers library. The system is trying to use native onnxruntime-node bindings. ' +
-            'Please ensure environment variables USE_WASM=1 and ONNXRUNTIME_DISABLE_NATIVE=1 are set before starting the server.'
-          );
-        }
-        throw importError;
-      }
+      // @xenova/transformers should respect USE_WASM=1 and use WASM backend
+      const { pipeline, env } = await import('@xenova/transformers');
       
       // Force WASM backend explicitly
       // This prevents errors in containers that don't have native libraries
