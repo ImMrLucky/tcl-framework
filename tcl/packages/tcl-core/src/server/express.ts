@@ -914,7 +914,7 @@ app.post("/validate", async (req, res) => {
               
               // Rank issues (deterministic) with scoring context
               const scoringContext = {
-                mode: evidenceMode === 'TRANSCRIPT_ONLY' ? 'transcript_only' : 'with_evidence',
+                mode: (evidenceMode === 'TRANSCRIPT_ONLY' ? 'transcript_only' : 'with_evidence') as 'transcript_only' | 'with_evidence',
                 numSources: (input.sources?.length ?? 0),
                 graphStatus: out.report?.graph?.status,
                 templateId: (out.report?.manifest as any)?.templateId,

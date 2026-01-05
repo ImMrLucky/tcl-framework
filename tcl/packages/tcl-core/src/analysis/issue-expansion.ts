@@ -107,15 +107,8 @@ export function expandIssueCandidates(input: IssueExpansionInput): IssueExpansio
       const isUnverified = truthState === 'UNVERIFIED' || truthState === 'UNVERIFIED_CLAIM';
       const hasGrounding = groundedClaimIds.has(claim.id) || (claim.evidenceRefs?.length ?? 0) > 0;
   
-  // Determine verification level
-  let verificationLevel: VerificationLevelV2 = 'NONE';
-  if (input.evidenceMode === 'TRANSCRIPT_PLUS_EXTERNAL' && hasGrounding) {
-    verificationLevel = 'EXTERNAL_VERIFIED';
-  } else if (input.evidenceMode === 'TRANSCRIPT_ONLY' && hasGrounding) {
-    verificationLevel = 'TRANSCRIPT_ONLY';
-  } else {
-    verificationLevel = 'NONE';
-  }
+      // Determine verification level (we're in TRANSCRIPT_ONLY mode, so it's either TRANSCRIPT_ONLY or NONE)
+      let verificationLevel: VerificationLevelV2 = hasGrounding ? 'TRANSCRIPT_ONLY' : 'NONE';
       const isAgent = claim.meta?.speaker === 'Agent' || claim.meta?.speaker === 'AGENT';
       
       // More lenient: if claimKind is not set, assume it's an assertion if it's from an agent
@@ -312,7 +305,10 @@ function createContradictionIssue(
     type: 'CONTRADICTION',
     category: 'consistency',
     severity: 'medium', // Will be recomputed by ranking
+    severityDisplay: 'medium' as const, // Will be recomputed by scoring
+    impact: 'high' as const, // Contradictions are high impact
     riskScore: 0, // Will be computed by ranking
+    score: 0, // Will be computed by scoring
     confidence: edge.weight || 0.7,
     reviewRequired: true,
     verification: {
@@ -431,7 +427,10 @@ function createUnverifiedClaimIssue(
     type: 'UNVERIFIED_CLAIM',
     category: 'evidence',
     severity: 'low', // Will be recomputed by ranking
+    severityDisplay: 'low' as const, // Will be recomputed by scoring
+    impact: 'low' as const, // Unverified claims are low impact
     riskScore: 0, // Will be computed by ranking
+    score: 0, // Will be computed by scoring
     confidence: claim.confidence || 0.7,
     reviewRequired: true, // Agent assertions/promises require review
     verification: {
@@ -511,7 +510,10 @@ function createUngroundedClaimIssue(
     type: 'UNGROUNDED',
     category: 'evidence',
     severity: 'medium', // Will be recomputed by ranking
+    severityDisplay: 'medium' as const, // Will be recomputed by scoring
+    impact: 'low' as const, // Ungrounded claims are low impact
     riskScore: 0, // Will be computed by ranking
+    score: 0, // Will be computed by scoring
     confidence: claim.confidence || 0.5,
     reviewRequired: true,
     verification: {
@@ -640,7 +642,10 @@ function createRiskSignalIssue(
     type: 'RISK_SIGNAL',
     category,
     severity: 'high', // Will be recomputed by ranking
+    severityDisplay: 'high' as const, // Will be recomputed by scoring (may be capped)
+    impact: 'high' as const, // Risk signals are high impact
     riskScore: 0, // Will be computed by ranking
+    score: 0, // Will be computed by scoring
     confidence: claim.confidence || 0.7,
     reviewRequired: true,
     verification: {
