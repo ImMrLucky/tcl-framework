@@ -129,9 +129,9 @@
         </div>
 
         <!-- Primary Risk Categories -->
-        <div class="risk-categories" *ngIf="issueSummaryV2?.byType && getObjectKeys(issueSummaryV2.byType).length > 0">
+        <div class="risk-categories" *ngIf="issueSummaryV2?.byType && getObjectKeys(issueSummaryV2?.byType).length > 0">
           <span class="category-label">Primary Risk Areas:</span>
-          <span class="category-chip" *ngFor="let cat of getObjectKeys(issueSummaryV2.byType)">
+          <span class="category-chip" *ngFor="let cat of getObjectKeys(issueSummaryV2?.byType)">
             <mat-icon class="category-icon">{{ getCategoryIcon(cat) }}</mat-icon>
             {{ getCategoryLabel(cat) }}
           </span>
@@ -192,8 +192,8 @@
 
           <div class="summary-metric">
             <div class="metric-label">Total Issues</div>
-            <div class="metric-value" [class.has-issues]="(issues?.length ?? 0) > 0">
-              {{ issues?.length ?? 0 }}
+            <div class="metric-value" [class.has-issues]="(allIssuesV2?.length ?? 0) > 0">
+              {{ allIssuesV2?.length ?? 0 }}
             </div>
             <div class="metric-sublabel">requiring review</div>
           </div>
