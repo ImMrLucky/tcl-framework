@@ -296,26 +296,6 @@ export class EvaluationResultsComponent implements OnInit {
       // Load allIssuesV2 and topIssuesV2
       if (report?.allIssuesV2 && Array.isArray(report.allIssuesV2)) {
         this.allIssuesV2 = report.allIssuesV2;
-        console.log('✅ Loaded allIssuesV2:', this.allIssuesV2.length);
-      }
-      
-      if (report?.topIssuesV2 && Array.isArray(report.topIssuesV2)) {
-        this.topIssuesV2 = report.topIssuesV2;
-        console.log('✅ Loaded topIssuesV2:', this.topIssuesV2.length);
-      }
-      
-      if (report?.issueSummaryV2) {
-        this.issueSummaryV2 = report.issueSummaryV2;
-        console.log('✅ Loaded issueSummaryV2:', this.issueSummaryV2);
-      }
-      
-      // Extract top offenders from IssueV2 if available
-      this.extractTopOffenders();
-      }
-      
-      // Load IssueV2 (Enterprise-Grade) from report
-      if (report?.allIssuesV2 && Array.isArray(report.allIssuesV2)) {
-        this.allIssuesV2 = report.allIssuesV2;
         this.topIssuesV2 = report.topIssuesV2 || report.allIssuesV2.slice(0, 4);
         this.issueSummaryV2 = report.issueSummaryV2 || {
           totalIssues: this.allIssuesV2.length,
@@ -325,12 +305,10 @@ export class EvaluationResultsComponent implements OnInit {
           topIssuesCount: this.topIssuesV2.length,
           allIssuesCount: this.allIssuesV2.length,
         };
-        console.log('📊 Loaded IssueV2 (Enterprise-Grade):', {
+        console.log('✅ Loaded IssueV2 (Enterprise-Grade):', {
           allIssuesCount: this.allIssuesV2.length,
           topIssuesCount: this.topIssuesV2.length,
           summary: this.issueSummaryV2,
-          byType: this.issueSummaryV2?.byType || {},
-          bySeverity: this.issueSummaryV2?.bySeverity || { low: 0, medium: 0, high: 0, critical: 0 },
         });
       } else {
         // Initialize empty if not present
@@ -338,6 +316,9 @@ export class EvaluationResultsComponent implements OnInit {
         this.topIssuesV2 = [];
         this.issueSummaryV2 = null;
       }
+      
+      // Extract top offenders from IssueV2 if available
+      this.extractTopOffenders();
     } catch (error: any) {
       console.error('Load evaluation error:', error);
       this.errorMessage = error.error?.error || error.message || 'Failed to load evaluation';
@@ -852,6 +833,10 @@ export class EvaluationResultsComponent implements OnInit {
       return;
     }
     window.open(`/api/evaluations/${this.evaluationId}/export/issues-v2/pdf`, '_blank');
+  }
+
+  getObjectKeys(obj: any): string[] {
+    return obj ? Object.keys(obj) : [];
   }
 
   exportNarrativesHTML() {
