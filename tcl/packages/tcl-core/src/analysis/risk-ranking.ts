@@ -30,9 +30,9 @@ export function rankIssuesV2(issues: IssueV2[], config?: RiskRankingConfig): Ran
   // Compute risk scores for all issues
   const scoredIssues = issues.map(issue => computeRiskScore(issue, rankingConfig));
   
-  // Sort deterministically
+  // Sort deterministically by composite score (riskScore * 100)
   const sorted = scoredIssues.sort((a, b) => {
-    // Primary: riskScore desc
+    // Primary: riskScore desc (this is effectively compositeScore)
     if (b.riskScore !== a.riskScore) {
       return b.riskScore - a.riskScore;
     }
@@ -80,47 +80,95 @@ export function rankIssuesV2(issues: IssueV2[], config?: RiskRankingConfig): Ran
 }
 
 /**
- * Compute risk score for a single issue
- * Formula: riskScore = clamp01(base * (0.6 + 0.4*edgeStrength) * speakerMult * verifyMult)
+ * Compute risk score for a single issue using composite scoring formula
+ * Formula: compositeScore = 100 * clamp01(
+ *   w_severity * severity01 +
+ *   w_category * category01 +
+ *   w_confidence * confidence +
+ *   w_structure * structuralImportance +
+ *   w_impact * impact01
+ *   - w_evidencePenalty * evidencePenalty01
+ * )
  */
 function computeRiskScore(issue: IssueV2, config: RiskRankingConfig): IssueV2 {
-  // Base score from type
-  const typeBase = config.weights.typeBase[issue.type] || config.weights.typeBase.OTHER;
+  // Get weights (with defaults if not in config)
+  const w_severity = config.weights.severityWeight || 0.25;
+  const w_category = 0.15; // Default if not in config
+  const w_confidence = config.weights.confidenceWeight || 0.20;
+  const w_structure = config.weights.structuralImportanceWeight || 0.15;
+  const w_impact = config.weights.customerImpactWeight || 0.30;
+  const w_evidencePenalty = config.weights.evidencePenaltyWeight || 0.10;
   
-  // Edge strength: max(edge.weight) if present, else avg(evidence.weight), else confidence
-  let edgeStrength = issue.confidence;
+  // Normalize severity to 0..1 (critical=1.0, high=0.75, medium=0.5, low=0.25)
+  const severity01 = {
+    critical: 1.0,
+    high: 0.75,
+    medium: 0.5,
+    low: 0.25,
+  }[issue.severity] || 0.5;
+  
+  // Category multiplier (normalized to 0..1)
+  const categoryMult = config.weights.categoryMultiplier?.[issue.category] || 1.0;
+  const category01 = clamp01(categoryMult / 1.3); // Normalize assuming max is 1.3
+  
+  // Confidence (already 0..1)
+  const confidence01 = issue.confidence;
+  
+  // Structural importance (from spectral if available, else use edge strength)
+  let structuralImportance = 0.5; // Default
   if (issue.evidence.edges && issue.evidence.edges.length > 0) {
-    edgeStrength = Math.max(...issue.evidence.edges.map(e => e.weight));
+    structuralImportance = Math.max(...issue.evidence.edges.map(e => e.weight || 0));
   } else if (issue.evidence.refs && issue.evidence.refs.length > 0) {
     const weights = issue.evidence.refs.map(r => r.weight || 0).filter(w => w > 0);
     if (weights.length > 0) {
-      edgeStrength = weights.reduce((a, b) => a + b, 0) / weights.length;
+      structuralImportance = weights.reduce((a, b) => a + b, 0) / weights.length;
     }
   }
   
-  // Speaker multiplier
-  const speakerMult = config.weights.speakerMultiplier[issue.who.speaker] || 1.0;
+  // Customer impact (based on type and category)
+  let impact01 = 0.5; // Default
+  if (issue.type === 'RISK_SIGNAL' || issue.type === 'CONTRADICTION') {
+    impact01 = 0.8;
+  } else if (issue.category === 'compliance' || issue.compliance.tags?.some(tag => 
+    tag.includes('fee') || tag.includes('billing') || tag.includes('refund'))) {
+    impact01 = 0.7;
+  } else if (issue.compliance.tags?.includes('high_impact')) {
+    impact01 = 0.75;
+  }
   
-  // Verification multiplier
-  const verifyMult = config.weights.verificationMultiplier[issue.verification.level] || 1.0;
+  // Evidence penalty (lower score if transcript-only or no evidence)
+  let evidencePenalty01 = 0;
+  if (issue.verification.level === 'TRANSCRIPT_ONLY') {
+    evidencePenalty01 = 0.2; // Small penalty for transcript-only
+  } else if (issue.verification.level === 'NONE') {
+    evidencePenalty01 = 0.4; // Larger penalty for no evidence
+  }
   
-  // Compute risk score
-  const riskScore = clamp01(
-    typeBase * (0.6 + 0.4 * edgeStrength) * speakerMult * verifyMult
+  // Compute composite score (0..100)
+  const compositeScore = 100 * clamp01(
+    w_severity * severity01 +
+    w_category * category01 +
+    w_confidence * confidence01 +
+    w_structure * structuralImportance +
+    w_impact * impact01 -
+    w_evidencePenalty * evidencePenalty01
   );
   
-  // Determine severity from thresholds
+  // Convert to riskScore (0..1) for backward compatibility
+  const riskScore = compositeScore / 100;
+  
+  // Determine severity from composite score thresholds
   const severity = computeSeverity(riskScore, config.severityThresholds);
   
   // Update legal hold suggestion (high/critical + agent + disclosure/billing)
   const legalHoldSuggested = 
     (severity === 'high' || severity === 'critical') &&
     issue.who.speaker === 'AGENT' &&
-    (issue.category === 'disclosure' || issue.category === 'billing');
+    (issue.category === 'disclosure' || issue.category === 'billing' || issue.category === 'compliance');
   
   return {
     ...issue,
-    riskScore,
+    riskScore, // Keep as 0..1 for backward compatibility
     severity,
     compliance: {
       ...issue.compliance,

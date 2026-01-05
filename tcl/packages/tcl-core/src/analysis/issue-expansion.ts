@@ -2,10 +2,12 @@
  * Issue Expansion Module
  * 
  * Expands graph edges into enterprise-grade IssueV2 objects.
- * Implements rules A-C from the spec:
+ * Implements comprehensive issue generation:
  * - A: Contradiction edges → CONTRADICTION issues
  * - B: Unverified claims → UNVERIFIED_CLAIM issues
- * - C: Optional pattern issues (if signals exist)
+ * - C: Ungrounded claims → UNGROUNDED issues
+ * - D: Risk signals → RISK_SIGNAL issues
+ * - E: Policy violations → POLICY issues (if enabled)
  */
 
 import { createHash } from 'crypto';
@@ -37,10 +39,16 @@ export interface IssueExpansionInput {
     configHash?: string;
     inputHash?: string;
   };
+  // Optional: spectral results for structural importance
+  spectralResults?: {
+    nodeBlameNorm?: Record<string, number>;
+    truthStates?: Record<string, string>;
+  };
 }
 
 export interface IssueExpansionOutput {
   allIssues: IssueV2[];
+  issuesByClaim: Record<string, IssueV2[]>; // Per-claim issues
   issueKeys: Set<string>; // For deduplication tracking
 }
 
@@ -51,13 +59,22 @@ export function expandIssueCandidates(input: IssueExpansionInput): IssueExpansio
   const issues: IssueV2[] = [];
   const issueKeys = new Set<string>();
   const claimMap = new Map(input.claims.map(c => [c.id, c]));
+  const config = getRiskRankingConfig();
+  const evidenceQuotesMax = config.issueLimits?.evidenceQuotesMax || 5;
   
   // Build grounded claim IDs
   const groundedClaimIds = new Set(input.grounding.map(g => g.claimId));
   
+  // Build contradicted claim IDs (to avoid duplicate issues)
+  const contradictedClaimIds = new Set<string>();
+  for (const edge of input.contradictions) {
+    contradictedClaimIds.add(edge.claimA);
+    contradictedClaimIds.add(edge.claimB);
+  }
+  
   // Rule A: Contradiction edges → CONTRADICTION issues
   for (const edge of input.contradictions) {
-    const issue = createContradictionIssue(edge, claimMap, input);
+    const issue = createContradictionIssue(edge, claimMap, input, evidenceQuotesMax);
     if (issue && !issueKeys.has(issue.issueKey)) {
       issues.push(issue);
       issueKeys.add(issue.issueKey);
@@ -75,9 +92,9 @@ export function expandIssueCandidates(input: IssueExpansionInput): IssueExpansio
       const isAssertionOrPromise = claim.claimKind === 'assertion' || claim.claimKind === 'promise';
       
       // Only flag agent assertions/promises that are unverified
-      // Contradicted claims are handled by Rule A
-      if (isUnverified && hasGrounding && isAgent && isAssertionOrPromise) {
-        const issue = createUnverifiedClaimIssue(claim, input);
+      // Skip if already contradicted (handled by Rule A)
+      if (isUnverified && hasGrounding && isAgent && isAssertionOrPromise && !contradictedClaimIds.has(claim.id)) {
+        const issue = createUnverifiedClaimIssue(claim, input, evidenceQuotesMax);
         if (issue && !issueKeys.has(issue.issueKey)) {
           issues.push(issue);
           issueKeys.add(issue.issueKey);
@@ -86,11 +103,76 @@ export function expandIssueCandidates(input: IssueExpansionInput): IssueExpansio
     }
   }
   
-  // Rule C: Optional pattern issues (only if signals exist)
-  // These are skipped for now - implement when pattern detection is available
+  // Rule C: Ungrounded claims → UNGROUNDED issues
+  // Claims with no grounding edges at all
+  for (const claim of input.claims) {
+    const truthState = claim.truthState?.toUpperCase();
+    const isUngrounded = truthState === 'UNGROUNDED' || (!groundedClaimIds.has(claim.id) && (claim.evidenceRefs?.length ?? 0) === 0);
+    const isAgent = claim.meta?.speaker === 'Agent' || claim.meta?.speaker === 'AGENT';
+    const isAssertionOrPromise = claim.claimKind === 'assertion' || claim.claimKind === 'promise';
+    
+    // Only flag agent assertions/promises that are ungrounded
+    // Skip if already contradicted or unverified (handled by Rules A & B)
+    if (isUngrounded && isAgent && isAssertionOrPromise && 
+        !contradictedClaimIds.has(claim.id) && 
+        !issueKeys.has(`unverified:${claim.id}`)) {
+      const issue = createUngroundedClaimIssue(claim, input, evidenceQuotesMax);
+      if (issue && !issueKeys.has(issue.issueKey)) {
+        issues.push(issue);
+        issueKeys.add(issue.issueKey);
+      }
+    }
+  }
+  
+  // Rule D: Risk signals → RISK_SIGNAL issues
+  // High-impact assertions: money, fees, cancellation, refund promises, legal threats
+  for (const claim of input.claims) {
+    const isAgent = claim.meta?.speaker === 'Agent' || claim.meta?.speaker === 'AGENT';
+    const isAssertionOrPromise = claim.claimKind === 'assertion' || claim.claimKind === 'promise';
+    
+    if (isAgent && isAssertionOrPromise) {
+      const riskSignals = detectRiskSignals(claim);
+      if (riskSignals.length > 0 && !contradictedClaimIds.has(claim.id)) {
+        const issue = createRiskSignalIssue(claim, input, riskSignals, evidenceQuotesMax);
+        if (issue && !issueKeys.has(issue.issueKey)) {
+          issues.push(issue);
+          issueKeys.add(issue.issueKey);
+        }
+      }
+    }
+  }
+  
+  // Rule E: Policy violations → POLICY issues
+  // Placeholder for future policy matching (if enabled)
+  // Currently skipped - implement when policy matching is available
+  
+  // Group issues by claim
+  const issuesByClaim: Record<string, IssueV2[]> = {};
+  for (const issue of issues) {
+    const claimId = issue.what.primaryClaimId;
+    if (!issuesByClaim[claimId]) {
+      issuesByClaim[claimId] = [];
+    }
+    issuesByClaim[claimId].push(issue);
+  }
+  
+  // Apply per-claim limits
+  const perClaimMax = config.issueLimits?.perClaimMax || 10;
+  for (const claimId in issuesByClaim) {
+    if (issuesByClaim[claimId].length > perClaimMax) {
+      // Sort by risk score (will be computed later, but sort by type priority for now)
+      issuesByClaim[claimId].sort((a, b) => {
+        const typeAIdx = config.typePriority.indexOf(a.type);
+        const typeBIdx = config.typePriority.indexOf(b.type);
+        return typeAIdx - typeBIdx; // Lower index = higher priority
+      });
+      issuesByClaim[claimId] = issuesByClaim[claimId].slice(0, perClaimMax);
+    }
+  }
   
   return {
     allIssues: issues,
+    issuesByClaim,
     issueKeys,
   };
 }
@@ -101,7 +183,8 @@ export function expandIssueCandidates(input: IssueExpansionInput): IssueExpansio
 function createContradictionIssue(
   edge: ContradictionEdge,
   claimMap: Map<string, Claim>,
-  input: IssueExpansionInput
+  input: IssueExpansionInput,
+  evidenceQuotesMax: number
 ): IssueV2 | null {
   const claimA = claimMap.get(edge.claimA);
   const claimB = claimMap.get(edge.claimB);
@@ -115,10 +198,10 @@ function createContradictionIssue(
   const issueKey = `contradiction:${sortedIds[0]}:${sortedIds[1]}`;
   const issueId = generateIssueId(input.runId, issueKey);
   
-  // Extract evidence refs (best 1-2 quotes from each claim)
+  // Extract evidence refs (best quotes from each claim, limited by config)
   const evidenceRefs = [];
   if (claimA.evidenceRefs && claimA.evidenceRefs.length > 0) {
-    evidenceRefs.push(...claimA.evidenceRefs.slice(0, 2).map(ref => ({
+    evidenceRefs.push(...claimA.evidenceRefs.slice(0, evidenceQuotesMax).map(ref => ({
       sourceType: 'TRANSCRIPT' as const,
       sourceId: ref.sourceId || `e-transcript-${ref.turnIndex || 0}`,
       quote: ref.quote || claimA.text,
@@ -127,7 +210,7 @@ function createContradictionIssue(
     })));
   }
   if (claimB.evidenceRefs && claimB.evidenceRefs.length > 0) {
-    evidenceRefs.push(...claimB.evidenceRefs.slice(0, 2).map(ref => ({
+    evidenceRefs.push(...claimB.evidenceRefs.slice(0, evidenceQuotesMax).map(ref => ({
       sourceType: 'TRANSCRIPT' as const,
       sourceId: ref.sourceId || `e-transcript-${ref.turnIndex || 0}`,
       quote: ref.quote || claimB.text,
@@ -218,16 +301,14 @@ function createContradictionIssue(
  */
 function createUnverifiedClaimIssue(
   claim: Claim,
-  input: IssueExpansionInput
+  input: IssueExpansionInput,
+  evidenceQuotesMax: number
 ): IssueV2 | null {
-  // This function is only called for agent assertions/promises
-  // (filtered in expandIssueCandidates)
-  
   const issueKey = `unverified:${claim.id}`;
   const issueId = generateIssueId(input.runId, issueKey);
   
-  // Extract evidence refs (transcript quotes)
-  const evidenceRefs = (claim.evidenceRefs || []).slice(0, 2).map(ref => ({
+  // Extract evidence refs (transcript quotes, limited by config)
+  const evidenceRefs = (claim.evidenceRefs || []).slice(0, evidenceQuotesMax).map(ref => ({
     sourceType: 'TRANSCRIPT' as const,
     sourceId: ref.sourceId || `e-transcript-${ref.turnIndex || 0}`,
     quote: ref.quote || claim.text,
@@ -321,6 +402,214 @@ function createUnverifiedClaimIssue(
 }
 
 /**
+ * Rule C: Create UNGROUNDED issue
+ */
+function createUngroundedClaimIssue(
+  claim: Claim,
+  input: IssueExpansionInput,
+  evidenceQuotesMax: number
+): IssueV2 | null {
+  const issueKey = `ungrounded:${claim.id}`;
+  const issueId = generateIssueId(input.runId, issueKey);
+  
+  const speaker: SpeakerV2 = 
+    claim.meta?.speaker === 'Agent' || claim.meta?.speaker === 'AGENT' ? 'AGENT' :
+    claim.meta?.speaker === 'Customer' || claim.meta?.speaker === 'CUSTOMER' ? 'CUSTOMER' :
+    'UNKNOWN';
+  
+  // Compliance tags
+  const complianceTags: string[] = ['missing_evidence'];
+  if (claim.claimKind === 'promise') {
+    complianceTags.push('commitment_risk', 'promise_tracking');
+  }
+  
+  // Disclaimers
+  const disclaimers: string[] = [
+    'This claim has no grounding evidence in the transcript or external sources.',
+  ];
+  
+  return {
+    issueId,
+    issueKey,
+    runId: input.runId,
+    conversationId: input.conversationId,
+    type: 'UNGROUNDED',
+    category: 'evidence',
+    severity: 'medium', // Will be recomputed by ranking
+    riskScore: 0, // Will be computed by ranking
+    confidence: claim.confidence || 0.5,
+    reviewRequired: true,
+    verification: {
+      level: 'NONE',
+      reasonCodes: ['NO_GROUNDING_EVIDENCE'],
+    },
+    who: {
+      speaker,
+      turnIndex: claim.meta?.turnIndex,
+    },
+    what: {
+      primaryClaimId: claim.id,
+      claimText: claim.text,
+      issueSummary: `Ungrounded claim: "${claim.text.substring(0, 80)}..."`,
+      issueDetail: `Claim "${claim.text}" (${claim.id}) has no grounding evidence in the transcript or external sources. This claim cannot be verified or traced to any source material.`,
+    },
+    evidence: {
+      refs: [], // No evidence refs for ungrounded claims
+      edges: [],
+    },
+    compliance: {
+      tags: complianceTags,
+      impactedPolicies: [],
+      legalHoldSuggested: false,
+      disclaimers,
+    },
+    audit: {
+      createdAt: new Date().toISOString(),
+      engineVersion: input.audit.engineVersion,
+      scorerId: input.audit.scorerId,
+      modelFingerprint: input.audit.modelFingerprint,
+      configHash: input.audit.configHash,
+      inputHash: input.audit.inputHash,
+    },
+  };
+}
+
+/**
+ * Rule D: Detect risk signals in a claim
+ */
+function detectRiskSignals(claim: Claim): string[] {
+  const signals: string[] = [];
+  const text = claim.text.toLowerCase();
+  
+  // Money/fees
+  if (/\$[\d,]+|\d+\s*(dollars?|cents?)/.test(text) || 
+      /\b(fee|fees|charge|charges|cost|costs|price|payment|billing|bill)\b/.test(text)) {
+    signals.push('MONEY_FEES');
+  }
+  
+  // Cancellation/termination
+  if (/\b(cancel|cancellation|terminate|termination)\b/.test(text)) {
+    signals.push('CANCELLATION');
+  }
+  
+  // Refunds/credits
+  if (/\b(refund|credit|reimburse)\b/.test(text)) {
+    signals.push('REFUND');
+  }
+  
+  // Legal/regulatory threats
+  if (/\b(legal|lawyer|attorney|sue|lawsuit|complaint|regulatory|fcc|ftc)\b/.test(text)) {
+    signals.push('LEGAL_ESCALATION');
+  }
+  
+  // Contract terms
+  if (/\b(contract|agreement|terms|policy|violation|breach)\b/.test(text)) {
+    signals.push('CONTRACT_TERMS');
+  }
+  
+  return signals;
+}
+
+/**
+ * Rule D: Create RISK_SIGNAL issue
+ */
+function createRiskSignalIssue(
+  claim: Claim,
+  input: IssueExpansionInput,
+  riskSignals: string[],
+  evidenceQuotesMax: number
+): IssueV2 | null {
+  // Create one issue per signal type (or combine if multiple)
+  const signalKey = riskSignals.sort().join('_');
+  const issueKey = `risk_signal:${signalKey}:${claim.id}`;
+  const issueId = generateIssueId(input.runId, issueKey);
+  
+  // Extract evidence refs (transcript quotes, limited by config)
+  const evidenceRefs = (claim.evidenceRefs || []).slice(0, evidenceQuotesMax).map(ref => ({
+    sourceType: 'TRANSCRIPT' as const,
+    sourceId: ref.sourceId || `e-transcript-${ref.turnIndex || 0}`,
+    quote: ref.quote || claim.text,
+    weight: ref.weight,
+    turnIndex: ref.turnIndex,
+  }));
+  
+  const speaker: SpeakerV2 = 
+    claim.meta?.speaker === 'Agent' || claim.meta?.speaker === 'AGENT' ? 'AGENT' :
+    claim.meta?.speaker === 'Customer' || claim.meta?.speaker === 'CUSTOMER' ? 'CUSTOMER' :
+    'UNKNOWN';
+  
+  // Determine category based on signals
+  let category: IssueCategoryV2 = 'compliance';
+  if (riskSignals.includes('MONEY_FEES')) {
+    category = 'billing';
+  } else if (riskSignals.includes('CANCELLATION') || riskSignals.includes('REFUND')) {
+    category = 'compliance';
+  } else if (riskSignals.includes('LEGAL_ESCALATION')) {
+    category = 'compliance';
+  }
+  
+  // Compliance tags
+  const complianceTags: string[] = ['high_impact', ...riskSignals.map(s => s.toLowerCase())];
+  
+  // Disclaimers
+  const disclaimers: string[] = [];
+  if (input.evidenceMode === 'TRANSCRIPT_ONLY') {
+    disclaimers.push('This finding is grounded in transcript content only and is not externally verified.');
+  }
+  
+  return {
+    issueId,
+    issueKey,
+    runId: input.runId,
+    conversationId: input.conversationId,
+    type: 'RISK_SIGNAL',
+    category,
+    severity: 'high', // Will be recomputed by ranking
+    riskScore: 0, // Will be computed by ranking
+    confidence: claim.confidence || 0.7,
+    reviewRequired: true,
+    verification: {
+      level: input.evidenceMode === 'TRANSCRIPT_PLUS_EXTERNAL' ? 'EXTERNAL_VERIFIED' : 'TRANSCRIPT_ONLY',
+      reasonCodes: input.evidenceMode === 'TRANSCRIPT_ONLY' ? ['NO_EXTERNAL_EVIDENCE'] : [],
+    },
+    who: {
+      speaker,
+      turnIndex: claim.meta?.turnIndex,
+    },
+    what: {
+      primaryClaimId: claim.id,
+      claimText: claim.text,
+      issueSummary: `High-risk signal detected: ${riskSignals.join(', ')} in "${claim.text.substring(0, 60)}..."`,
+      issueDetail: `Claim "${claim.text}" (${claim.id}) contains high-risk signals: ${riskSignals.join(', ')}. This may indicate financial impact, legal escalation risk, or policy violations.`,
+    },
+    evidence: {
+      refs: evidenceRefs,
+      edges: input.grounding
+        .filter(g => g.claimId === claim.id)
+        .map(g => ({
+          kind: 'grounding' as const,
+          claimA: claim.id,
+          weight: g.weight || 0.7,
+        })),
+    },
+    compliance: {
+      tags: complianceTags,
+      impactedPolicies: [],
+      legalHoldSuggested: true, // Risk signals suggest legal hold
+      disclaimers,
+    },
+    audit: {
+      createdAt: new Date().toISOString(),
+      engineVersion: input.audit.engineVersion,
+      scorerId: input.audit.scorerId,
+      modelFingerprint: input.audit.modelFingerprint,
+      configHash: input.audit.configHash,
+      inputHash: input.audit.inputHash,
+    },
+  };
+}
+
+/**
  * Generate stable issue ID from runId + issueKey
  */
 function generateIssueId(runId: string, issueKey: string): string {
@@ -330,4 +619,3 @@ function generateIssueId(runId: string, issueKey: string): string {
     .substring(0, 16);
   return `issue_${hash}`;
 }
-

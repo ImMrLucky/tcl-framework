@@ -17,6 +17,12 @@ export interface RiskRankingConfig {
   ui: {
     maxTopIssues: number;
   };
+  issueLimits?: {
+    perClaimMax: number;
+    globalMax: number;
+    topIssuesMax: number;
+    evidenceQuotesMax: number;
+  };
   severityThresholds: {
     low: number;
     medium: number;
@@ -27,6 +33,13 @@ export interface RiskRankingConfig {
     typeBase: Record<string, number>;
     speakerMultiplier: Record<string, number>;
     verificationMultiplier: Record<string, number>;
+    // Composite scoring weights (for new formula)
+    severityWeight?: number;
+    categoryMultiplier?: Record<string, number>;
+    confidenceWeight?: number;
+    structuralImportanceWeight?: number;
+    evidencePenaltyWeight?: number;
+    customerImpactWeight?: number;
   };
   typePriority: string[];
 }
@@ -47,7 +60,13 @@ export function getRiskRankingConfig(): RiskRankingConfig {
     console.warn('Failed to load risk-ranking.json, using defaults');
     // Return safe defaults
     return {
-      ui: { maxTopIssues: 4 },
+      ui: { maxTopIssues: 10 },
+      issueLimits: {
+        perClaimMax: 10,
+        globalMax: 50,
+        topIssuesMax: 10,
+        evidenceQuotesMax: 5,
+      },
       severityThresholds: {
         low: 0.20,
         medium: 0.45,
@@ -59,6 +78,9 @@ export function getRiskRankingConfig(): RiskRankingConfig {
           CONTRADICTION: 0.75,
           UNVERIFIED_CLAIM: 0.35,
           UNSUPPORTED_CLAIM: 0.65,
+          UNGROUNDED: 0.50,
+          RISK_SIGNAL: 0.60,
+          POLICY: 0.70,
           FEE_DISCLOSURE_RISK: 0.70,
           COMMITMENT_INCONSISTENCY: 0.60,
           NUMERIC_MISMATCH: 0.55,
@@ -76,14 +98,33 @@ export function getRiskRankingConfig(): RiskRankingConfig {
           TRANSCRIPT_ONLY: 0.90,
           NONE: 0.80,
         },
+        // Composite scoring weights
+        severityWeight: 0.25,
+        categoryMultiplier: {
+          billing: 1.2,
+          fees: 1.3,
+          refunds: 1.2,
+          privacy: 1.1,
+          disclosure: 1.15,
+          retention: 1.0,
+          general: 1.0,
+          other: 1.0,
+        },
+        confidenceWeight: 0.20,
+        structuralImportanceWeight: 0.15,
+        evidencePenaltyWeight: 0.10,
+        customerImpactWeight: 0.30,
       },
       typePriority: [
         'CONTRADICTION',
         'DATA_INTEGRITY',
+        'POLICY',
         'FEE_DISCLOSURE_RISK',
+        'RISK_SIGNAL',
         'COMMITMENT_INCONSISTENCY',
         'NUMERIC_MISMATCH',
         'UNSUPPORTED_CLAIM',
+        'UNGROUNDED',
         'UNVERIFIED_CLAIM',
         'OTHER',
       ],

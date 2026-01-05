@@ -907,6 +907,7 @@ app.post("/validate", async (req, res) => {
               (out.report as any).allIssuesV2 = rankedResult.allIssues;
               (out.report as any).topIssuesV2 = rankedResult.topIssues;
               (out.report as any).issueSummaryV2 = rankedResult.summary;
+              (out.report as any).issuesByClaim = expansionResult.issuesByClaim;
               
               console.log("9️⃣ ISSUE V2 EXPANSION:", {
                 allIssuesCount: rankedResult.allIssues.length,
