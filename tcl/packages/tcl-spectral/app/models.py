@@ -64,9 +64,9 @@ class SpectralAnalyzeResponse(BaseModel):
     cycleMass: float
     heatTrace: Optional[List[float]] = None
     
-    # New platform-grade fields
-    truthVector: List[float]
-    truthStates: List[str]
+    # New platform-grade fields (using signal naming to avoid confusion with verified truth)
+    truthSignalVector: List[float]
+    truthSignalStates: List[str]
     topBadContradictions: List[EdgeAttribution]
     topBadSupports: List[EdgeAttribution]
     nodeBlame: Optional[List[float]] = None

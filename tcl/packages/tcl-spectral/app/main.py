@@ -13,6 +13,7 @@ from .spectral import (
     spectral_fingerprint,
     spectral_claim_importance
 )
+from .spectral_config_loader import build_spectral_config
 import logging
 import time
 
@@ -375,15 +376,20 @@ def score(req: SpectralRequest):
         if cid in idx:
             grounded_ids.add(idx[cid])
 
+    # Build config from request (with defaults)
+    config = build_spectral_config({
+        "w_support": req.w_support,
+        "w_contradiction": req.w_contradiction,
+        "w_circularity": req.w_circularity,
+        "cycle_max_len": req.cycle_max_len
+    } if hasattr(req, 'w_support') else None)
+    
     m = spectral_metrics(
         n=len(ids),
         support_edges=supports,
         contradiction_edges=contradictions,
         grounded_ids=grounded_ids,
-        w_support=req.w_support,
-        w_contradiction=req.w_contradiction,
-        w_circularity=req.w_circularity,
-        cycle_max_len=req.cycle_max_len
+        config=config
     )
 
     return SpectralResponse(
@@ -403,11 +409,11 @@ def score(req: SpectralRequest):
 @app.post("/spectral/analyze", response_model=SpectralAnalyzeResponse)
 def analyze(req: SpectralRequest):
     """
-    Enhanced spectral analysis with per-claim truth vectors, edge attribution, and claim importance ranking.
+    Enhanced spectral analysis with per-claim truth signal vectors, edge attribution, and claim importance ranking.
     
     Returns all existing metrics from /spectral/score plus:
-    - truthVector: per-claim truth values
-    - truthStates: per-claim state labels
+    - truthSignalVector: per-claim truth signal values (spectral output, not verified truth)
+    - truthSignalStates: per-claim state labels (spectral signals, not verified truth)
     - topBadContradictions: problematic contradiction edges (with claim IDs)
     - topBadSupports: problematic support edges (with claim IDs)
     - nodeBlame: blame scores per node
@@ -446,30 +452,34 @@ def analyze(req: SpectralRequest):
     n = len(ids)
     
     # 1. Get existing metrics (unchanged behavior)
+    # Build config from request (with defaults)
+    config = build_spectral_config({
+        "w_support": req.w_support,
+        "w_contradiction": req.w_contradiction,
+        "w_circularity": req.w_circularity,
+        "cycle_max_len": req.cycle_max_len
+    } if hasattr(req, 'w_support') else None)
+    
     m = spectral_metrics(
         n=n,
         support_edges=supports,
         contradiction_edges=contradictions,
         grounded_ids=grounded_ids,
-        w_support=req.w_support,
-        w_contradiction=req.w_contradiction,
-        w_circularity=req.w_circularity,
-        cycle_max_len=req.cycle_max_len
+        config=config
     )
     
-    # 2. Compute truth vector (new)
+    # 2. Compute truth signal vector (new)
     truth_result = spectral_truth_vector(
         n=n,
         support_edges=supports,
         contradiction_edges=contradictions,
         grounded_ids=grounded_ids,
-        w_support=req.w_support,
-        w_contradiction=req.w_contradiction
+        config=config
     )
     
     # 3. Compute edge attribution (new)
     attribution_result = spectral_edge_attribution(
-        truth_vector=truth_result["truthVector"],
+        truth_vector=truth_result["truthSignalVector"],
         support_edges=supports,
         contradiction_edges=contradictions,
         top_k=10
@@ -496,10 +506,11 @@ def analyze(req: SpectralRequest):
     # 6. Compute claim importance ranking (new)
     importance_result = spectral_claim_importance(
         n=n,
-        truth_vector=truth_result["truthVector"],
+        truth_vector=truth_result["truthSignalVector"],
         support_edges=supports,
         contradiction_edges=contradictions,
-        grounded_ids=grounded_ids
+        grounded_ids=grounded_ids,
+        config=config
     )
     
     # Add claim IDs to importance rankings
@@ -550,9 +561,9 @@ def analyze(req: SpectralRequest):
         spectralGap=m["spectralGap"],
         cycleMass=m["cycleMass"],
         heatTrace=m["heatTrace"],
-        # New fields
-        truthVector=truth_result["truthVector"],
-        truthStates=truth_result["truthStates"],
+        # New fields (using signal naming to avoid confusion with verified truth)
+        truthSignalVector=truth_result["truthSignalVector"],
+        truthSignalStates=truth_result["truthSignalStates"],
         topBadContradictions=[EdgeAttribution(**e) for e in top_bad_contradictions_with_ids],
         topBadSupports=[EdgeAttribution(**e) for e in top_bad_supports_with_ids],
         nodeBlame=attribution_result["nodeBlame"],

@@ -1,6 +1,7 @@
 import numpy as np
-from typing import List, Dict, Tuple, Set
+from typing import List, Dict, Tuple, Set, Optional
 from collections import deque
+from .spectral_config import SpectralConfig
 
 def build_index(claim_ids: List[str]) -> Dict[str, int]:
     return {cid: i for i, cid in enumerate(claim_ids)}
@@ -46,7 +47,7 @@ def _signed_laplacian_from_directed(A_signed_dir: np.ndarray) -> np.ndarray:
 def _eigvals_sym(H: np.ndarray) -> np.ndarray:
     return np.linalg.eigvalsh(H)
 
-def _heat_trace(evals: np.ndarray, t_values=(0.1, 1.0, 5.0)) -> List[float]:
+def _heat_trace(evals: np.ndarray, t_values: Tuple[float, ...]) -> List[float]:
     evals = np.clip(evals, 0.0, None)
     return [float(np.sum(np.exp(-t * evals))) for t in t_values]
 
@@ -91,10 +92,10 @@ def spectral_metrics(n: int,
                      support_edges: List[Tuple[int,int,float]],
                      contradiction_edges: List[Tuple[int,int,float]],
                      grounded_ids: Set[int],
-                     w_support: float = 1.0,
-                     w_contradiction: float = 1.0,
-                     w_circularity: float = 1.0,
-                     cycle_max_len: int = 4) -> Dict[str, object]:
+                     config: Optional[SpectralConfig] = None) -> Dict[str, object]:
+    if config is None:
+        config = SpectralConfig()
+    
     if n <= 1:
         return {
             "spectralGap": 1.0,
@@ -106,7 +107,7 @@ def spectral_metrics(n: int,
             "coherenceScore": 100
         }
 
-    A_signed, A_sup_dir, A_con_dir = _adjacency_directed(n, support_edges, contradiction_edges, w_support, w_contradiction)
+    A_signed, A_sup_dir, A_con_dir = _adjacency_directed(n, support_edges, contradiction_edges, config.w_support, config.w_contradiction)
     H = _signed_laplacian_from_directed(A_signed)
 
     evals = np.sort(np.clip(_eigvals_sym(H), 0.0, None))
@@ -117,24 +118,24 @@ def spectral_metrics(n: int,
 
     # grounding-aware circularity: only penalize cycles among ungrounded claims
     ungrounded = set(range(n)) - set(grounded_ids)
-    cycle_mass = _cycle_mass_directed(A_sup_dir, ungrounded, int(cycle_max_len))
+    cycle_mass = _cycle_mass_directed(A_sup_dir, ungrounded, config.cycle_max_len)
     # map cycle_mass to 0..1
-    cycle01 = 1.0 - np.exp(-1.2 * cycle_mass)
-    circ_pen = float(np.clip(cycle01 * float(w_circularity), 0.0, 1.0))
+    cycle01 = 1.0 - np.exp(-config.cycle_decay * cycle_mass)
+    circ_pen = float(np.clip(cycle01 * float(config.w_circularity), 0.0, 1.0))
     circularityScore = int(round(100.0 * float(np.clip(cycle01, 0.0, 1.0))))
 
-    heat = _heat_trace(evals)
+    heat = _heat_trace(evals, config.heat_t_values)
 
     # Soft-normalize
-    gap_norm = 1.0 - np.exp(-3.0 * spectral_gap)                 # better
-    contra_norm = 1.0 - np.exp(-1.2 * contradiction_energy)      # worse
-    sup_norm = 1.0 - np.exp(-0.6 * support_energy)               # better (diminishing)
+    gap_norm = 1.0 - np.exp(-config.gap_scale * spectral_gap)
+    contra_norm = 1.0 - np.exp(-config.contra_scale * contradiction_energy)
+    sup_norm = 1.0 - np.exp(-config.support_scale * support_energy)
 
     coherence01 = (
-        0.45 * gap_norm +
-        0.30 * sup_norm +
-        0.25 * (1.0 - contra_norm) -
-        0.25 * circ_pen
+        config.w_gap * gap_norm +
+        config.w_support_energy * sup_norm +
+        config.w_anti_contra * (1.0 - contra_norm) -
+        config.w_circularity_penalty * circ_pen
     )
     coherence01 = float(np.clip(coherence01, 0.0, 1.0))
     coherenceScore = int(round(100.0 * coherence01))
@@ -150,10 +151,34 @@ def spectral_metrics(n: int,
     }
 
 # ============================================================================
-# NEW PLATFORM-GRADE ANALYSIS FUNCTIONS (Additive - does not modify existing)
+# LEGACY WRAPPER (for backward compatibility)
 # ============================================================================
 
-def spectral_truth_vector(
+def spectral_metrics_legacy(
+    n: int,
+    support_edges: List[Tuple[int,int,float]],
+    contradiction_edges: List[Tuple[int,int,float]],
+    grounded_ids: Set[int],
+    w_support: float = 1.0,
+    w_contradiction: float = 1.0,
+    w_circularity: float = 1.0,
+    cycle_max_len: int = 4
+) -> Dict[str, object]:
+    """
+    Legacy wrapper for spectral_metrics with old parameter signature.
+    
+    DEPRECATED: Use spectral_metrics with SpectralConfig instead.
+    """
+    config = SpectralConfig(
+        w_support=w_support,
+        w_contradiction=w_contradiction,
+        w_circularity=w_circularity,
+        cycle_max_len=cycle_max_len
+    )
+    return spectral_metrics(n, support_edges, contradiction_edges, grounded_ids, config=config)
+
+
+def spectral_truth_vector_legacy(
     n: int,
     support_edges: List[Tuple[int,int,float]],
     contradiction_edges: List[Tuple[int,int,float]],
@@ -166,23 +191,59 @@ def spectral_truth_vector(
     tau: float = 0.15
 ) -> Dict[str, object]:
     """
-    Compute per-claim truth vector using signed Laplacian with grounding bias.
+    Legacy wrapper for spectral_truth_vector with old parameter signature.
+    
+    DEPRECATED: Use spectral_truth_vector with SpectralConfig instead.
+    Note: Returns old field names (truthVector, truthStates) for compatibility.
+    """
+    config = SpectralConfig(
+        w_support=w_support,
+        w_contradiction=w_contradiction,
+        alpha=alpha,
+        beta=beta,
+        clip=clip,
+        tau=tau
+    )
+    result = spectral_truth_vector(n, support_edges, contradiction_edges, grounded_ids, config=config)
+    # Map new field names to old for backward compatibility
+    return {
+        "truthVector": result["truthSignalVector"],
+        "truthStates": result["truthSignalStates"]
+    }
+
+
+# ============================================================================
+# NEW PLATFORM-GRADE ANALYSIS FUNCTIONS (Additive - does not modify existing)
+# ============================================================================
+
+def spectral_truth_vector(
+    n: int,
+    support_edges: List[Tuple[int,int,float]],
+    contradiction_edges: List[Tuple[int,int,float]],
+    grounded_ids: Set[int],
+    config: Optional[SpectralConfig] = None
+) -> Dict[str, object]:
+    """
+    Compute per-claim truth signal vector using signed Laplacian with grounding bias.
     
     Solves: (H + alpha * I) x = beta * b
     where H is signed Laplacian, b is grounding bias vector.
     
     Returns:
-        truthVector: List[float] - normalized truth values per claim
-        truthStates: List[str] - state labels ("Supported", "Contradicted", "Ungrounded", "Inconclusive")
+        truthSignalVector: List[float] - normalized truth signal values per claim
+        truthSignalStates: List[str] - state labels ("Supported", "Contradicted", "Ungrounded", "Inconclusive")
     """
+    if config is None:
+        config = SpectralConfig()
+    
     if n <= 0:
         return {
-            "truthVector": [],
-            "truthStates": []
+            "truthSignalVector": [],
+            "truthSignalStates": []
         }
     
     # Build signed adjacency using existing helper
-    A_signed, _, _ = _adjacency_directed(n, support_edges, contradiction_edges, w_support, w_contradiction)
+    A_signed, _, _ = _adjacency_directed(n, support_edges, contradiction_edges, config.w_support, config.w_contradiction)
     
     # Build signed Laplacian using existing helper
     H = _signed_laplacian_from_directed(A_signed)
@@ -194,8 +255,8 @@ def spectral_truth_vector(
             b[i] = 1.0
     
     # Solve (H + alpha * I) x = beta * b
-    H_reg = H + alpha * np.eye(n, dtype=np.float64)
-    rhs = beta * b
+    H_reg = H + config.alpha * np.eye(n, dtype=np.float64)
+    rhs = config.beta * b
     
     try:
         # Try direct solve first
@@ -206,32 +267,32 @@ def spectral_truth_vector(
     
     # Normalize by max absolute value if nonzero
     max_abs = float(np.max(np.abs(x))) if n > 0 else 1.0
-    if max_abs > 1e-10:
+    if max_abs > config.eps:
         x = x / max_abs
     
     # Clamp to [-clip, clip]
-    x = np.clip(x, -clip, clip)
+    x = np.clip(x, -config.clip, config.clip)
     
     # Convert to list of floats
-    truth_vector = [float(x[i]) for i in range(n)]
+    truth_signal_vector = [float(x[i]) for i in range(n)]
     
-    # Map to truth states
-    truth_states = []
+    # Map to truth signal states
+    truth_signal_states = []
     for i in range(n):
-        x_i = truth_vector[i]
-        if abs(x_i) <= tau:
+        x_i = truth_signal_vector[i]
+        if abs(x_i) <= config.tau:
             if i in grounded_ids:
-                truth_states.append("Inconclusive")
+                truth_signal_states.append("Inconclusive")
             else:
-                truth_states.append("Ungrounded")
-        elif x_i > tau:
-            truth_states.append("Supported")
+                truth_signal_states.append("Ungrounded")
+        elif x_i > config.tau:
+            truth_signal_states.append("Supported")
         else:  # x_i < -tau
-            truth_states.append("Contradicted")
+            truth_signal_states.append("Contradicted")
     
     return {
-        "truthVector": truth_vector,
-        "truthStates": truth_states
+        "truthSignalVector": truth_signal_vector,
+        "truthSignalStates": truth_signal_states
     }
 
 def spectral_edge_attribution(
@@ -347,7 +408,8 @@ def spectral_claim_importance(
     truth_vector: List[float],
     support_edges: List[Tuple[int,int,float]],
     contradiction_edges: List[Tuple[int,int,float]],
-    grounded_ids: Set[int]
+    grounded_ids: Set[int],
+    config: Optional[SpectralConfig] = None
 ) -> Dict[str, object]:
     """
     Rank claims by their structural importance in the network.
@@ -358,10 +420,11 @@ def spectral_claim_importance(
     
     Args:
         n: Number of claims
-        truth_vector: Per-claim truth values from spectral_truth_vector
+        truth_vector: Per-claim truth signal values from spectral_truth_vector
         support_edges: List of (i, j, weight) tuples for support edges
         contradiction_edges: List of (i, j, weight) tuples for contradiction edges
         grounded_ids: Set of claim indices that are grounded to evidence
+        config: SpectralConfig (optional, uses defaults if None)
     
     Returns:
         Dict with:
@@ -369,6 +432,9 @@ def spectral_claim_importance(
               influence, groundingDistance, truthValue, priority
             - topCritical: List of claims with priority "CRITICAL"
     """
+    if config is None:
+        config = SpectralConfig()
+    
     if n <= 0:
         return {
             "rankedClaims": [],
@@ -390,7 +456,7 @@ def spectral_claim_importance(
             A[j, i] += float(w)
     
     # 1. Eigenvector centrality (structural importance)
-    centrality = _compute_eigenvector_centrality(A)
+    centrality = _compute_eigenvector_centrality(A, config.centrality_iterations)
     
     # 2. Truth propagation influence (how much fixing this node affects others)
     influence = _compute_truth_influence(n, x, support_edges)
@@ -416,16 +482,16 @@ def spectral_claim_importance(
                 grounding_score = 1.0 / (1.0 + float(dist))
         
         score = (
-            0.35 * float(centrality[i]) +
-            0.35 * float(influence[i]) +
-            0.20 * grounding_score +
-            0.10 * problem_factor
+            config.importance_w_centrality * float(centrality[i]) +
+            config.importance_w_influence * float(influence[i]) +
+            config.importance_w_grounding * grounding_score +
+            config.importance_w_problem * problem_factor
         )
         
         # Determine priority
-        if score > 0.75:
+        if score > config.priority_critical_threshold:
             priority = "CRITICAL"
-        elif score > 0.5:
+        elif score > config.priority_high_threshold:
             priority = "HIGH"
         else:
             priority = "MEDIUM"
@@ -452,7 +518,7 @@ def spectral_claim_importance(
     }
 
 
-def _compute_eigenvector_centrality(A: np.ndarray, iterations: int = 100) -> np.ndarray:
+def _compute_eigenvector_centrality(A: np.ndarray, iterations: int) -> np.ndarray:
     """
     Power iteration for eigenvector centrality.
     
@@ -477,7 +543,7 @@ def _compute_eigenvector_centrality(A: np.ndarray, iterations: int = 100) -> np.
     for _ in range(iterations):
         x_new = A @ x
         norm = np.linalg.norm(x_new)
-        if norm > 1e-10:
+        if norm > 1e-10:  # Use fixed tolerance for convergence check
             x = x_new / norm
         else:
             # Convergence to zero vector (disconnected graph)
@@ -485,7 +551,7 @@ def _compute_eigenvector_centrality(A: np.ndarray, iterations: int = 100) -> np.
     
     # Normalize to [0, 1] scale
     max_val = np.max(x)
-    if max_val > 1e-10:
+    if max_val > 1e-10:  # Use fixed tolerance for normalization check
         x = x / max_val
     
     return x
@@ -521,7 +587,7 @@ def _compute_truth_influence(
     
     # Normalize to [0, 1] scale
     max_inf = np.max(influence)
-    if max_inf > 1e-10:
+    if max_inf > 1e-10:  # Use fixed tolerance for normalization check
         influence = influence / max_inf
     
     return influence
