@@ -16,7 +16,10 @@ interface IssueV2 {
   type: string;
   category: string;
   severity: 'low' | 'medium' | 'high' | 'critical';
+  severityDisplay?: 'low' | 'medium' | 'high'; // What UI shows (capped in transcript-only)
+  impact?: 'low' | 'medium' | 'high'; // How bad if true (not affected by mode)
   riskScore: number;
+  score?: number; // Numeric for sorting (0..100)
   confidence: number;
   reviewRequired: boolean;
   verification: {

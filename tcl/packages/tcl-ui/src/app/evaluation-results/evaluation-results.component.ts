@@ -92,7 +92,10 @@ interface IssueV2 {
   type: 'CONTRADICTION' | 'UNVERIFIED_CLAIM' | 'UNSUPPORTED_CLAIM' | 'NUMERIC_MISMATCH' | 'COMMITMENT_INCONSISTENCY' | 'FEE_DISCLOSURE_RISK' | 'DATA_INTEGRITY' | 'OTHER';
   category: 'evidence' | 'consistency' | 'compliance' | 'billing' | 'disclosure' | 'data_integrity' | 'other';
   severity: 'low' | 'medium' | 'high' | 'critical';
+  severityDisplay?: 'low' | 'medium' | 'high'; // What UI shows (capped in transcript-only)
+  impact?: 'low' | 'medium' | 'high'; // How bad if true (not affected by mode)
   riskScore: number;
+  score?: number; // Numeric for sorting (0..100)
   confidence: number;
   reviewRequired: boolean;
   verification: {
