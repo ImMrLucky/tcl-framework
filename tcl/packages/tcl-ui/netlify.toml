@@ -2,6 +2,19 @@
   command = "npm run build"
   publish = "dist/tcl-ui/browser"
 
+# Force HTTPS - redirect all HTTP traffic to HTTPS
+[[redirects]]
+  from = "http://protectqa.com/*"
+  to = "https://protectqa.com/:splat"
+  status = 301
+  force = true
+
+[[redirects]]
+  from = "http://www.protectqa.com/*"
+  to = "https://www.protectqa.com/:splat"
+  status = 301
+  force = true
+
 # Redirect API calls to the TCL Core service via proxy function
 # You'll need to set NETLIFY_TCL_CORE_URL environment variable in Netlify dashboard
 [[redirects]]

@@ -6,6 +6,21 @@
  * Does not store audio files - only extracts and returns text
  */
 
+// CRITICAL: Set environment variables at module level BEFORE any imports
+// This prevents onnxruntime-node from loading native bindings
+// Required for Docker/container environments without native libraries
+if (typeof process !== 'undefined' && process.env) {
+  process.env.USE_WASM = '1';
+  process.env.ONNXRUNTIME_EXECUTION_PROVIDERS = '';
+  // Prevent onnxruntime-node from being used
+  process.env.ONNXRUNTIME_DISABLE_NATIVE = '1';
+  // Force transformers to use WASM only
+  process.env.TRANSFORMERS_USE_WASM = '1';
+  // Additional WASM-only flags
+  process.env.USE_BROWSER = '0';
+  process.env.USE_WASM_ONLY = '1';
+}
+
 import fs from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
@@ -32,22 +47,44 @@ export async function transcribeAudio(
     fs.writeFileSync(tempFile, audioBuffer);
 
     try {
-      // Set environment variables BEFORE import to force WASM-only mode
-      // This prevents onnxruntime-node from trying to load native bindings
-      // Required for Docker/container environments without native libraries
-      if (typeof process !== 'undefined' && process.env) {
-        process.env.USE_WASM = '1';
-        process.env.ONNXRUNTIME_EXECUTION_PROVIDERS = '';
+      // Dynamic import - env vars are already set at module level
+      // Wrap in try-catch to handle onnxruntime-node loading errors
+      let pipeline: any;
+      let env: any;
+      
+      try {
+        const transformers = await import('@xenova/transformers');
+        pipeline = transformers.pipeline;
+        env = transformers.env;
+      } catch (importError: any) {
+        // If import fails due to onnxruntime-node, provide clearer error
+        if (importError.message?.includes('onnxruntime') || importError.message?.includes('ld-linux')) {
+          throw new Error(
+            'Failed to load transformers library. The system is trying to use native onnxruntime-node bindings. ' +
+            'Please ensure environment variables USE_WASM=1 and ONNXRUNTIME_DISABLE_NATIVE=1 are set before starting the server.'
+          );
+        }
+        throw importError;
       }
       
-      // Dynamic import to ensure env vars are set first
-      const { pipeline, env } = await import('@xenova/transformers');
-      
-      // Force WASM backend to avoid native onnxruntime-node dependency
+      // Force WASM backend explicitly
       // This prevents errors in containers that don't have native libraries
-      if (env && env.backends && env.backends.onnx) {
-        env.backends.onnx.wasm.proxy = false;
-        env.backends.onnx.wasm.numThreads = 1;
+      if (env) {
+        // Disable any native backends
+        if (env.backends) {
+          if (env.backends.onnx) {
+            // Force WASM-only mode
+            env.backends.onnx.wasm.proxy = false;
+            env.backends.onnx.wasm.numThreads = 1;
+            // Disable native backend
+            if (env.backends.onnx.native) {
+              env.backends.onnx.native = undefined;
+            }
+          }
+        }
+        // Set default backend to WASM
+        env.useBrowserCache = false;
+        env.useCustomCache = false;
       }
       
       // Load Whisper model (downloads on first use, ~1.5GB)
