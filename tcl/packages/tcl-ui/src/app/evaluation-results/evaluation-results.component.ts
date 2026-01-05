@@ -247,20 +247,10 @@ export class EvaluationResultsComponent implements OnInit {
   topContradictions: Array<{ claimAId: string; claimBId: string; weight: number }> = [];
   topSupports: Array<{ claimAId: string; claimBId: string; weight: number }> = [];
   
-  // NEW: Manager-grade issue narratives (QA-Manager Grade)
-  issueNarratives: IssueNarrative[] = [];
-  issueNarrativesSummary: IssueSummary | null = null;
-
-  // Legacy: Manager-grade clustered issues (for backward compatibility)
-  clusteredIssues: ClusteredIssue[] = [];
-  
-  // NEW: IssueV2 (Enterprise-Grade)
+  // IssueV2 (Enterprise-Grade) - Only view
   allIssuesV2: IssueV2[] = [];
   topIssuesV2: IssueV2[] = [];
   issueSummaryV2: IssueSummaryV2 | null = null;
-  showIssueV2View: boolean = false; // Toggle between legacy and V2 view
-  issueSummary: IssueSummary | null = null;
-  showClusteredView = true; // Toggle between clustered and per-claim view
 
   constructor(
     private route: ActivatedRoute,
@@ -292,19 +282,13 @@ export class EvaluationResultsComponent implements OnInit {
       }
       this.evaluation = evalResponse.evaluation;
 
-      // PART 4: Defensive guard: ensure report exists
+      // Defensive guard: ensure report exists
       if (!this.evaluation?.report) {
         console.warn('Evaluation report is missing');
         // Initialize empty state
-        this.issues = [];
-        this.issueNarratives = [];
-        this.issueNarrativesSummary = {
-          totalIssues: 0,
-          bySeverity: { LOW: 0, MEDIUM: 0, HIGH: 0, CRITICAL: 0 },
-          byCategory: {},
-          primaryRiskCategories: [],
-          auditReady: false
-        };
+        this.allIssuesV2 = [];
+        this.topIssuesV2 = [];
+        this.issueSummaryV2 = null;
         return;
       }
 
@@ -327,127 +311,8 @@ export class EvaluationResultsComponent implements OnInit {
         console.log('✅ Loaded issueSummaryV2:', this.issueSummaryV2);
       }
       
-      // Default to IssueV2 view if available (PRIMARY)
-      // IssueNarratives and per-claim issues are kept for backward compatibility only
-      if (this.allIssuesV2.length > 0) {
-        this.showIssueV2View = true;
-        this.showClusteredView = false; // Don't show legacy views by default
-      }
-      
-      // Load issue narratives (QA-Manager Grade) from report - LEGACY/FALLBACK
-      // Try multiple possible locations in the report structure
-      let issueNarrativesData = report?.issueNarratives;
-      
-      // Also check if narratives are directly in report
-      if (!issueNarrativesData && Array.isArray(report?.narratives)) {
-        issueNarrativesData = { narratives: report.narratives, summary: report.summary };
-      }
-      
-      // Also check if it's in issueAnalysis
-      if (!issueNarrativesData && report?.issueAnalysis?.narratives) {
-        issueNarrativesData = report.issueAnalysis;
-      }
-      
-      // Extract narratives array and check if it's actually populated
-      const narratives = issueNarrativesData
-        ? (Array.isArray(issueNarrativesData) 
-            ? issueNarrativesData 
-            : (issueNarrativesData.narratives || []))
-        : [];
-      
-      // Only use narratives if they're actually populated (not empty array)
-      if (narratives.length > 0) {
-        this.issueNarratives = narratives;
-        this.issueNarrativesSummary = {
-          totalIssues: issueNarrativesData.summary?.totalIssues || narratives.length,
-          bySeverity: issueNarrativesData.summary?.bySeverity || { LOW: 0, MEDIUM: 0, HIGH: 0, CRITICAL: 0 },
-          byCategory: issueNarrativesData.summary?.byCategory || {},
-          primaryRiskCategories: issueNarrativesData.summary?.topCategories || [],
-          auditReady: true, // Issue narratives include full reproducibility
-        };
-        console.log('📊 Loaded issue narratives (legacy):', {
-          count: this.issueNarratives.length,
-          summary: this.issueNarrativesSummary,
-          firstNarrative: this.issueNarratives[0] ? {
-            issueId: this.issueNarratives[0].issueId,
-            title: this.issueNarratives[0].title,
-            evidenceQuotesCount: this.issueNarratives[0].evidenceQuotes?.length || 0,
-            traceabilityEdgesCount: this.issueNarratives[0].traceability?.topEdges?.length || 0,
-            hasScoring: !!this.issueNarratives[0].scoring
-          } : null
-        });
-        
-        // Convert issue narratives to Issue[] format for the table
-        this.issues = this.convertNarrativesToIssues(this.issueNarratives);
-        this.sortAndProcessIssues();
-        this.extractTopOffenders();
-      } else {
-        // PART 3: Fallback to report.issues if narratives are empty
-        // Explicitly set issueNarratives to empty array
-        this.issueNarratives = [];
-        const reportIssues = Array.isArray(report?.issues) ? report.issues : [];
-        
-        console.log('📊 No narratives found, falling back to report.issues:', {
-          narrativesLength: narratives.length,
-          reportIssuesLength: reportIssues.length,
-          issueNarrativesDataExists: !!issueNarrativesData
-        });
-        
-        if (reportIssues.length > 0) {
-          // Use issues directly from report
-          this.issues = reportIssues;
-          this.issueNarrativesSummary = this.buildIssueSummaryFromIssues(reportIssues);
-          // Default to per-claim view when we only have issues (no narratives)
-          this.showClusteredView = false;
-          this.sortAndProcessIssues();
-          this.extractTopOffenders();
-          console.log('📊 Loaded issues from report.issues:', {
-            count: this.issues.length,
-            sortedCount: this.sortedIssues.length,
-            showClusteredView: this.showClusteredView,
-            summary: this.issueNarrativesSummary,
-            bySeverity: this.issueNarrativesSummary.bySeverity,
-            topOffendersCount: this.topOffenders.length,
-            firstIssue: this.issues[0] ? {
-              claimId: this.issues[0].claimId,
-              issueType: (this.issues[0] as any).what?.issueType || this.issues[0].issueType,
-              severity: this.getSeverity(this.issues[0])
-            } : null
-          });
-        } else {
-          // Final fallback: Load issues from API if not in report
-          const issuesResponse = await this.auditService.getIssues(this.evaluationId).toPromise();
-          if (issuesResponse && Array.isArray(issuesResponse.issues) && issuesResponse.issues.length > 0) {
-            this.issues = issuesResponse.issues;
-            this.issueNarrativesSummary = this.buildIssueSummaryFromIssues(issuesResponse.issues);
-            // Default to per-claim view when we only have issues (no narratives)
-            this.showClusteredView = false;
-            this.sortAndProcessIssues();
-            this.extractTopOffenders();
-            console.log('📊 Loaded issues from API:', {
-              count: this.issues.length,
-              summary: this.issueNarrativesSummary,
-              bySeverity: this.issueNarrativesSummary.bySeverity
-            });
-          } else {
-            // No issues found anywhere - initialize empty state
-            this.issues = [];
-            this.issueNarrativesSummary = {
-              totalIssues: 0,
-              bySeverity: { LOW: 0, MEDIUM: 0, HIGH: 0, CRITICAL: 0 },
-              byCategory: {},
-              primaryRiskCategories: [],
-              auditReady: false
-            };
-          }
-        }
-      }
-      
-      // Load clustered issues (legacy manager-grade) from report - FALLBACK
-      const issueAnalysis = report?.issueAnalysis;
-      if (issueAnalysis && this.issueNarratives.length === 0) {
-        this.clusteredIssues = issueAnalysis.clusteredIssues || [];
-        this.issueSummary = issueAnalysis.summary || null;
+      // Extract top offenders from IssueV2 if available
+      this.extractTopOffenders();
         console.log('📊 Loaded clustered issues (legacy):', {
           count: this.clusteredIssues.length,
           summary: this.issueSummary
@@ -658,7 +523,7 @@ export class EvaluationResultsComponent implements OnInit {
   // ============================================================================
 
   toggleView() {
-    this.showClusteredView = !this.showClusteredView;
+    // Legacy view toggle removed - IssueV2 is the only view
   }
 
   selectClusteredIssue(issue: ClusteredIssue) {

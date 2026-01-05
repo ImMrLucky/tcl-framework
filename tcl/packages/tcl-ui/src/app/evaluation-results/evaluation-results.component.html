@@ -40,32 +40,6 @@
           <span>Export Issues V2 (JSON)</span>
         </button>
         <mat-divider *ngIf="allIssuesV2.length > 0"></mat-divider>
-        <!-- Legacy Narratives Exports -->
-        <button mat-menu-item (click)="exportNarrativesHTML()" *ngIf="issueNarratives.length > 0">
-          <mat-icon>picture_as_pdf</mat-icon>
-          <span>Export Audit Report (HTML/PDF)</span>
-        </button>
-        <button mat-menu-item (click)="exportNarrativesCSV()" *ngIf="issueNarratives.length > 0">
-          <mat-icon>table_chart</mat-icon>
-          <span>Export Narratives CSV</span>
-        </button>
-        <button mat-menu-item (click)="exportNarrativesJSON()" *ngIf="issueNarratives.length > 0">
-          <mat-icon>code</mat-icon>
-          <span>Export Narratives JSON</span>
-        </button>
-        <mat-divider *ngIf="issueNarratives.length > 0"></mat-divider>
-        <button mat-menu-item (click)="exportHTML()">
-          <mat-icon>picture_as_pdf</mat-icon>
-          <span>Export Report (HTML/PDF) - Legacy</span>
-        </button>
-        <button mat-menu-item (click)="exportIssuesCSV()">
-          <mat-icon>table_chart</mat-icon>
-          <span>Export Issues CSV</span>
-        </button>
-        <button mat-menu-item (click)="exportIssuesJSON()">
-          <mat-icon>code</mat-icon>
-          <span>Export Issues JSON</span>
-        </button>
         <mat-divider></mat-divider>
         <button mat-menu-item (click)="exportClaimsCSV()">
           <mat-icon>list_alt</mat-icon>
@@ -118,7 +92,7 @@
       </mat-card-header>
       <mat-card-content>
         <!-- Clean Transcript Banner - show when 0 issues -->
-        <div class="clean-transcript-banner" *ngIf="(issueNarrativesSummary?.totalIssues || 0) === 0 && (issues?.length ?? 0) === 0">
+        <div class="clean-transcript-banner" *ngIf="(issueSummaryV2?.totalIssues || 0) === 0">
           <mat-icon>check_circle</mat-icon>
           <div class="banner-content">
             <strong>Clean Transcript</strong>
@@ -326,24 +300,10 @@
     <div class="main-layout">
       <!-- B) Issues Section with Toggle -->
       <div class="main-content">
-        <!-- View Toggle - show if we have any issues -->
-        <div class="view-toggle" *ngIf="allIssuesV2.length > 0 || issueNarratives.length > 0 || clusteredIssues.length > 0 || (issues?.length ?? 0) > 0">
-          <button mat-button [class.active]="showIssueV2View" (click)="showIssueV2View = true; showClusteredView = false" *ngIf="allIssuesV2.length > 0">
-            <mat-icon>verified</mat-icon>
-            Issues V2 ({{ allIssuesV2.length }})
-          </button>
-          <button mat-button [class.active]="showClusteredView && !showIssueV2View" (click)="showClusteredView = true; showIssueV2View = false" *ngIf="issueNarratives.length > 0 || clusteredIssues.length > 0">
-            <mat-icon>category</mat-icon>
-            Problem Statements ({{ issueNarratives.length || clusteredIssues.length }})
-          </button>
-          <button mat-button [class.active]="!showClusteredView && !showIssueV2View" (click)="showClusteredView = false; showIssueV2View = false">
-            <mat-icon>list</mat-icon>
-            Per-Claim Issues ({{ issues?.length ?? 0 }})
-          </button>
-        </div>
+        <!-- IssueV2 is the primary view - no toggle needed -->
         
-        <!-- IssueV2 Display (Enterprise-Grade) -->
-        <mat-card class="issues-card issue-v2" *ngIf="showIssueV2View && allIssuesV2.length > 0">
+        <!-- IssueV2 Display (Enterprise-Grade) - Primary View -->
+        <mat-card class="issues-card issue-v2" *ngIf="allIssuesV2.length > 0">
           <mat-card-header>
             <mat-card-title>
               <mat-icon>verified</mat-icon>
@@ -440,8 +400,8 @@
           </mat-card-content>
         </mat-card>
 
-        <!-- No Issues Found State - show when everything is empty -->
-        <mat-card class="no-issues-card" *ngIf="issueNarratives.length === 0 && clusteredIssues.length === 0 && (issues?.length ?? 0) === 0">
+        <!-- No Issues Found State - show when IssueV2 is empty -->
+        <mat-card class="no-issues-card" *ngIf="allIssuesV2.length === 0">
           <mat-card-content>
             <div class="no-issues-state">
               <mat-icon class="success-icon">check_circle</mat-icon>
@@ -469,289 +429,6 @@
           </mat-card-content>
         </mat-card>
 
-        <!-- PRIMARY: Issue Narratives View (QA-Manager Grade) -->
-        <!-- PART 4: Only show if narratives exist and view is set to clustered -->
-        <mat-card class="issues-card issue-narratives" *ngIf="showClusteredView && (issueNarratives.length > 0 || clusteredIssues.length > 0)">
-          <mat-card-header>
-            <mat-card-title>
-              <mat-icon>assignment</mat-icon>
-              Problem Statements (Ranked by Risk)
-            </mat-card-title>
-            <mat-card-subtitle>QA-Manager Grade findings with exact evidence quotes and actionable recommendations</mat-card-subtitle>
-          </mat-card-header>
-          <mat-card-content>
-            <div class="issue-narratives-list">
-              <div 
-                class="issue-narrative-card" 
-                *ngFor="let narrative of issueNarratives; let i = index"
-                (click)="selectIssueNarrative(narrative)"
-              >
-                <div class="issue-rank">#{{ i + 1 }}</div>
-                <div 
-                  class="issue-severity-badge"
-                  [style.background-color]="getNarrativeSeverityBgColor(narrative.severity)"
-                  [style.color]="getNarrativeSeverityColor(narrative.severity)"
-                  [matTooltip]="getSeverityTooltip(narrative.severity)"
-                >
-                  {{ narrative.severity }}
-                </div>
-                <div class="issue-main">
-                  <div class="issue-title">{{ narrative.title }}</div>
-                  <div class="issue-problem">{{ narrative.whatIsWrong }}</div>
-                  <div class="issue-why-matters" *ngIf="narrative.whyItMatters.length > 0">
-                    <strong>Why it matters:</strong> {{ narrative.whyItMatters[0] }}
-                  </div>
-                  <div class="issue-meta">
-                    <span class="issue-category">
-                      <mat-icon>{{ getCategoryIcon(narrative.category) }}</mat-icon>
-                      {{ getCategoryLabel(narrative.category) }}
-                      <span *ngIf="narrative.subcategory"> · {{ narrative.subcategory }}</span>
-                    </span>
-                    <span 
-                      class="issue-confidence" 
-                      [style.color]="getNarrativeConfidenceColor(narrative.confidence)"
-                      [matTooltip]="getConfidenceTooltip(narrative.confidence)"
-                    >
-                      <mat-icon class="meta-icon">verified</mat-icon>
-                      {{ narrative.confidence }} confidence
-                    </span>
-                    <span class="issue-turns">
-                      <mat-icon class="meta-icon">chat</mat-icon>
-                      {{ getNarrativeTurnRange(narrative) }}
-                    </span>
-                    <span class="issue-claims">
-                      <mat-icon class="meta-icon">label</mat-icon>
-                      {{ narrative.scope.claimIds.length }} claim{{ narrative.scope.claimIds.length !== 1 ? 's' : '' }}
-                    </span>
-                    <span class="issue-evidence" *ngIf="narrative.evidenceQuotes.length > 0">
-                      <mat-icon class="meta-icon">description</mat-icon>
-                      {{ narrative.evidenceQuotes.length }} quote{{ narrative.evidenceQuotes.length !== 1 ? 's' : '' }}
-                    </span>
-                  </div>
-                  <div class="issue-actions-preview" *ngIf="narrative.recommendedActions.length > 0">
-                    <mat-icon class="action-icon">lightbulb</mat-icon>
-                    <span>{{ narrative.recommendedActions[0].type }}: {{ narrative.recommendedActions[0].action }}</span>
-                  </div>
-                </div>
-                <div class="issue-scores">
-                  <div class="score-item" [matTooltip]="getNarrativeScoreTooltip('compositeScore')">
-                    <div class="score-value">{{ narrative.scoring.compositeScore }}</div>
-                    <div class="score-label">Composite</div>
-                  </div>
-                  <div class="score-item" [matTooltip]="getNarrativeScoreTooltip('riskScore')">
-                    <div class="score-value">{{ narrative.scoring.riskScore }}</div>
-                    <div class="score-label">Risk</div>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            <!-- Empty state -->
-            <div class="empty-state" *ngIf="issueNarratives.length === 0 && clusteredIssues.length === 0">
-              <mat-icon>check_circle</mat-icon>
-              <p>No significant issues detected</p>
-            </div>
-          </mat-card-content>
-        </mat-card>
-
-        <!-- FALLBACK: Legacy Clustered Issues View -->
-        <mat-card class="issues-card clustered-issues" *ngIf="showClusteredView && issueNarratives.length === 0 && clusteredIssues.length > 0">
-          <mat-card-header>
-            <mat-card-title>
-              <mat-icon>assignment</mat-icon>
-              Problem Statements (Ranked by Risk)
-            </mat-card-title>
-            <mat-card-subtitle>Actionable issues grouped by topic — what managers need to review</mat-card-subtitle>
-          </mat-card-header>
-          <mat-card-content>
-            <div class="clustered-issues-list">
-              <div 
-                class="clustered-issue-card" 
-                *ngFor="let issue of clusteredIssues; let i = index"
-                (click)="selectClusteredIssue(issue)"
-              >
-                <div class="issue-rank">#{{ i + 1 }}</div>
-                <div 
-                  class="issue-severity-badge"
-                  [style.background-color]="getClusteredSeverityBgColor(issue.severity)"
-                  [style.color]="getClusteredSeverityColor(issue.severity)"
-                >
-                  {{ issue.severity }}
-                </div>
-                <div class="issue-main">
-                  <div class="issue-title">{{ issue.title }}</div>
-                  <div class="issue-problem">{{ issue.problemStatement }}</div>
-                  <div class="issue-meta">
-                    <span class="issue-category">
-                      <mat-icon>{{ getCategoryIcon(issue.category) }}</mat-icon>
-                      {{ getCategoryLabel(issue.category) }}
-                    </span>
-                    <span class="issue-confidence">Confidence: {{ issue.confidence }}</span>
-                    <span class="issue-turns" *ngIf="getTurnRange(issue)">
-                      <mat-icon class="meta-icon">chat</mat-icon>
-                      {{ getTurnRange(issue) }}
-                    </span>
-                    <span class="issue-claims" [matTooltip]="getClaimIdsSummary(issue)">
-                      <mat-icon class="meta-icon">label</mat-icon>
-                      {{ issue.metrics.claimCount }} claim{{ issue.metrics.claimCount !== 1 ? 's' : '' }}
-                    </span>
-                  </div>
-                </div>
-                <div class="issue-risk-score">
-                  <div class="risk-value">{{ issue.metrics.riskScore }}</div>
-                  <div class="risk-label">Risk</div>
-                </div>
-              </div>
-            </div>
-
-            <!-- Empty state -->
-            <div class="empty-state" *ngIf="clusteredIssues.length === 0">
-              <mat-icon>check_circle</mat-icon>
-              <p>No significant issues detected</p>
-            </div>
-          </mat-card-content>
-        </mat-card>
-
-        <!-- Selected Issue Detail Panel (Replaced by Modal - see IssueDetailModalComponent) -->
-
-        <!-- Original Per-Claim Issues Table (when toggled or if no narratives) -->
-        <!-- PART 4: Show table if: not in clustered view, OR no narratives/clustered issues exist -->
-        <mat-card class="issues-card" *ngIf="(!showClusteredView || (issueNarratives.length === 0 && clusteredIssues.length === 0)) && (issues?.length ?? 0) > 0">
-          <mat-card-header>
-            <mat-card-title>Top Claim Issues (Ranked by Risk)</mat-card-title>
-            <mat-card-subtitle>Actionable findings from conversation analysis</mat-card-subtitle>
-          </mat-card-header>
-          <mat-card-content>
-            <table mat-table [dataSource]="sortedIssues" class="issues-table">
-              <!-- Rank Column -->
-              <ng-container matColumnDef="severity">
-                <th mat-header-cell *matHeaderCellDef>Rank</th>
-                <td mat-cell *matCellDef="let issue; let i = index">
-                  <div class="rank-cell">
-                    <span class="rank-number">{{ getIssueRank(issue, i) }}</span>
-                    <mat-chip 
-                      [style.background-color]="getSeverityColor(getSeverity(issue))" 
-                      [style.color]="'white'"
-                      class="severity-chip">
-                      {{ getSeverityLabel(getSeverity(issue)) }}
-                    </mat-chip>
-                  </div>
-                </td>
-              </ng-container>
-
-              <!-- Issue Type Column -->
-              <ng-container matColumnDef="issueType">
-                <th mat-header-cell *matHeaderCellDef>Issue Type</th>
-                <td mat-cell *matCellDef="let issue">
-                  <span [class]="'issue-type-badge issue-type-' + (issue.what?.issueType || issue.issueType || 'unknown').toLowerCase()">
-                    {{ getIssueTypeLabel(issue.what?.issueType || issue.issueType) }}
-                  </span>
-                </td>
-              </ng-container>
-
-              <!-- Claim Summary Column -->
-              <ng-container matColumnDef="claim">
-                <th mat-header-cell *matHeaderCellDef>Claim Summary</th>
-                <td mat-cell *matCellDef="let issue">
-                  <div class="claim-summary" [matTooltip]="issue.what?.claimText || issue.claimText || getClaimText(issue.claimId, issue)">
-                    {{ issue.what?.claimSummary || issue.claimSummary || getClaimSummary(issue.claimId, issue) }}
-                  </div>
-                </td>
-              </ng-container>
-
-              <!-- Speaker Column -->
-              <ng-container matColumnDef="speaker">
-                <th mat-header-cell *matHeaderCellDef>Speaker</th>
-                <td mat-cell *matCellDef="let issue">
-                  <span [class]="'speaker-badge speaker-' + (issue.who?.speaker || issue.speaker || 'unknown').toLowerCase()">
-                    {{ issue.who?.speakerLabel || issue.speakerLabel || issue.who?.speaker || issue.speaker || 'Unknown' }}
-                  </span>
-                </td>
-              </ng-container>
-
-              <!-- Evidence Location Column -->
-              <ng-container matColumnDef="where">
-                <th mat-header-cell *matHeaderCellDef>Evidence</th>
-                <td mat-cell *matCellDef="let issue">
-                  <div class="evidence-location">
-                    {{ issue.evidenceLocation || getEvidenceLocation(issue) }}
-                  </div>
-                </td>
-              </ng-container>
-
-              <!-- Risk Column (replaces old Evidence column) -->
-              <ng-container matColumnDef="evidence">
-                <th mat-header-cell *matHeaderCellDef>Risk</th>
-                <td mat-cell *matCellDef="let issue">
-                  <div class="risk-cell">
-                    <span [class]="'risk-badge risk-' + getSeverity(issue)">
-                      {{ getSeverityLabel(getSeverity(issue)) }}
-                    </span>
-                    <span class="risk-score" *ngIf="getRiskScore(issue) !== null">
-                      ({{ getRiskScore(issue) }})
-                    </span>
-                  </div>
-                </td>
-              </ng-container>
-
-              <!-- Why Flagged Column (replaces old Importance column) -->
-              <ng-container matColumnDef="importance">
-                <th mat-header-cell *matHeaderCellDef>Why Flagged</th>
-                <td mat-cell *matCellDef="let issue">
-                  <div class="why-flagged" [matTooltip]="issue.what?.whyFlagged || issue.whyFlagged || issue.what?.description || issue.description || 'Issue detected'">
-                    {{ issue.what?.whyFlagged || issue.whyFlagged || issue.what?.description || issue.description || 'Issue detected' }}
-                  </div>
-                </td>
-              </ng-container>
-
-              <!-- Status Column -->
-              <ng-container matColumnDef="status">
-                <th mat-header-cell *matHeaderCellDef>Status</th>
-                <td mat-cell *matCellDef="let issue">
-                  <mat-select 
-                    [value]="issue.status || 'OPEN'" 
-                    (selectionChange)="updateStatus(issue, $event.value)"
-                    class="status-select">
-                    <mat-option value="OPEN">Open</mat-option>
-                    <mat-option value="ACKNOWLEDGED">Acknowledged</mat-option>
-                    <mat-option value="RESOLVED">Resolved</mat-option>
-                    <mat-option value="FALSE_POSITIVE">False Positive</mat-option>
-                  </mat-select>
-                </td>
-              </ng-container>
-
-              <!-- Actions Column -->
-              <ng-container matColumnDef="actions">
-                <th mat-header-cell *matHeaderCellDef>Action</th>
-                <td mat-cell *matCellDef="let issue">
-                  <div class="action-buttons">
-                    <button
-                      mat-button
-                      color="primary"
-                      class="action-link"
-                      (click)="openEvidenceViewer(issue)"
-                      matTooltip="View evidence and context"
-                    >
-                      View evidence
-                    </button>
-                    <span class="action-separator">·</span>
-                    <button
-                      mat-button
-                      class="action-link"
-                      (click)="exportIssuePDF(issue.claimId)"
-                      matTooltip="Export this issue as PDF"
-                    >
-                      Export
-                    </button>
-                  </div>
-                </td>
-              </ng-container>
-
-              <tr mat-header-row *matHeaderRowDef="displayedColumns"></tr>
-              <tr mat-row *matRowDef="let row; columns: displayedColumns"></tr>
-            </table>
-          </mat-card-content>
-        </mat-card>
 
         <!-- Claims Viewer - shows all analyzed claims even when no issues -->
         <mat-card class="claims-viewer-card" *ngIf="evaluation?.report?.claims?.length > 0">
