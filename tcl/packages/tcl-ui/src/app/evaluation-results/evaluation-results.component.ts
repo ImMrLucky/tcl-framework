@@ -313,10 +313,6 @@ export class EvaluationResultsComponent implements OnInit {
       
       // Extract top offenders from IssueV2 if available
       this.extractTopOffenders();
-        console.log('📊 Loaded clustered issues (legacy):', {
-          count: this.clusteredIssues.length,
-          summary: this.issueSummary
-        });
       }
       
       // Load IssueV2 (Enterprise-Grade) from report
@@ -1338,23 +1334,23 @@ export class EvaluationResultsComponent implements OnInit {
   }
   
   /**
-   * Get issue rank - use compositeScore if available, otherwise use index
+   * Get issue rank - use IssueV2 riskScore if available, otherwise use index
    */
   getIssueRank(issue: Issue, index: number): number {
-    // If we have issueNarratives, use their compositeScore for ranking
-    if (this.issueNarratives.length > 0) {
-      // Find the narrative that matches this issue
-      const narrative = this.issueNarratives.find(n => 
-        n.issueId === issue.issueId || 
-        n.scope?.claimIds?.includes(issue.claimId)
+    // If we have IssueV2, use their riskScore for ranking
+    if (this.allIssuesV2.length > 0) {
+      // Find the IssueV2 that matches this issue
+      const issueV2 = this.allIssuesV2.find(i => 
+        i.what?.primaryClaimId === issue.claimId ||
+        i.issueId === issue.issueId
       );
-      if (narrative?.scoring?.compositeScore !== undefined) {
-        // Rank by compositeScore (higher = better rank = lower number)
-        const sortedByScore = [...this.issueNarratives].sort((a, b) => 
-          (b.scoring?.compositeScore || 0) - (a.scoring?.compositeScore || 0)
+      if (issueV2?.riskScore !== undefined) {
+        // Rank by riskScore (higher = better rank = lower number)
+        const sortedByScore = [...this.allIssuesV2].sort((a, b) => 
+          (b.riskScore || 0) - (a.riskScore || 0)
         );
-        const rankIndex = sortedByScore.findIndex(n => 
-          n.issueId === narrative.issueId
+        const rankIndex = sortedByScore.findIndex(i => 
+          i.issueId === issueV2.issueId
         );
         return rankIndex >= 0 ? rankIndex + 1 : index + 1;
       }
@@ -1364,15 +1360,15 @@ export class EvaluationResultsComponent implements OnInit {
   }
   
   /**
-   * Get risk score from narrative if available
+   * Get risk score from IssueV2 if available
    */
   getRiskScore(issue: Issue): number | null {
-    if (this.issueNarratives.length > 0) {
-      const narrative = this.issueNarratives.find(n => 
-        n.issueId === issue.issueId || 
-        n.scope?.claimIds?.includes(issue.claimId)
+    if (this.allIssuesV2.length > 0) {
+      const issueV2 = this.allIssuesV2.find(i => 
+        i.what?.primaryClaimId === issue.claimId ||
+        i.issueId === issue.issueId
       );
-      return narrative?.scoring?.riskScore ?? null;
+      return issueV2?.riskScore ? issueV2.riskScore * 100 : null;
     }
     return null;
   }

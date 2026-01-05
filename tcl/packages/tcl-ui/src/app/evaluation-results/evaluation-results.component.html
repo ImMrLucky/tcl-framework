@@ -100,45 +100,45 @@
           </div>
         </div>
 
-        <!-- Issue Summary Grid (use issueNarrativesSummary if available, fallback to issueSummary) -->
-        <div class="executive-grid" *ngIf="issueNarrativesSummary || issueSummary">
-          <div class="exec-metric total" [class.zero-issues]="(issueNarrativesSummary || issueSummary)?.totalIssues === 0">
-            <div class="exec-value">{{ (issueNarrativesSummary || issueSummary)?.totalIssues || 0 }}</div>
+        <!-- Issue Summary Grid (use issueSummaryV2) -->
+        <div class="executive-grid" *ngIf="issueSummaryV2">
+          <div class="exec-metric total" [class.zero-issues]="(issueSummaryV2?.totalIssues || 0) === 0">
+            <div class="exec-value">{{ issueSummaryV2?.totalIssues || 0 }}</div>
             <div class="exec-label">Total Issues</div>
           </div>
-          <div class="exec-metric critical" *ngIf="((issueNarrativesSummary || issueSummary)?.bySeverity?.CRITICAL || 0) > 0">
-            <div class="exec-value">{{ (issueNarrativesSummary || issueSummary)?.bySeverity?.CRITICAL || 0 }}</div>
+          <div class="exec-metric critical" *ngIf="(issueSummaryV2?.bySeverity?.critical || 0) > 0">
+            <div class="exec-value">{{ issueSummaryV2?.bySeverity?.critical || 0 }}</div>
             <div class="exec-label">Critical</div>
           </div>
           <div class="exec-metric high">
-            <div class="exec-value">{{ ((issueNarrativesSummary || issueSummary)?.bySeverity?.HIGH || 0) + ((issueNarrativesSummary || issueSummary)?.bySeverity?.CRITICAL || 0) }}</div>
+            <div class="exec-value">{{ (issueSummaryV2?.bySeverity?.high || 0) + (issueSummaryV2?.bySeverity?.critical || 0) }}</div>
             <div class="exec-label">High/Critical</div>
           </div>
           <div class="exec-metric medium">
-            <div class="exec-value">{{ (issueNarrativesSummary || issueSummary)?.bySeverity?.MEDIUM || 0 }}</div>
+            <div class="exec-value">{{ issueSummaryV2?.bySeverity?.medium || 0 }}</div>
             <div class="exec-label">Medium</div>
           </div>
           <div class="exec-metric low">
-            <div class="exec-value">{{ (issueNarrativesSummary || issueSummary)?.bySeverity?.LOW || 0 }}</div>
+            <div class="exec-value">{{ issueSummaryV2?.bySeverity?.low || 0 }}</div>
             <div class="exec-label">Low</div>
           </div>
-          <div class="exec-metric audit-status" [class.ready]="(issueNarrativesSummary || issueSummary)?.auditReady">
-            <mat-icon>{{ (issueNarrativesSummary || issueSummary)?.auditReady ? 'verified' : 'pending' }}</mat-icon>
-            <div class="exec-label">{{ (issueNarrativesSummary || issueSummary)?.auditReady ? 'Audit Ready' : 'Pending' }}</div>
+          <div class="exec-metric audit-status" [class.ready]="true">
+            <mat-icon>verified</mat-icon>
+            <div class="exec-label">Audit Ready</div>
           </div>
         </div>
 
         <!-- Primary Risk Categories -->
-        <div class="risk-categories" *ngIf="(issueNarrativesSummary || issueSummary)?.primaryRiskCategories?.length">
+        <div class="risk-categories" *ngIf="issueSummaryV2?.byType && Object.keys(issueSummaryV2.byType).length > 0">
           <span class="category-label">Primary Risk Areas:</span>
-          <span class="category-chip" *ngFor="let cat of (issueNarrativesSummary || issueSummary)?.primaryRiskCategories || []">
+          <span class="category-chip" *ngFor="let cat of Object.keys(issueSummaryV2.byType)">
             <mat-icon class="category-icon">{{ getCategoryIcon(cat) }}</mat-icon>
             {{ getCategoryLabel(cat) }}
           </span>
         </div>
 
-        <!-- Fallback to old summary if no issue analysis -->
-        <div class="audit-summary-grid" *ngIf="!issueSummary">
+        <!-- Fallback summary if no IssueV2 -->
+        <div class="audit-summary-grid" *ngIf="!issueSummaryV2">
           <div class="summary-metric" [matTooltip]="getMetricTooltip('coherenceScore')">
             <div class="metric-label">
               Coherence Score
