@@ -873,18 +873,27 @@ export function setupIssueWorkflowRoutes(app: express.Application) {
 
       // Get workflow records
       const issueIds = allIssues.map(i => i.issueId).filter(Boolean);
-      const { data: workflows } = await supabaseAdmin
-        .from('issue_workflow')
-        .select('*')
-        .in('issue_id', issueIds)
-        .eq('org_id', context.orgId)
-        .catch(() => ({ data: [] }));
+      let workflows: any[] = [];
+      if (issueIds.length > 0) {
+        try {
+          const { data, error } = await supabaseAdmin
+            .from('issue_workflow')
+            .select('*')
+            .in('issue_id', issueIds)
+            .eq('org_id', context.orgId);
+          if (!error && data) {
+            workflows = data;
+          }
+        } catch (e) {
+          console.warn('Failed to load workflows:', e);
+        }
+      }
 
-      const workflowMap = new Map((workflows || []).map(w => [w.issue_id, w]));
+      const workflowMap = new Map(workflows.map((w: any) => [w.issue_id, w]));
 
       // Enrich issues with workflow data
       const enrichedIssues = allIssues.map(issue => {
-        const workflow = workflowMap.get(issue.issueId);
+        const workflow = workflowMap.get(issue.issueId) as any;
         return {
           ...issue,
           status: workflow?.status || 'OPEN',
@@ -1100,13 +1109,20 @@ export function setupIssueWorkflowRoutes(app: express.Application) {
       }
 
       // Get all evaluations and extract issues (same as queue endpoint)
-      const { data: evaluations } = await supabaseAdmin
-        .from('evaluations')
-        .select('id, report, created_at')
-        .eq('org_id', context.orgId)
-        .order('created_at', { ascending: false })
-        .limit(100)
-        .catch(() => ({ data: [] }));
+      let evaluations: any[] = [];
+      try {
+        const { data, error } = await supabaseAdmin
+          .from('evaluations')
+          .select('id, report, created_at')
+          .eq('org_id', context.orgId)
+          .order('created_at', { ascending: false })
+          .limit(100);
+        if (!error && data) {
+          evaluations = data;
+        }
+      } catch (e) {
+        console.warn('Failed to load evaluations:', e);
+      }
 
       if (!evaluations || evaluations.length === 0) {
         return res.status(404).json({ error: 'Pattern not found' });
@@ -1173,18 +1189,27 @@ export function setupIssueWorkflowRoutes(app: express.Application) {
 
       // Get workflow records
       const issueIds = allIssues.map(i => i.issueId).filter(Boolean);
-      const { data: workflows } = await supabaseAdmin
-        .from('issue_workflow')
-        .select('*')
-        .in('issue_id', issueIds)
-        .eq('org_id', context.orgId)
-        .catch(() => ({ data: [] }));
+      let workflows: any[] = [];
+      if (issueIds.length > 0) {
+        try {
+          const { data, error } = await supabaseAdmin
+            .from('issue_workflow')
+            .select('*')
+            .in('issue_id', issueIds)
+            .eq('org_id', context.orgId);
+          if (!error && data) {
+            workflows = data;
+          }
+        } catch (e) {
+          console.warn('Failed to load workflows:', e);
+        }
+      }
 
-      const workflowMap = new Map((workflows || []).map(w => [w.issue_id, w]));
+      const workflowMap = new Map(workflows.map((w: any) => [w.issue_id, w]));
 
       // Enrich issues with workflow
       const enrichedIssues = allIssues.map(issue => {
-        const workflow = workflowMap.get(issue.issueId);
+        const workflow = workflowMap.get(issue.issueId) as any;
         return {
           ...issue,
           status: workflow?.status || 'OPEN',
@@ -1340,13 +1365,20 @@ export function setupIssueWorkflowRoutes(app: express.Application) {
       }
 
       // Get all issues matching this pattern (same logic as detail endpoint)
-      const { data: evaluations } = await supabaseAdmin
-        .from('evaluations')
-        .select('id, report, created_at')
-        .eq('org_id', context.orgId)
-        .order('created_at', { ascending: false })
-        .limit(100)
-        .catch(() => ({ data: [] }));
+      let evaluations: any[] = [];
+      try {
+        const { data, error } = await supabaseAdmin
+          .from('evaluations')
+          .select('id, report, created_at')
+          .eq('org_id', context.orgId)
+          .order('created_at', { ascending: false })
+          .limit(100);
+        if (!error && data) {
+          evaluations = data;
+        }
+      } catch (e) {
+        console.warn('Failed to load evaluations:', e);
+      }
 
       const allIssues: any[] = [];
       for (const eval_ of evaluations || []) {
