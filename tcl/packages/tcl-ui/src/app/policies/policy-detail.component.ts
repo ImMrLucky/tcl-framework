@@ -45,6 +45,10 @@ export class PolicyDetailComponent implements OnInit {
     private snackBar: MatSnackBar
   ) {}
 
+  getPolicyName(): string {
+    return this.policyDetail?.policy?.name || 'Policy Detail';
+  }
+
   ngOnInit() {
     const id = this.route.snapshot.paramMap.get('id');
     if (id) {

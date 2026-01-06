@@ -160,7 +160,7 @@
                 <input matInput type="number" step="0.01" [(ngModel)]="riskScoringWeights.category" (ngModelChange)="validateForm()">
               </mat-form-field>
             </div>
-            <div class="sum-display" [class.invalid]="Math.abs(getRiskScoringSum() - 1.0) > 0.001">
+            <div class="sum-display" [class.invalid]="abs(getRiskScoringSum() - 1.0) > 0.001">
               Sum: {{ getRiskScoringSum().toFixed(3) }} (must be 1.0)
             </div>
 
@@ -236,7 +236,7 @@
                 <input matInput type="number" step="0.01" [(ngModel)]="baseWeights.confidence" (ngModelChange)="validateForm()">
               </mat-form-field>
             </div>
-            <div class="sum-display" [class.invalid]="Math.abs(getBaseWeightsSum() - 1.0) > 0.001">
+            <div class="sum-display" [class.invalid]="abs(getBaseWeightsSum() - 1.0) > 0.001">
               Sum: {{ getBaseWeightsSum().toFixed(3) }} (must be 1.0)
             </div>
           </div>

@@ -139,7 +139,7 @@
           <div *ngFor="let cat of topCategories" class="bar-item">
             <div class="bar-label">{{ cat.category }}</div>
             <div class="bar-wrapper">
-              <div class="bar-fill" [style.width]="getBarWidth(cat.count, getMaxValue(topCategories.map(c => c.count)))"></div>
+              <div class="bar-fill" [style.width]="getBarWidth(cat.count, getMaxCategoryValue())"></div>
               <span class="bar-value">{{ cat.count }}</span>
             </div>
           </div>
@@ -154,7 +154,7 @@
           <div *ngFor="let type of topTypes" class="bar-item">
             <div class="bar-label">{{ type.type }}</div>
             <div class="bar-wrapper">
-              <div class="bar-fill" [style.width]="getBarWidth(type.count, getMaxValue(topTypes.map(t => t.count)))"></div>
+              <div class="bar-fill" [style.width]="getBarWidth(type.count, getMaxTypeValue())"></div>
               <span class="bar-value">{{ type.count }}</span>
             </div>
           </div>

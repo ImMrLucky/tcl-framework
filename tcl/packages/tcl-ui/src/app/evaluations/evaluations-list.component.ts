@@ -52,6 +52,24 @@ interface EvaluationSummary {
   engine_version: string;
 }
 
+export interface EvaluationSearchResult {
+  evaluationId: string;
+  createdAt: string;
+  agent: string;
+  totalIssues: number;
+  highCriticalCount: number;
+  verifiedPercent: number;
+  topCategories: string[];
+  conversationId: string;
+  env: string;
+  scores: any;
+  report: {
+    source?: {
+      sourceTitle?: string;
+    };
+  };
+}
+
 @Component({
   selector: 'app-evaluations-list',
   standalone: true,
@@ -484,24 +502,6 @@ interface EvaluationSummary {
     }
   `]
 })
-export interface EvaluationSearchResult {
-  evaluationId: string;
-  createdAt: string;
-  agent: string;
-  totalIssues: number;
-  highCriticalCount: number;
-  verifiedPercent: number;
-  topCategories: string[];
-  conversationId: string;
-  env: string;
-  scores: any;
-  report: {
-    source?: {
-      sourceTitle?: string;
-    };
-  };
-}
-
 export class EvaluationsListComponent implements OnInit {
   evaluations: EvaluationSearchResult[] = [];
   loading = true;

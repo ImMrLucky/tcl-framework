@@ -97,6 +97,21 @@ export class ComplianceDashboardComponent implements OnInit {
   formatDate(date: Date): string {
     return date.toLocaleDateString();
   }
+
+  getMaxValue(values: number[]): number {
+    if (!values || values.length === 0) return 1;
+    return Math.max(...values);
+  }
+
+  getMaxCategoryValue(): number {
+    if (!this.topCategories || this.topCategories.length === 0) return 1;
+    return Math.max(...this.topCategories.map(c => c.count));
+  }
+
+  getMaxTypeValue(): number {
+    if (!this.topTypes || this.topTypes.length === 0) return 1;
+    return Math.max(...this.topTypes.map(t => t.count));
+  }
   
   getSeverityBreakdown(pattern: IssuePattern): string {
     const parts: string[] = [];

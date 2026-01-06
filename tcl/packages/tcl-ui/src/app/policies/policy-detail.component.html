@@ -1,6 +1,6 @@
 <div class="policy-detail-container">
   <app-header 
-    [pageTitle]="policyDetail?.policy.name || 'Policy Detail'" 
+    [pageTitle]="getPolicyName()" 
     pageSubtitle="View policy details, versions, and linked issues"
     [showNavigation]="true"
     [showBackButton]="true"

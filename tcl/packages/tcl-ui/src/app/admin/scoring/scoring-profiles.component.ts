@@ -391,5 +391,12 @@ export class ScoringProfilesComponent implements OnInit {
   getBaseWeightsSum(): number {
     return this.baseWeights.impact + this.baseWeights.verification + this.baseWeights.confidence;
   }
+
+  // Expose Math for template
+  Math = Math;
+
+  abs(value: number): number {
+    return Math.abs(value);
+  }
 }
 

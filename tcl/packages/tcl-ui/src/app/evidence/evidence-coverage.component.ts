@@ -98,5 +98,15 @@ export class EvidenceCoverageComponent implements OnInit {
     const total = cat.total || 1;
     return Math.round((cat.externalVerified / total) * 100);
   }
+
+  // Expose Object for template
+  Object = Object;
+
+  getCategoryKeys(): string[] {
+    if (!this.coverage || !this.coverage.byCategory) {
+      return [];
+    }
+    return Object.keys(this.coverage.byCategory);
+  }
 }
 
