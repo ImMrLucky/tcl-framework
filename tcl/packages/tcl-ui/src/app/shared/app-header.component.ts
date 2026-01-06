@@ -6,7 +6,6 @@ import { MatIconModule } from '@angular/material/icon';
 import { MatMenuModule } from '@angular/material/menu';
 import { MatDividerModule } from '@angular/material/divider';
 import { MatTooltipModule } from '@angular/material/tooltip';
-import { MatSidenavModule } from '@angular/material/sidenav';
 import { MatListModule } from '@angular/material/list';
 import { LogoComponent } from './logo.component';
 import { AuthService, User } from '../auth.service';
@@ -22,7 +21,6 @@ import { AuthService, User } from '../auth.service';
     MatMenuModule,
     MatDividerModule,
     MatTooltipModule,
-    MatSidenavModule,
     MatListModule,
     LogoComponent
   ],
@@ -47,7 +45,27 @@ export class AppHeaderComponent implements OnInit {
     this.authService.currentUser$.subscribe(user => {
       this.currentUser = user;
       this.isAuthenticated = user !== null;
+      
+      // Add/remove body class for sidebar
+      if (typeof document !== 'undefined') {
+        if (this.isAuthenticated && this.showNavigation) {
+          document.body.classList.add('has-sidebar');
+          this.updateSidebarClass();
+        } else {
+          document.body.classList.remove('has-sidebar', 'sidebar-collapsed');
+        }
+      }
     });
+  }
+
+  updateSidebarClass() {
+    if (typeof document !== 'undefined') {
+      if (this.sidebarOpen) {
+        document.body.classList.remove('sidebar-collapsed');
+      } else {
+        document.body.classList.add('sidebar-collapsed');
+      }
+    }
   }
 
   signOut() {
@@ -56,6 +74,7 @@ export class AppHeaderComponent implements OnInit {
 
   toggleSidebar() {
     this.sidebarOpen = !this.sidebarOpen;
+    this.updateSidebarClass();
   }
 }
 

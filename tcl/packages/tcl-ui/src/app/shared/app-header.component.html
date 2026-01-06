@@ -1,8 +1,5 @@
-<mat-sidenav-container class="header-container" *ngIf="showNavigation && isAuthenticated">
-  <mat-sidenav 
-    #sidenav 
-    mode="side" 
-    opened="true"
+<div class="header-container" *ngIf="showNavigation && isAuthenticated">
+  <div 
     class="sidebar-nav"
     [class.collapsed]="!sidebarOpen"
     [style.width.px]="sidebarOpen ? 240 : 64">
@@ -44,9 +41,9 @@
         <span *ngIf="sidebarOpen" matListItemTitle>Admin → Scoring</span>
       </a>
     </mat-nav-list>
-  </mat-sidenav>
+  </div>
   
-  <mat-sidenav-content class="header-content-wrapper">
+  <div class="header-content-wrapper">
     <header>
       <div class="container">
         <div class="header-content">
@@ -133,8 +130,8 @@
         </div>
       </div>
     </header>
-  </mat-sidenav-content>
-</mat-sidenav-container>
+  </div>
+</div>
 
 <header *ngIf="!showNavigation || !isAuthenticated">
   <div class="container">

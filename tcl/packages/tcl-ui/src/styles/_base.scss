@@ -6,10 +6,23 @@
   box-sizing: border-box;
 }
 
+:root {
+  --sidebar-width: 240px;
+}
+
 body {
   font-family: $font-family-base;
   line-height: $line-height-base;
   color: $color-text-primary;
   background: $bg-white;
+  transition: padding-left 0.3s ease;
+}
+
+body.has-sidebar {
+  padding-left: 240px;
+}
+
+body.has-sidebar.sidebar-collapsed {
+  padding-left: 64px;
 }
 
