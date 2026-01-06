@@ -50,12 +50,12 @@ export interface IngestResponse {
 
 export function registerIngestEndpoints(app: express.Express) {
   /**
-   * POST /ingest
+   * POST /api/ingest
    * 
    * Ingest a file and normalize it to the canonical format.
    * Optionally runs evaluation immediately.
    */
-  app.post("/ingest", async (req, res) => {
+  app.post("/api/ingest", async (req, res) => {
     try {
       const context = await getOrgContext(req);
       
@@ -221,12 +221,12 @@ export function registerIngestEndpoints(app: express.Express) {
   });
   
   /**
-   * POST /ingest/preview
+   * POST /api/ingest/preview
    * 
    * Preview normalization without saving to database.
    * Useful for showing user the parsed result before confirming.
    */
-  app.post("/ingest/preview", async (req, res) => {
+  app.post("/api/ingest/preview", async (req, res) => {
     try {
       const context = await getOrgContext(req);
       
