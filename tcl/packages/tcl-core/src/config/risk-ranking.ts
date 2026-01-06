@@ -91,8 +91,8 @@ export function getRiskRankingConfig(): RiskRankingConfig {
     return cachedConfig;
   } catch (error) {
     console.warn('Failed to load risk-ranking.json, using defaults', error);
-    // Return safe defaults
-    return {
+    // Assign safe defaults to cachedConfig
+    cachedConfig = {
       ui: { maxTopIssues: 10 },
       issueLimits: {
         perClaimMax: 10,
@@ -187,13 +187,16 @@ export function getRiskRankingConfig(): RiskRankingConfig {
       ],
     };
     
-    // Validate defaults (cachedConfig is guaranteed to be non-null here)
-    if (cachedConfig) {
-      validateRiskRankingConfig(cachedConfig);
-    }
+    // Validate defaults (cachedConfig is guaranteed to be non-null here since we just assigned it)
+    validateRiskRankingConfig(cachedConfig!);
   }
   
-  return cachedConfig!;
+  // At this point, cachedConfig is guaranteed to be non-null
+  if (!cachedConfig) {
+    throw new Error('Failed to load or create risk ranking config');
+  }
+  
+  return cachedConfig;
 }
 
 /**
