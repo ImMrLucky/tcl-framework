@@ -68,7 +68,8 @@ export class PolicyDetailComponent implements OnInit {
       const snackBarRef = this.snackBar.open('Failed to load policy: ' + (error.error?.error || error.message), 'Close', {
         duration: 5000
       });
-      snackBarRef.onAction().subscribe(() => snackBarRef.dismiss()); finally {
+      snackBarRef.onAction().subscribe(() => snackBarRef.dismiss());
+    } finally {
       this.loading = false;
     }
   }
@@ -87,6 +88,7 @@ export class PolicyDetailComponent implements OnInit {
         duration: 5000
       });
       snackBarRef.onAction().subscribe(() => snackBarRef.dismiss());
+    }
   }
 
   async archivePolicy() {
@@ -107,6 +109,7 @@ export class PolicyDetailComponent implements OnInit {
         duration: 5000
       });
       snackBarRef.onAction().subscribe(() => snackBarRef.dismiss());
+    }
   }
 
   getStatusClass(status: string): string {
