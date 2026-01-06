@@ -47,11 +47,13 @@ export function setupIssueWorkflowRoutes(app: express.Application) {
       const evaluationId = req.query.evaluationId as string | undefined;
 
       // Build evaluation query
+      // Limit to prevent loading too many evaluations at once (each can have many issues)
       let evalQuery = supabaseAdmin
         .from('evaluations')
         .select('id, report, created_at')
         .eq('org_id', context.orgId)
-        .order('created_at', { ascending: false });
+        .order('created_at', { ascending: false })
+        .limit(100); // Limit evaluations to prevent huge responses
 
       if (evaluationId) {
         evalQuery = evalQuery.eq('id', evaluationId);
@@ -83,11 +85,24 @@ export function setupIssueWorkflowRoutes(app: express.Application) {
         const issues = report?.issues || report?.topIssuesV2 || report?.allIssuesV2 || [];
         
         for (const issue of issues) {
-          // Add evaluation metadata
+          // Ensure issue has required fields
+          if (!issue || !issue.issueId) {
+            console.warn('Skipping issue without issueId:', issue);
+            continue;
+          }
+          
+          // Add evaluation metadata and ensure all required fields exist
           allIssues.push({
             ...issue,
             evaluationId: eval_.id,
             evaluationCreatedAt: eval_.created_at,
+            // Ensure nested objects exist
+            what: issue.what || { issueSummary: '', issueDetail: '' },
+            verification: issue.verification || { level: 'NONE', reasonCodes: [] },
+            who: issue.who || { speaker: 'unknown' },
+            evidence: issue.evidence || { refs: [] },
+            compliance: issue.compliance || { tags: [], disclaimers: [] },
+            audit: issue.audit || { createdAt: eval_.created_at, engineVersion: '', scorerId: '' },
           });
         }
       }

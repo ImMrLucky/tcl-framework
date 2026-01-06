@@ -205,10 +205,11 @@ export function setupAuditRoutes(app: express.Application) {
       const env = req.query.env as string;
       const projectId = req.query.projectId as string;
       
-      // Build query
+      // Build query - exclude 'report' field to reduce response size
+      // The 'report' field can be very large (6MB+) and causes Netlify function size limits
       let query = supabaseAdmin
         .from('evaluations')
-        .select('id, org_id, project_id, env, conversation_id, scores, engine_version, latency_ms, report, created_at', { count: 'exact' })
+        .select('id, org_id, project_id, env, conversation_id, scores, engine_version, latency_ms, created_at', { count: 'exact' })
         .eq('org_id', context.orgId)
         .order('created_at', { ascending: false });
       

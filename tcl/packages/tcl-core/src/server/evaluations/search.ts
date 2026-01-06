@@ -38,12 +38,14 @@ export function setupEvaluationSearchRoutes(app: express.Application) {
       const projectId = req.query.projectId as string || context.projectId;
       const env = req.query.env as string || context.env;
 
-      // Build base query
+      // Build base query - we need 'report' for filtering, but we'll only load what we need
+      // For large datasets, we should paginate the database query first
       let query = supabaseAdmin
         .from('evaluations')
         .select('id, org_id, project_id, env, conversation_id, scores, engine_version, latency_ms, report, created_at', { count: 'exact' })
         .eq('org_id', context.orgId)
-        .order('created_at', { ascending: false });
+        .order('created_at', { ascending: false })
+        .limit(1000); // Limit to prevent loading too many reports at once
 
       if (projectId) {
         query = query.eq('project_id', projectId);

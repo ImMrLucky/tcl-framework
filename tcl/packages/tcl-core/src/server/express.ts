@@ -3067,6 +3067,12 @@ app.post("/transcribe", upload.single('audio'), async (req, res) => {
 // Setup integration routes
 setupIntegrationRoutes(app);
 
+// Setup evaluation search routes FIRST (before /api/evaluations)
+// This ensures /api/evaluations/search matches before the more general /api/evaluations route
+console.log("Registering evaluation search routes...");
+setupEvaluationSearchRoutes(app);
+console.log("Evaluation search routes registered successfully");
+
 // Setup audit-grade analysis routes
 console.log("Registering audit routes...");
 setupAuditRoutes(app);
@@ -3086,11 +3092,6 @@ console.log("Analytics routes registered successfully");
 console.log("Registering export routes...");
 setupExportRoutes(app);
 console.log("Export routes registered successfully");
-
-// Setup evaluation search routes
-console.log("Registering evaluation search routes...");
-setupEvaluationSearchRoutes(app);
-console.log("Evaluation search routes registered successfully");
 
 // Setup policy routes
 console.log("Registering policy routes...");
