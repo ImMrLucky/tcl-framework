@@ -50,6 +50,7 @@ import { AuthService } from '../auth.service';
     MatNativeDateModule,
     MatDialogModule,
     MatSnackBarModule,
+    MatDividerModule,
     AppHeaderComponent
   ],
   templateUrl: './issues-list.component.html',
@@ -260,9 +261,19 @@ export class IssuesListComponent implements OnInit {
   }
   
   getVerificationLabel(level: string): string {
-    if (level === 'TRANSCRIPT_ONLY') return 'Unverified (Transcript-only)';
+    if (level === 'TRANSCRIPT_ONLY') return 'Transcript-only';
     if (level === 'EXTERNAL_VERIFIED') return 'Verified';
     return 'Unverified';
+  }
+  
+  getVerificationTooltip(level: string): string {
+    if (level === 'TRANSCRIPT_ONLY') {
+      return 'This issue is based on transcript content only and has not been verified against external evidence (policies, system records, etc.).';
+    }
+    if (level === 'EXTERNAL_VERIFIED') {
+      return 'This issue has been verified against external evidence sources (policies, documents, system records).';
+    }
+    return 'This issue has no grounding evidence and requires investigation.';
   }
   
   getStatusColor(status: string | undefined): string {
@@ -283,6 +294,83 @@ export class IssuesListComponent implements OnInit {
   
   getScore(issue: IssueV2): number {
     return issue.score ?? (issue.riskScore ?? 0) * 100;
+  }
+  
+  exportIssue(issue: IssueV2) {
+    const dataStr = JSON.stringify(issue, null, 2);
+    const dataBlob = new Blob([dataStr], { type: 'application/json' });
+    const url = URL.createObjectURL(dataBlob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `issue-${issue.issueId}.json`;
+    link.click();
+    URL.revokeObjectURL(url);
+    this.snackBar.open('Issue exported', 'Close', { duration: 2000 });
+  }
+  
+  exportSelected(format: 'csv' | 'json' | 'pdf') {
+    if (this.selectedIssues.size === 0) {
+      this.snackBar.open('Please select at least one issue', 'Close', { duration: 3000 });
+      return;
+    }
+    
+    const selectedIssues = this.dataSource.data.filter(issue => this.selectedIssues.has(issue.issueId));
+    
+    if (format === 'json') {
+      const dataStr = JSON.stringify(selectedIssues, null, 2);
+      const dataBlob = new Blob([dataStr], { type: 'application/json' });
+      const url = URL.createObjectURL(dataBlob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `issues-${new Date().toISOString().split('T')[0]}.json`;
+      link.click();
+      URL.revokeObjectURL(url);
+      this.snackBar.open(`Exported ${selectedIssues.length} issues as JSON`, 'Close', { duration: 2000 });
+    } else if (format === 'csv') {
+      // Convert to CSV
+      const headers = ['Issue ID', 'Type', 'Category', 'Severity', 'Impact', 'Score', 'Status', 'Verification', 'Summary', 'Created At'];
+      const rows = selectedIssues.map(issue => [
+        issue.issueId,
+        issue.type || '',
+        issue.category || '',
+        issue.severityDisplay || issue.severity || '',
+        issue.impact || '',
+        this.getScore(issue).toString(),
+        issue.status || 'OPEN',
+        this.getVerificationLabel(issue.verification?.level || 'NONE'),
+        issue.what?.issueSummary || '',
+        issue.evaluationCreatedAt || issue.audit?.createdAt || ''
+      ]);
+      
+      const csvContent = [
+        headers.join(','),
+        ...rows.map(row => row.map(cell => `"${String(cell).replace(/"/g, '""')}"`).join(','))
+      ].join('\n');
+      
+      const dataBlob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+      const url = URL.createObjectURL(dataBlob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `issues-${new Date().toISOString().split('T')[0]}.csv`;
+      link.click();
+      URL.revokeObjectURL(url);
+      this.snackBar.open(`Exported ${selectedIssues.length} issues as CSV`, 'Close', { duration: 2000 });
+    }
+  }
+  
+  sendToJira(issue: IssueV2) {
+    // TODO: Implement Jira integration
+    this.snackBar.open('Jira integration coming soon', 'Close', { duration: 3000 });
+  }
+  
+  sendToSalesforce(issue: IssueV2) {
+    // TODO: Implement Salesforce integration
+    this.snackBar.open('Salesforce integration coming soon', 'Close', { duration: 3000 });
+  }
+  
+  sendToServiceNow(issue: IssueV2) {
+    // TODO: Implement ServiceNow integration
+    this.snackBar.open('ServiceNow integration coming soon', 'Close', { duration: 3000 });
   }
 }
 

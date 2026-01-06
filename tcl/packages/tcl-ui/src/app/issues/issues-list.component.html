@@ -91,6 +91,45 @@
           <mat-icon>person_remove</mat-icon>
           Unassign
         </button>
+        <mat-divider [vertical]="true"></mat-divider>
+        <button mat-button [matMenuTriggerFor]="exportMenu">
+          <mat-icon>download</mat-icon>
+          Export
+        </button>
+        <mat-menu #exportMenu="matMenu">
+          <button mat-menu-item (click)="exportSelected('csv')">
+            <mat-icon>table_chart</mat-icon>
+            Export as CSV
+          </button>
+          <button mat-menu-item (click)="exportSelected('json')">
+            <mat-icon>code</mat-icon>
+            Export as JSON
+          </button>
+          <button mat-menu-item (click)="exportSelected('pdf')" disabled>
+            <mat-icon>picture_as_pdf</mat-icon>
+            Export as PDF
+            <span class="coming-soon">(Coming Soon)</span>
+          </button>
+        </mat-menu>
+        <button mat-button [matMenuTriggerFor]="integrationBulkMenu" disabled>
+          <mat-icon>link</mat-icon>
+          Send to External System
+          <span class="coming-soon">(Coming Soon)</span>
+        </button>
+        <mat-menu #integrationBulkMenu="matMenu">
+          <button mat-menu-item disabled>
+            <mat-icon>bug_report</mat-icon>
+            Create Jira Tickets
+          </button>
+          <button mat-menu-item disabled>
+            <mat-icon>account_circle</mat-icon>
+            Create Salesforce Cases
+          </button>
+          <button mat-menu-item disabled>
+            <mat-icon>assignment</mat-icon>
+            Create ServiceNow Tickets
+          </button>
+        </mat-menu>
       </div>
     </mat-card>
 
@@ -134,9 +173,10 @@
         <ng-container matColumnDef="severityDisplay">
           <th mat-header-cell *matHeaderCellDef mat-sort-header>Severity</th>
           <td mat-cell *matCellDef="let issue">
-            <mat-chip [class]="'severity-chip ' + getSeverityColor(issue.severityDisplay || issue.severity)">
+            <mat-chip *ngIf="issue.severityDisplay || issue.severity" [class]="'severity-chip ' + getSeverityColor(issue.severityDisplay || issue.severity)">
               {{ (issue.severityDisplay || issue.severity) | titlecase }}
             </mat-chip>
+            <span *ngIf="!issue.severityDisplay && !issue.severity" class="no-data">-</span>
           </td>
         </ng-container>
 
@@ -153,9 +193,10 @@
         <ng-container matColumnDef="verification">
           <th mat-header-cell *matHeaderCellDef>Verification</th>
           <td mat-cell *matCellDef="let issue">
-            <mat-chip [class]="'verification-chip ' + (issue.verification.level === 'TRANSCRIPT_ONLY' ? 'transcript-only' : '')">
+            <mat-chip *ngIf="issue.verification?.level" [class]="'verification-chip ' + (issue.verification.level === 'TRANSCRIPT_ONLY' ? 'transcript-only' : '')">
               {{ getVerificationLabel(issue.verification.level) }}
             </mat-chip>
+            <span *ngIf="!issue.verification?.level" class="no-data">-</span>
           </td>
         </ng-container>
 
@@ -173,9 +214,10 @@
         <ng-container matColumnDef="issueSummary">
           <th mat-header-cell *matHeaderCellDef>Summary</th>
           <td mat-cell *matCellDef="let issue">
-            <div class="summary-cell" [matTooltip]="issue.what.issueSummary">
+            <div *ngIf="issue.what?.issueSummary" class="summary-cell" [matTooltip]="issue.what.issueSummary">
               {{ issue.what.issueSummary }}
             </div>
+            <span *ngIf="!issue.what?.issueSummary" class="no-data">-</span>
           </td>
         </ng-container>
 
@@ -217,6 +259,32 @@
                 <mat-icon>open_in_new</mat-icon>
                 View Evaluation
               </button>
+              <mat-divider></mat-divider>
+              <button mat-menu-item (click)="exportIssue(issue)">
+                <mat-icon>download</mat-icon>
+                Export Issue
+              </button>
+              <button mat-menu-item [matMenuTriggerFor]="integrationMenu" *ngIf="issue.evaluationId">
+                <mat-icon>link</mat-icon>
+                Send to External System
+              </button>
+              <mat-menu #integrationMenu="matMenu">
+                <button mat-menu-item (click)="sendToJira(issue)" disabled>
+                  <mat-icon>bug_report</mat-icon>
+                  Create Jira Ticket
+                  <span class="coming-soon">(Coming Soon)</span>
+                </button>
+                <button mat-menu-item (click)="sendToSalesforce(issue)" disabled>
+                  <mat-icon>account_circle</mat-icon>
+                  Create Salesforce Case
+                  <span class="coming-soon">(Coming Soon)</span>
+                </button>
+                <button mat-menu-item (click)="sendToServiceNow(issue)" disabled>
+                  <mat-icon>assignment</mat-icon>
+                  Create ServiceNow Ticket
+                  <span class="coming-soon">(Coming Soon)</span>
+                </button>
+              </mat-menu>
             </mat-menu>
           </td>
         </ng-container>
