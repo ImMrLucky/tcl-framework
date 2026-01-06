@@ -122,10 +122,6 @@ export class ComplianceDashboardComponent implements OnInit {
     return parts.join(', ') || 'N/A';
   }
   
-  getMaxValue(data: number[]): number {
-    return Math.max(...data, 1);
-  }
-  
   getBarWidth(value: number, max: number): string {
     return `${(value / max) * 100}%`;
   }
