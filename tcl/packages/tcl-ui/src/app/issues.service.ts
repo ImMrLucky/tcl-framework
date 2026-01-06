@@ -107,6 +107,114 @@ export interface IssueFilters {
   offset?: number;
 }
 
+// Pattern Queue Interfaces
+export interface IssuePatternRow {
+  patternKey: string;
+  title: string;
+  summary: string;
+  category: string;
+  type: string;
+  impact?: 'low' | 'medium' | 'high';
+  severity: 'low' | 'medium' | 'high' | 'critical';
+  severityDisplay: 'low' | 'medium' | 'high' | 'critical';
+  occurrences: number;
+  uniqueAgents?: number;
+  uniqueCustomers?: number;
+  verificationCounts: {
+    EXTERNAL_VERIFIED: number;
+    TRANSCRIPT_ONLY: number;
+    NONE: number;
+  };
+  lastSeenAt: string;
+  firstSeenAt: string;
+  trend: {
+    direction: 'up' | 'down' | 'flat';
+    pctChange: number;
+    window: string;
+  };
+  status: 'OPEN' | 'ACKNOWLEDGED' | 'RESOLVED' | 'FALSE_POSITIVE';
+  assignee?: string | null;
+  priorityScore: number;
+  avgRiskScore: number;
+  maxRiskScore: number;
+}
+
+export interface IssueQueueResponse {
+  rows: IssuePatternRow[];
+  total: number;
+  page: number;
+  pageSize: number;
+  diagnostics?: { mode?: string; warnings?: string[] };
+}
+
+export interface IssuePatternOccurrence {
+  evaluationId: string;
+  conversationId: string;
+  occurredAt: string;
+  riskScore: number;
+  score?: number;
+  severityDisplay: 'low' | 'medium' | 'high' | 'critical';
+  verificationLevel: 'EXTERNAL_VERIFIED' | 'TRANSCRIPT_ONLY' | 'NONE';
+  who: {
+    speaker: string;
+    turnIndex?: number;
+  };
+  what: {
+    primaryClaimId: string;
+    issueSummary: string;
+    claimText?: string;
+  };
+  evidencePreview: Array<{
+    sourceType: string;
+    quote: string;
+    turnIndex?: number;
+  }>;
+  tracePreview?: {
+    contradictionPairs?: Array<{
+      claimA: string;
+      claimB: string;
+      weight: number;
+    }>;
+  };
+}
+
+export interface IssuePatternDetail {
+  patternKey: string;
+  title: string;
+  summary: string;
+  recommendedActions?: string[];
+  occurrences: number;
+  verificationCounts: IssuePatternRow['verificationCounts'];
+  status: IssuePatternRow['status'];
+  assignee?: string | null;
+  firstSeenAt: string;
+  lastSeenAt: string;
+  occurrencesList: IssuePatternOccurrence[];
+  traceability?: {
+    topEdges: Array<{
+      kind: string;
+      claimA: string;
+      claimB?: string;
+      weight: number;
+    }>;
+  };
+  scoring?: any;
+}
+
+export interface QueueFilters {
+  from?: string;
+  to?: string;
+  severity?: string;
+  verification?: string;
+  status?: string;
+  type?: string;
+  category?: string;
+  assignee?: string;
+  q?: string;
+  page?: number;
+  pageSize?: number;
+}
+
 @Injectable({
   providedIn: 'root'
 })
@@ -158,6 +266,49 @@ export class IssuesService {
 
   bulkAction(issueIds: string[], action: 'status' | 'assign', payload: any): Observable<any> {
     return this.http.post(`${this.apiUrl}/issues-v2/bulk`, { issueIds, action, payload });
+  }
+
+  // Pattern Queue Methods
+  getIssueQueue(filters: QueueFilters = {}): Observable<IssueQueueResponse> {
+    let params = new HttpParams();
+    
+    if (filters.from) params = params.set('from', filters.from);
+    if (filters.to) params = params.set('to', filters.to);
+    if (filters.severity) params = params.set('severity', filters.severity);
+    if (filters.verification) params = params.set('verification', filters.verification);
+    if (filters.status) params = params.set('status', filters.status);
+    if (filters.type) params = params.set('type', filters.type);
+    if (filters.category) params = params.set('category', filters.category);
+    if (filters.assignee) params = params.set('assignee', filters.assignee);
+    if (filters.q) params = params.set('q', filters.q);
+    if (filters.page) params = params.set('page', filters.page.toString());
+    if (filters.pageSize) params = params.set('pageSize', filters.pageSize.toString());
+
+    return this.http.get<IssueQueueResponse>(`${this.apiUrl}/issues/queue`, { params });
+  }
+
+  getPatternDetail(patternKey: string): Observable<IssuePatternDetail> {
+    return this.http.get<IssuePatternDetail>(`${this.apiUrl}/issues/pattern/${patternKey}`);
+  }
+
+  updatePattern(patternKey: string, patch: { status?: string; assignee?: string | null }): Observable<any> {
+    return this.http.patch(`${this.apiUrl}/issues/pattern/${patternKey}`, patch);
+  }
+
+  exportQueue(format: 'csv' | 'json', filters: QueueFilters = {}): string {
+    let params = new HttpParams();
+    
+    if (filters.from) params = params.set('from', filters.from);
+    if (filters.to) params = params.set('to', filters.to);
+    if (filters.severity) params = params.set('severity', filters.severity);
+    if (filters.verification) params = params.set('verification', filters.verification);
+    if (filters.status) params = params.set('status', filters.status);
+    if (filters.type) params = params.set('type', filters.type);
+    if (filters.category) params = params.set('category', filters.category);
+    if (filters.assignee) params = params.set('assignee', filters.assignee);
+    if (filters.q) params = params.set('q', filters.q);
+
+    return `${this.apiUrl}/issues/queue/export/${format}?${params.toString()}`;
   }
 }
 

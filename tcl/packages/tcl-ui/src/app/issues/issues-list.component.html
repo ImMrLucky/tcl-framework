@@ -1,7 +1,7 @@
 <div class="issues-container">
   <app-header 
     pageTitle="Issue Review Queue" 
-    pageSubtitle="Triage and manage issues across evaluations"
+    pageSubtitle="Recurring risk patterns across monitored conversations"
     [showNavigation]="true"
     [showBackButton]="true"
     backButtonRoute="/dashboard"
@@ -11,72 +11,80 @@
   <div class="container">
     <!-- Filters -->
     <mat-card class="filters-card">
-      <div class="filters-grid">
+      <form [formGroup]="filters" class="filters-grid">
+        <mat-form-field appearance="outline">
+          <mat-label>Date Range</mat-label>
+          <mat-select formControlName="dateRange" (selectionChange)="applyFilters()">
+            <mat-option value="7d">Last 7 days</mat-option>
+            <mat-option value="30d">Last 30 days</mat-option>
+            <mat-option value="custom">Custom</mat-option>
+          </mat-select>
+        </mat-form-field>
+
+        <mat-form-field *ngIf="filters.get('dateRange')?.value === 'custom'" appearance="outline">
+          <mat-label>From</mat-label>
+          <input matInput type="date" formControlName="from" (dateChange)="applyFilters()">
+        </mat-form-field>
+
+        <mat-form-field *ngIf="filters.get('dateRange')?.value === 'custom'" appearance="outline">
+          <mat-label>To</mat-label>
+          <input matInput type="date" formControlName="to" (dateChange)="applyFilters()">
+        </mat-form-field>
+
+        <mat-form-field appearance="outline">
+          <mat-label>Severity</mat-label>
+          <mat-select formControlName="severity" (selectionChange)="applyFilters()">
+            <mat-option *ngFor="let sev of severityOptions" [value]="sev">{{ sev === 'all' ? 'All' : (sev | titlecase) }}</mat-option>
+          </mat-select>
+        </mat-form-field>
+
+        <mat-form-field appearance="outline">
+          <mat-label>Verification</mat-label>
+          <mat-select formControlName="verification" (selectionChange)="applyFilters()">
+            <mat-option *ngFor="let ver of verificationOptions" [value]="ver">{{ ver === 'all' ? 'All' : ver }}</mat-option>
+          </mat-select>
+        </mat-form-field>
+
         <mat-form-field appearance="outline">
           <mat-label>Status</mat-label>
-          <mat-select [(ngModel)]="filters.status" (selectionChange)="applyFilters()">
-            <mat-option value="">All</mat-option>
-            <mat-option *ngFor="let status of statusOptions" [value]="status">{{ status }}</mat-option>
-          </mat-select>
-        </mat-form-field>
-
-        <mat-form-field appearance="outline">
-          <mat-label>Severity Display</mat-label>
-          <mat-select [(ngModel)]="filters.severityDisplay" (selectionChange)="applyFilters()">
-            <mat-option value="">All</mat-option>
-            <mat-option *ngFor="let sev of severityOptions" [value]="sev">{{ sev | titlecase }}</mat-option>
-          </mat-select>
-        </mat-form-field>
-
-        <mat-form-field appearance="outline">
-          <mat-label>Verification Level</mat-label>
-          <mat-select [(ngModel)]="filters.verificationLevel" (selectionChange)="applyFilters()">
-            <mat-option value="">All</mat-option>
-            <mat-option *ngFor="let ver of verificationOptions" [value]="ver">{{ ver }}</mat-option>
-          </mat-select>
-        </mat-form-field>
-
-        <mat-form-field appearance="outline">
-          <mat-label>Category</mat-label>
-          <mat-select [(ngModel)]="filters.category" (selectionChange)="applyFilters()">
-            <mat-option value="">All</mat-option>
-            <mat-option *ngFor="let cat of categoryOptions" [value]="cat">{{ cat }}</mat-option>
+          <mat-select formControlName="status" (selectionChange)="applyFilters()">
+            <mat-option *ngFor="let status of statusOptions" [value]="status">{{ status === 'all' ? 'All' : status }}</mat-option>
           </mat-select>
         </mat-form-field>
 
         <mat-form-field appearance="outline">
           <mat-label>Type</mat-label>
-          <mat-select [(ngModel)]="filters.type" (selectionChange)="applyFilters()">
-            <mat-option value="">All</mat-option>
+          <mat-select formControlName="type" (selectionChange)="applyFilters()">
+            <mat-option value="all">All</mat-option>
             <mat-option *ngFor="let type of typeOptions" [value]="type">{{ type }}</mat-option>
           </mat-select>
         </mat-form-field>
 
         <mat-form-field appearance="outline">
-          <mat-label>Date From</mat-label>
-          <input matInput [matDatepicker]="dateFromPicker" [(ngModel)]="filters.dateFrom" (dateChange)="applyFilters()">
-          <mat-datepicker-toggle matSuffix [for]="dateFromPicker"></mat-datepicker-toggle>
-          <mat-datepicker #dateFromPicker></mat-datepicker>
+          <mat-label>Category</mat-label>
+          <mat-select formControlName="category" (selectionChange)="applyFilters()">
+            <mat-option value="all">All</mat-option>
+            <mat-option *ngFor="let cat of categoryOptions" [value]="cat">{{ cat }}</mat-option>
+          </mat-select>
         </mat-form-field>
 
         <mat-form-field appearance="outline">
-          <mat-label>Date To</mat-label>
-          <input matInput [matDatepicker]="dateToPicker" [(ngModel)]="filters.dateTo" (dateChange)="applyFilters()">
-          <mat-datepicker-toggle matSuffix [for]="dateToPicker"></mat-datepicker-toggle>
-          <mat-datepicker #dateToPicker></mat-datepicker>
+          <mat-label>Search</mat-label>
+          <input matInput formControlName="q" placeholder="Search patterns...">
+          <mat-icon matSuffix>search</mat-icon>
         </mat-form-field>
 
         <button mat-button (click)="clearFilters()">
           <mat-icon>clear</mat-icon>
           Clear Filters
         </button>
-      </div>
+      </form>
     </mat-card>
 
     <!-- Bulk Actions -->
-    <mat-card *ngIf="selectedIssues.size > 0" class="bulk-actions-card">
+    <mat-card *ngIf="selectedPatterns.size > 0" class="bulk-actions-card">
       <div class="bulk-actions">
-        <span class="selected-count">{{ selectedIssues.size }} selected</span>
+        <span class="selected-count">{{ selectedPatterns.size }} selected</span>
         <button mat-button [matMenuTriggerFor]="statusMenu">
           <mat-icon>edit</mat-icon>
           Change Status
@@ -87,11 +95,6 @@
           <button mat-menu-item (click)="bulkUpdateStatus('RESOLVED')">Resolved</button>
           <button mat-menu-item (click)="bulkUpdateStatus('FALSE_POSITIVE')">False Positive</button>
         </mat-menu>
-        <button mat-button (click)="bulkAssign(null)">
-          <mat-icon>person_remove</mat-icon>
-          Unassign
-        </button>
-        <mat-divider [vertical]="true"></mat-divider>
         <button mat-button [matMenuTriggerFor]="exportMenu">
           <mat-icon>download</mat-icon>
           Export
@@ -99,223 +102,360 @@
         <mat-menu #exportMenu="matMenu">
           <button mat-menu-item (click)="exportSelected('csv')">
             <mat-icon>table_chart</mat-icon>
-            Export as CSV
+            Export Selected as CSV
           </button>
           <button mat-menu-item (click)="exportSelected('json')">
             <mat-icon>code</mat-icon>
-            Export as JSON
+            Export Selected as JSON
           </button>
-          <button mat-menu-item (click)="exportSelected('pdf')" disabled>
-            <mat-icon>picture_as_pdf</mat-icon>
-            Export as PDF
-            <span class="coming-soon">(Coming Soon)</span>
+          <mat-divider></mat-divider>
+          <button mat-menu-item (click)="exportQueue('csv')">
+            <mat-icon>table_chart</mat-icon>
+            Export Queue as CSV
+          </button>
+          <button mat-menu-item (click)="exportQueue('json')">
+            <mat-icon>code</mat-icon>
+            Export Queue as JSON
           </button>
         </mat-menu>
-        <button mat-button [matMenuTriggerFor]="integrationBulkMenu" disabled>
-          <mat-icon>link</mat-icon>
-          Send to External System
-          <span class="coming-soon">(Coming Soon)</span>
-        </button>
-        <mat-menu #integrationBulkMenu="matMenu">
-          <button mat-menu-item disabled>
+      </div>
+    </mat-card>
+
+    <!-- Main Content with Drawer -->
+    <mat-drawer-container class="drawer-container" [hasBackdrop]="false">
+      <mat-drawer-content>
+        <!-- Loading -->
+        <mat-card *ngIf="loading" class="loading-card">
+          <mat-spinner diameter="40"></mat-spinner>
+          <p>Loading issue patterns...</p>
+        </mat-card>
+
+        <!-- Patterns Table -->
+        <mat-card *ngIf="!loading" class="table-card">
+          <table mat-table [dataSource]="dataSource" matSort>
+            <!-- Select Column -->
+            <ng-container matColumnDef="select">
+              <th mat-header-cell *matHeaderCellDef>
+                <mat-checkbox 
+                  [checked]="selectAll" 
+                  (change)="toggleSelectAll()"
+                  [indeterminate]="selectedPatterns.size > 0 && selectedPatterns.size < dataSource.data.length">
+                </mat-checkbox>
+              </th>
+              <td mat-cell *matCellDef="let pattern">
+                <mat-checkbox 
+                  [checked]="isSelected(pattern.patternKey)"
+                  (change)="toggleSelect(pattern.patternKey)">
+                </mat-checkbox>
+              </td>
+            </ng-container>
+
+            <!-- Status Column -->
+            <ng-container matColumnDef="status">
+              <th mat-header-cell *matHeaderCellDef mat-sort-header>Status</th>
+              <td mat-cell *matCellDef="let pattern">
+                <mat-chip [class]="'status-chip ' + getStatusColor(pattern.status)">
+                  {{ pattern.status }}
+                </mat-chip>
+              </td>
+            </ng-container>
+
+            <!-- Pattern Column -->
+            <ng-container matColumnDef="pattern">
+              <th mat-header-cell *matHeaderCellDef>Pattern</th>
+              <td mat-cell *matCellDef="let pattern">
+                <div class="pattern-cell">
+                  <div class="pattern-title">{{ pattern.title }}</div>
+                  <div class="pattern-meta">
+                    <span class="pattern-type">{{ pattern.type }}</span>
+                    <span class="pattern-category">{{ pattern.category }}</span>
+                  </div>
+                </div>
+              </td>
+            </ng-container>
+
+            <!-- Impact Column -->
+            <ng-container matColumnDef="impact">
+              <th mat-header-cell *matHeaderCellDef>Impact</th>
+              <td mat-cell *matCellDef="let pattern">
+                <span *ngIf="pattern.impact" class="impact-badge" [class]="'impact-' + pattern.impact">
+                  {{ pattern.impact | titlecase }}
+                </span>
+                <span *ngIf="!pattern.impact" class="no-data">-</span>
+              </td>
+            </ng-container>
+
+            <!-- Severity Display Column -->
+            <ng-container matColumnDef="severityDisplay">
+              <th mat-header-cell *matHeaderCellDef mat-sort-header>Severity</th>
+              <td mat-cell *matCellDef="let pattern">
+                <mat-chip [class]="'severity-chip ' + getSeverityColor(pattern.severityDisplay)">
+                  {{ pattern.severityDisplay | titlecase }}
+                </mat-chip>
+              </td>
+            </ng-container>
+
+            <!-- Verification Mix Column -->
+            <ng-container matColumnDef="verificationMix">
+              <th mat-header-cell *matHeaderCellDef>Verification</th>
+              <td mat-cell *matCellDef="let pattern">
+                <div class="verification-mix">
+                  <mat-chip *ngIf="pattern.verificationCounts.EXTERNAL_VERIFIED > 0" class="verification-chip verified">
+                    {{ pattern.verificationCounts.EXTERNAL_VERIFIED }}V
+                  </mat-chip>
+                  <mat-chip *ngIf="pattern.verificationCounts.TRANSCRIPT_ONLY > 0" class="verification-chip transcript-only">
+                    {{ pattern.verificationCounts.TRANSCRIPT_ONLY }}T
+                  </mat-chip>
+                  <mat-chip *ngIf="pattern.verificationCounts.NONE > 0" class="verification-chip unverified">
+                    {{ pattern.verificationCounts.NONE }}U
+                  </mat-chip>
+                  <span *ngIf="pattern.verificationCounts.EXTERNAL_VERIFIED === 0 && pattern.verificationCounts.TRANSCRIPT_ONLY === 0 && pattern.verificationCounts.NONE === 0" class="no-data">-</span>
+                </div>
+              </td>
+            </ng-container>
+
+            <!-- Occurrences Column -->
+            <ng-container matColumnDef="occurrences">
+              <th mat-header-cell *matHeaderCellDef mat-sort-header>Occurrences</th>
+              <td mat-cell *matCellDef="let pattern">
+                <div class="occurrences-cell">
+                  <span class="occurrences-count">{{ pattern.occurrences }}</span>
+                  <span *ngIf="pattern.uniqueAgents" class="occurrences-meta">{{ pattern.uniqueAgents }} agents</span>
+                </div>
+              </td>
+            </ng-container>
+
+            <!-- Trend Column -->
+            <ng-container matColumnDef="trend">
+              <th mat-header-cell *matHeaderCellDef>Trend</th>
+              <td mat-cell *matCellDef="let pattern">
+                <div class="trend-cell" [class]="getTrendColor(pattern.trend)">
+                  <mat-icon>{{ getTrendIcon(pattern.trend) }}</mat-icon>
+                  <span>{{ pattern.trend.pctChange > 0 ? '+' : '' }}{{ pattern.trend.pctChange }}%</span>
+                </div>
+              </td>
+            </ng-container>
+
+            <!-- Last Seen Column -->
+            <ng-container matColumnDef="lastSeen">
+              <th mat-header-cell *matHeaderCellDef mat-sort-header>Last Seen</th>
+              <td mat-cell *matCellDef="let pattern">
+                <div class="date-cell">
+                  {{ formatRelativeTime(pattern.lastSeenAt) }}
+                </div>
+              </td>
+            </ng-container>
+
+            <!-- Assignee Column -->
+            <ng-container matColumnDef="assignee">
+              <th mat-header-cell *matHeaderCellDef>Assignee</th>
+              <td mat-cell *matCellDef="let pattern">
+                <span *ngIf="pattern.assignee">{{ pattern.assignee }}</span>
+                <span *ngIf="!pattern.assignee" class="no-data">Unassigned</span>
+              </td>
+            </ng-container>
+
+            <!-- Priority Score Column -->
+            <ng-container matColumnDef="priorityScore">
+              <th mat-header-cell *matHeaderCellDef mat-sort-header>Priority</th>
+              <td mat-cell *matCellDef="let pattern">
+                <div class="score-cell">
+                  {{ pattern.priorityScore }}
+                </div>
+              </td>
+            </ng-container>
+
+            <!-- Actions Column -->
+            <ng-container matColumnDef="actions">
+              <th mat-header-cell *matHeaderCellDef>Actions</th>
+              <td mat-cell *matCellDef="let pattern" (click)="$event.stopPropagation()">
+                <button mat-icon-button [matMenuTriggerFor]="actionMenu">
+                  <mat-icon>more_vert</mat-icon>
+                </button>
+                <mat-menu #actionMenu="matMenu">
+                  <button mat-menu-item (click)="viewPattern(pattern)">
+                    <mat-icon>visibility</mat-icon>
+                    View Details
+                  </button>
+                  <mat-divider></mat-divider>
+                  <button mat-menu-item (click)="exportQueue('csv')">
+                    <mat-icon>download</mat-icon>
+                    Export Queue
+                  </button>
+                </mat-menu>
+              </td>
+            </ng-container>
+
+            <tr mat-header-row *matHeaderRowDef="displayedColumns"></tr>
+            <tr mat-row *matRowDef="let row; columns: displayedColumns" 
+                class="pattern-row"
+                (click)="viewPattern(row)"></tr>
+          </table>
+
+          <!-- Empty State -->
+          <div *ngIf="dataSource.data.length === 0" class="empty-state">
             <mat-icon>bug_report</mat-icon>
-            Create Jira Tickets
-          </button>
-          <button mat-menu-item disabled>
-            <mat-icon>account_circle</mat-icon>
-            Create Salesforce Cases
-          </button>
-          <button mat-menu-item disabled>
-            <mat-icon>assignment</mat-icon>
-            Create ServiceNow Tickets
-          </button>
-        </mat-menu>
-      </div>
-    </mat-card>
-
-    <!-- Loading -->
-    <mat-card *ngIf="loading" class="loading-card">
-      <mat-spinner diameter="40"></mat-spinner>
-      <p>Loading issues...</p>
-    </mat-card>
-
-    <!-- Issues Table -->
-    <mat-card *ngIf="!loading" class="table-card">
-      <table mat-table [dataSource]="dataSource" matSort>
-        <!-- Select Column -->
-        <ng-container matColumnDef="select">
-          <th mat-header-cell *matHeaderCellDef>
-            <mat-checkbox 
-              [checked]="selectAll" 
-              (change)="toggleSelectAll()"
-              [indeterminate]="selectedIssues.size > 0 && selectedIssues.size < dataSource.data.length">
-            </mat-checkbox>
-          </th>
-          <td mat-cell *matCellDef="let issue">
-            <mat-checkbox 
-              [checked]="isSelected(issue.issueId)"
-              (change)="toggleSelect(issue.issueId)">
-            </mat-checkbox>
-          </td>
-        </ng-container>
-
-        <!-- Status Column -->
-        <ng-container matColumnDef="status">
-          <th mat-header-cell *matHeaderCellDef mat-sort-header>Status</th>
-          <td mat-cell *matCellDef="let issue">
-            <mat-chip [class]="'status-chip ' + getStatusColor(issue.status)">
-              {{ issue.status || 'OPEN' }}
-            </mat-chip>
-          </td>
-        </ng-container>
-
-        <!-- Severity Display Column -->
-        <ng-container matColumnDef="severityDisplay">
-          <th mat-header-cell *matHeaderCellDef mat-sort-header>Severity</th>
-          <td mat-cell *matCellDef="let issue">
-            <mat-chip *ngIf="issue.severityDisplay || issue.severity" [class]="'severity-chip ' + getSeverityColor(issue.severityDisplay || issue.severity)">
-              {{ (issue.severityDisplay || issue.severity) | titlecase }}
-            </mat-chip>
-            <span *ngIf="!issue.severityDisplay && !issue.severity" class="no-data">-</span>
-          </td>
-        </ng-container>
-
-        <!-- Impact Column -->
-        <ng-container matColumnDef="impact">
-          <th mat-header-cell *matHeaderCellDef>Impact</th>
-          <td mat-cell *matCellDef="let issue">
-            <span *ngIf="issue.impact">{{ issue.impact | titlecase }}</span>
-            <span *ngIf="!issue.impact" class="no-data">-</span>
-          </td>
-        </ng-container>
-
-        <!-- Verification Column -->
-        <ng-container matColumnDef="verification">
-          <th mat-header-cell *matHeaderCellDef>Verification</th>
-          <td mat-cell *matCellDef="let issue">
-            <mat-chip *ngIf="issue.verification?.level" [class]="'verification-chip ' + (issue.verification.level === 'TRANSCRIPT_ONLY' ? 'transcript-only' : '')">
-              {{ getVerificationLabel(issue.verification.level) }}
-            </mat-chip>
-            <span *ngIf="!issue.verification?.level" class="no-data">-</span>
-          </td>
-        </ng-container>
-
-        <!-- Risk Score Column -->
-        <ng-container matColumnDef="riskScore">
-          <th mat-header-cell *matHeaderCellDef mat-sort-header>Score</th>
-          <td mat-cell *matCellDef="let issue">
-            <div class="score-cell" [matTooltip]="'Risk Score: ' + getScore(issue)">
-              {{ getScore(issue) | number:'1.0-0' }}
-            </div>
-          </td>
-        </ng-container>
-
-        <!-- Issue Summary Column -->
-        <ng-container matColumnDef="issueSummary">
-          <th mat-header-cell *matHeaderCellDef>Summary</th>
-          <td mat-cell *matCellDef="let issue">
-            <div *ngIf="issue.what?.issueSummary" class="summary-cell" [matTooltip]="issue.what.issueSummary">
-              {{ issue.what.issueSummary }}
-            </div>
-            <span *ngIf="!issue.what?.issueSummary" class="no-data">-</span>
-          </td>
-        </ng-container>
-
-        <!-- Created At Column -->
-        <ng-container matColumnDef="createdAt">
-          <th mat-header-cell *matHeaderCellDef mat-sort-header>Created</th>
-          <td mat-cell *matCellDef="let issue">
-            <div class="date-cell">
-              <span class="date-primary">{{ formatDate(issue.evaluationCreatedAt || issue.audit?.createdAt) }}</span>
-            </div>
-          </td>
-        </ng-container>
-
-        <!-- Evaluation Column -->
-        <ng-container matColumnDef="evaluation">
-          <th mat-header-cell *matHeaderCellDef>Evaluation</th>
-          <td mat-cell *matCellDef="let issue">
-            <button *ngIf="issue.evaluationId" mat-button color="primary" (click)="viewEvaluation(issue.evaluationId!)">
-              <mat-icon>open_in_new</mat-icon>
-              View
+            <h3>No patterns found</h3>
+            <p>No issue patterns match your current filters.</p>
+            <button mat-button (click)="clearFilters()">
+              Clear Filters
             </button>
-            <span *ngIf="!issue.evaluationId" class="no-data">-</span>
-          </td>
-        </ng-container>
+          </div>
 
-        <!-- Actions Column -->
-        <ng-container matColumnDef="actions">
-          <th mat-header-cell *matHeaderCellDef>Actions</th>
-          <td mat-cell *matCellDef="let issue">
-            <button mat-icon-button [matMenuTriggerFor]="actionMenu" (click)="$event.stopPropagation()">
-              <mat-icon>more_vert</mat-icon>
-            </button>
-            <mat-menu #actionMenu="matMenu">
-              <button mat-menu-item (click)="viewIssue(issue)">
-                <mat-icon>visibility</mat-icon>
-                View Details
-              </button>
-              <button mat-menu-item (click)="viewEvaluation(issue.evaluationId!)" *ngIf="issue.evaluationId">
-                <mat-icon>open_in_new</mat-icon>
-                View Evaluation
-              </button>
-              <mat-divider></mat-divider>
-              <button mat-menu-item (click)="exportIssue(issue)">
-                <mat-icon>download</mat-icon>
-                Export Issue
-              </button>
-              <button mat-menu-item [matMenuTriggerFor]="integrationMenu" *ngIf="issue.evaluationId">
-                <mat-icon>link</mat-icon>
-                Send to External System
-              </button>
-              <mat-menu #integrationMenu="matMenu">
-                <button mat-menu-item (click)="sendToJira(issue)" disabled>
-                  <mat-icon>bug_report</mat-icon>
-                  Create Jira Ticket
-                  <span class="coming-soon">(Coming Soon)</span>
-                </button>
-                <button mat-menu-item (click)="sendToSalesforce(issue)" disabled>
-                  <mat-icon>account_circle</mat-icon>
-                  Create Salesforce Case
-                  <span class="coming-soon">(Coming Soon)</span>
-                </button>
-                <button mat-menu-item (click)="sendToServiceNow(issue)" disabled>
-                  <mat-icon>assignment</mat-icon>
-                  Create ServiceNow Ticket
-                  <span class="coming-soon">(Coming Soon)</span>
-                </button>
-              </mat-menu>
-            </mat-menu>
-          </td>
-        </ng-container>
+          <!-- Paginator -->
+          <mat-paginator
+            *ngIf="dataSource.data.length > 0"
+            [length]="total"
+            [pageSize]="pageSize"
+            [pageIndex]="pageIndex"
+            [pageSizeOptions]="[10, 25, 50, 100]"
+            (page)="onPageChange($event)"
+            showFirstLastButtons>
+          </mat-paginator>
+        </mat-card>
+      </mat-drawer-content>
 
-        <tr mat-header-row *matHeaderRowDef="displayedColumns"></tr>
-        <tr mat-row *matRowDef="let row; columns: displayedColumns" 
-            class="issue-row"
-            (click)="viewIssue(row)"></tr>
-      </table>
+      <!-- Pattern Detail Drawer -->
+      <mat-drawer #drawer mode="side" position="end" [(opened)]="drawerOpen" class="pattern-drawer">
+        <div class="drawer-header">
+          <h2>Pattern Details</h2>
+          <button mat-icon-button (click)="closeDrawer()">
+            <mat-icon>close</mat-icon>
+          </button>
+        </div>
 
-      <!-- Empty State -->
-      <div *ngIf="dataSource.data.length === 0" class="empty-state">
-        <mat-icon>bug_report</mat-icon>
-        <h3>No issues found</h3>
-        <p>No issues match your current filters.</p>
-        <button mat-button (click)="clearFilters()">
-          Clear Filters
-        </button>
-      </div>
+        <div *ngIf="loadingDetail" class="drawer-loading">
+          <mat-spinner diameter="40"></mat-spinner>
+          <p>Loading pattern details...</p>
+        </div>
 
-      <!-- Paginator -->
-      <mat-paginator
-        *ngIf="dataSource.data.length > 0"
-        [length]="total"
-        [pageSize]="pageSize"
-        [pageIndex]="pageIndex"
-        [pageSizeOptions]="[25, 50, 100]"
-        (page)="onPageChange($event)"
-        showFirstLastButtons>
-      </mat-paginator>
-    </mat-card>
+        <div *ngIf="!loadingDetail && patternDetail" class="drawer-content">
+          <mat-tab-group>
+            <!-- Overview Tab -->
+            <mat-tab label="Overview">
+              <div class="tab-content">
+                <div class="pattern-header">
+                  <h3>{{ patternDetail.title }}</h3>
+                  <p class="pattern-summary">{{ patternDetail.summary }}</p>
+                </div>
+
+                <div class="pattern-metrics">
+                  <div class="metric-card">
+                    <div class="metric-label">Occurrences</div>
+                    <div class="metric-value">{{ patternDetail.occurrences }}</div>
+                  </div>
+                  <div class="metric-card">
+                    <div class="metric-label">First Seen</div>
+                    <div class="metric-value">{{ formatRelativeTime(patternDetail.firstSeenAt) }}</div>
+                  </div>
+                  <div class="metric-card">
+                    <div class="metric-label">Last Seen</div>
+                    <div class="metric-value">{{ formatRelativeTime(patternDetail.lastSeenAt) }}</div>
+                  </div>
+                </div>
+
+                <div class="pattern-actions">
+                  <mat-form-field appearance="outline">
+                    <mat-label>Status</mat-label>
+                    <mat-select [value]="patternDetail.status" (selectionChange)="updatePatternStatus($event.value)">
+                      <mat-option value="OPEN">Open</mat-option>
+                      <mat-option value="ACKNOWLEDGED">Acknowledged</mat-option>
+                      <mat-option value="RESOLVED">Resolved</mat-option>
+                      <mat-option value="FALSE_POSITIVE">False Positive</mat-option>
+                    </mat-select>
+                  </mat-form-field>
+                </div>
+
+                <div class="verification-breakdown">
+                  <h4>Verification Breakdown</h4>
+                  <div class="verification-stats">
+                    <div class="verification-stat">
+                      <span class="stat-label">Verified:</span>
+                      <span class="stat-value">{{ patternDetail.verificationCounts.EXTERNAL_VERIFIED }}</span>
+                    </div>
+                    <div class="verification-stat">
+                      <span class="stat-label">Transcript-only:</span>
+                      <span class="stat-value">{{ patternDetail.verificationCounts.TRANSCRIPT_ONLY }}</span>
+                    </div>
+                    <div class="verification-stat">
+                      <span class="stat-label">Unverified:</span>
+                      <span class="stat-value">{{ patternDetail.verificationCounts.NONE }}</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </mat-tab>
+
+            <!-- Occurrences Tab -->
+            <mat-tab label="Occurrences">
+              <div class="tab-content">
+                <table mat-table [dataSource]="patternDetail.occurrencesList" class="occurrences-table">
+                  <ng-container matColumnDef="occurredAt">
+                    <th mat-header-cell *matHeaderCellDef>Date</th>
+                    <td mat-cell *matCellDef="let occ">{{ formatRelativeTime(occ.occurredAt) }}</td>
+                  </ng-container>
+
+                  <ng-container matColumnDef="riskScore">
+                    <th mat-header-cell *matHeaderCellDef>Score</th>
+                    <td mat-cell *matCellDef="let occ">{{ (occ.score ?? (occ.riskScore * 100)) | number:'1.0-0' }}</td>
+                  </ng-container>
+
+                  <ng-container matColumnDef="verificationLevel">
+                    <th mat-header-cell *matHeaderCellDef>Verification</th>
+                    <td mat-cell *matCellDef="let occ">
+                      <mat-chip [class]="'verification-chip ' + (occ.verificationLevel === 'TRANSCRIPT_ONLY' ? 'transcript-only' : '')">
+                        {{ occ.verificationLevel }}
+                      </mat-chip>
+                    </td>
+                  </ng-container>
+
+                  <ng-container matColumnDef="excerpt">
+                    <th mat-header-cell *matHeaderCellDef>Excerpt</th>
+                    <td mat-cell *matCellDef="let occ">
+                      <div class="excerpt-cell">{{ occ.what.issueSummary }}</div>
+                    </td>
+                  </ng-container>
+
+                  <ng-container matColumnDef="actions">
+                    <th mat-header-cell *matHeaderCellDef>Actions</th>
+                    <td mat-cell *matCellDef="let occ">
+                      <button mat-button color="primary" (click)="viewEvaluation(occ.evaluationId)">
+                        <mat-icon>open_in_new</mat-icon>
+                        View Evaluation
+                      </button>
+                    </td>
+                  </ng-container>
+
+                  <tr mat-header-row *matHeaderRowDef="['occurredAt', 'riskScore', 'verificationLevel', 'excerpt', 'actions']"></tr>
+                  <tr mat-row *matRowDef="let row; columns: ['occurredAt', 'riskScore', 'verificationLevel', 'excerpt', 'actions']"></tr>
+                </table>
+              </div>
+            </mat-tab>
+
+            <!-- Traceability Tab -->
+            <mat-tab label="Traceability">
+              <div class="tab-content">
+                <div *ngIf="patternDetail.traceability && patternDetail.traceability.topEdges.length > 0">
+                  <h4>Top Edges</h4>
+                  <div class="edges-list">
+                    <div *ngFor="let edge of patternDetail.traceability.topEdges" class="edge-item">
+                      <div class="edge-kind">{{ edge.kind }}</div>
+                      <div class="edge-claims">
+                        <span>{{ edge.claimA }}</span>
+                        <span *ngIf="edge.claimB"> → {{ edge.claimB }}</span>
+                      </div>
+                      <div class="edge-weight">Weight: {{ edge.weight }}</div>
+                    </div>
+                  </div>
+                </div>
+                <div *ngIf="!patternDetail.traceability || patternDetail.traceability.topEdges.length === 0" class="empty-state">
+                  <p>No traceability data available</p>
+                </div>
+              </div>
+            </mat-tab>
+          </mat-tab-group>
+        </div>
+      </mat-drawer>
+    </mat-drawer-container>
   </div>
 </div>
-

@@ -4,6 +4,7 @@
  */
 
 import express from 'express';
+import { createHash } from 'crypto';
 import { supabaseAdmin } from '../supabase.js';
 import { getOrgContext } from '../auth-context.js';
 import { logAudit } from '../supabase.js';
@@ -93,14 +94,53 @@ export function setupIssueWorkflowRoutes(app: express.Application) {
           
           // Transform old issue format to IssueV2 format
           // Handle both old format (risk.severity, what.claimSummary) and new format
+          
+          // Compute score from available data (confidence, contradictions, etc.)
+          const importance = issue.confidence?.importance ?? 0.5;
+          const nodeBlame = issue.confidence?.nodeBlameNorm ?? 0;
+          const nliScore = issue.confidence?.nliScore ?? 0;
+          
+          // Check if there are contradictions (higher risk)
+          const hasContradictions = (issue.conflictsWith && issue.conflictsWith.length > 0) || 
+                                   (issue.conflictsWith && Array.isArray(issue.conflictsWith) && issue.conflictsWith.length > 0);
+          const contradictionBoost = hasContradictions ? 0.15 : 0;
+          
+          // Compute risk score from available signals
+          // Base: importance (0-1)
+          // Boost: nodeBlame (0-1) * 0.3 (contradictions/conflicts)
+          // Boost: nliScore (0-1) * 0.2 (NLI confidence)
+          // Boost: contradiction presence * 0.15
+          const computedRiskScore = Math.min(1.0, 
+            (importance * 0.5) + 
+            (nodeBlame * 0.3) + 
+            (nliScore * 0.2) + 
+            contradictionBoost
+          );
+          
+          // Derive severity from computed risk score
+          const deriveSeverityFromScore = (riskScore: number): 'low' | 'medium' | 'high' | 'critical' => {
+            if (riskScore >= 0.75) return 'high';
+            if (riskScore >= 0.5) return 'medium';
+            return 'low';
+          };
+          
+          const derivedSeverity = deriveSeverityFromScore(computedRiskScore);
+          
+          // Derive impact from severity and contradiction presence
+          const deriveImpact = (severity: string, hasContradictions: boolean): 'low' | 'medium' | 'high' => {
+            if (severity === 'high' || (severity === 'medium' && hasContradictions)) return 'high';
+            if (severity === 'medium') return 'medium';
+            return 'low';
+          };
+          
           const transformedIssue: any = {
             ...issue,
             evaluationId: eval_.id,
             evaluationCreatedAt: eval_.created_at,
             
-            // Map severity from risk.severity or use existing
-            severity: issue.severity || issue.risk?.severity || 'medium',
-            severityDisplay: issue.severityDisplay || issue.risk?.severity || 'medium',
+            // Use existing scoring if available, otherwise compute from data
+            severity: issue.severity || derivedSeverity,
+            severityDisplay: issue.severityDisplay || (derivedSeverity === 'high' ? 'high' : derivedSeverity === 'medium' ? 'medium' : 'low'),
             
             // Map category from risk.category or use existing
             category: issue.category || issue.risk?.category || 'evidence',
@@ -108,13 +148,12 @@ export function setupIssueWorkflowRoutes(app: express.Application) {
             // Map type from what.issueType or use existing
             type: issue.type || issue.what?.issueType || 'UNVERIFIED_CLAIM',
             
-            // Map impact - derive from severity if not present
-            impact: issue.impact || (issue.risk?.severity === 'high' ? 'high' : 
-                                     issue.risk?.severity === 'medium' ? 'medium' : 'low'),
+            // Derive impact from computed severity and contradictions
+            impact: issue.impact || deriveImpact(derivedSeverity, hasContradictions),
             
-            // Map score/riskScore - compute from confidence if not present
-            score: issue.score ?? (issue.riskScore ?? (issue.confidence?.importance ?? 0.5) * 100),
-            riskScore: issue.riskScore ?? (issue.confidence?.importance ?? 0.5),
+            // Use computed score if not present
+            score: issue.score ?? Math.round(computedRiskScore * 100),
+            riskScore: issue.riskScore ?? computedRiskScore,
             
             // Map what.issueSummary from what.claimSummary or use existing
             what: {
@@ -684,6 +723,757 @@ export function setupIssueWorkflowRoutes(app: express.Application) {
       res.json({ results, errors });
     } catch (e: any) {
       console.error('Bulk action error:', e);
+      res.status(500).json({ error: e?.message ?? 'unknown error' });
+    }
+  });
+
+  // ============================================================================
+  // Pattern Key Generation
+  // ============================================================================
+  
+  /**
+   * Generate deterministic pattern key from issue
+   * Hash of: type + category + normalized claim text + speaker role
+   */
+  function generatePatternKey(issue: any): string {
+    const type = issue.type || issue.what?.issueType || 'UNVERIFIED_CLAIM';
+    const category = issue.category || issue.risk?.category || 'evidence';
+    
+    // Normalize claim text: lowercase, remove extra whitespace, remove quotes
+    const claimText = issue.what?.claimText || issue.what?.claimSummary || issue.what?.issueSummary || '';
+    const normalizedClaim = claimText
+      .toLowerCase()
+      .trim()
+      .replace(/["'`]/g, '')
+      .replace(/\s+/g, ' ')
+      .substring(0, 200); // Limit length for consistency
+    
+    // Normalize speaker role (AGENT, CUSTOMER, SYSTEM, UNKNOWN)
+    const speaker = issue.who?.speaker || 'UNKNOWN';
+    const normalizedRole = speaker.toUpperCase();
+    
+    // Create deterministic hash
+    const input = `${type}|${category}|${normalizedClaim}|${normalizedRole}`;
+    return createHash('sha256').update(input).digest('hex').substring(0, 16);
+  }
+
+  // ============================================================================
+  // GET /api/issues/queue - Aggregated pattern queue
+  // ============================================================================
+  app.get('/api/issues/queue', async (req, res) => {
+    try {
+      const context = await getOrgContext(req);
+      
+      if (!context || context.error) {
+        return res.status(401).json({ error: context?.error || 'Authorization required' });
+      }
+      
+      if (!supabaseAdmin) {
+        return res.status(503).json({ error: 'Supabase not configured' });
+      }
+
+      // Parse query parameters
+      const page = Math.max(1, parseInt(req.query.page as string) || 1);
+      const pageSize = Math.min(100, Math.max(10, parseInt(req.query.pageSize as string) || 25));
+      const offset = (page - 1) * pageSize;
+      
+      const dateFrom = req.query.from as string | undefined;
+      const dateTo = req.query.to as string | undefined;
+      const severityFilter = req.query.severity as string | undefined;
+      const verificationFilter = req.query.verification as string | undefined;
+      const statusFilter = req.query.status as string | undefined;
+      const typeFilter = req.query.type as string | undefined;
+      const categoryFilter = req.query.category as string | undefined;
+      const assigneeFilter = req.query.assignee as string | undefined;
+      const searchQuery = req.query.q as string | undefined;
+
+      // Build evaluation query (same as /api/issues-v2)
+      let evalQuery = supabaseAdmin
+        .from('evaluations')
+        .select('id, report, created_at')
+        .eq('org_id', context.orgId)
+        .order('created_at', { ascending: false })
+        .limit(100);
+
+      if (dateFrom) {
+        evalQuery = evalQuery.gte('created_at', dateFrom);
+      }
+      if (dateTo) {
+        evalQuery = evalQuery.lte('created_at', dateTo);
+      }
+
+      const { data: evaluations, error: evalError } = await evalQuery;
+
+      if (evalError) {
+        return res.status(500).json({ error: evalError.message });
+      }
+
+      if (!evaluations || evaluations.length === 0) {
+        return res.json({ rows: [], total: 0, page, pageSize });
+      }
+
+      // Extract all issues and transform to IssueV2 format
+      const allIssues: any[] = [];
+      for (const eval_ of evaluations) {
+        const report = eval_.report as any;
+        const issues = report?.issues || report?.topIssuesV2 || report?.allIssuesV2 || [];
+        
+        for (const issue of issues) {
+          if (!issue || !issue.issueId) continue;
+          
+          // Transform to IssueV2 format (same logic as /api/issues-v2)
+          const importance = issue.confidence?.importance ?? 0.5;
+          const nodeBlame = issue.confidence?.nodeBlameNorm ?? 0;
+          const nliScore = issue.confidence?.nliScore ?? 0;
+          const hasContradictions = (issue.conflictsWith && issue.conflictsWith.length > 0);
+          const contradictionBoost = hasContradictions ? 0.15 : 0;
+          const computedRiskScore = Math.min(1.0, 
+            (importance * 0.5) + (nodeBlame * 0.3) + (nliScore * 0.2) + contradictionBoost
+          );
+          const deriveSeverityFromScore = (riskScore: number): 'low' | 'medium' | 'high' | 'critical' => {
+            if (riskScore >= 0.75) return 'high';
+            if (riskScore >= 0.5) return 'medium';
+            return 'low';
+          };
+          const derivedSeverity = deriveSeverityFromScore(computedRiskScore);
+          const deriveImpact = (severity: string, hasContradictions: boolean): 'low' | 'medium' | 'high' => {
+            if (severity === 'high' || (severity === 'medium' && hasContradictions)) return 'high';
+            if (severity === 'medium') return 'medium';
+            return 'low';
+          };
+          
+          const transformedIssue: any = {
+            ...issue,
+            evaluationId: eval_.id,
+            evaluationCreatedAt: eval_.created_at,
+            severity: issue.severity || derivedSeverity,
+            severityDisplay: issue.severityDisplay || (derivedSeverity === 'high' ? 'high' : derivedSeverity === 'medium' ? 'medium' : 'low'),
+            category: issue.category || issue.risk?.category || 'evidence',
+            type: issue.type || issue.what?.issueType || 'UNVERIFIED_CLAIM',
+            impact: issue.impact || deriveImpact(derivedSeverity, hasContradictions),
+            score: issue.score ?? Math.round(computedRiskScore * 100),
+            riskScore: issue.riskScore ?? computedRiskScore,
+            what: {
+              ...issue.what,
+              issueSummary: issue.what?.issueSummary || issue.what?.claimSummary || issue.what?.claimText || '',
+              issueDetail: issue.what?.issueDetail || issue.what?.description || issue.what?.claimText || '',
+              primaryClaimId: issue.what?.primaryClaimId || issue.claimId || '',
+              claimText: issue.what?.claimText || issue.what?.claimSummary || '',
+            },
+            verification: issue.verification || { level: 'NONE', reasonCodes: [] },
+            who: issue.who || { speaker: 'UNKNOWN' },
+            evidence: issue.evidence || { refs: [] },
+            compliance: issue.compliance || { tags: [], disclaimers: [] },
+            audit: issue.audit || { createdAt: eval_.created_at, engineVersion: '', scorerId: '' },
+          };
+          
+          allIssues.push(transformedIssue);
+        }
+      }
+
+      // Get workflow records
+      const issueIds = allIssues.map(i => i.issueId).filter(Boolean);
+      const { data: workflows } = await supabaseAdmin
+        .from('issue_workflow')
+        .select('*')
+        .in('issue_id', issueIds)
+        .eq('org_id', context.orgId)
+        .catch(() => ({ data: [] }));
+
+      const workflowMap = new Map((workflows || []).map(w => [w.issue_id, w]));
+
+      // Enrich issues with workflow data
+      const enrichedIssues = allIssues.map(issue => {
+        const workflow = workflowMap.get(issue.issueId);
+        return {
+          ...issue,
+          status: workflow?.status || 'OPEN',
+          assigneeUserId: workflow?.assignee_user_id || null,
+        };
+      });
+
+      // Generate pattern keys and group
+      const patternMap = new Map<string, {
+        issues: any[];
+        patternKey: string;
+      }>();
+
+      for (const issue of enrichedIssues) {
+        const patternKey = generatePatternKey(issue);
+        if (!patternMap.has(patternKey)) {
+          patternMap.set(patternKey, { issues: [], patternKey });
+        }
+        patternMap.get(patternKey)!.issues.push(issue);
+      }
+
+      // Build pattern rows
+      const patternRows: any[] = [];
+      
+      for (const [patternKey, group] of patternMap.entries()) {
+        const issues = group.issues;
+        
+        // Apply filters
+        if (severityFilter && severityFilter !== 'all') {
+          const filtered = issues.filter(i => (i.severityDisplay || i.severity) === severityFilter);
+          if (filtered.length === 0) continue;
+        }
+        if (verificationFilter && verificationFilter !== 'all') {
+          const filtered = issues.filter(i => i.verification?.level === verificationFilter);
+          if (filtered.length === 0) continue;
+        }
+        if (statusFilter && statusFilter !== 'all') {
+          const filtered = issues.filter(i => i.status === statusFilter);
+          if (filtered.length === 0) continue;
+        }
+        if (typeFilter && typeFilter !== 'all') {
+          const filtered = issues.filter(i => i.type === typeFilter);
+          if (filtered.length === 0) continue;
+        }
+        if (categoryFilter && categoryFilter !== 'all') {
+          const filtered = issues.filter(i => i.category === categoryFilter);
+          if (filtered.length === 0) continue;
+        }
+        if (assigneeFilter && assigneeFilter !== 'all') {
+          if (assigneeFilter === 'unassigned') {
+            const filtered = issues.filter(i => !i.assigneeUserId);
+            if (filtered.length === 0) continue;
+          } else {
+            const filtered = issues.filter(i => i.assigneeUserId === assigneeFilter);
+            if (filtered.length === 0) continue;
+          }
+        }
+        if (searchQuery) {
+          const searchLower = searchQuery.toLowerCase();
+          const matches = issues.some(i => 
+            (i.what?.issueSummary || '').toLowerCase().includes(searchLower) ||
+            (i.what?.claimText || '').toLowerCase().includes(searchLower) ||
+            (i.type || '').toLowerCase().includes(searchLower) ||
+            (i.category || '').toLowerCase().includes(searchLower)
+          );
+          if (!matches) continue;
+        }
+
+        // Get representative issue (highest score)
+        const representative = issues.sort((a, b) => (b.score ?? 0) - (a.score ?? 0))[0];
+        
+        // Compute aggregates
+        const riskScores = issues.map(i => i.riskScore ?? 0).filter(s => s > 0);
+        const avgRiskScore = riskScores.length > 0 
+          ? riskScores.reduce((a, b) => a + b, 0) / riskScores.length 
+          : 0;
+        const maxRiskScore = riskScores.length > 0 ? Math.max(...riskScores) : 0;
+        
+        const dates = issues.map(i => new Date(i.evaluationCreatedAt || i.audit?.createdAt || 0).getTime()).filter(d => d > 0);
+        const firstSeenAt = dates.length > 0 ? new Date(Math.min(...dates)).toISOString() : new Date().toISOString();
+        const lastSeenAt = dates.length > 0 ? new Date(Math.max(...dates)).toISOString() : new Date().toISOString();
+        
+        // Verification counts
+        const verificationCounts = {
+          EXTERNAL_VERIFIED: issues.filter(i => i.verification?.level === 'EXTERNAL_VERIFIED').length,
+          TRANSCRIPT_ONLY: issues.filter(i => i.verification?.level === 'TRANSCRIPT_ONLY').length,
+          NONE: issues.filter(i => i.verification?.level === 'NONE' || !i.verification?.level).length,
+        };
+        
+        // Unique agents/customers (from conversation metadata if available)
+        const uniqueAgents = new Set(issues.map(i => i.who?.speaker === 'AGENT' ? 'agent' : null).filter(Boolean)).size;
+        const uniqueCustomers = new Set(issues.map(i => i.who?.speaker === 'CUSTOMER' ? 'customer' : null).filter(Boolean)).size;
+        
+        // Status counts
+        const statusCounts = {
+          OPEN: issues.filter(i => i.status === 'OPEN').length,
+          ACKNOWLEDGED: issues.filter(i => i.status === 'ACKNOWLEDGED').length,
+          RESOLVED: issues.filter(i => i.status === 'RESOLVED').length,
+          FALSE_POSITIVE: issues.filter(i => i.status === 'FALSE_POSITIVE').length,
+        };
+        
+        // Determine pattern status (most common, or OPEN if tie)
+        const patternStatus = Object.entries(statusCounts)
+          .sort((a, b) => b[1] - a[1])[0][0] as 'OPEN' | 'ACKNOWLEDGED' | 'RESOLVED' | 'FALSE_POSITIVE';
+        
+        // Pattern assignee (most common, or null)
+        const assignees = issues.map(i => i.assigneeUserId).filter(Boolean);
+        const patternAssignee = assignees.length > 0 
+          ? assignees.sort((a, b) => 
+              assignees.filter(x => x === a).length - assignees.filter(x => x === b).length
+            ).pop() || null
+          : null;
+        
+        // Compute trend (simple: compare last 7 days vs previous 7 days)
+        const now = Date.now();
+        const sevenDaysAgo = now - (7 * 24 * 60 * 60 * 1000);
+        const fourteenDaysAgo = now - (14 * 24 * 60 * 60 * 1000);
+        const recentIssues = issues.filter(i => {
+          const date = new Date(i.evaluationCreatedAt || i.audit?.createdAt || 0).getTime();
+          return date >= sevenDaysAgo;
+        });
+        const previousIssues = issues.filter(i => {
+          const date = new Date(i.evaluationCreatedAt || i.audit?.createdAt || 0).getTime();
+          return date >= fourteenDaysAgo && date < sevenDaysAgo;
+        });
+        const recentCount = recentIssues.length;
+        const previousCount = previousIssues.length;
+        const pctChange = previousCount > 0 
+          ? Math.round(((recentCount - previousCount) / previousCount) * 100)
+          : recentCount > 0 ? 100 : 0;
+        const trend = {
+          direction: pctChange > 10 ? 'up' : pctChange < -10 ? 'down' : 'flat',
+          pctChange,
+          window: 'prev_period' as const,
+        };
+        
+        // Compute priority score (combination of recurrence + risk + unresolved)
+        const occurrenceWeight = Math.min(issues.length / 10, 1.0) * 0.3; // Cap at 10 occurrences
+        const riskWeight = avgRiskScore * 0.5;
+        const unresolvedWeight = (statusCounts.OPEN + statusCounts.ACKNOWLEDGED) / issues.length * 0.2;
+        const priorityScore = Math.round((occurrenceWeight + riskWeight + unresolvedWeight) * 100);
+        
+        // Generate title from representative issue
+        const title = representative.what?.issueSummary || 
+                     representative.what?.claimSummary || 
+                     `${representative.type} in ${representative.category}`;
+        const summary = representative.what?.issueDetail || 
+                       representative.what?.description || 
+                       title;
+
+        patternRows.push({
+          patternKey,
+          title,
+          summary,
+          category: representative.category,
+          type: representative.type,
+          impact: representative.impact,
+          severity: representative.severity,
+          severityDisplay: representative.severityDisplay || representative.severity,
+          occurrences: issues.length,
+          uniqueAgents: uniqueAgents > 0 ? uniqueAgents : undefined,
+          uniqueCustomers: uniqueCustomers > 0 ? uniqueCustomers : undefined,
+          verificationCounts,
+          lastSeenAt,
+          firstSeenAt,
+          trend,
+          status: patternStatus,
+          assignee: patternAssignee,
+          priorityScore,
+          avgRiskScore,
+          maxRiskScore,
+        });
+      }
+
+      // Sort by priority score DESC, then by occurrences DESC
+      patternRows.sort((a, b) => {
+        if (b.priorityScore !== a.priorityScore) {
+          return b.priorityScore - a.priorityScore;
+        }
+        return b.occurrences - a.occurrences;
+      });
+
+      // Paginate
+      const total = patternRows.length;
+      const paginatedRows = patternRows.slice(offset, offset + pageSize);
+
+      res.json({
+        rows: paginatedRows,
+        total,
+        page,
+        pageSize,
+      });
+    } catch (e: any) {
+      console.error('Get issue queue error:', e);
+      res.status(500).json({ error: e?.message ?? 'unknown error' });
+    }
+  });
+
+  // ============================================================================
+  // GET /api/issues/pattern/:patternKey - Pattern detail for drawer
+  // ============================================================================
+  app.get('/api/issues/pattern/:patternKey', async (req, res) => {
+    try {
+      const { patternKey } = req.params;
+      const context = await getOrgContext(req);
+      
+      if (!context || context.error) {
+        return res.status(401).json({ error: context?.error || 'Authorization required' });
+      }
+      
+      if (!supabaseAdmin) {
+        return res.status(503).json({ error: 'Supabase not configured' });
+      }
+
+      // Get all evaluations and extract issues (same as queue endpoint)
+      const { data: evaluations } = await supabaseAdmin
+        .from('evaluations')
+        .select('id, report, created_at')
+        .eq('org_id', context.orgId)
+        .order('created_at', { ascending: false })
+        .limit(100)
+        .catch(() => ({ data: [] }));
+
+      if (!evaluations || evaluations.length === 0) {
+        return res.status(404).json({ error: 'Pattern not found' });
+      }
+
+      // Extract and transform all issues
+      const allIssues: any[] = [];
+      for (const eval_ of evaluations) {
+        const report = eval_.report as any;
+        const issues = report?.issues || report?.topIssuesV2 || report?.allIssuesV2 || [];
+        
+        for (const issue of issues) {
+          if (!issue || !issue.issueId) continue;
+          
+          // Same transformation as queue endpoint
+          const importance = issue.confidence?.importance ?? 0.5;
+          const nodeBlame = issue.confidence?.nodeBlameNorm ?? 0;
+          const nliScore = issue.confidence?.nliScore ?? 0;
+          const hasContradictions = (issue.conflictsWith && issue.conflictsWith.length > 0);
+          const contradictionBoost = hasContradictions ? 0.15 : 0;
+          const computedRiskScore = Math.min(1.0, 
+            (importance * 0.5) + (nodeBlame * 0.3) + (nliScore * 0.2) + contradictionBoost
+          );
+          const deriveSeverityFromScore = (riskScore: number): 'low' | 'medium' | 'high' | 'critical' => {
+            if (riskScore >= 0.75) return 'high';
+            if (riskScore >= 0.5) return 'medium';
+            return 'low';
+          };
+          const derivedSeverity = deriveSeverityFromScore(computedRiskScore);
+          const deriveImpact = (severity: string, hasContradictions: boolean): 'low' | 'medium' | 'high' => {
+            if (severity === 'high' || (severity === 'medium' && hasContradictions)) return 'high';
+            if (severity === 'medium') return 'medium';
+            return 'low';
+          };
+          
+          const transformedIssue: any = {
+            ...issue,
+            evaluationId: eval_.id,
+            evaluationCreatedAt: eval_.created_at,
+            severity: issue.severity || derivedSeverity,
+            severityDisplay: issue.severityDisplay || (derivedSeverity === 'high' ? 'high' : derivedSeverity === 'medium' ? 'medium' : 'low'),
+            category: issue.category || issue.risk?.category || 'evidence',
+            type: issue.type || issue.what?.issueType || 'UNVERIFIED_CLAIM',
+            impact: issue.impact || deriveImpact(derivedSeverity, hasContradictions),
+            score: issue.score ?? Math.round(computedRiskScore * 100),
+            riskScore: issue.riskScore ?? computedRiskScore,
+            what: {
+              ...issue.what,
+              issueSummary: issue.what?.issueSummary || issue.what?.claimSummary || issue.what?.claimText || '',
+              issueDetail: issue.what?.issueDetail || issue.what?.description || issue.what?.claimText || '',
+              primaryClaimId: issue.what?.primaryClaimId || issue.claimId || '',
+              claimText: issue.what?.claimText || issue.what?.claimSummary || '',
+            },
+            verification: issue.verification || { level: 'NONE', reasonCodes: [] },
+            who: issue.who || { speaker: 'UNKNOWN' },
+            evidence: issue.evidence || { refs: [] },
+            compliance: issue.compliance || { tags: [], disclaimers: [] },
+            audit: issue.audit || { createdAt: eval_.created_at, engineVersion: '', scorerId: '' },
+          };
+          
+          allIssues.push(transformedIssue);
+        }
+      }
+
+      // Get workflow records
+      const issueIds = allIssues.map(i => i.issueId).filter(Boolean);
+      const { data: workflows } = await supabaseAdmin
+        .from('issue_workflow')
+        .select('*')
+        .in('issue_id', issueIds)
+        .eq('org_id', context.orgId)
+        .catch(() => ({ data: [] }));
+
+      const workflowMap = new Map((workflows || []).map(w => [w.issue_id, w]));
+
+      // Enrich issues with workflow
+      const enrichedIssues = allIssues.map(issue => {
+        const workflow = workflowMap.get(issue.issueId);
+        return {
+          ...issue,
+          status: workflow?.status || 'OPEN',
+          assigneeUserId: workflow?.assignee_user_id || null,
+        };
+      });
+
+      // Find all issues matching this pattern key
+      const patternIssues = enrichedIssues.filter(issue => generatePatternKey(issue) === patternKey);
+
+      if (patternIssues.length === 0) {
+        return res.status(404).json({ error: 'Pattern not found' });
+      }
+
+      // Get representative issue
+      const representative = patternIssues.sort((a, b) => (b.score ?? 0) - (a.score ?? 0))[0];
+      
+      // Compute aggregates (same as queue)
+      const riskScores = patternIssues.map(i => i.riskScore ?? 0).filter(s => s > 0);
+      const avgRiskScore = riskScores.length > 0 
+        ? riskScores.reduce((a, b) => a + b, 0) / riskScores.length 
+        : 0;
+      
+      const dates = patternIssues.map(i => new Date(i.evaluationCreatedAt || i.audit?.createdAt || 0).getTime()).filter(d => d > 0);
+      const firstSeenAt = dates.length > 0 ? new Date(Math.min(...dates)).toISOString() : new Date().toISOString();
+      const lastSeenAt = dates.length > 0 ? new Date(Math.max(...dates)).toISOString() : new Date().toISOString();
+      
+      const verificationCounts = {
+        EXTERNAL_VERIFIED: patternIssues.filter(i => i.verification?.level === 'EXTERNAL_VERIFIED').length,
+        TRANSCRIPT_ONLY: patternIssues.filter(i => i.verification?.level === 'TRANSCRIPT_ONLY').length,
+        NONE: patternIssues.filter(i => i.verification?.level === 'NONE' || !i.verification?.level).length,
+      };
+      
+      const statusCounts = {
+        OPEN: patternIssues.filter(i => i.status === 'OPEN').length,
+        ACKNOWLEDGED: patternIssues.filter(i => i.status === 'ACKNOWLEDGED').length,
+        RESOLVED: patternIssues.filter(i => i.status === 'RESOLVED').length,
+        FALSE_POSITIVE: patternIssues.filter(i => i.status === 'FALSE_POSITIVE').length,
+      };
+      const patternStatus = Object.entries(statusCounts)
+        .sort((a, b) => b[1] - a[1])[0][0] as 'OPEN' | 'ACKNOWLEDGED' | 'RESOLVED' | 'FALSE_POSITIVE';
+      
+      const assignees = patternIssues.map(i => i.assigneeUserId).filter(Boolean);
+      const patternAssignee = assignees.length > 0 
+        ? assignees.sort((a, b) => 
+            assignees.filter(x => x === a).length - assignees.filter(x => x === b).length
+          ).pop() || null
+        : null;
+
+      // Build occurrences list (sorted by date DESC)
+      const occurrencesList = patternIssues
+        .sort((a, b) => {
+          const dateA = new Date(a.evaluationCreatedAt || a.audit?.createdAt || 0).getTime();
+          const dateB = new Date(b.evaluationCreatedAt || b.audit?.createdAt || 0).getTime();
+          return dateB - dateA;
+        })
+        .map(issue => ({
+          evaluationId: issue.evaluationId,
+          conversationId: issue.conversationId,
+          occurredAt: issue.evaluationCreatedAt || issue.audit?.createdAt,
+          riskScore: issue.riskScore ?? 0,
+          score: issue.score,
+          severityDisplay: issue.severityDisplay || issue.severity,
+          verificationLevel: issue.verification?.level || 'NONE',
+          who: {
+            speaker: issue.who?.speaker || 'UNKNOWN',
+            turnIndex: issue.who?.turnIndex,
+          },
+          what: {
+            primaryClaimId: issue.what?.primaryClaimId || '',
+            issueSummary: issue.what?.issueSummary || '',
+            claimText: issue.what?.claimText || '',
+          },
+          evidencePreview: (issue.evidence?.refs || []).slice(0, 3).map((ref: any) => ({
+            sourceType: ref.sourceType || 'TRANSCRIPT',
+            quote: ref.quote || '',
+            turnIndex: ref.turnIndex,
+          })),
+          tracePreview: issue.conflictsWith ? {
+            contradictionPairs: (issue.conflictsWith || []).slice(0, 3).map((conflict: any) => ({
+              claimA: conflict.claimId || '',
+              claimB: conflict.claimId || '',
+              weight: conflict.edgeWeight || 0,
+            })),
+          } : undefined,
+        }));
+
+      // Extract traceability (top edges from representative)
+      const traceability = representative.evidence?.edges ? {
+        topEdges: (representative.evidence.edges || []).slice(0, 10).map((edge: any) => ({
+          kind: edge.kind || 'grounding',
+          claimA: edge.claimA || '',
+          claimB: edge.claimB,
+          weight: edge.weight || 0,
+        })),
+      } : undefined;
+
+      const title = representative.what?.issueSummary || 
+                   representative.what?.claimSummary || 
+                   `${representative.type} in ${representative.category}`;
+      const summary = representative.what?.issueDetail || 
+                     representative.what?.description || 
+                     title;
+
+      res.json({
+        patternKey,
+        title,
+        summary,
+        occurrences: patternIssues.length,
+        verificationCounts,
+        status: patternStatus,
+        assignee: patternAssignee,
+        firstSeenAt,
+        lastSeenAt,
+        occurrencesList,
+        traceability,
+        scoring: representative.scoring,
+      });
+    } catch (e: any) {
+      console.error('Get pattern detail error:', e);
+      res.status(500).json({ error: e?.message ?? 'unknown error' });
+    }
+  });
+
+  // ============================================================================
+  // PATCH /api/issues/pattern/:patternKey - Update pattern status/assignee
+  // ============================================================================
+  app.patch('/api/issues/pattern/:patternKey', async (req, res) => {
+    try {
+      const { patternKey } = req.params;
+      const { status, assignee } = req.body;
+      const context = await getOrgContext(req);
+      
+      if (!context || context.error) {
+        return res.status(401).json({ error: context?.error || 'Authorization required' });
+      }
+      
+      if (!supabaseAdmin) {
+        return res.status(503).json({ error: 'Supabase not configured' });
+      }
+
+      // Get user ID
+      const authHeader = req.headers.authorization;
+      let userId: string | undefined;
+      if (authHeader?.startsWith('Bearer ')) {
+        const token = authHeader.substring(7);
+        const { data: { user } } = await supabaseAdmin.auth.getUser(token).catch(() => ({ data: { user: null } }));
+        userId = user?.id;
+      }
+
+      if (!userId) {
+        return res.status(401).json({ error: 'User authentication required' });
+      }
+
+      // Get all issues matching this pattern (same logic as detail endpoint)
+      const { data: evaluations } = await supabaseAdmin
+        .from('evaluations')
+        .select('id, report, created_at')
+        .eq('org_id', context.orgId)
+        .order('created_at', { ascending: false })
+        .limit(100)
+        .catch(() => ({ data: [] }));
+
+      const allIssues: any[] = [];
+      for (const eval_ of evaluations || []) {
+        const report = eval_.report as any;
+        const issues = report?.issues || report?.topIssuesV2 || report?.allIssuesV2 || [];
+        for (const issue of issues) {
+          if (!issue || !issue.issueId) continue;
+          allIssues.push({ ...issue, evaluationId: eval_.id });
+        }
+      }
+
+      const patternIssues = allIssues.filter(issue => generatePatternKey(issue) === patternKey);
+      const issueIds = patternIssues.map(i => i.issueId).filter(Boolean);
+
+      if (issueIds.length === 0) {
+        return res.status(404).json({ error: 'Pattern not found' });
+      }
+
+      // Update workflow for all issues in pattern
+      if (status && ['OPEN', 'ACKNOWLEDGED', 'RESOLVED', 'FALSE_POSITIVE'].includes(status)) {
+        for (const issueId of issueIds) {
+          await supabaseAdmin
+            .from('issue_workflow')
+            .upsert({
+              issue_id: issueId,
+              org_id: context.orgId,
+              status,
+              updated_at: new Date().toISOString(),
+            }, {
+              onConflict: 'issue_id',
+            });
+
+          await supabaseAdmin
+            .from('issue_actions_log')
+            .insert({
+              issue_id: issueId,
+              org_id: context.orgId,
+              actor_user_id: userId,
+              action_type: 'BULK_STATUS_CHANGE',
+              payload_json: { status, patternKey },
+            });
+        }
+      }
+
+      if (assignee !== undefined) {
+        for (const issueId of issueIds) {
+          await supabaseAdmin
+            .from('issue_workflow')
+            .upsert({
+              issue_id: issueId,
+              org_id: context.orgId,
+              assignee_user_id: assignee || null,
+              updated_at: new Date().toISOString(),
+            }, {
+              onConflict: 'issue_id',
+            });
+
+          await supabaseAdmin
+            .from('issue_actions_log')
+            .insert({
+              issue_id: issueId,
+              org_id: context.orgId,
+              actor_user_id: userId,
+              action_type: 'BULK_ASSIGNMENT',
+              payload_json: { assigneeUserId: assignee, patternKey },
+            });
+        }
+      }
+
+      res.json({ success: true, updatedCount: issueIds.length });
+    } catch (e: any) {
+      console.error('Update pattern error:', e);
+      res.status(500).json({ error: e?.message ?? 'unknown error' });
+    }
+  });
+
+  // ============================================================================
+  // GET /api/issues/queue/export/csv - Export queue as CSV
+  // ============================================================================
+  app.get('/api/issues/queue/export/csv', async (req, res) => {
+    try {
+      const context = await getOrgContext(req);
+      
+      if (!context || context.error) {
+        return res.status(401).json({ error: context?.error || 'Authorization required' });
+      }
+      
+      if (!supabaseAdmin) {
+        return res.status(503).json({ error: 'Supabase not configured' });
+      }
+
+      // Use same logic as queue endpoint but return all rows (no pagination)
+      // ... (implementation similar to queue endpoint but return CSV)
+      // For now, return JSON with CSV content
+      res.setHeader('Content-Type', 'text/csv');
+      res.setHeader('Content-Disposition', 'attachment; filename="issue-queue.csv"');
+      
+      // TODO: Implement CSV generation
+      res.send('Pattern Key,Title,Category,Type,Occurrences,Avg Risk,Last Seen\n');
+    } catch (e: any) {
+      console.error('Export queue CSV error:', e);
+      res.status(500).json({ error: e?.message ?? 'unknown error' });
+    }
+  });
+
+  // ============================================================================
+  // GET /api/issues/queue/export/json - Export queue as JSON
+  // ============================================================================
+  app.get('/api/issues/queue/export/json', async (req, res) => {
+    try {
+      const context = await getOrgContext(req);
+      
+      if (!context || context.error) {
+        return res.status(401).json({ error: context?.error || 'Authorization required' });
+      }
+      
+      if (!supabaseAdmin) {
+        return res.status(503).json({ error: 'Supabase not configured' });
+      }
+
+      // Get queue data (same as queue endpoint but all rows)
+      // For now, return placeholder
+      res.setHeader('Content-Type', 'application/json');
+      res.setHeader('Content-Disposition', 'attachment; filename="issue-queue.json"');
+      res.json({ rows: [], total: 0 });
+    } catch (e: any) {
+      console.error('Export queue JSON error:', e);
       res.status(500).json({ error: e?.message ?? 'unknown error' });
     }
   });
