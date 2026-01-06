@@ -1538,7 +1538,7 @@ app.post("/auth/provision", async (req, res) => {
 });
 
 // Get user's organizations
-app.post("/me/orgs", async (req, res) => {
+app.post("/api/me/orgs", async (req, res) => {
   try {
     // Get userId from request body
     const userId = req.body.userId as string | undefined;
@@ -1566,7 +1566,7 @@ app.post("/me/orgs", async (req, res) => {
 // ============================================
 
 // List members of an organization
-app.get("/orgs/:orgId/members", async (req, res) => {
+app.get("/api/orgs/:orgId/members", async (req, res) => {
   try {
     const { orgId } = req.params;
     const userId = req.body.userId || req.query.userId as string;
@@ -1594,7 +1594,7 @@ app.get("/orgs/:orgId/members", async (req, res) => {
 });
 
 // Invite a member to an organization
-app.post("/orgs/:orgId/members/invite", async (req, res) => {
+app.post("/api/orgs/:orgId/members/invite", async (req, res) => {
   try {
     const { orgId } = req.params;
     const { email, role } = req.body;
@@ -1636,7 +1636,7 @@ app.post("/orgs/:orgId/members/invite", async (req, res) => {
 });
 
 // Update a member's role
-app.patch("/orgs/:orgId/members/:memberUserId", async (req, res) => {
+app.patch("/api/orgs/:orgId/members/:memberUserId", async (req, res) => {
   try {
     const { orgId, memberUserId } = req.params;
     const { role } = req.body;
@@ -1678,7 +1678,7 @@ app.patch("/orgs/:orgId/members/:memberUserId", async (req, res) => {
 });
 
 // Remove a member from an organization
-app.delete("/orgs/:orgId/members/:memberUserId", async (req, res) => {
+app.delete("/api/orgs/:orgId/members/:memberUserId", async (req, res) => {
   try {
     const { orgId, memberUserId } = req.params;
     const userId = req.body.userId || req.query.userId as string;
@@ -1714,7 +1714,7 @@ app.delete("/orgs/:orgId/members/:memberUserId", async (req, res) => {
 });
 
 // API Key management endpoints
-app.post("/orgs/:orgId/api-keys", async (req, res) => {
+app.post("/api/orgs/:orgId/api-keys", async (req, res) => {
   try {
     const { orgId } = req.params;
     const { name } = req.body;
@@ -1772,7 +1772,7 @@ app.post("/orgs/:orgId/api-keys", async (req, res) => {
   }
 });
 
-app.get("/orgs/:orgId/projects/:projectId/api-keys", async (req, res) => {
+app.get("/api/orgs/:orgId/projects/:projectId/api-keys", async (req, res) => {
   try {
     const { orgId, projectId } = req.params;
     
@@ -2722,7 +2722,7 @@ app.get("/evaluations/:evaluationId/export/issues-v2/pdf", async (req, res) => {
 });
 
 // Get projects for an org
-app.get("/orgs/:orgId/projects", async (req, res) => {
+app.get("/api/orgs/:orgId/projects", async (req, res) => {
   try {
     const { orgId } = req.params;
     
@@ -2743,7 +2743,7 @@ app.get("/orgs/:orgId/projects", async (req, res) => {
 });
 
 // Get project environments
-app.get("/projects/:projectId/envs", async (req, res) => {
+app.get("/api/projects/:projectId/envs", async (req, res) => {
   try {
     const { projectId } = req.params;
     
@@ -2764,7 +2764,7 @@ app.get("/projects/:projectId/envs", async (req, res) => {
 });
 
 // Revoke API key
-app.post("/orgs/:orgId/projects/:projectId/api-keys/:keyId/revoke", async (req, res) => {
+app.post("/api/orgs/:orgId/projects/:projectId/api-keys/:keyId/revoke", async (req, res) => {
   try {
     const { orgId, projectId, keyId } = req.params;
     
@@ -2807,7 +2807,7 @@ app.post("/orgs/:orgId/projects/:projectId/api-keys/:keyId/revoke", async (req, 
 });
 
 // Create conversation (ingest transcript)
-app.post("/conversations", async (req, res) => {
+app.post("/api/conversations", async (req, res) => {
   try {
     const context = await getOrgContext(req);
     
@@ -2867,7 +2867,7 @@ app.post("/conversations", async (req, res) => {
 });
 
 // Get conversations
-app.get("/conversations", async (req, res) => {
+app.get("/api/conversations", async (req, res) => {
   try {
     const context = await getOrgContext(req);
     
@@ -2914,7 +2914,7 @@ app.get("/conversations", async (req, res) => {
 });
 
 // Get evaluations for a conversation
-app.get("/conversations/:conversationId/evaluations", async (req, res) => {
+app.get("/api/conversations/:conversationId/evaluations", async (req, res) => {
   try {
     const context = await getOrgContext(req);
     const { conversationId } = req.params;
