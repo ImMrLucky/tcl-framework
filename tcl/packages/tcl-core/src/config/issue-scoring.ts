@@ -7,21 +7,35 @@ const __dirname = path.dirname(__filename);
 
 export interface IssueScoringConfig {
   weights: {
-    impact: {
+    // Base weights for weighted average (should sum to ~1.0)
+    baseWeights?: {
+      impact: number;
+      verification: number;
+      confidence: number;
+    };
+    // Legacy impact/verification mappings (kept for backward compat, but not used in new formula)
+    impact?: {
       low: number;
       medium: number;
       high: number;
     };
-    verification: {
+    verification?: {
       EXTERNAL_VERIFIED: number;
       TRANSCRIPT_ONLY: number;
       NONE: number;
     };
-    disputeBoost: number;
-    contradictionBoost: number;
-    commitmentBoost: number;
-    escalationBoost: number;
-    regulatedTemplateBoost: number;
+    // Boost points (added to score, not multiplied)
+    disputeBoostPoints?: number;
+    contradictionBoostPoints?: number;
+    commitmentBoostPoints?: number;
+    escalationBoostPoints?: number;
+    regulatedTemplateBoostPoints?: number;
+    // Legacy boost multipliers (kept for backward compat)
+    disputeBoost?: number;
+    contradictionBoost?: number;
+    commitmentBoost?: number;
+    escalationBoost?: number;
+    regulatedTemplateBoost?: number;
   };
   caps: {
     transcriptOnlyMaxSeverityDisplay: "low" | "medium" | "high";

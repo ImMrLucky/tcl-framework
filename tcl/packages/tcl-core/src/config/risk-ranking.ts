@@ -30,16 +30,45 @@ export interface RiskRankingConfig {
     critical: number;
   };
   weights: {
+    // Risk scoring weights (MUST sum to 1.0 ± 0.001)
+    riskScoring: {
+      impact: number;
+      evidence: number;
+      signal: number;
+      category: number;
+    };
     typeBase: Record<string, number>;
     speakerMultiplier: Record<string, number>;
     verificationMultiplier: Record<string, number>;
-    // Composite scoring weights (for new formula)
+    // Composite scoring weights (for legacy formula)
     severityWeight?: number;
     categoryMultiplier?: Record<string, number>;
     confidenceWeight?: number;
     structuralImportanceWeight?: number;
     evidencePenaltyWeight?: number;
     customerImpactWeight?: number;
+  };
+  // Impact mapping (low/medium/high -> 0..1)
+  impactMap: {
+    low: number;
+    medium: number;
+    high: number;
+  };
+  // Evidence mapping (verification level -> 0..1)
+  evidenceMap: {
+    EXTERNAL_VERIFIED: number;
+    TRANSCRIPT_ONLY: number;
+    NONE: number;
+  };
+  // Category normalization range
+  categoryNormalization: {
+    min: number;
+    max: number;
+  };
+  // Degraded mode fallbacks (when spectral/graph data missing)
+  degradedMode: {
+    missingSpectralSignal01: number;
+    missingEdgesSignal01: number;
   };
   typePriority: string[];
 }
@@ -55,9 +84,13 @@ export function getRiskRankingConfig(): RiskRankingConfig {
     const configPath = join(__dirname, 'risk-ranking.json');
     const configText = readFileSync(configPath, 'utf-8');
     cachedConfig = JSON.parse(configText) as RiskRankingConfig;
+    
+    // Validate config on startup (fail fast)
+    validateRiskRankingConfig(cachedConfig);
+    
     return cachedConfig;
   } catch (error) {
-    console.warn('Failed to load risk-ranking.json, using defaults');
+    console.warn('Failed to load risk-ranking.json, using defaults', error);
     // Return safe defaults
     return {
       ui: { maxTopIssues: 10 },
@@ -74,6 +107,12 @@ export function getRiskRankingConfig(): RiskRankingConfig {
         critical: 0.85,
       },
       weights: {
+        riskScoring: {
+          impact: 0.40,
+          evidence: 0.30,
+          signal: 0.20,
+          category: 0.10,
+        },
         typeBase: {
           CONTRADICTION: 0.75,
           UNVERIFIED_CLAIM: 0.35,
@@ -115,6 +154,24 @@ export function getRiskRankingConfig(): RiskRankingConfig {
         evidencePenaltyWeight: 0.10,
         customerImpactWeight: 0.30,
       },
+      impactMap: {
+        low: 0.3,
+        medium: 0.6,
+        high: 1.0,
+      },
+      evidenceMap: {
+        EXTERNAL_VERIFIED: 1.0,
+        TRANSCRIPT_ONLY: 0.45,
+        NONE: 0.20,
+      },
+      categoryNormalization: {
+        min: 1.0,
+        max: 1.3,
+      },
+      degradedMode: {
+        missingSpectralSignal01: 0.5,
+        missingEdgesSignal01: 0.5,
+      },
       typePriority: [
         'CONTRADICTION',
         'DATA_INTEGRITY',
@@ -129,6 +186,53 @@ export function getRiskRankingConfig(): RiskRankingConfig {
         'OTHER',
       ],
     };
+    
+    // Validate defaults
+    validateRiskRankingConfig(cachedConfig);
+  }
+  
+  return cachedConfig!;
+}
+
+/**
+ * Validate risk ranking config on startup (fail fast)
+ * Exported for testing
+ */
+export function validateRiskRankingConfig(config: RiskRankingConfig): void {
+  // Validate weights sum to 1.0 ± 0.001
+  if (config.weights.riskScoring) {
+    const sum = 
+      config.weights.riskScoring.impact +
+      config.weights.riskScoring.evidence +
+      config.weights.riskScoring.signal +
+      config.weights.riskScoring.category;
+    
+    const diff = Math.abs(sum - 1.0);
+    if (diff > 0.001) {
+      throw new Error(
+        `Risk ranking config validation failed: riskScoring weights sum to ${sum}, must be 1.0 ± 0.001. ` +
+        `Weights: impact=${config.weights.riskScoring.impact}, evidence=${config.weights.riskScoring.evidence}, ` +
+        `signal=${config.weights.riskScoring.signal}, category=${config.weights.riskScoring.category}`
+      );
+    }
+  }
+  
+  // Validate severity thresholds are monotonic (low < medium < high < critical)
+  const thresholds = config.severityThresholds;
+  if (thresholds.low >= thresholds.medium) {
+    throw new Error(
+      `Risk ranking config validation failed: severityThresholds.low (${thresholds.low}) must be < medium (${thresholds.medium})`
+    );
+  }
+  if (thresholds.medium >= thresholds.high) {
+    throw new Error(
+      `Risk ranking config validation failed: severityThresholds.medium (${thresholds.medium}) must be < high (${thresholds.high})`
+    );
+  }
+  if (thresholds.high >= thresholds.critical) {
+    throw new Error(
+      `Risk ranking config validation failed: severityThresholds.high (${thresholds.high}) must be < critical (${thresholds.critical})`
+    );
   }
 }
 

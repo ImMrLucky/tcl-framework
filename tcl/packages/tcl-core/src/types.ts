@@ -250,6 +250,22 @@ export interface IssueV2 {
     };
   };
   
+  scoring?: {
+    components: {
+      impact01: number;
+      evidence01: number;
+      signal01: number;
+      category01: number;
+    };
+    weights: {
+      impact: number;
+      evidence: number;
+      signal: number;
+      category: number;
+    };
+    reasons: string[];
+  };
+  
   severityReason?: string[];        // Human-readable reasons for severity
   capsApplied?: string[];           // e.g. ["TRANSCRIPT_ONLY_SEVERITY_CAP", "TRANSCRIPT_ONLY_EXCEPTION:escalation"]
   

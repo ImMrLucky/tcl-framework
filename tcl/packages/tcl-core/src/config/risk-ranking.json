@@ -14,7 +14,31 @@
     "high": 0.70,
     "critical": 0.85
   },
+  "impactMap": {
+    "low": 0.3,
+    "medium": 0.6,
+    "high": 1.0
+  },
+  "evidenceMap": {
+    "EXTERNAL_VERIFIED": 1.0,
+    "TRANSCRIPT_ONLY": 0.45,
+    "NONE": 0.20
+  },
+  "categoryNormalization": {
+    "min": 1.0,
+    "max": 1.3
+  },
+  "degradedMode": {
+    "missingSpectralSignal01": 0.5,
+    "missingEdgesSignal01": 0.5
+  },
   "weights": {
+    "riskScoring": {
+      "impact": 0.40,
+      "evidence": 0.30,
+      "signal": 0.20,
+      "category": 0.10
+    },
     "typeBase": {
       "CONTRADICTION": 0.75,
       "UNVERIFIED_CLAIM": 0.35,

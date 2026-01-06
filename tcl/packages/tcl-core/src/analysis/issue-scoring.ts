@@ -84,11 +84,12 @@ function scoreSingleIssue(
   // Step 2: Get verification level (already set in issue)
   const verificationLevel = issue.verification.level;
   
-  // Step 3: Compute base scores
-  const impactScore = config.weights.impact[impact];
-  const verificationScore = config.weights.verification[verificationLevel];
+  // Step 3: Map impact and verification to 0..1 scale for weighted average
+  const impact01 = impact === 'high' ? 1.0 : impact === 'medium' ? 0.6 : 0.3;
+  const verification01 = verificationLevel === 'EXTERNAL_VERIFIED' ? 1.0 : 
+                         verificationLevel === 'TRANSCRIPT_ONLY' ? 0.45 : 0.20;
   
-  // Step 4: Compute boosts
+  // Step 4: Compute boosts (as point additions, not multipliers)
   const disputeScore = computeDisputeBoost(issue, config);
   const contradictionScore = computeContradictionBoost(issue, config);
   const commitmentScore = computeCommitmentBoost(issue, config);
@@ -137,16 +138,34 @@ function scoreSingleIssue(
   
   penalties.transcriptOnlyCapPenalty = transcriptOnlyCapPenalty;
   
-  // Step 7: Compute final score with normalization to prevent saturation
-  const baseScore = impactScore + verificationScore;
-  const boosts = disputeScore + contradictionScore + commitmentScore + escalationScore + templateScore;
-  const penaltyTotal = Object.values(penalties).reduce((sum, p) => sum + (p || 0), 0);
-  const rawScore = baseScore + boosts - penaltyTotal;
+  // Step 7: Compute final score using weighted average (prevents saturation)
+  const wImpact = config.weights?.baseWeights?.impact ?? 0.55;
+  const wVerification = config.weights?.baseWeights?.verification ?? 0.30;
+  const wConfidence = config.weights?.baseWeights?.confidence ?? 0.15;
   
-  // Normalize to 0..100 using max raw score
-  const maxRaw = config.normalization?.maxRawScore ?? getMaxRawScore(config);
-  const normalized = maxRaw > 0 ? Math.max(0, rawScore / maxRaw) : 0;
-  const score = Math.max(0, Math.min(100, Math.round(normalized * 100)));
+  // Confidence already 0..1
+  const confidence01 = Math.max(0, Math.min(1, issue.confidence ?? 0.5));
+  
+  // Weighted average base (0..1)
+  const base01 = (wImpact * impact01) + (wVerification * verification01) + (wConfidence * confidence01);
+  
+  // Scale to 0..100
+  let scaledScore = base01 * 100;
+  
+  // Add boosts as point additions (not multipliers)
+  const totalBoosts = disputeScore + contradictionScore + commitmentScore + escalationScore + templateScore;
+  scaledScore += totalBoosts;
+  
+  // Subtract penalties
+  const penaltyTotal = Object.values(penalties).reduce((sum, p) => sum + (p || 0), 0);
+  scaledScore -= penaltyTotal;
+  
+  // Final score clamped to 0..100
+  const score = Math.max(0, Math.min(100, Math.round(scaledScore)));
+  
+  // Store raw values for breakdown (for debugging/audit)
+  const impactScore = impact01;
+  const verificationScore = verification01;
   
   // Step 8: Build severity reasons
   const severityReason: string[] = [];
@@ -187,31 +206,13 @@ function scoreSingleIssue(
     severityReason,
     capsApplied,
     recommendedAction,
-    // Keep backward compatibility
-    severity: severityDisplay === 'high' ? 'high' : severityDisplay === 'medium' ? 'medium' : 'low',
+    // Note: severity will be recomputed in risk-ranking.ts based on actual score
+    // severityDisplay is what UI shows (capped in transcript-only)
     riskScore: score / 100,
   };
 }
 
-/**
- * Compute maximum possible raw score for normalization
- * This prevents score saturation by ensuring scores spread across the 0-100 range
- */
-function getMaxRawScore(config: IssueScoringConfig): number {
-  const maxImpact = config.weights.impact.high;
-  const maxVerification = config.weights.verification.EXTERNAL_VERIFIED;
-  
-  // Max boosts (assume worst case: all could apply)
-  const maxBoosts =
-    (config.weights.disputeBoost || 0) +
-    (config.weights.contradictionBoost || 0) +
-    (config.weights.commitmentBoost || 0) +
-    (config.weights.escalationBoost || 0) +
-    (config.weights.regulatedTemplateBoost || 0);
-  
-  // Penalties reduce score, so we don't include them in max (they're subtracted)
-  return maxImpact + maxVerification + maxBoosts;
-}
+// Note: getMaxRawScore removed - we now use weighted average which naturally stays in 0..1 range
 
 function determineImpact(issue: IssueV2, config: IssueScoringConfig): ImpactV2 {
   // Check type-based mapping first
@@ -243,12 +244,14 @@ function computeDisputeBoost(issue: IssueV2, config: IssueScoringConfig): number
     tag.includes('dispute') || tag.includes('denial') || tag.includes('challenge')
   );
   
-  return hasDispute ? config.weights.disputeBoost : 0;
+  // Return as point boost (not multiplier)
+  return hasDispute ? (config.weights.disputeBoostPoints ?? 6) : 0;
 }
 
 function computeContradictionBoost(issue: IssueV2, config: IssueScoringConfig): number {
   if (issue.type === 'CONTRADICTION' && issue.evidence.edges?.some(e => e.kind === 'contradiction')) {
-    return config.weights.contradictionBoost;
+    // Return as point boost
+    return config.weights.contradictionBoostPoints ?? 3;
   }
   return 0;
 }
@@ -259,7 +262,8 @@ function computeCommitmentBoost(issue: IssueV2, config: IssueScoringConfig): num
   );
   
   if (hasCommitment && (issue.type === 'COMMITMENT_INCONSISTENCY' || issue.type === 'CONTRADICTION')) {
-    return config.weights.commitmentBoost;
+    // Return as point boost
+    return config.weights.commitmentBoostPoints ?? 4;
   }
   return 0;
 }
@@ -270,13 +274,15 @@ function computeEscalationBoost(issue: IssueV2, config: IssueScoringConfig): num
     text.includes(keyword.toLowerCase())
   );
   
-  return hasEscalation ? config.weights.escalationBoost : 0;
+  // Return as point boost
+  return hasEscalation ? (config.weights.escalationBoostPoints ?? 8) : 0;
 }
 
 function computeTemplateBoost(issue: IssueV2, context: ScoringContext, config: IssueScoringConfig): number {
   if (context.isRegulatedTemplate && 
       (issue.category === 'compliance' || issue.category === 'disclosure')) {
-    return config.weights.regulatedTemplateBoost;
+    // Return as point boost
+    return config.weights.regulatedTemplateBoostPoints ?? 4;
   }
   return 0;
 }

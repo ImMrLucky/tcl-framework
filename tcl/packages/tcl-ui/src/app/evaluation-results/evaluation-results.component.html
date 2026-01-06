@@ -335,13 +335,17 @@
                     <span class="issue-impact" *ngIf="issue.impact">
                       {{ getImpactLabel(issue) }}
                     </span>
-                    <span class="issue-risk-score">Score: {{ ((issue.score ?? (issue.riskScore * 100))).toFixed(0) }}</span>
+                    <span class="issue-risk-score" 
+                          [matTooltip]="getScoreTooltip(issue)"
+                          matTooltipPosition="above"
+                          matTooltipClass="score-tooltip">Score: {{ ((issue.score ?? (issue.riskScore * 100))).toFixed(0) }}</span>
                   </div>
                   <div class="issue-v2-body">
                     <div class="issue-summary">{{ issue.what.issueSummary }}</div>
                     <div class="issue-meta">
                       <span class="verification-badge" 
                             [class.transcript-only]="issue.verification.level === 'TRANSCRIPT_ONLY'"
+                            [matTooltip]="issue.verification.level === 'TRANSCRIPT_ONLY' ? 'Unverified (Transcript-only)' : issue.verification.level === 'EXTERNAL_VERIFIED' ? 'Externally Verified' : 'No Verification'"
                             [class.verified]="issue.verification.level === 'EXTERNAL_VERIFIED'">
                         {{ getVerificationLabel(issue) }}
                       </span>
@@ -389,7 +393,12 @@
                 </ng-container>
                 <ng-container matColumnDef="riskScore">
                   <mat-header-cell *matHeaderCellDef>Risk Score</mat-header-cell>
-                  <mat-cell *matCellDef="let issue">{{ ((issue.score ?? (issue.riskScore * 100))).toFixed(0) }}%</mat-cell>
+                  <mat-cell *matCellDef="let issue">
+                    <span [matTooltip]="getScoreTooltip(issue)"
+                          matTooltipPosition="above"
+                          matTooltipClass="score-tooltip"
+                          style="cursor: help;">{{ ((issue.score ?? (issue.riskScore * 100))).toFixed(0) }}%</span>
+                  </mat-cell>
                 </ng-container>
                 <ng-container matColumnDef="summary">
                   <mat-header-cell *matHeaderCellDef>Summary</mat-header-cell>
@@ -398,8 +407,9 @@
                 <ng-container matColumnDef="verification">
                   <mat-header-cell *matHeaderCellDef>Verification</mat-header-cell>
                   <mat-cell *matCellDef="let issue">
-                    <span [class.transcript-only]="issue.verification.level === 'TRANSCRIPT_ONLY'">
-                      {{ issue.verification.level }}
+                    <span [class.transcript-only]="issue.verification.level === 'TRANSCRIPT_ONLY'"
+                          [class.verified]="issue.verification.level === 'EXTERNAL_VERIFIED'">
+                      {{ getVerificationLabel(issue) }}
                     </span>
                   </mat-cell>
                 </ng-container>

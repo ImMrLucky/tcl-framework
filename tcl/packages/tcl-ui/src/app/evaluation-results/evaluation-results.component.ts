@@ -102,6 +102,21 @@ interface IssueV2 {
     level: 'EXTERNAL_VERIFIED' | 'TRANSCRIPT_ONLY' | 'NONE';
     reasonCodes: string[];
   };
+  scoring?: {
+    components: {
+      impact01: number;
+      evidence01: number;
+      signal01: number;
+      category01: number;
+    };
+    weights: {
+      impact: number;
+      evidence: number;
+      signal: number;
+      category: number;
+    };
+    reasons: string[];
+  };
   who: {
     speaker: 'AGENT' | 'CUSTOMER' | 'SYSTEM' | 'UNKNOWN';
     turnIndex?: number;
@@ -703,7 +718,35 @@ export class EvaluationResultsComponent implements OnInit {
   }
 
   // Tooltip definitions for metrics
-  getMetricTooltip(metric: string): string {
+  /**
+ * Get tooltip text for issue score showing scoring components
+ */
+getScoreTooltip(issue: IssueV2): string {
+  if (!issue.scoring) {
+    return `Score: ${(issue.score ?? (issue.riskScore * 100)).toFixed(0)}`;
+  }
+  
+  const { components, weights, reasons } = issue.scoring;
+  const score = (issue.score ?? (issue.riskScore * 100)).toFixed(0);
+  
+  let tooltip = `Score: ${score}\n\n`;
+  tooltip += `Components:\n`;
+  tooltip += `  Impact: ${(components.impact01 * 100).toFixed(1)}% (weight: ${(weights.impact * 100).toFixed(0)}%)\n`;
+  tooltip += `  Evidence: ${(components.evidence01 * 100).toFixed(1)}% (weight: ${(weights.evidence * 100).toFixed(0)}%)\n`;
+  tooltip += `  Signal: ${(components.signal01 * 100).toFixed(1)}% (weight: ${(weights.signal * 100).toFixed(0)}%)\n`;
+  tooltip += `  Category: ${(components.category01 * 100).toFixed(1)}% (weight: ${(weights.category * 100).toFixed(0)}%)\n`;
+  
+  if (reasons && reasons.length > 0) {
+    tooltip += `\nReasons:\n`;
+    reasons.forEach(reason => {
+      tooltip += `  • ${reason}\n`;
+    });
+  }
+  
+  return tooltip;
+}
+
+getMetricTooltip(metric: string): string {
     // First check if definitions are available from backend (from headline counts)
     const counts = this.evaluation?.scores?.counts;
     if (counts?.definitions) {
