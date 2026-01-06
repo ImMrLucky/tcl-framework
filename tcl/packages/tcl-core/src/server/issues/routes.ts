@@ -91,19 +91,61 @@ export function setupIssueWorkflowRoutes(app: express.Application) {
             continue;
           }
           
-          // Add evaluation metadata and ensure all required fields exist
-          allIssues.push({
+          // Transform old issue format to IssueV2 format
+          // Handle both old format (risk.severity, what.claimSummary) and new format
+          const transformedIssue: any = {
             ...issue,
             evaluationId: eval_.id,
             evaluationCreatedAt: eval_.created_at,
-            // Ensure nested objects exist
-            what: issue.what || { issueSummary: '', issueDetail: '' },
+            
+            // Map severity from risk.severity or use existing
+            severity: issue.severity || issue.risk?.severity || 'medium',
+            severityDisplay: issue.severityDisplay || issue.risk?.severity || 'medium',
+            
+            // Map category from risk.category or use existing
+            category: issue.category || issue.risk?.category || 'evidence',
+            
+            // Map type from what.issueType or use existing
+            type: issue.type || issue.what?.issueType || 'UNVERIFIED_CLAIM',
+            
+            // Map impact - derive from severity if not present
+            impact: issue.impact || (issue.risk?.severity === 'high' ? 'high' : 
+                                     issue.risk?.severity === 'medium' ? 'medium' : 'low'),
+            
+            // Map score/riskScore - compute from confidence if not present
+            score: issue.score ?? (issue.riskScore ?? (issue.confidence?.importance ?? 0.5) * 100),
+            riskScore: issue.riskScore ?? (issue.confidence?.importance ?? 0.5),
+            
+            // Map what.issueSummary from what.claimSummary or use existing
+            what: {
+              ...issue.what,
+              issueSummary: issue.what?.issueSummary || issue.what?.claimSummary || issue.what?.claimText || '',
+              issueDetail: issue.what?.issueDetail || issue.what?.description || issue.what?.claimText || '',
+              primaryClaimId: issue.what?.primaryClaimId || issue.claimId || '',
+              claimText: issue.what?.claimText || issue.what?.claimSummary || '',
+            },
+            
+            // Ensure verification exists
             verification: issue.verification || { level: 'NONE', reasonCodes: [] },
-            who: issue.who || { speaker: 'unknown' },
+            
+            // Ensure who exists
+            who: issue.who || { speaker: 'UNKNOWN' },
+            
+            // Ensure evidence exists
             evidence: issue.evidence || { refs: [] },
+            
+            // Ensure compliance exists
             compliance: issue.compliance || { tags: [], disclaimers: [] },
-            audit: issue.audit || { createdAt: eval_.created_at, engineVersion: '', scorerId: '' },
-          });
+            
+            // Ensure audit exists
+            audit: issue.audit || { 
+              createdAt: eval_.created_at, 
+              engineVersion: '', 
+              scorerId: '' 
+            },
+          };
+          
+          allIssues.push(transformedIssue);
         }
       }
 
