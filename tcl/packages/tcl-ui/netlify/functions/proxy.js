@@ -30,49 +30,98 @@ exports.handler = async (event, context) => {
   }
   
   // Extract the path from the original request
-  // Netlify sets headers with the original request info
-  let path = '/validate'; // default
+  // Netlify redirects /api/* to /.netlify/functions/proxy?path=:splat
+  // :splat captures everything after /api/, so for /api/issues-v2, :splat = issues-v2
+  let apiPath = null;
   
-  // Method 1: Check X-Original-URL header (set by Netlify redirects)
-  const originalUrl = event.headers['x-original-url'] || event.headers['X-Original-URL'];
-  if (originalUrl) {
-    try {
-      const url = new URL(originalUrl);
-      const match = url.pathname.match(/^\/api(\/.*)$/);
-      if (match) {
-        path = match[1];
-      }
-    } catch (e) {
-      console.error('Error parsing original URL:', e);
+  // Method 1: Check query parameters first (most reliable for Netlify redirects)
+  // The redirect passes :splat as the path query parameter
+  if (event.queryStringParameters?.path) {
+    apiPath = event.queryStringParameters.path;
+    // :splat doesn't include leading /, so add it if needed
+    if (!apiPath.startsWith('/')) {
+      apiPath = '/' + apiPath;
     }
   }
   
-  // Method 2: Check rawUrl
-  if (path === '/validate' && event.rawUrl) {
+  // Method 2: Check X-Original-URL header (set by Netlify redirects)
+  if (!apiPath) {
+    const originalUrl = event.headers['x-original-url'] || event.headers['X-Original-URL'];
+    if (originalUrl) {
+      try {
+        const url = new URL(originalUrl);
+        // Extract path after /api
+        const match = url.pathname.match(/^\/api(\/.*)$/);
+        if (match) {
+          apiPath = match[1];
+        }
+      } catch (e) {
+        console.error('Error parsing original URL:', e);
+      }
+    }
+  }
+  
+  // Method 3: Check rawUrl
+  if (!apiPath && event.rawUrl) {
     try {
       const url = new URL(event.rawUrl);
       const match = url.pathname.match(/^\/api(\/.*)$/);
       if (match) {
-        path = match[1];
+        apiPath = match[1];
       }
     } catch (e) {
-      // rawUrl might not be a full URL
+      // rawUrl might not be a full URL, try parsing as path
+      const match = event.rawUrl.match(/^\/api(\/.*)$/);
+      if (match) {
+        apiPath = match[1];
+      }
     }
   }
   
-  // Method 3: Check query parameters (if redirect passes it)
-  if (path === '/validate' && event.queryStringParameters?.path) {
-    path = event.queryStringParameters.path.startsWith('/') 
-      ? event.queryStringParameters.path 
-      : '/' + event.queryStringParameters.path;
+  // Method 4: Check path from event.path (if available)
+  if (!apiPath && event.path) {
+    const match = event.path.match(/^\/api(\/.*)$/);
+    if (match) {
+      apiPath = match[1];
+    }
+  }
+  
+  // Fallback: default to /validate if no path found
+  if (!apiPath) {
+    console.warn('Could not extract path from request, defaulting to /validate');
+    console.log('Event:', JSON.stringify({
+      queryStringParameters: event.queryStringParameters,
+      headers: Object.keys(event.headers),
+      path: event.path,
+      rawUrl: event.rawUrl
+    }, null, 2));
+    apiPath = '/validate';
   }
   
   // Ensure path starts with /
-  if (!path.startsWith('/')) {
-    path = '/' + path;
+  if (!apiPath.startsWith('/')) {
+    apiPath = '/' + apiPath;
   }
   
-  const url = `${TCL_CORE_URL}${path}`;
+  // Reconstruct full API path: /api + apiPath
+  // For example: /api + /issues-v2 = /api/issues-v2
+  const fullPath = '/api' + apiPath;
+  
+  // Preserve query string from original request
+  let queryString = '';
+  if (event.queryStringParameters) {
+    // Filter out the 'path' parameter we used for routing
+    const queryParams = { ...event.queryStringParameters };
+    delete queryParams.path;
+    const queryEntries = Object.entries(queryParams).filter(([_, v]) => v !== null && v !== undefined);
+    if (queryEntries.length > 0) {
+      queryString = '?' + queryEntries.map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(v)}`).join('&');
+    }
+  }
+  
+  const url = `${TCL_CORE_URL}${fullPath}${queryString}`;
+  
+  console.log(`Proxying ${event.httpMethod} ${fullPath}${queryString} to ${url}`);
   
   try {
     // Forward the request to TCL Core
