@@ -62,6 +62,41 @@ export const routes: Routes = [
     loadComponent: () => import('./evaluation-results/evaluation-results.component').then(m => m.EvaluationResultsComponent),
     canActivate: [AuthGuard]
   },
+  {
+    path: 'issues',
+    loadComponent: () => import('./issues/issues-list.component').then(m => m.IssuesListComponent),
+    canActivate: [AuthGuard]
+  },
+  {
+    path: 'compliance',
+    loadComponent: () => import('./compliance/compliance-dashboard.component').then(m => m.ComplianceDashboardComponent),
+    canActivate: [AuthGuard]
+  },
+  {
+    path: 'audit-packs',
+    loadComponent: () => import('./audit-packs/audit-packs.component').then(m => m.AuditPacksComponent),
+    canActivate: [AuthGuard]
+  },
+  {
+    path: 'policies',
+    loadComponent: () => import('./policies/policies-list.component').then(m => m.PoliciesListComponent),
+    canActivate: [AuthGuard]
+  },
+  {
+    path: 'policies/:id',
+    loadComponent: () => import('./policies/policy-detail.component').then(m => m.PolicyDetailComponent),
+    canActivate: [AuthGuard]
+  },
+  {
+    path: 'evidence',
+    loadComponent: () => import('./evidence/evidence-coverage.component').then(m => m.EvidenceCoverageComponent),
+    canActivate: [AuthGuard]
+  },
+  {
+    path: 'admin/scoring',
+    loadComponent: () => import('./admin/scoring/scoring-profiles.component').then(m => m.ScoringProfilesComponent),
+    canActivate: [AuthGuard]
+  },
   
   // Default route
   {

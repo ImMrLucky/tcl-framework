@@ -310,6 +310,45 @@ export class AuditService {
   }
 
   /**
+   * Search evaluations with filters (server-side)
+   */
+  searchEvaluations(filters: {
+    limit?: number;
+    offset?: number;
+    dateFrom?: string;
+    dateTo?: string;
+    severityDisplay?: string;
+    verification?: string;
+    category?: string;
+    type?: string;
+    agent?: string;
+    team?: string;
+    textContains?: string;
+    projectId?: string;
+    env?: string;
+  }): Observable<{ evaluations: any[]; total: number; limit: number; offset: number }> {
+    const queryParams = new URLSearchParams();
+    if (filters.limit) queryParams.set('limit', filters.limit.toString());
+    if (filters.offset) queryParams.set('offset', filters.offset.toString());
+    if (filters.dateFrom) queryParams.set('dateFrom', filters.dateFrom);
+    if (filters.dateTo) queryParams.set('dateTo', filters.dateTo);
+    if (filters.severityDisplay) queryParams.set('severityDisplay', filters.severityDisplay);
+    if (filters.verification) queryParams.set('verification', filters.verification);
+    if (filters.category) queryParams.set('category', filters.category);
+    if (filters.type) queryParams.set('type', filters.type);
+    if (filters.agent) queryParams.set('agent', filters.agent);
+    if (filters.team) queryParams.set('team', filters.team);
+    if (filters.textContains) queryParams.set('textContains', filters.textContains);
+    if (filters.projectId) queryParams.set('projectId', filters.projectId);
+    if (filters.env) queryParams.set('env', filters.env);
+
+    const query = queryParams.toString();
+    return this.http.get<{ evaluations: any[]; total: number; limit: number; offset: number }>(
+      `${this.apiBase}/evaluations/search${query ? '?' + query : ''}`
+    );
+  }
+
+  /**
    * Run an evaluation with full reproducibility manifest
    */
   runEvaluation(request: EvaluationRunRequest): Observable<EvaluationRunResponse> {

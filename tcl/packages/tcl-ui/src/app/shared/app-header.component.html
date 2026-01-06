@@ -1,4 +1,142 @@
-<header>
+<mat-sidenav-container class="header-container" *ngIf="showNavigation && isAuthenticated">
+  <mat-sidenav 
+    #sidenav 
+    mode="side" 
+    opened="true"
+    class="sidebar-nav"
+    [class.collapsed]="!sidebarOpen"
+    [style.width.px]="sidebarOpen ? 240 : 64">
+    <div class="sidebar-header">
+      <app-logo></app-logo>
+      <button mat-icon-button (click)="toggleSidebar()" class="toggle-button">
+        <mat-icon>{{ sidebarOpen ? 'chevron_left' : 'chevron_right' }}</mat-icon>
+      </button>
+    </div>
+    
+    <mat-nav-list class="nav-list">
+      <a mat-list-item routerLink="/issues" routerLinkActive="active" [routerLinkActiveOptions]="{exact: false}">
+        <mat-icon matListItemIcon>assignment</mat-icon>
+        <span *ngIf="sidebarOpen" matListItemTitle>Issues (Triage)</span>
+      </a>
+      <a mat-list-item routerLink="/compliance" routerLinkActive="active" [routerLinkActiveOptions]="{exact: false}">
+        <mat-icon matListItemIcon>dashboard</mat-icon>
+        <span *ngIf="sidebarOpen" matListItemTitle>Compliance Dashboard</span>
+      </a>
+      <a mat-list-item routerLink="/evaluations" routerLinkActive="active" [routerLinkActiveOptions]="{exact: false}">
+        <mat-icon matListItemIcon>assessment</mat-icon>
+        <span *ngIf="sidebarOpen" matListItemTitle>Evaluations</span>
+      </a>
+      <a mat-list-item routerLink="/audit-packs" routerLinkActive="active" [routerLinkActiveOptions]="{exact: false}">
+        <mat-icon matListItemIcon>folder</mat-icon>
+        <span *ngIf="sidebarOpen" matListItemTitle>Audit Packs</span>
+      </a>
+      <a mat-list-item routerLink="/policies" routerLinkActive="active" [routerLinkActiveOptions]="{exact: false}">
+        <mat-icon matListItemIcon>description</mat-icon>
+        <span *ngIf="sidebarOpen" matListItemTitle>Policies</span>
+      </a>
+      <a mat-list-item routerLink="/evidence" routerLinkActive="active" [routerLinkActiveOptions]="{exact: false}">
+        <mat-icon matListItemIcon>verified</mat-icon>
+        <span *ngIf="sidebarOpen" matListItemTitle>Evidence</span>
+      </a>
+      <mat-divider></mat-divider>
+      <a mat-list-item routerLink="/admin/scoring" routerLinkActive="active" [routerLinkActiveOptions]="{exact: false}">
+        <mat-icon matListItemIcon>tune</mat-icon>
+        <span *ngIf="sidebarOpen" matListItemTitle>Admin → Scoring</span>
+      </a>
+    </mat-nav-list>
+  </mat-sidenav>
+  
+  <mat-sidenav-content class="header-content-wrapper">
+    <header>
+      <div class="container">
+        <div class="header-content">
+          <div class="header-left">
+            <button *ngIf="!sidebarOpen" mat-icon-button (click)="toggleSidebar()" class="menu-button">
+              <mat-icon>menu</mat-icon>
+            </button>
+            <div *ngIf="pageTitle" class="page-title-section">
+              <h1 class="page-title">{{ pageTitle }}</h1>
+              <p *ngIf="pageSubtitle" class="page-subtitle">{{ pageSubtitle }}</p>
+            </div>
+          </div>
+          
+          <div class="header-actions">
+            <!-- Back button (optional) -->
+            <button *ngIf="showBackButton" mat-button [routerLink]="backButtonRoute">
+              <mat-icon>arrow_back</mat-icon>
+              {{ backButtonText }}
+            </button>
+            
+            <!-- Page-specific actions (projected content) -->
+            <ng-content select="[headerActions]"></ng-content>
+
+            <!-- User menu (only when authenticated) -->
+        <ng-container *ngIf="isAuthenticated">
+          <button mat-icon-button [matMenuTriggerFor]="userMenu">
+            <mat-icon>account_circle</mat-icon>
+          </button>
+                 <mat-menu #userMenu="matMenu">
+                   <div class="user-menu-header">
+                     <div class="user-email">{{ currentUser?.email }}</div>
+                     <div class="user-role" *ngIf="currentUser?.companyRole">{{ currentUser?.companyRole }}</div>
+                   </div>
+                   <mat-divider></mat-divider>
+                   <button mat-menu-item routerLink="/dashboard">
+                     <mat-icon>dashboard</mat-icon>
+                     <span>Dashboard</span>
+                   </button>
+                   <button mat-menu-item routerLink="/ingest">
+                     <mat-icon>upload_file</mat-icon>
+                     <span>Analyze Conversations</span>
+                   </button>
+                   <mat-divider></mat-divider>
+                   <button mat-menu-item routerLink="/issues">
+                     <mat-icon>assignment</mat-icon>
+                     <span>Issues (Triage)</span>
+                   </button>
+                   <button mat-menu-item routerLink="/compliance">
+                     <mat-icon>dashboard</mat-icon>
+                     <span>Compliance Dashboard</span>
+                   </button>
+                   <button mat-menu-item routerLink="/evaluations">
+                     <mat-icon>assessment</mat-icon>
+                     <span>Evaluations</span>
+                   </button>
+                   <button mat-menu-item routerLink="/audit-packs">
+                     <mat-icon>folder</mat-icon>
+                     <span>Audit Packs</span>
+                   </button>
+                   <button mat-menu-item routerLink="/policies">
+                     <mat-icon>description</mat-icon>
+                     <span>Policies</span>
+                   </button>
+                   <button mat-menu-item routerLink="/evidence">
+                     <mat-icon>verified</mat-icon>
+                     <span>Evidence</span>
+                   </button>
+                   <button mat-menu-item routerLink="/admin/scoring">
+                     <mat-icon>tune</mat-icon>
+                     <span>Admin → Scoring</span>
+                   </button>
+                   <mat-divider></mat-divider>
+                   <button mat-menu-item routerLink="/profile">
+                     <mat-icon>settings</mat-icon>
+                     <span>Profile Settings</span>
+                   </button>
+                   <button mat-menu-item (click)="signOut()">
+                     <mat-icon>logout</mat-icon>
+                     <span>Sign Out</span>
+                   </button>
+                 </mat-menu>
+        </ng-container>
+          </div>
+        </div>
+      </div>
+    </header>
+  </mat-sidenav-content>
+</mat-sidenav-container>
+
+<header *ngIf="!showNavigation || !isAuthenticated">
   <div class="container">
     <div class="header-content">
       <div class="header-left">
@@ -15,18 +153,6 @@
           <mat-icon>arrow_back</mat-icon>
           {{ backButtonText }}
         </button>
-
-               <!-- Navigation buttons (optional) -->
-               <ng-container *ngIf="showNavigation && isAuthenticated">
-                 <button mat-button routerLink="/dashboard" routerLinkActive="active">
-                   <mat-icon>dashboard</mat-icon>
-                   Dashboard
-                 </button>
-                 <button mat-button routerLink="/ingest" routerLinkActive="active">
-                   <mat-icon>upload_file</mat-icon>
-                   Analyze Conversations
-                 </button>
-               </ng-container>
 
         <!-- Page-specific actions (projected content) -->
         <ng-content select="[headerActions]"></ng-content>
@@ -50,6 +176,36 @@
                      <mat-icon>upload_file</mat-icon>
                      <span>Analyze Conversations</span>
                    </button>
+                   <mat-divider></mat-divider>
+                   <button mat-menu-item routerLink="/issues">
+                     <mat-icon>assignment</mat-icon>
+                     <span>Issues (Triage)</span>
+                   </button>
+                   <button mat-menu-item routerLink="/compliance">
+                     <mat-icon>dashboard</mat-icon>
+                     <span>Compliance Dashboard</span>
+                   </button>
+                   <button mat-menu-item routerLink="/evaluations">
+                     <mat-icon>assessment</mat-icon>
+                     <span>Evaluations</span>
+                   </button>
+                   <button mat-menu-item routerLink="/audit-packs">
+                     <mat-icon>folder</mat-icon>
+                     <span>Audit Packs</span>
+                   </button>
+                   <button mat-menu-item routerLink="/policies">
+                     <mat-icon>description</mat-icon>
+                     <span>Policies</span>
+                   </button>
+                   <button mat-menu-item routerLink="/evidence">
+                     <mat-icon>verified</mat-icon>
+                     <span>Evidence</span>
+                   </button>
+                   <button mat-menu-item routerLink="/admin/scoring">
+                     <mat-icon>tune</mat-icon>
+                     <span>Admin → Scoring</span>
+                   </button>
+                   <mat-divider></mat-divider>
                    <button mat-menu-item routerLink="/profile">
                      <mat-icon>settings</mat-icon>
                      <span>Profile Settings</span>

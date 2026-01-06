@@ -1,0 +1,253 @@
+<div class="issues-container">
+  <app-header 
+    pageTitle="Issue Review Queue" 
+    pageSubtitle="Triage and manage issues across evaluations"
+    [showNavigation]="true"
+    [showBackButton]="true"
+    backButtonRoute="/dashboard"
+    backButtonText="Back to Dashboard">
+  </app-header>
+
+  <div class="container">
+    <!-- Filters -->
+    <mat-card class="filters-card">
+      <div class="filters-grid">
+        <mat-form-field appearance="outline">
+          <mat-label>Status</mat-label>
+          <mat-select [(ngModel)]="filters.status" (selectionChange)="applyFilters()">
+            <mat-option value="">All</mat-option>
+            <mat-option *ngFor="let status of statusOptions" [value]="status">{{ status }}</mat-option>
+          </mat-select>
+        </mat-form-field>
+
+        <mat-form-field appearance="outline">
+          <mat-label>Severity Display</mat-label>
+          <mat-select [(ngModel)]="filters.severityDisplay" (selectionChange)="applyFilters()">
+            <mat-option value="">All</mat-option>
+            <mat-option *ngFor="let sev of severityOptions" [value]="sev">{{ sev | titlecase }}</mat-option>
+          </mat-select>
+        </mat-form-field>
+
+        <mat-form-field appearance="outline">
+          <mat-label>Verification Level</mat-label>
+          <mat-select [(ngModel)]="filters.verificationLevel" (selectionChange)="applyFilters()">
+            <mat-option value="">All</mat-option>
+            <mat-option *ngFor="let ver of verificationOptions" [value]="ver">{{ ver }}</mat-option>
+          </mat-select>
+        </mat-form-field>
+
+        <mat-form-field appearance="outline">
+          <mat-label>Category</mat-label>
+          <mat-select [(ngModel)]="filters.category" (selectionChange)="applyFilters()">
+            <mat-option value="">All</mat-option>
+            <mat-option *ngFor="let cat of categoryOptions" [value]="cat">{{ cat }}</mat-option>
+          </mat-select>
+        </mat-form-field>
+
+        <mat-form-field appearance="outline">
+          <mat-label>Type</mat-label>
+          <mat-select [(ngModel)]="filters.type" (selectionChange)="applyFilters()">
+            <mat-option value="">All</mat-option>
+            <mat-option *ngFor="let type of typeOptions" [value]="type">{{ type }}</mat-option>
+          </mat-select>
+        </mat-form-field>
+
+        <mat-form-field appearance="outline">
+          <mat-label>Date From</mat-label>
+          <input matInput [matDatepicker]="dateFromPicker" [(ngModel)]="filters.dateFrom" (dateChange)="applyFilters()">
+          <mat-datepicker-toggle matSuffix [for]="dateFromPicker"></mat-datepicker-toggle>
+          <mat-datepicker #dateFromPicker></mat-datepicker>
+        </mat-form-field>
+
+        <mat-form-field appearance="outline">
+          <mat-label>Date To</mat-label>
+          <input matInput [matDatepicker]="dateToPicker" [(ngModel)]="filters.dateTo" (dateChange)="applyFilters()">
+          <mat-datepicker-toggle matSuffix [for]="dateToPicker"></mat-datepicker-toggle>
+          <mat-datepicker #dateToPicker></mat-datepicker>
+        </mat-form-field>
+
+        <button mat-button (click)="clearFilters()">
+          <mat-icon>clear</mat-icon>
+          Clear Filters
+        </button>
+      </div>
+    </mat-card>
+
+    <!-- Bulk Actions -->
+    <mat-card *ngIf="selectedIssues.size > 0" class="bulk-actions-card">
+      <div class="bulk-actions">
+        <span class="selected-count">{{ selectedIssues.size }} selected</span>
+        <button mat-button [matMenuTriggerFor]="statusMenu">
+          <mat-icon>edit</mat-icon>
+          Change Status
+        </button>
+        <mat-menu #statusMenu="matMenu">
+          <button mat-menu-item (click)="bulkUpdateStatus('OPEN')">Open</button>
+          <button mat-menu-item (click)="bulkUpdateStatus('ACKNOWLEDGED')">Acknowledged</button>
+          <button mat-menu-item (click)="bulkUpdateStatus('RESOLVED')">Resolved</button>
+          <button mat-menu-item (click)="bulkUpdateStatus('FALSE_POSITIVE')">False Positive</button>
+        </mat-menu>
+        <button mat-button (click)="bulkAssign(null)">
+          <mat-icon>person_remove</mat-icon>
+          Unassign
+        </button>
+      </div>
+    </mat-card>
+
+    <!-- Loading -->
+    <mat-card *ngIf="loading" class="loading-card">
+      <mat-spinner diameter="40"></mat-spinner>
+      <p>Loading issues...</p>
+    </mat-card>
+
+    <!-- Issues Table -->
+    <mat-card *ngIf="!loading" class="table-card">
+      <table mat-table [dataSource]="dataSource" matSort>
+        <!-- Select Column -->
+        <ng-container matColumnDef="select">
+          <th mat-header-cell *matHeaderCellDef>
+            <mat-checkbox 
+              [checked]="selectAll" 
+              (change)="toggleSelectAll()"
+              [indeterminate]="selectedIssues.size > 0 && selectedIssues.size < dataSource.data.length">
+            </mat-checkbox>
+          </th>
+          <td mat-cell *matCellDef="let issue">
+            <mat-checkbox 
+              [checked]="isSelected(issue.issueId)"
+              (change)="toggleSelect(issue.issueId)">
+            </mat-checkbox>
+          </td>
+        </ng-container>
+
+        <!-- Status Column -->
+        <ng-container matColumnDef="status">
+          <th mat-header-cell *matHeaderCellDef mat-sort-header>Status</th>
+          <td mat-cell *matCellDef="let issue">
+            <mat-chip [class]="'status-chip ' + getStatusColor(issue.status)">
+              {{ issue.status || 'OPEN' }}
+            </mat-chip>
+          </td>
+        </ng-container>
+
+        <!-- Severity Display Column -->
+        <ng-container matColumnDef="severityDisplay">
+          <th mat-header-cell *matHeaderCellDef mat-sort-header>Severity</th>
+          <td mat-cell *matCellDef="let issue">
+            <mat-chip [class]="'severity-chip ' + getSeverityColor(issue.severityDisplay || issue.severity)">
+              {{ (issue.severityDisplay || issue.severity) | titlecase }}
+            </mat-chip>
+          </td>
+        </ng-container>
+
+        <!-- Impact Column -->
+        <ng-container matColumnDef="impact">
+          <th mat-header-cell *matHeaderCellDef>Impact</th>
+          <td mat-cell *matCellDef="let issue">
+            <span *ngIf="issue.impact">{{ issue.impact | titlecase }}</span>
+            <span *ngIf="!issue.impact" class="no-data">-</span>
+          </td>
+        </ng-container>
+
+        <!-- Verification Column -->
+        <ng-container matColumnDef="verification">
+          <th mat-header-cell *matHeaderCellDef>Verification</th>
+          <td mat-cell *matCellDef="let issue">
+            <mat-chip [class]="'verification-chip ' + (issue.verification.level === 'TRANSCRIPT_ONLY' ? 'transcript-only' : '')">
+              {{ getVerificationLabel(issue.verification.level) }}
+            </mat-chip>
+          </td>
+        </ng-container>
+
+        <!-- Risk Score Column -->
+        <ng-container matColumnDef="riskScore">
+          <th mat-header-cell *matHeaderCellDef mat-sort-header>Score</th>
+          <td mat-cell *matCellDef="let issue">
+            <div class="score-cell" [matTooltip]="'Risk Score: ' + getScore(issue)">
+              {{ getScore(issue) | number:'1.0-0' }}
+            </div>
+          </td>
+        </ng-container>
+
+        <!-- Issue Summary Column -->
+        <ng-container matColumnDef="issueSummary">
+          <th mat-header-cell *matHeaderCellDef>Summary</th>
+          <td mat-cell *matCellDef="let issue">
+            <div class="summary-cell" [matTooltip]="issue.what.issueSummary">
+              {{ issue.what.issueSummary }}
+            </div>
+          </td>
+        </ng-container>
+
+        <!-- Created At Column -->
+        <ng-container matColumnDef="createdAt">
+          <th mat-header-cell *matHeaderCellDef mat-sort-header>Created</th>
+          <td mat-cell *matCellDef="let issue">
+            <div class="date-cell">
+              <span class="date-primary">{{ formatDate(issue.evaluationCreatedAt || issue.audit?.createdAt) }}</span>
+            </div>
+          </td>
+        </ng-container>
+
+        <!-- Evaluation Column -->
+        <ng-container matColumnDef="evaluation">
+          <th mat-header-cell *matHeaderCellDef>Evaluation</th>
+          <td mat-cell *matCellDef="let issue">
+            <button *ngIf="issue.evaluationId" mat-button color="primary" (click)="viewEvaluation(issue.evaluationId!)">
+              <mat-icon>open_in_new</mat-icon>
+              View
+            </button>
+            <span *ngIf="!issue.evaluationId" class="no-data">-</span>
+          </td>
+        </ng-container>
+
+        <!-- Actions Column -->
+        <ng-container matColumnDef="actions">
+          <th mat-header-cell *matHeaderCellDef>Actions</th>
+          <td mat-cell *matCellDef="let issue">
+            <button mat-icon-button [matMenuTriggerFor]="actionMenu" (click)="$event.stopPropagation()">
+              <mat-icon>more_vert</mat-icon>
+            </button>
+            <mat-menu #actionMenu="matMenu">
+              <button mat-menu-item (click)="viewIssue(issue)">
+                <mat-icon>visibility</mat-icon>
+                View Details
+              </button>
+              <button mat-menu-item (click)="viewEvaluation(issue.evaluationId!)" *ngIf="issue.evaluationId">
+                <mat-icon>open_in_new</mat-icon>
+                View Evaluation
+              </button>
+            </mat-menu>
+          </td>
+        </ng-container>
+
+        <tr mat-header-row *matHeaderRowDef="displayedColumns"></tr>
+        <tr mat-row *matRowDef="let row; columns: displayedColumns" 
+            class="issue-row"
+            (click)="viewIssue(row)"></tr>
+      </table>
+
+      <!-- Empty State -->
+      <div *ngIf="dataSource.data.length === 0" class="empty-state">
+        <mat-icon>bug_report</mat-icon>
+        <h3>No issues found</h3>
+        <p>No issues match your current filters.</p>
+        <button mat-button (click)="clearFilters()">
+          Clear Filters
+        </button>
+      </div>
+
+      <!-- Paginator -->
+      <mat-paginator
+        *ngIf="dataSource.data.length > 0"
+        [length]="total"
+        [pageSize]="pageSize"
+        [pageIndex]="pageIndex"
+        [pageSizeOptions]="[25, 50, 100]"
+        (page)="onPageChange($event)"
+        showFirstLastButtons>
+      </mat-paginator>
+    </mat-card>
+  </div>
+</div>
+

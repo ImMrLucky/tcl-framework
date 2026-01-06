@@ -1,0 +1,282 @@
+<div class="scoring-profiles-container">
+  <app-header 
+    pageTitle="Risk Scoring Settings" 
+    pageSubtitle="Manage scoring configuration profiles (Admin only)"
+    [showNavigation]="true"
+    [showBackButton]="true"
+    backButtonRoute="/dashboard"
+    backButtonText="Back to Dashboard">
+  </app-header>
+
+  <div class="container">
+    <!-- Loading -->
+    <mat-card *ngIf="loading && !editing" class="loading-card">
+      <mat-spinner diameter="40"></mat-spinner>
+      <p>Loading scoring profiles...</p>
+    </mat-card>
+
+    <!-- Active Profile Info -->
+    <mat-card *ngIf="!loading && !editing && activeProfile" class="active-profile-card">
+      <div class="active-header">
+        <div>
+          <h3>Active Profile</h3>
+          <p class="active-name">{{ activeProfile.name }}</p>
+          <p class="active-meta">Version: {{ activeProfile.version }} | Config Hash: {{ activeProfile.config_hash }}</p>
+        </div>
+        <mat-chip class="active-chip">Active</mat-chip>
+      </div>
+    </mat-card>
+
+    <!-- Profiles List -->
+    <mat-card *ngIf="!loading && !editing" class="profiles-card">
+      <div class="card-header">
+        <h3>Scoring Profiles</h3>
+        <button mat-raised-button color="primary" (click)="startEditing()">
+          <mat-icon>add</mat-icon>
+          New Profile
+        </button>
+      </div>
+
+      <div *ngIf="profiles.length === 0" class="empty-state">
+        <mat-icon>settings</mat-icon>
+        <p>No scoring profiles yet. Create your first profile to customize scoring weights and thresholds.</p>
+      </div>
+
+      <table *ngIf="profiles.length > 0" mat-table [dataSource]="profiles">
+        <ng-container matColumnDef="name">
+          <th mat-header-cell *matHeaderCellDef>Name</th>
+          <td mat-cell *matCellDef="let profile">
+            <div class="name-cell">
+              <span class="name-primary">{{ profile.name }}</span>
+              <span *ngIf="profile.description" class="name-secondary">{{ profile.description }}</span>
+            </div>
+          </td>
+        </ng-container>
+
+        <ng-container matColumnDef="version">
+          <th mat-header-cell *matHeaderCellDef>Version</th>
+          <td mat-cell *matCellDef="let profile">{{ profile.version }}</td>
+        </ng-container>
+
+        <ng-container matColumnDef="status">
+          <th mat-header-cell *matHeaderCellDef>Status</th>
+          <td mat-cell *matCellDef="let profile">
+            <mat-chip *ngIf="profile.is_active" class="status-active">Active</mat-chip>
+            <mat-chip *ngIf="!profile.is_active" class="status-inactive">Inactive</mat-chip>
+          </td>
+        </ng-container>
+
+        <ng-container matColumnDef="configHash">
+          <th mat-header-cell *matHeaderCellDef>Config Hash</th>
+          <td mat-cell *matCellDef="let profile">
+            <code class="hash-code">{{ profile.config_hash }}</code>
+          </td>
+        </ng-container>
+
+        <ng-container matColumnDef="actions">
+          <th mat-header-cell *matHeaderCellDef>Actions</th>
+          <td mat-cell *matCellDef="let profile">
+            <button 
+              *ngIf="!profile.is_active" 
+              mat-button 
+              color="accent" 
+              (click)="activateProfile(profile)">
+              <mat-icon>check_circle</mat-icon>
+              Activate
+            </button>
+            <button mat-button (click)="startEditing(profile)">
+              <mat-icon>edit</mat-icon>
+              Edit
+            </button>
+          </td>
+        </ng-container>
+
+        <tr mat-header-row *matHeaderRowDef="['name', 'version', 'status', 'configHash', 'actions']"></tr>
+        <tr mat-row *matRowDef="let row; columns: ['name', 'version', 'status', 'configHash', 'actions']"></tr>
+      </table>
+    </mat-card>
+
+    <!-- Edit Form -->
+    <mat-card *ngIf="editing" class="edit-card">
+      <div class="card-header">
+        <h3>{{ profileName ? 'Edit Profile' : 'New Profile' }}</h3>
+        <button mat-button (click)="cancelEditing()">
+          <mat-icon>close</mat-icon>
+          Cancel
+        </button>
+      </div>
+
+      <!-- Validation Errors -->
+      <div *ngIf="validationErrors.length > 0" class="validation-errors">
+        <mat-icon color="warn">error</mat-icon>
+        <div>
+          <strong>Validation Errors:</strong>
+          <ul>
+            <li *ngFor="let error of validationErrors">{{ error }}</li>
+          </ul>
+        </div>
+      </div>
+
+      <mat-tab-group>
+        <!-- Basic Settings Tab -->
+        <mat-tab label="Basic Settings">
+          <div class="form-section">
+            <mat-form-field appearance="outline" class="full-width">
+              <mat-label>Profile Name</mat-label>
+              <input matInput [(ngModel)]="profileName" required>
+            </mat-form-field>
+
+            <mat-form-field appearance="outline" class="full-width">
+              <mat-label>Description</mat-label>
+              <input matInput [(ngModel)]="profileDescription">
+            </mat-form-field>
+
+            <mat-form-field appearance="outline" class="full-width">
+              <mat-label>Version</mat-label>
+              <input matInput [(ngModel)]="profileVersion" placeholder="1.0.0">
+            </mat-form-field>
+          </div>
+        </mat-tab>
+
+        <!-- Risk Scoring Tab -->
+        <mat-tab label="Risk Scoring">
+          <div class="form-section">
+            <h4>Risk Scoring Weights (must sum to 1.0)</h4>
+            <div class="weights-grid">
+              <mat-form-field appearance="outline">
+                <mat-label>Impact</mat-label>
+                <input matInput type="number" step="0.01" [(ngModel)]="riskScoringWeights.impact" (ngModelChange)="validateForm()">
+              </mat-form-field>
+              <mat-form-field appearance="outline">
+                <mat-label>Evidence</mat-label>
+                <input matInput type="number" step="0.01" [(ngModel)]="riskScoringWeights.evidence" (ngModelChange)="validateForm()">
+              </mat-form-field>
+              <mat-form-field appearance="outline">
+                <mat-label>Signal</mat-label>
+                <input matInput type="number" step="0.01" [(ngModel)]="riskScoringWeights.signal" (ngModelChange)="validateForm()">
+              </mat-form-field>
+              <mat-form-field appearance="outline">
+                <mat-label>Category</mat-label>
+                <input matInput type="number" step="0.01" [(ngModel)]="riskScoringWeights.category" (ngModelChange)="validateForm()">
+              </mat-form-field>
+            </div>
+            <div class="sum-display" [class.invalid]="Math.abs(getRiskScoringSum() - 1.0) > 0.001">
+              Sum: {{ getRiskScoringSum().toFixed(3) }} (must be 1.0)
+            </div>
+
+            <h4>Severity Thresholds (must be monotonic)</h4>
+            <div class="thresholds-grid">
+              <mat-form-field appearance="outline">
+                <mat-label>Low</mat-label>
+                <input matInput type="number" step="0.01" [(ngModel)]="severityThresholds.low" (ngModelChange)="validateForm()">
+              </mat-form-field>
+              <mat-form-field appearance="outline">
+                <mat-label>Medium</mat-label>
+                <input matInput type="number" step="0.01" [(ngModel)]="severityThresholds.medium" (ngModelChange)="validateForm()">
+              </mat-form-field>
+              <mat-form-field appearance="outline">
+                <mat-label>High</mat-label>
+                <input matInput type="number" step="0.01" [(ngModel)]="severityThresholds.high" (ngModelChange)="validateForm()">
+              </mat-form-field>
+              <mat-form-field appearance="outline">
+                <mat-label>Critical</mat-label>
+                <input matInput type="number" step="0.01" [(ngModel)]="severityThresholds.critical" (ngModelChange)="validateForm()">
+              </mat-form-field>
+            </div>
+
+            <h4>Evidence Map</h4>
+            <div class="evidence-grid">
+              <mat-form-field appearance="outline">
+                <mat-label>External Verified</mat-label>
+                <input matInput type="number" step="0.01" [(ngModel)]="evidenceMap.EXTERNAL_VERIFIED">
+              </mat-form-field>
+              <mat-form-field appearance="outline">
+                <mat-label>Transcript Only</mat-label>
+                <input matInput type="number" step="0.01" [(ngModel)]="evidenceMap.TRANSCRIPT_ONLY">
+              </mat-form-field>
+              <mat-form-field appearance="outline">
+                <mat-label>None</mat-label>
+                <input matInput type="number" step="0.01" [(ngModel)]="evidenceMap.NONE">
+              </mat-form-field>
+            </div>
+
+            <h4>Impact Map</h4>
+            <div class="impact-grid">
+              <mat-form-field appearance="outline">
+                <mat-label>Low</mat-label>
+                <input matInput type="number" step="0.01" [(ngModel)]="impactMap.low">
+              </mat-form-field>
+              <mat-form-field appearance="outline">
+                <mat-label>Medium</mat-label>
+                <input matInput type="number" step="0.01" [(ngModel)]="impactMap.medium">
+              </mat-form-field>
+              <mat-form-field appearance="outline">
+                <mat-label>High</mat-label>
+                <input matInput type="number" step="0.01" [(ngModel)]="impactMap.high">
+              </mat-form-field>
+            </div>
+          </div>
+        </mat-tab>
+
+        <!-- Issue Scoring Tab -->
+        <mat-tab label="Issue Scoring">
+          <div class="form-section">
+            <h4>Base Weights (must sum to 1.0)</h4>
+            <div class="weights-grid">
+              <mat-form-field appearance="outline">
+                <mat-label>Impact</mat-label>
+                <input matInput type="number" step="0.01" [(ngModel)]="baseWeights.impact" (ngModelChange)="validateForm()">
+              </mat-form-field>
+              <mat-form-field appearance="outline">
+                <mat-label>Verification</mat-label>
+                <input matInput type="number" step="0.01" [(ngModel)]="baseWeights.verification" (ngModelChange)="validateForm()">
+              </mat-form-field>
+              <mat-form-field appearance="outline">
+                <mat-label>Confidence</mat-label>
+                <input matInput type="number" step="0.01" [(ngModel)]="baseWeights.confidence" (ngModelChange)="validateForm()">
+              </mat-form-field>
+            </div>
+            <div class="sum-display" [class.invalid]="Math.abs(getBaseWeightsSum() - 1.0) > 0.001">
+              Sum: {{ getBaseWeightsSum().toFixed(3) }} (must be 1.0)
+            </div>
+          </div>
+        </mat-tab>
+
+        <!-- Advanced Tab -->
+        <mat-tab label="Advanced (JSON)">
+          <div class="form-section">
+            <button mat-button (click)="showAdvanced = !showAdvanced">
+              <mat-icon>{{ showAdvanced ? 'visibility_off' : 'visibility' }}</mat-icon>
+              {{ showAdvanced ? 'Hide' : 'Show' }} Advanced JSON Editor
+            </button>
+
+            <div *ngIf="showAdvanced" class="json-editors">
+              <div>
+                <h4>Risk Ranking Config</h4>
+                <mat-form-field appearance="outline" class="full-width">
+                  <textarea matInput [(ngModel)]="riskRankingConfigJson" rows="15" (ngModelChange)="validateForm()"></textarea>
+                </mat-form-field>
+              </div>
+
+              <div>
+                <h4>Issue Scoring Config</h4>
+                <mat-form-field appearance="outline" class="full-width">
+                  <textarea matInput [(ngModel)]="issueScoringConfigJson" rows="15" (ngModelChange)="validateForm()"></textarea>
+                </mat-form-field>
+              </div>
+            </div>
+          </div>
+        </mat-tab>
+      </mat-tab-group>
+
+      <div class="form-actions">
+        <button mat-raised-button color="primary" (click)="saveProfile()" [disabled]="loading || validationErrors.length > 0">
+          <mat-icon>save</mat-icon>
+          Save Profile
+        </button>
+        <button mat-button (click)="cancelEditing()">Cancel</button>
+      </div>
+    </mat-card>
+  </div>
+</div>
+

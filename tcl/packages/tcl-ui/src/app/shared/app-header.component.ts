@@ -6,6 +6,8 @@ import { MatIconModule } from '@angular/material/icon';
 import { MatMenuModule } from '@angular/material/menu';
 import { MatDividerModule } from '@angular/material/divider';
 import { MatTooltipModule } from '@angular/material/tooltip';
+import { MatSidenavModule } from '@angular/material/sidenav';
+import { MatListModule } from '@angular/material/list';
 import { LogoComponent } from './logo.component';
 import { AuthService, User } from '../auth.service';
 
@@ -20,6 +22,8 @@ import { AuthService, User } from '../auth.service';
     MatMenuModule,
     MatDividerModule,
     MatTooltipModule,
+    MatSidenavModule,
+    MatListModule,
     LogoComponent
   ],
   templateUrl: './app-header.component.html',
@@ -35,6 +39,7 @@ export class AppHeaderComponent implements OnInit {
   
   currentUser: User | null = null;
   isAuthenticated = false;
+  sidebarOpen = true; // Start with sidebar open
 
   constructor(private authService: AuthService) {}
 
@@ -47,6 +52,10 @@ export class AppHeaderComponent implements OnInit {
 
   signOut() {
     this.authService.signOut();
+  }
+
+  toggleSidebar() {
+    this.sidebarOpen = !this.sidebarOpen;
   }
 }
 

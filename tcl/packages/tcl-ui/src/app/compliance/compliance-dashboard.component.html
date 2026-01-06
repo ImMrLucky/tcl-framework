@@ -1,0 +1,219 @@
+<div class="compliance-container">
+  <app-header 
+    pageTitle="Compliance Dashboard" 
+    pageSubtitle="Trend analysis and issue concentration"
+    [showNavigation]="true"
+    [showBackButton]="true"
+    backButtonRoute="/dashboard"
+    backButtonText="Back to Dashboard">
+  </app-header>
+
+  <div class="container">
+    <!-- Date Range Selector -->
+    <mat-card class="date-range-card">
+      <div class="date-range">
+        <mat-form-field appearance="outline">
+          <mat-label>From</mat-label>
+          <input matInput [matDatepicker]="fromPicker" [(ngModel)]="dateFrom" (dateChange)="onDateRangeChange()">
+          <mat-datepicker-toggle matSuffix [for]="fromPicker"></mat-datepicker-toggle>
+          <mat-datepicker #fromPicker></mat-datepicker>
+        </mat-form-field>
+        
+        <mat-form-field appearance="outline">
+          <mat-label>To</mat-label>
+          <input matInput [matDatepicker]="toPicker" [(ngModel)]="dateTo" (dateChange)="onDateRangeChange()">
+          <mat-datepicker-toggle matSuffix [for]="toPicker"></mat-datepicker-toggle>
+          <mat-datepicker #toPicker></mat-datepicker>
+        </mat-form-field>
+      </div>
+    </mat-card>
+
+    <!-- Loading -->
+    <div *ngIf="loading" class="loading-container">
+      <mat-spinner diameter="50"></mat-spinner>
+      <p>Loading compliance data...</p>
+    </div>
+
+    <!-- KPI Cards -->
+    <div *ngIf="!loading && summary" class="kpi-grid">
+      <mat-card class="kpi-card">
+        <div class="kpi-value">{{ summary.totalEvaluations }}</div>
+        <div class="kpi-label">Total Evaluations</div>
+      </mat-card>
+      
+      <mat-card class="kpi-card">
+        <div class="kpi-value">{{ summary.totalIssues }}</div>
+        <div class="kpi-label">Total Issues</div>
+      </mat-card>
+      
+      <mat-card class="kpi-card">
+        <div class="kpi-value">{{ summary.highCriticalCount }}</div>
+        <div class="kpi-label">High/Critical Issues</div>
+      </mat-card>
+      
+      <mat-card class="kpi-card">
+        <div class="kpi-value">{{ summary.verifiedPercent }}%</div>
+        <div class="kpi-label">% Verified</div>
+      </mat-card>
+      
+      <mat-card class="kpi-card">
+        <div class="kpi-value">{{ summary.avgRiskScore }}</div>
+        <div class="kpi-label">Avg Risk Score</div>
+      </mat-card>
+    </div>
+
+    <!-- Empty State -->
+    <div *ngIf="!loading && (!summary || summary.totalEvaluations === 0)" class="empty-state">
+      <mat-icon>assessment</mat-icon>
+      <h3>No Data Available</h3>
+      <p>No evaluations found for the selected date range.</p>
+      <p>Try adjusting the date range or run some evaluations first.</p>
+    </div>
+
+    <!-- Charts and Tables -->
+    <div *ngIf="!loading && summary && summary.totalEvaluations > 0" class="charts-grid">
+      <!-- Issues Over Time -->
+      <mat-card class="chart-card">
+        <h3>Issues Over Time (Stacked by Severity)</h3>
+        <div class="chart-container">
+          <div *ngFor="let point of timeseries" class="chart-bar-group">
+            <div class="bar-label">{{ point.date | date:'MMM d' }}</div>
+            <div class="stacked-bars">
+              <div class="bar-segment low" 
+                   [style.width]="getStackedBarWidth(point.low, point.low + point.medium + point.high + point.critical, getMaxValue([point.low + point.medium + point.high + point.critical]))"
+                   [style.left]="getStackedBarLeft(point.low, point.medium, point.high, point.critical, 0, getMaxValue([point.low + point.medium + point.high + point.critical]))"></div>
+              <div class="bar-segment medium"
+                   [style.width]="getStackedBarWidth(point.medium, point.low + point.medium + point.high + point.critical, getMaxValue([point.low + point.medium + point.high + point.critical]))"
+                   [style.left]="getStackedBarLeft(point.low, point.medium, point.high, point.critical, 1, getMaxValue([point.low + point.medium + point.high + point.critical]))"></div>
+              <div class="bar-segment high"
+                   [style.width]="getStackedBarWidth(point.high, point.low + point.medium + point.high + point.critical, getMaxValue([point.low + point.medium + point.high + point.critical]))"
+                   [style.left]="getStackedBarLeft(point.low, point.medium, point.high, point.critical, 2, getMaxValue([point.low + point.medium + point.high + point.critical]))"></div>
+              <div class="bar-segment critical"
+                   [style.width]="getStackedBarWidth(point.critical, point.low + point.medium + point.high + point.critical, getMaxValue([point.low + point.medium + point.high + point.critical]))"
+                   [style.left]="getStackedBarLeft(point.low, point.medium, point.high, point.critical, 3, getMaxValue([point.low + point.medium + point.high + point.critical]))"></div>
+            </div>
+            <div class="bar-total">{{ point.low + point.medium + point.high + point.critical }}</div>
+          </div>
+          <div *ngIf="timeseries.length === 0" class="no-data">No data available</div>
+        </div>
+        <div class="chart-legend">
+          <span class="legend-item"><span class="legend-color critical"></span> Critical</span>
+          <span class="legend-item"><span class="legend-color high"></span> High</span>
+          <span class="legend-item"><span class="legend-color medium"></span> Medium</span>
+          <span class="legend-item"><span class="legend-color low"></span> Low</span>
+        </div>
+      </mat-card>
+
+      <!-- Verification Coverage Over Time -->
+      <mat-card class="chart-card">
+        <h3>Verification Coverage Over Time</h3>
+        <div class="chart-container">
+          <div *ngFor="let point of coverage" class="chart-bar-group">
+            <div class="bar-label">{{ point.date | date:'MMM d' }}</div>
+            <div class="stacked-bars">
+              <div class="bar-segment verified"
+                   [style.width]="getStackedBarWidth(point.externalVerified, point.total, getMaxValue([point.total]))"
+                   [style.left]="getCoverageBarLeft(point.externalVerified, point.transcriptOnly, point.none, 0, getMaxValue([point.total]))"></div>
+              <div class="bar-segment transcript-only"
+                   [style.width]="getStackedBarWidth(point.transcriptOnly, point.total, getMaxValue([point.total]))"
+                   [style.left]="getCoverageBarLeft(point.externalVerified, point.transcriptOnly, point.none, 1, getMaxValue([point.total]))"></div>
+              <div class="bar-segment unverified"
+                   [style.width]="getStackedBarWidth(point.none, point.total, getMaxValue([point.total]))"
+                   [style.left]="getCoverageBarLeft(point.externalVerified, point.transcriptOnly, point.none, 2, getMaxValue([point.total]))"></div>
+            </div>
+            <div class="bar-total">{{ point.total }} ({{ point.verifiedPercent }}% verified)</div>
+          </div>
+          <div *ngIf="coverage.length === 0" class="no-data">No data available</div>
+        </div>
+        <div class="chart-legend">
+          <span class="legend-item"><span class="legend-color verified"></span> Verified</span>
+          <span class="legend-item"><span class="legend-color transcript-only"></span> Transcript-only</span>
+          <span class="legend-item"><span class="legend-color unverified"></span> Unverified</span>
+        </div>
+      </mat-card>
+
+      <!-- Top Categories -->
+      <mat-card class="chart-card">
+        <h3>Top Categories</h3>
+        <div class="bar-chart">
+          <div *ngFor="let cat of topCategories" class="bar-item">
+            <div class="bar-label">{{ cat.category }}</div>
+            <div class="bar-wrapper">
+              <div class="bar-fill" [style.width]="getBarWidth(cat.count, getMaxValue(topCategories.map(c => c.count)))"></div>
+              <span class="bar-value">{{ cat.count }}</span>
+            </div>
+          </div>
+          <div *ngIf="topCategories.length === 0" class="no-data">No data available</div>
+        </div>
+      </mat-card>
+
+      <!-- Top Types -->
+      <mat-card class="chart-card">
+        <h3>Top Issue Types</h3>
+        <div class="bar-chart">
+          <div *ngFor="let type of topTypes" class="bar-item">
+            <div class="bar-label">{{ type.type }}</div>
+            <div class="bar-wrapper">
+              <div class="bar-fill" [style.width]="getBarWidth(type.count, getMaxValue(topTypes.map(t => t.count)))"></div>
+              <span class="bar-value">{{ type.count }}</span>
+            </div>
+          </div>
+          <div *ngIf="topTypes.length === 0" class="no-data">No data available</div>
+        </div>
+      </mat-card>
+    </div>
+
+    <!-- Top Recurring Issue Patterns Table -->
+    <mat-card *ngIf="!loading && summary && summary.totalEvaluations > 0" class="patterns-card">
+      <h3>Top Recurring Issue Patterns</h3>
+      <table mat-table [dataSource]="patterns" class="patterns-table">
+        <ng-container matColumnDef="type">
+          <th mat-header-cell *matHeaderCellDef>Type</th>
+          <td mat-cell *matCellDef="let pattern">
+            <mat-chip>{{ pattern.type }}</mat-chip>
+          </td>
+        </ng-container>
+
+        <ng-container matColumnDef="category">
+          <th mat-header-cell *matHeaderCellDef>Category</th>
+          <td mat-cell *matCellDef="let pattern">
+            <mat-chip>{{ pattern.category }}</mat-chip>
+          </td>
+        </ng-container>
+
+        <ng-container matColumnDef="summary">
+          <th mat-header-cell *matHeaderCellDef>Summary</th>
+          <td mat-cell *matCellDef="let pattern">
+            <div class="summary-text">{{ pattern.summary }}</div>
+          </td>
+        </ng-container>
+
+        <ng-container matColumnDef="count">
+          <th mat-header-cell *matHeaderCellDef>Count</th>
+          <td mat-cell *matCellDef="let pattern">
+            <strong>{{ pattern.count }}</strong>
+          </td>
+        </ng-container>
+
+        <ng-container matColumnDef="avgScore">
+          <th mat-header-cell *matHeaderCellDef>Avg Score</th>
+          <td mat-cell *matCellDef="let pattern">
+            {{ pattern.avgScore }}
+          </td>
+        </ng-container>
+
+        <ng-container matColumnDef="severity">
+          <th mat-header-cell *matHeaderCellDef>Severity Breakdown</th>
+          <td mat-cell *matCellDef="let pattern">
+            <div class="severity-breakdown">{{ getSeverityBreakdown(pattern) }}</div>
+          </td>
+        </ng-container>
+
+        <tr mat-header-row *matHeaderRowDef="displayedColumns"></tr>
+        <tr mat-row *matRowDef="let row; columns: displayedColumns"></tr>
+      </table>
+      <div *ngIf="patterns.length === 0" class="no-data">No patterns found</div>
+    </mat-card>
+  </div>
+</div>
+

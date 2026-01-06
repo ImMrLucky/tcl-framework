@@ -1,0 +1,159 @@
+.audit-packs-container {
+  min-height: 100vh;
+  background: #f5f5f5;
+}
+
+.container {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 24px;
+}
+
+.options-card,
+.status-card,
+.info-card {
+  margin-bottom: 24px;
+  padding: 24px;
+}
+
+.options-card h2,
+.status-card h3,
+.info-card h3 {
+  margin: 0 0 20px;
+  font-size: 20px;
+  font-weight: 500;
+}
+
+.export-type-selector {
+  margin-bottom: 24px;
+}
+
+.options-section {
+  margin-bottom: 20px;
+}
+
+.date-range {
+  display: flex;
+  gap: 16px;
+  align-items: center;
+}
+
+.full-width {
+  width: 100%;
+}
+
+.loading-evaluations {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+  color: #666;
+}
+
+.status-loading {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 40px;
+  gap: 16px;
+}
+
+.status-info {
+  padding: 20px 0;
+}
+
+.status-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 20px;
+  padding-bottom: 16px;
+  border-bottom: 1px solid #e0e0e0;
+}
+
+.status-processing {
+  padding: 20px;
+}
+
+.status-error {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 20px;
+  background: #ffebee;
+  border-radius: 4px;
+  color: #c62828;
+}
+
+.status-completed {
+  padding: 20px 0;
+}
+
+.download-section {
+  margin-top: 20px;
+}
+
+.download-section h4 {
+  margin: 0 0 16px;
+  font-size: 16px;
+}
+
+.download-buttons {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 16px;
+}
+
+.checksum {
+  padding: 12px;
+  background: #f5f5f5;
+  border-radius: 4px;
+  font-family: monospace;
+  font-size: 12px;
+  word-break: break-all;
+}
+
+.info-card ul {
+  margin: 12px 0;
+  padding-left: 24px;
+}
+
+.info-card li {
+  margin: 8px 0;
+}
+
+mat-chip {
+  font-size: 11px !important;
+  min-height: 24px !important;
+}
+
+.status-processing mat-chip {
+  background: #fff3e0 !important;
+  color: #ef6c00 !important;
+}
+
+.status-completed mat-chip {
+  background: #e8f5e9 !important;
+  color: #2e7d32 !important;
+}
+
+.status-failed mat-chip {
+  background: #ffebee !important;
+  color: #c62828 !important;
+}
+
+@media (max-width: 768px) {
+  .date-range {
+    flex-direction: column;
+  }
+  
+  .download-buttons {
+    flex-direction: column;
+  }
+  
+  .container {
+    padding: 16px;
+  }
+}
+

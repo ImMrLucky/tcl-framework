@@ -38,6 +38,13 @@ import {
 } from "./member-management.js";
 import { setupIntegrationRoutes } from "./integrations/routes.js";
 import { setupAuditRoutes } from "./audit/routes.js";
+import { setupIssueWorkflowRoutes } from "./issues/routes.js";
+import { setupAnalyticsRoutes } from "./analytics/routes.js";
+import { setupExportRoutes } from "./exports/routes.js";
+import { setupEvaluationSearchRoutes } from "./evaluations/search.js";
+import { setupPolicyRoutes } from "./policies/routes.js";
+import { setupEvidenceRoutes } from "./evidence/routes.js";
+import { setupScoringProfilesRoutes } from "./admin/scoring-profiles.js";
 import { buildIssuesList } from "./audit/reproducibility.js";
 import { analyzeForIssues, exportAsJSON, exportAsCSV, exportAsHTML, type IssueAnalysisOutput } from "../issues/index.js";
 import { buildIssueNarratives } from "../analysis/issue-narratives.js";
@@ -600,6 +607,19 @@ app.post("/validate", async (req, res) => {
 
     console.log("Starting validation...");
     const startTime = Date.now();
+    
+    // Get org context early (for scoring profile lookup)
+    let orgContextForProfile: { orgId: string } | null = null;
+    try {
+      const contextForProfile = await getOrgContext(req);
+      if (contextForProfile && !contextForProfile.error && contextForProfile.orgId) {
+        orgContextForProfile = { orgId: contextForProfile.orgId };
+      }
+    } catch (contextError) {
+      // Non-fatal - will use defaults
+      console.debug('Could not get org context for scoring profile:', contextError);
+    }
+    
     const out = await validate(input);
     const latency = Date.now() - startTime;
     console.log("Validation complete");
@@ -912,6 +932,31 @@ app.post("/validate", async (req, res) => {
                 },
               });
               
+              // Check for active scoring profile (use orgContextForProfile retrieved earlier)
+              let rankingConfig: any = undefined;
+              let profileConfigHash: string | undefined = undefined;
+              if (orgContextForProfile && orgContextForProfile.orgId) {
+                try {
+                  const { getActiveScoringProfile } = await import('./admin/scoring-profiles.js');
+                  const activeProfile = await getActiveScoringProfile(orgContextForProfile.orgId);
+                  if (activeProfile) {
+                    rankingConfig = activeProfile.riskRankingConfig;
+                    profileConfigHash = activeProfile.configHash;
+                    // Update manifest configHash to include profile
+                    if (out.report?.manifest) {
+                      (out.report.manifest as any).configHash = profileConfigHash;
+                      (out.report.manifest as any).scoringProfileHash = profileConfigHash;
+                    }
+                    console.log('Using active scoring profile:', {
+                      configHash: profileConfigHash,
+                      orgId: orgContextForProfile.orgId
+                    });
+                  }
+                } catch (profileError) {
+                  console.warn('Failed to load active scoring profile, using defaults:', profileError);
+                }
+              }
+              
               // Rank issues (deterministic) with scoring context
               const scoringContext = {
                 mode: (evidenceMode === 'TRANSCRIPT_ONLY' ? 'transcript_only' : 'with_evidence') as 'transcript_only' | 'with_evidence',
@@ -920,7 +965,7 @@ app.post("/validate", async (req, res) => {
                 templateId: (out.report?.manifest as any)?.templateId,
                 isRegulatedTemplate: false, // TODO: detect from template
               };
-              const rankedResult = rankIssuesV2(expansionResult.allIssues, undefined, scoringContext);
+              const rankedResult = rankIssuesV2(expansionResult.allIssues, rankingConfig, scoringContext);
               
               // Store in report
               (out.report as any).allIssuesV2 = rankedResult.allIssues;
@@ -3026,6 +3071,41 @@ setupIntegrationRoutes(app);
 console.log("Registering audit routes...");
 setupAuditRoutes(app);
 console.log("Audit routes registered successfully");
+
+// Setup issue workflow routes
+console.log("Registering issue workflow routes...");
+setupIssueWorkflowRoutes(app);
+console.log("Issue workflow routes registered successfully");
+
+// Setup analytics routes
+console.log("Registering analytics routes...");
+setupAnalyticsRoutes(app);
+console.log("Analytics routes registered successfully");
+
+// Setup export routes
+console.log("Registering export routes...");
+setupExportRoutes(app);
+console.log("Export routes registered successfully");
+
+// Setup evaluation search routes
+console.log("Registering evaluation search routes...");
+setupEvaluationSearchRoutes(app);
+console.log("Evaluation search routes registered successfully");
+
+// Setup policy routes
+console.log("Registering policy routes...");
+setupPolicyRoutes(app);
+console.log("Policy routes registered successfully");
+
+// Setup evidence routes
+console.log("Registering evidence routes...");
+setupEvidenceRoutes(app);
+console.log("Evidence routes registered successfully");
+
+// Setup admin scoring profiles routes
+console.log("Registering admin scoring profiles routes...");
+setupScoringProfilesRoutes(app);
+console.log("Admin scoring profiles routes registered successfully");
 
 // Setup ingestion routes (normalization pipeline)
 console.log("Registering ingestion routes...");

@@ -1,0 +1,136 @@
+.policy-detail-container {
+  min-height: 100vh;
+  background: #f5f5f5;
+}
+
+.container {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 24px;
+}
+
+.loading-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 48px;
+  gap: 16px;
+}
+
+.policy-content {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+
+.info-card {
+  padding: 24px;
+}
+
+.policy-header {
+  margin-bottom: 16px;
+}
+
+.policy-title {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.policy-title h2 {
+  margin: 0;
+  font-size: 24px;
+}
+
+.policy-meta {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 12px;
+}
+
+.meta-item {
+  font-size: 14px;
+  color: #666;
+}
+
+.meta-item strong {
+  color: #333;
+  margin-right: 8px;
+}
+
+.policy-description {
+  margin-top: 16px;
+  padding-top: 16px;
+  border-top: 1px solid #e0e0e0;
+}
+
+.policy-description p {
+  margin: 0;
+  color: #666;
+}
+
+.content-card {
+  padding: 24px;
+}
+
+.policy-content-text {
+  white-space: pre-wrap;
+  word-wrap: break-word;
+  font-family: 'Courier New', monospace;
+  font-size: 13px;
+  line-height: 1.6;
+  margin: 0;
+}
+
+.versions-card,
+.issues-card {
+  padding: 24px;
+}
+
+table {
+  width: 100%;
+}
+
+.empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 48px;
+  color: #666;
+}
+
+.empty-state mat-icon {
+  font-size: 48px;
+  width: 48px;
+  height: 48px;
+  margin-bottom: 16px;
+  opacity: 0.5;
+}
+
+mat-chip {
+  font-size: 11px !important;
+  min-height: 24px !important;
+}
+
+.status-draft {
+  background: #fff3e0 !important;
+  color: #ef6c00 !important;
+}
+
+.status-active {
+  background: #e8f5e9 !important;
+  color: #2e7d32 !important;
+}
+
+.status-archived {
+  background: #f5f5f5 !important;
+  color: #666 !important;
+}
+
+@media (max-width: 768px) {
+  .policy-meta {
+    grid-template-columns: 1fr;
+  }
+}
+

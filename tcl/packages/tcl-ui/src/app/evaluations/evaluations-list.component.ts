@@ -13,6 +13,8 @@ import { MatSortModule, Sort } from '@angular/material/sort';
 import { MatInputModule } from '@angular/material/input';
 import { MatFormFieldModule } from '@angular/material/form-field';
 import { MatSelectModule } from '@angular/material/select';
+import { MatDatepickerModule } from '@angular/material/datepicker';
+import { MatNativeDateModule } from '@angular/material/core';
 import { FormsModule } from '@angular/forms';
 import { AppHeaderComponent } from '../shared/app-header.component';
 import { AuditService } from '../audit.service';
@@ -69,6 +71,8 @@ interface EvaluationSummary {
     MatInputModule,
     MatFormFieldModule,
     MatSelectModule,
+    MatDatepickerModule,
+    MatNativeDateModule,
     AppHeaderComponent
   ],
   template: `
@@ -91,14 +95,69 @@ interface EvaluationSummary {
       <div class="container">
         <!-- Filters -->
         <mat-card class="filters-card">
-          <div class="filters-row">
+          <h3>Filters</h3>
+          <div class="filters-grid">
             <mat-form-field appearance="outline" class="search-field">
               <mat-label>Search</mat-label>
-              <input matInput [(ngModel)]="searchQuery" placeholder="Search by ID or title..." (keyup.enter)="applyFilters()">
+              <input matInput [(ngModel)]="searchQuery" placeholder="Search by ID, text..." (keyup.enter)="applyFilters()">
               <mat-icon matSuffix>search</mat-icon>
             </mat-form-field>
             
-            <mat-form-field appearance="outline" class="env-filter">
+            <mat-form-field appearance="outline">
+              <mat-label>Date From</mat-label>
+              <input matInput [matDatepicker]="fromPicker" [(ngModel)]="dateFrom" (dateChange)="applyFilters()">
+              <mat-datepicker-toggle matSuffix [for]="fromPicker"></mat-datepicker-toggle>
+              <mat-datepicker #fromPicker></mat-datepicker>
+            </mat-form-field>
+            
+            <mat-form-field appearance="outline">
+              <mat-label>Date To</mat-label>
+              <input matInput [matDatepicker]="toPicker" [(ngModel)]="dateTo" (dateChange)="applyFilters()">
+              <mat-datepicker-toggle matSuffix [for]="toPicker"></mat-datepicker-toggle>
+              <mat-datepicker #toPicker></mat-datepicker>
+            </mat-form-field>
+            
+            <mat-form-field appearance="outline">
+              <mat-label>Severity Display</mat-label>
+              <mat-select [(ngModel)]="severityDisplay" (selectionChange)="applyFilters()">
+                <mat-option value="">All</mat-option>
+                <mat-option value="low">Low</mat-option>
+                <mat-option value="medium">Medium</mat-option>
+                <mat-option value="high">High</mat-option>
+              </mat-select>
+            </mat-form-field>
+            
+            <mat-form-field appearance="outline">
+              <mat-label>Verification</mat-label>
+              <mat-select [(ngModel)]="verification" (selectionChange)="applyFilters()">
+                <mat-option value="">All</mat-option>
+                <mat-option value="EXTERNAL_VERIFIED">Verified</mat-option>
+                <mat-option value="TRANSCRIPT_ONLY">Transcript-only</mat-option>
+                <mat-option value="NONE">Unverified</mat-option>
+              </mat-select>
+            </mat-form-field>
+            
+            <mat-form-field appearance="outline">
+              <mat-label>Category</mat-label>
+              <input matInput [(ngModel)]="category" placeholder="e.g. billing" (keyup.enter)="applyFilters()">
+            </mat-form-field>
+            
+            <mat-form-field appearance="outline">
+              <mat-label>Type</mat-label>
+              <input matInput [(ngModel)]="type" placeholder="e.g. CONTRADICTION" (keyup.enter)="applyFilters()">
+            </mat-form-field>
+            
+            <mat-form-field appearance="outline">
+              <mat-label>Agent</mat-label>
+              <input matInput [(ngModel)]="agent" placeholder="Agent ID" (keyup.enter)="applyFilters()">
+            </mat-form-field>
+            
+            <mat-form-field appearance="outline">
+              <mat-label>Team</mat-label>
+              <input matInput [(ngModel)]="team" placeholder="Team ID" (keyup.enter)="applyFilters()">
+            </mat-form-field>
+            
+            <mat-form-field appearance="outline">
               <mat-label>Environment</mat-label>
               <mat-select [(ngModel)]="envFilter" (selectionChange)="applyFilters()">
                 <mat-option value="">All</mat-option>
@@ -107,20 +166,9 @@ interface EvaluationSummary {
               </mat-select>
             </mat-form-field>
             
-            <mat-form-field appearance="outline" class="score-filter">
-              <mat-label>Min Coherence</mat-label>
-              <mat-select [(ngModel)]="minCoherence" (selectionChange)="applyFilters()">
-                <mat-option [value]="0">Any</mat-option>
-                <mat-option [value]="30">30+</mat-option>
-                <mat-option [value]="50">50+</mat-option>
-                <mat-option [value]="70">70+</mat-option>
-                <mat-option [value]="90">90+</mat-option>
-              </mat-select>
-            </mat-form-field>
-            
             <button mat-button (click)="clearFilters()">
               <mat-icon>clear</mat-icon>
-              Clear
+              Clear Filters
             </button>
           </div>
         </mat-card>
@@ -133,98 +181,75 @@ interface EvaluationSummary {
 
         <!-- Evaluations Table -->
         <mat-card *ngIf="!loading" class="table-card">
-          <table mat-table [dataSource]="filteredEvaluations" matSort (matSortChange)="sortData($event)">
+          <table mat-table [dataSource]="evaluations" matSort (matSortChange)="sortData($event)">
             
-            <!-- Date Column -->
-            <ng-container matColumnDef="date">
-              <th mat-header-cell *matHeaderCellDef mat-sort-header>Date</th>
+            <!-- Evaluation ID Column -->
+            <ng-container matColumnDef="evaluationId">
+              <th mat-header-cell *matHeaderCellDef>Evaluation ID</th>
+              <td mat-cell *matCellDef="let ev">
+                <div class="id-cell">
+                  <span class="id-primary">{{ ev.evaluationId | slice:0:8 }}...</span>
+                </div>
+              </td>
+            </ng-container>
+
+            <!-- Created At Column -->
+            <ng-container matColumnDef="createdAt">
+              <th mat-header-cell *matHeaderCellDef mat-sort-header>Created</th>
               <td mat-cell *matCellDef="let ev">
                 <div class="date-cell">
-                  <span class="date-primary">{{ ev.created_at | date:'MMM d, yyyy' }}</span>
-                  <span class="date-secondary">{{ ev.created_at | date:'h:mm a' }}</span>
+                  <span class="date-primary">{{ ev.createdAt | date:'MMM d, yyyy' }}</span>
+                  <span class="date-secondary">{{ ev.createdAt | date:'h:mm a' }}</span>
                 </div>
               </td>
             </ng-container>
 
-            <!-- Source Column -->
-            <ng-container matColumnDef="source">
-              <th mat-header-cell *matHeaderCellDef>Source</th>
+            <!-- Agent Column -->
+            <ng-container matColumnDef="agent">
+              <th mat-header-cell *matHeaderCellDef>Agent</th>
               <td mat-cell *matCellDef="let ev">
-                <div class="source-cell">
-                  <span class="source-title">{{ getSourceTitle(ev) }}</span>
-                  <span class="source-id">{{ ev.conversation_id | slice:0:8 }}...</span>
+                {{ ev.agent }}
+              </td>
+            </ng-container>
+
+            <!-- Total Issues Column -->
+            <ng-container matColumnDef="totalIssues">
+              <th mat-header-cell *matHeaderCellDef>Total Issues</th>
+              <td mat-cell *matCellDef="let ev">
+                {{ ev.totalIssues }}
+              </td>
+            </ng-container>
+
+            <!-- High/Critical Column -->
+            <ng-container matColumnDef="highCritical">
+              <th mat-header-cell *matHeaderCellDef>High/Critical</th>
+              <td mat-cell *matCellDef="let ev">
+                <mat-chip *ngIf="ev.highCriticalCount > 0" class="issue-chip critical">
+                  {{ ev.highCriticalCount }}
+                </mat-chip>
+                <span *ngIf="ev.highCriticalCount === 0" class="no-issues">0</span>
+              </td>
+            </ng-container>
+
+            <!-- Verified % Column -->
+            <ng-container matColumnDef="verifiedPercent">
+              <th mat-header-cell *matHeaderCellDef>Verified %</th>
+              <td mat-cell *matCellDef="let ev">
+                <div class="percent-cell">
+                  {{ ev.verifiedPercent }}%
                 </div>
               </td>
             </ng-container>
 
-            <!-- Coherence Column -->
-            <ng-container matColumnDef="coherence">
-              <th mat-header-cell *matHeaderCellDef mat-sort-header>Coherence</th>
+            <!-- Top Categories Column -->
+            <ng-container matColumnDef="topCategories">
+              <th mat-header-cell *matHeaderCellDef>Top Categories</th>
               <td mat-cell *matCellDef="let ev">
-                <div class="score-cell" [class]="getScoreClass(ev.scores?.spectral?.coherenceScore)">
-                  <span class="score-value">{{ ev.scores?.spectral?.coherenceScore ?? 'N/A' }}</span>
-                </div>
-              </td>
-            </ng-container>
-
-            <!-- Issues Column -->
-            <ng-container matColumnDef="issues">
-              <th mat-header-cell *matHeaderCellDef>Issues</th>
-              <td mat-cell *matCellDef="let ev">
-                <div class="issues-cell">
-                  <mat-chip *ngIf="ev.scores?.counts?.contradicted > 0" class="issue-chip critical">
-                    {{ ev.scores?.counts?.contradicted }} contradicted
+                <div class="categories-cell">
+                  <mat-chip *ngFor="let cat of ev.topCategories" class="category-chip">
+                    {{ cat }}
                   </mat-chip>
-                  <mat-chip *ngIf="ev.scores?.counts?.ungrounded > 0" class="issue-chip warning">
-                    {{ ev.scores?.counts?.ungrounded }} ungrounded
-                  </mat-chip>
-                  <span *ngIf="!ev.scores?.counts?.contradicted && !ev.scores?.counts?.ungrounded" class="no-issues">
-                    No issues
-                  </span>
-                </div>
-              </td>
-            </ng-container>
-
-            <!-- Claims Column -->
-            <ng-container matColumnDef="claims">
-              <th mat-header-cell *matHeaderCellDef>Claims</th>
-              <td mat-cell *matCellDef="let ev">
-                {{ ev.scores?.counts?.claims ?? 0 }}
-              </td>
-            </ng-container>
-
-            <!-- Mode Column -->
-            <ng-container matColumnDef="mode">
-              <th mat-header-cell *matHeaderCellDef>Mode</th>
-              <td mat-cell *matCellDef="let ev">
-                <mat-chip *ngIf="isSimulation(ev)" class="mode-chip simulation">
-                  <mat-icon>science</mat-icon>
-                  Simulation
-                </mat-chip>
-                <mat-chip *ngIf="!isSimulation(ev)" class="mode-chip evaluation">
-                  <mat-icon>verified</mat-icon>
-                  Evaluation
-                </mat-chip>
-              </td>
-            </ng-container>
-
-            <!-- Env Column -->
-            <ng-container matColumnDef="env">
-              <th mat-header-cell *matHeaderCellDef>Env</th>
-              <td mat-cell *matCellDef="let ev">
-                <mat-chip [class]="'env-chip ' + ev.env">
-                  {{ ev.env }}
-                </mat-chip>
-              </td>
-            </ng-container>
-
-            <!-- Integrity Column -->
-            <ng-container matColumnDef="integrity">
-              <th mat-header-cell *matHeaderCellDef>Integrity</th>
-              <td mat-cell *matCellDef="let ev">
-                <div class="integrity-cell" [matTooltip]="getIntegrityTooltip(ev)">
-                  <mat-icon class="integrity-icon">verified</mat-icon>
-                  <span class="hash-preview">{{ getInputHashPreview(ev) }}</span>
+                  <span *ngIf="ev.topCategories.length === 0" class="no-data">-</span>
                 </div>
               </td>
             </ng-container>
@@ -233,7 +258,7 @@ interface EvaluationSummary {
             <ng-container matColumnDef="actions">
               <th mat-header-cell *matHeaderCellDef>Actions</th>
               <td mat-cell *matCellDef="let ev">
-                <button mat-button color="primary" (click)="viewEvaluation(ev.id)">
+                <button mat-button color="primary" (click)="viewEvaluation(ev.evaluationId); $event.stopPropagation()">
                   <mat-icon>visibility</mat-icon>
                   View
                 </button>
@@ -243,23 +268,22 @@ interface EvaluationSummary {
             <tr mat-header-row *matHeaderRowDef="displayedColumns"></tr>
             <tr mat-row *matRowDef="let row; columns: displayedColumns" 
                 class="evaluation-row"
-                (click)="viewEvaluation(row.id)"></tr>
+                (click)="viewEvaluation(row.evaluationId)"></tr>
           </table>
 
           <!-- Empty State -->
-          <div *ngIf="filteredEvaluations.length === 0" class="empty-state">
+          <div *ngIf="evaluations.length === 0" class="empty-state">
             <mat-icon>assessment</mat-icon>
             <h3>No evaluations found</h3>
-            <p>Run your first evaluation to see it here.</p>
-            <button mat-raised-button color="primary" routerLink="/ingest">
-              <mat-icon>add</mat-icon>
-              New Evaluation
+            <p>No evaluations match your current filters.</p>
+            <button mat-button (click)="clearFilters()">
+              Clear Filters
             </button>
           </div>
 
           <!-- Paginator -->
           <mat-paginator
-            *ngIf="filteredEvaluations.length > 0"
+            *ngIf="evaluations.length > 0"
             [length]="totalEvaluations"
             [pageSize]="pageSize"
             [pageIndex]="pageIndex"
@@ -269,27 +293,6 @@ interface EvaluationSummary {
           </mat-paginator>
         </mat-card>
 
-        <!-- Summary Stats -->
-        <mat-card *ngIf="!loading && evaluations.length > 0" class="stats-card">
-          <div class="stats-grid">
-            <div class="stat-item">
-              <span class="stat-value">{{ evaluations.length }}</span>
-              <span class="stat-label">Total Evaluations</span>
-            </div>
-            <div class="stat-item">
-              <span class="stat-value">{{ getAverageCoherence() | number:'1.0-0' }}</span>
-              <span class="stat-label">Avg Coherence</span>
-            </div>
-            <div class="stat-item">
-              <span class="stat-value">{{ getTotalIssues() }}</span>
-              <span class="stat-label">Total Issues Found</span>
-            </div>
-            <div class="stat-item">
-              <span class="stat-value">{{ getProductionCount() }}</span>
-              <span class="stat-label">Production Runs</span>
-            </div>
-          </div>
-        </mat-card>
       </div>
     </div>
   `,
@@ -309,20 +312,21 @@ interface EvaluationSummary {
       margin-bottom: 24px;
     }
     
-    .filters-row {
-      display: flex;
+    .filters-card h3 {
+      margin: 0 0 16px;
+      font-size: 18px;
+      font-weight: 500;
+    }
+    
+    .filters-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
       gap: 16px;
       align-items: center;
-      flex-wrap: wrap;
     }
     
     .search-field {
-      flex: 1;
-      min-width: 250px;
-    }
-    
-    .env-filter, .score-filter {
-      width: 150px;
+      grid-column: 1 / -1;
     }
     
     .loading-card {
@@ -364,55 +368,35 @@ interface EvaluationSummary {
       color: #666;
     }
     
-    .source-cell {
-      display: flex;
-      flex-direction: column;
-    }
-    
-    .source-title {
-      font-weight: 500;
-      max-width: 200px;
-      overflow: hidden;
-      text-overflow: ellipsis;
-      white-space: nowrap;
-    }
-    
-    .source-id {
-      font-size: 12px;
-      color: #666;
+    .id-cell {
       font-family: monospace;
+      font-size: 12px;
     }
     
-    .score-cell {
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      width: 48px;
-      height: 48px;
-      border-radius: 8px;
-      font-weight: bold;
-      font-size: 18px;
+    .id-primary {
+      color: #666;
     }
     
-    .score-cell.high {
-      background: #e8f5e9;
-      color: #2e7d32;
+    .percent-cell {
+      font-weight: 500;
     }
     
-    .score-cell.medium {
-      background: #fff3e0;
-      color: #ef6c00;
-    }
-    
-    .score-cell.low {
-      background: #ffebee;
-      color: #c62828;
-    }
-    
-    .issues-cell {
+    .categories-cell {
       display: flex;
-      gap: 8px;
+      gap: 4px;
       flex-wrap: wrap;
+    }
+    
+    .category-chip {
+      font-size: 10px !important;
+      min-height: 20px !important;
+      background: #e3f2fd !important;
+      color: #1565c0 !important;
+    }
+    
+    .no-data {
+      color: #999;
+      font-style: italic;
     }
     
     .issue-chip {
@@ -425,71 +409,9 @@ interface EvaluationSummary {
       color: #c62828 !important;
     }
     
-    .issue-chip.warning {
-      background: #ffe0b2 !important;
-      color: #ef6c00 !important;
-    }
-    
     .no-issues {
       color: #4caf50;
       font-size: 13px;
-    }
-    
-    .env-chip {
-      font-size: 11px !important;
-      min-height: 24px !important;
-    }
-    
-    .env-chip.sandbox {
-      background: #e3f2fd !important;
-      color: #1565c0 !important;
-    }
-    
-    .env-chip.production {
-      background: #fce4ec !important;
-      color: #c2185b !important;
-    }
-    
-    .mode-chip {
-      font-size: 11px !important;
-      min-height: 24px !important;
-    }
-    
-    .mode-chip mat-icon {
-      font-size: 14px !important;
-      width: 14px !important;
-      height: 14px !important;
-      margin-right: 4px !important;
-    }
-    
-    .mode-chip.simulation {
-      background: #ede7f6 !important;
-      color: #5e35b1 !important;
-    }
-    
-    .mode-chip.evaluation {
-      background: #e8f5e9 !important;
-      color: #2e7d32 !important;
-    }
-    
-    .integrity-cell {
-      display: flex;
-      align-items: center;
-      gap: 4px;
-      cursor: help;
-    }
-    
-    .integrity-icon {
-      color: #4caf50;
-      font-size: 18px;
-      width: 18px;
-      height: 18px;
-    }
-    
-    .hash-preview {
-      font-family: monospace;
-      font-size: 11px;
-      color: #666;
     }
     
     .empty-state {
@@ -562,22 +484,46 @@ interface EvaluationSummary {
     }
   `]
 })
+export interface EvaluationSearchResult {
+  evaluationId: string;
+  createdAt: string;
+  agent: string;
+  totalIssues: number;
+  highCriticalCount: number;
+  verifiedPercent: number;
+  topCategories: string[];
+  conversationId: string;
+  env: string;
+  scores: any;
+  report: {
+    source?: {
+      sourceTitle?: string;
+    };
+  };
+}
+
 export class EvaluationsListComponent implements OnInit {
-  evaluations: EvaluationSummary[] = [];
-  filteredEvaluations: EvaluationSummary[] = [];
+  evaluations: EvaluationSearchResult[] = [];
   loading = true;
   
   // Filters
   searchQuery = '';
+  dateFrom: Date | null = null;
+  dateTo: Date | null = null;
+  severityDisplay: string = '';
+  verification: string = '';
+  category: string = '';
+  type: string = '';
+  agent: string = '';
+  team: string = '';
   envFilter = '';
-  minCoherence = 0;
   
   // Pagination
   pageSize = 25;
   pageIndex = 0;
   totalEvaluations = 0;
   
-  displayedColumns = ['date', 'source', 'coherence', 'issues', 'claims', 'mode', 'env', 'integrity', 'actions'];
+  displayedColumns = ['evaluationId', 'createdAt', 'agent', 'totalIssues', 'highCritical', 'verifiedPercent', 'topCategories', 'actions'];
 
   constructor(
     private auditService: AuditService,
@@ -591,11 +537,46 @@ export class EvaluationsListComponent implements OnInit {
   async loadEvaluations() {
     this.loading = true;
     try {
-      const response = await this.auditService.getEvaluations(this.pageSize, this.pageIndex * this.pageSize).toPromise();
-      if (response?.evaluations) {
+      const filters: any = {
+        limit: this.pageSize,
+        offset: this.pageIndex * this.pageSize,
+      };
+
+      if (this.searchQuery) {
+        filters.textContains = this.searchQuery;
+      }
+      if (this.dateFrom) {
+        filters.dateFrom = this.dateFrom.toISOString().split('T')[0];
+      }
+      if (this.dateTo) {
+        filters.dateTo = this.dateTo.toISOString().split('T')[0];
+      }
+      if (this.severityDisplay) {
+        filters.severityDisplay = this.severityDisplay;
+      }
+      if (this.verification) {
+        filters.verification = this.verification;
+      }
+      if (this.category) {
+        filters.category = this.category;
+      }
+      if (this.type) {
+        filters.type = this.type;
+      }
+      if (this.agent) {
+        filters.agent = this.agent;
+      }
+      if (this.team) {
+        filters.team = this.team;
+      }
+      if (this.envFilter) {
+        filters.env = this.envFilter;
+      }
+
+      const response = await this.auditService.searchEvaluations(filters).toPromise();
+      if (response) {
         this.evaluations = response.evaluations;
-        this.totalEvaluations = response.total || response.evaluations.length;
-        this.applyFilters();
+        this.totalEvaluations = response.total;
       }
     } catch (error) {
       console.error('Failed to load evaluations:', error);
@@ -605,64 +586,27 @@ export class EvaluationsListComponent implements OnInit {
   }
 
   applyFilters() {
-    this.filteredEvaluations = this.evaluations.filter(ev => {
-      // Search filter
-      if (this.searchQuery) {
-        const query = this.searchQuery.toLowerCase();
-        const matchesId = ev.id.toLowerCase().includes(query);
-        const matchesConvId = ev.conversation_id?.toLowerCase().includes(query);
-        const matchesTitle = this.getSourceTitle(ev).toLowerCase().includes(query);
-        if (!matchesId && !matchesConvId && !matchesTitle) {
-          return false;
-        }
-      }
-      
-      // Env filter
-      if (this.envFilter && ev.env !== this.envFilter) {
-        return false;
-      }
-      
-      // Coherence filter
-      const coherence = ev.scores?.spectral?.coherenceScore ?? 0;
-      if (coherence < this.minCoherence) {
-        return false;
-      }
-      
-      return true;
-    });
+    this.pageIndex = 0;
+    this.loadEvaluations();
   }
 
   clearFilters() {
     this.searchQuery = '';
+    this.dateFrom = null;
+    this.dateTo = null;
+    this.severityDisplay = '';
+    this.verification = '';
+    this.category = '';
+    this.type = '';
+    this.agent = '';
+    this.team = '';
     this.envFilter = '';
-    this.minCoherence = 0;
     this.applyFilters();
   }
 
   sortData(sort: Sort) {
-    if (!sort.active || sort.direction === '') {
-      return;
-    }
-
-    this.filteredEvaluations = [...this.filteredEvaluations].sort((a, b) => {
-      const isAsc = sort.direction === 'asc';
-      switch (sort.active) {
-        case 'date':
-          return this.compare(new Date(a.created_at).getTime(), new Date(b.created_at).getTime(), isAsc);
-        case 'coherence':
-          return this.compare(
-            a.scores?.spectral?.coherenceScore ?? 0,
-            b.scores?.spectral?.coherenceScore ?? 0,
-            isAsc
-          );
-        default:
-          return 0;
-      }
-    });
-  }
-
-  compare(a: number, b: number, isAsc: boolean): number {
-    return (a < b ? -1 : 1) * (isAsc ? 1 : -1);
+    // Server-side sorting is handled by the API
+    // Client-side sorting could be added here if needed
   }
 
   onPageChange(event: PageEvent) {
@@ -671,58 +615,9 @@ export class EvaluationsListComponent implements OnInit {
     this.loadEvaluations();
   }
 
-  viewEvaluation(id: string) {
-    this.router.navigate(['/evaluations', id]);
+  viewEvaluation(evaluationId: string) {
+    this.router.navigate(['/evaluations', evaluationId]);
   }
 
-  getSourceTitle(ev: EvaluationSummary): string {
-    return ev.report?.source?.sourceTitle || 
-           ev.report?.run?.inputHash?.substring(0, 8) || 
-           'Untitled';
-  }
-
-  getScoreClass(score: number | undefined): string {
-    if (score === undefined) return '';
-    if (score >= 70) return 'high';
-    if (score >= 50) return 'medium';
-    return 'low';
-  }
-
-  getInputHashPreview(ev: EvaluationSummary): string {
-    const hash = ev.report?.run?.inputHash;
-    return hash ? hash.substring(0, 8) : 'N/A';
-  }
-
-  getIntegrityTooltip(ev: EvaluationSummary): string {
-    const run = ev.report?.run;
-    if (!run) return 'No integrity data';
-    return `Input Hash: ${run.inputHash || 'N/A'}\nConfig Hash: ${run.configHash || 'N/A'}\nEngine: ${run.engineVersion || 'N/A'}`;
-  }
-
-  getAverageCoherence(): number {
-    if (this.evaluations.length === 0) return 0;
-    const sum = this.evaluations.reduce((acc, e) => acc + (e.scores?.spectral?.coherenceScore ?? 0), 0);
-    return sum / this.evaluations.length;
-  }
-
-  getTotalIssues(): number {
-    return this.evaluations.reduce((acc, e) => {
-      const contradicted = e.scores?.counts?.contradicted ?? 0;
-      const ungrounded = e.scores?.counts?.ungrounded ?? 0;
-      return acc + contradicted + ungrounded;
-    }, 0);
-  }
-
-  getProductionCount(): number {
-    return this.evaluations.filter(e => e.env === 'production').length;
-  }
-
-  isSimulation(ev: EvaluationSummary): boolean {
-    return (ev.report as any)?.mode === 'SIMULATION';
-  }
-
-  getSimulationCount(): number {
-    return this.evaluations.filter(e => this.isSimulation(e)).length;
-  }
 }
 

@@ -1,0 +1,148 @@
+<div class="evidence-container">
+  <app-header 
+    pageTitle="Evidence Coverage" 
+    pageSubtitle="Track verification levels and identify evidence gaps"
+    [showNavigation]="true"
+    [showBackButton]="true"
+    backButtonRoute="/dashboard"
+    backButtonText="Back to Dashboard">
+  </app-header>
+
+  <div class="container">
+    <!-- Date Range Filter -->
+    <mat-card class="filters-card">
+      <div class="filters-row">
+        <mat-form-field appearance="outline">
+          <mat-label>From</mat-label>
+          <input matInput [matDatepicker]="fromPicker" [(ngModel)]="dateFrom" (dateChange)="applyFilters()">
+          <mat-datepicker-toggle matSuffix [for]="fromPicker"></mat-datepicker-toggle>
+          <mat-datepicker #fromPicker></mat-datepicker>
+        </mat-form-field>
+        
+        <mat-form-field appearance="outline">
+          <mat-label>To</mat-label>
+          <input matInput [matDatepicker]="toPicker" [(ngModel)]="dateTo" (dateChange)="applyFilters()">
+          <mat-datepicker-toggle matSuffix [for]="toPicker"></mat-datepicker-toggle>
+          <mat-datepicker #toPicker></mat-datepicker>
+        </mat-form-field>
+        
+        <button mat-raised-button color="primary" (click)="applyFilters()">
+          <mat-icon>refresh</mat-icon>
+          Refresh
+        </button>
+      </div>
+    </mat-card>
+
+    <!-- Loading -->
+    <mat-card *ngIf="loading" class="loading-card">
+      <mat-spinner diameter="40"></mat-spinner>
+      <p>Loading evidence coverage...</p>
+    </mat-card>
+
+    <!-- Coverage Overview -->
+    <div *ngIf="!loading && coverage" class="coverage-section">
+      <!-- Summary Cards -->
+      <div class="summary-cards">
+        <mat-card class="summary-card">
+          <div class="card-header">
+            <mat-icon>verified</mat-icon>
+            <h3>Verified</h3>
+          </div>
+          <div class="card-value">{{ coverage.verifiedPercent }}%</div>
+          <div class="card-detail">{{ coverage.externalVerified }} of {{ coverage.totalIssues }} issues</div>
+        </mat-card>
+
+        <mat-card class="summary-card">
+          <div class="card-header">
+            <mat-icon>description</mat-icon>
+            <h3>Transcript-Only</h3>
+          </div>
+          <div class="card-value">{{ coverage.transcriptOnlyPercent }}%</div>
+          <div class="card-detail">{{ coverage.transcriptOnly }} issues</div>
+        </mat-card>
+
+        <mat-card class="summary-card">
+          <div class="card-header">
+            <mat-icon>warning</mat-icon>
+            <h3>Unverified</h3>
+          </div>
+          <div class="card-value">{{ coverage.unverifiedPercent }}%</div>
+          <div class="card-detail">{{ coverage.none }} issues</div>
+        </mat-card>
+
+        <mat-card class="summary-card">
+          <div class="card-header">
+            <mat-icon>assessment</mat-icon>
+            <h3>Total Issues</h3>
+          </div>
+          <div class="card-value">{{ coverage.totalIssues }}</div>
+          <div class="card-detail">All issues analyzed</div>
+        </mat-card>
+      </div>
+
+      <!-- Coverage by Category -->
+      <mat-card class="category-card">
+        <h3>Coverage by Category</h3>
+        <div *ngIf="Object.keys(coverage.byCategory).length === 0" class="empty-state">
+          <p>No category data available</p>
+        </div>
+        <div *ngFor="let category of Object.keys(coverage.byCategory)" class="category-item">
+          <div class="category-header">
+            <span class="category-name">{{ category }}</span>
+            <span class="category-percent">{{ getCategoryPercent(category) }}% verified</span>
+          </div>
+          <div class="category-stats">
+            <span>Total: {{ coverage.byCategory[category].total }}</span>
+            <span>Verified: {{ coverage.byCategory[category].externalVerified }}</span>
+            <span>Transcript-only: {{ coverage.byCategory[category].transcriptOnly }}</span>
+            <span>Unverified: {{ coverage.byCategory[category].none }}</span>
+          </div>
+          <div class="category-bar">
+            <div class="bar-segment verified" [style.width.%]="(coverage.byCategory[category].externalVerified / coverage.byCategory[category].total) * 100"></div>
+            <div class="bar-segment transcript-only" [style.width.%]="(coverage.byCategory[category].transcriptOnly / coverage.byCategory[category].total) * 100"></div>
+            <div class="bar-segment unverified" [style.width.%]="(coverage.byCategory[category].none / coverage.byCategory[category].total) * 100"></div>
+          </div>
+        </div>
+      </mat-card>
+    </div>
+
+    <!-- Evidence Gaps -->
+    <mat-card *ngIf="!loading" class="gaps-card">
+      <h3>Top Evidence Gaps</h3>
+      <p class="gaps-subtitle">Recommended evidence sources to improve verification coverage</p>
+      
+      <div *ngIf="gaps.length === 0" class="empty-state">
+        <mat-icon>check_circle</mat-icon>
+        <p>No evidence gaps identified. Great coverage!</p>
+      </div>
+
+      <div *ngFor="let gap of gaps" class="gap-item">
+        <div class="gap-header">
+          <div class="gap-title">
+            <mat-icon [class]="getPriorityClass(gap.priority)">info</mat-icon>
+            <span class="gap-evidence">{{ gap.evidence }}</span>
+            <mat-chip [class]="getPriorityClass(gap.priority)">{{ gap.priority | titlecase }}</mat-chip>
+          </div>
+          <div class="gap-count">{{ gap.count }} issues need this</div>
+        </div>
+        <div class="gap-details">
+          <div class="gap-tags">
+            <span class="tag-label">Categories:</span>
+            <mat-chip *ngFor="let cat of gap.categories" class="tag-chip">{{ cat }}</mat-chip>
+          </div>
+          <div class="gap-tags">
+            <span class="tag-label">Types:</span>
+            <mat-chip *ngFor="let type of gap.types" class="tag-chip">{{ type }}</mat-chip>
+          </div>
+          <div *ngIf="gap.examples.length > 0" class="gap-examples">
+            <strong>Example issues:</strong>
+            <ul>
+              <li *ngFor="let example of gap.examples">{{ example }}</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+    </mat-card>
+  </div>
+</div>
+

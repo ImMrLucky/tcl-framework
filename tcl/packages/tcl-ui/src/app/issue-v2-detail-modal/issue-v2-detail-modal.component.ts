@@ -1,4 +1,4 @@
-import { Component, Inject } from '@angular/core';
+import { Component, Inject, OnInit } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { MatDialogRef, MAT_DIALOG_DATA, MatDialogModule } from '@angular/material/dialog';
 import { MatCardModule } from '@angular/material/card';
@@ -7,6 +7,12 @@ import { MatIconModule } from '@angular/material/icon';
 import { MatButtonModule } from '@angular/material/button';
 import { MatChipsModule } from '@angular/material/chips';
 import { MatDividerModule } from '@angular/material/divider';
+import { MatInputModule } from '@angular/material/input';
+import { MatFormFieldModule } from '@angular/material/form-field';
+import { FormsModule } from '@angular/forms';
+import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
+import { IssuesService, IssueActivityItem } from '../issues.service';
+import { MatSnackBar, MatSnackBarModule } from '@angular/material/snack-bar';
 
 interface IssueV2 {
   issueId: string;
@@ -80,6 +86,11 @@ interface IssueV2 {
     MatButtonModule,
     MatChipsModule,
     MatDividerModule,
+    MatInputModule,
+    MatFormFieldModule,
+    FormsModule,
+    MatProgressSpinnerModule,
+    MatSnackBarModule,
   ],
   template: `
     <h2 mat-dialog-title>
@@ -247,6 +258,52 @@ interface IssueV2 {
             </table>
           </div>
         </mat-tab>
+        
+        <!-- Comments & Activity Tab -->
+        <mat-tab label="Comments & Activity">
+          <div class="activity-section">
+            <!-- Add Comment Form -->
+            <div class="comment-form">
+              <mat-form-field appearance="outline" class="full-width">
+                <mat-label>Add a comment</mat-label>
+                <textarea matInput [(ngModel)]="newComment" rows="3" placeholder="Enter your comment..."></textarea>
+              </mat-form-field>
+              <button mat-raised-button color="primary" (click)="addComment()" [disabled]="!newComment || newComment.trim().length === 0 || addingComment">
+                <mat-icon>send</mat-icon>
+                Add Comment
+              </button>
+            </div>
+            
+            <mat-divider></mat-divider>
+            
+            <!-- Activity Feed -->
+            <div class="activity-feed" *ngIf="!loadingActivity">
+              <div *ngFor="let item of activity" class="activity-item" [class.comment]="item.type === 'comment'" [class.action]="item.type === 'action'">
+                <div class="activity-header">
+                  <mat-icon *ngIf="item.type === 'comment'">comment</mat-icon>
+                  <mat-icon *ngIf="item.type === 'action'">history</mat-icon>
+                  <span class="actor-name">{{ item.actor.full_name || item.actor.email || 'Unknown User' }}</span>
+                  <span class="activity-time">{{ formatActivityTime(item.createdAt) }}</span>
+                </div>
+                <div class="activity-body" *ngIf="item.type === 'comment'">
+                  {{ item.body }}
+                </div>
+                <div class="activity-body" *ngIf="item.type === 'action'">
+                  <strong>{{ formatActionType(item.actionType) }}</strong>
+                  <span *ngIf="item.payload">{{ formatActionPayload(item.actionType, item.payload) }}</span>
+                </div>
+              </div>
+              <div *ngIf="activity.length === 0" class="no-activity">
+                <p>No comments or activity yet.</p>
+              </div>
+            </div>
+            
+            <div *ngIf="loadingActivity" class="loading-activity">
+              <mat-spinner diameter="30"></mat-spinner>
+              <p>Loading activity...</p>
+            </div>
+          </div>
+        </mat-tab>
       </mat-tab-group>
     </mat-dialog-content>
     
@@ -348,13 +405,159 @@ interface IssueV2 {
       background: #f5f5f5;
       font-weight: bold;
     }
+    .activity-section {
+      padding: 20px;
+    }
+    .comment-form {
+      margin-bottom: 20px;
+    }
+    .full-width {
+      width: 100%;
+      margin-bottom: 12px;
+    }
+    .activity-feed {
+      margin-top: 20px;
+    }
+    .activity-item {
+      padding: 16px;
+      margin-bottom: 12px;
+      border-radius: 8px;
+      border-left: 3px solid #ddd;
+    }
+    .activity-item.comment {
+      background: #f9f9f9;
+      border-left-color: #1976d2;
+    }
+    .activity-item.action {
+      background: #fafafa;
+      border-left-color: #666;
+    }
+    .activity-header {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 8px;
+    }
+    .activity-header mat-icon {
+      font-size: 18px;
+      width: 18px;
+      height: 18px;
+    }
+    .actor-name {
+      font-weight: 500;
+      flex: 1;
+    }
+    .activity-time {
+      font-size: 12px;
+      color: #666;
+    }
+    .activity-body {
+      margin-left: 26px;
+      color: #333;
+    }
+    .no-activity {
+      text-align: center;
+      padding: 40px;
+      color: #999;
+    }
+    .loading-activity {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 40px;
+      gap: 12px;
+    }
   `]
 })
-export class IssueV2DetailModalComponent {
+export class IssueV2DetailModalComponent implements OnInit {
+  activity: IssueActivityItem[] = [];
+  loadingActivity = false;
+  newComment = '';
+  addingComment = false;
+
   constructor(
     public dialogRef: MatDialogRef<IssueV2DetailModalComponent>,
-    @Inject(MAT_DIALOG_DATA) public data: { issue: IssueV2; evaluation?: any }
+    @Inject(MAT_DIALOG_DATA) public data: { issue: IssueV2; evaluation?: any },
+    private issuesService: IssuesService,
+    private snackBar: MatSnackBar
   ) {}
+
+  ngOnInit() {
+    this.loadActivity();
+  }
+
+  async loadActivity() {
+    this.loadingActivity = true;
+    try {
+      const response = await this.issuesService.getActivity(this.data.issue.issueId).toPromise();
+      if (response) {
+        this.activity = response.activity || [];
+      }
+    } catch (error: any) {
+      console.error('Failed to load activity:', error);
+      this.snackBar.open('Failed to load activity: ' + (error.error?.error || error.message), 'Close', {
+        duration: 5000
+      });
+    } finally {
+      this.loadingActivity = false;
+    }
+  }
+
+  async addComment() {
+    if (!this.newComment || this.newComment.trim().length === 0) {
+      return;
+    }
+
+    this.addingComment = true;
+    try {
+      await this.issuesService.addComment(this.data.issue.issueId, this.newComment).toPromise();
+      this.newComment = '';
+      this.snackBar.open('Comment added successfully', 'Close', { duration: 3000 });
+      this.loadActivity();
+    } catch (error: any) {
+      console.error('Failed to add comment:', error);
+      this.snackBar.open('Failed to add comment: ' + (error.error?.error || error.message), 'Close', {
+        duration: 5000
+      });
+    } finally {
+      this.addingComment = false;
+    }
+  }
+
+  formatActivityTime(date: string): string {
+    const d = new Date(date);
+    const now = new Date();
+    const diffMs = now.getTime() - d.getTime();
+    const diffMins = Math.floor(diffMs / 60000);
+    const diffHours = Math.floor(diffMs / 3600000);
+    const diffDays = Math.floor(diffMs / 86400000);
+
+    if (diffMins < 1) return 'Just now';
+    if (diffMins < 60) return `${diffMins} minute${diffMins > 1 ? 's' : ''} ago`;
+    if (diffHours < 24) return `${diffHours} hour${diffHours > 1 ? 's' : ''} ago`;
+    if (diffDays < 7) return `${diffDays} day${diffDays > 1 ? 's' : ''} ago`;
+    return d.toLocaleDateString() + ' ' + d.toLocaleTimeString();
+  }
+
+  formatActionType(actionType: string | undefined): string {
+    if (!actionType) return 'Action';
+    return actionType.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
+  }
+
+  formatActionPayload(actionType: string | undefined, payload: any): string {
+    if (!payload) return '';
+    if (actionType === 'STATUS_CHANGE' || actionType === 'BULK_STATUS_CHANGE') {
+      return `: ${payload.oldStatus || 'N/A'} → ${payload.newStatus || payload.status || 'N/A'}`;
+    }
+    if (actionType === 'ASSIGNMENT' || actionType === 'BULK_ASSIGNMENT') {
+      if (payload.newAssignee || payload.assigneeUserId) {
+        return `: Assigned to user`;
+      } else {
+        return `: Unassigned`;
+      }
+    }
+    return '';
+  }
 
   getSeverityIcon(): string {
     const severity = this.data.issue.severity;

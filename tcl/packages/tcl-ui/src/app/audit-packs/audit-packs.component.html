@@ -1,0 +1,140 @@
+<div class="audit-packs-container">
+  <app-header 
+    pageTitle="Audit Pack Generator" 
+    pageSubtitle="Generate defensible export bundles (PDF + JSON + CSV)"
+    [showNavigation]="true"
+    [showBackButton]="true"
+    backButtonRoute="/dashboard"
+    backButtonText="Back to Dashboard">
+  </app-header>
+
+  <div class="container">
+    <!-- Generation Options -->
+    <mat-card class="options-card">
+      <h2>Export Options</h2>
+      
+      <div class="export-type-selector">
+        <mat-radio-group [(ngModel)]="exportType">
+          <mat-radio-button value="dateRange">Date Range</mat-radio-button>
+          <mat-radio-button value="evaluation">Single Evaluation</mat-radio-button>
+        </mat-radio-group>
+      </div>
+
+      <!-- Date Range Options -->
+      <div *ngIf="exportType === 'dateRange'" class="options-section">
+        <div class="date-range">
+          <mat-form-field appearance="outline">
+            <mat-label>From</mat-label>
+            <input matInput [matDatepicker]="fromPicker" [(ngModel)]="dateFrom">
+            <mat-datepicker-toggle matSuffix [for]="fromPicker"></mat-datepicker-toggle>
+            <mat-datepicker #fromPicker></mat-datepicker>
+          </mat-form-field>
+          
+          <mat-form-field appearance="outline">
+            <mat-label>To</mat-label>
+            <input matInput [matDatepicker]="toPicker" [(ngModel)]="dateTo">
+            <mat-datepicker-toggle matSuffix [for]="toPicker"></mat-datepicker-toggle>
+            <mat-datepicker #toPicker></mat-datepicker>
+          </mat-form-field>
+        </div>
+      </div>
+
+      <!-- Single Evaluation Options -->
+      <div *ngIf="exportType === 'evaluation'" class="options-section">
+        <mat-form-field appearance="outline" class="full-width">
+          <mat-label>Evaluation</mat-label>
+          <mat-select [(ngModel)]="evaluationId">
+            <mat-option *ngFor="let eval of evaluations" [value]="eval.id">
+              {{ eval.id }} - {{ eval.created_at | date:'short' }}
+            </mat-option>
+          </mat-select>
+        </mat-form-field>
+        <div *ngIf="loadingEvaluations" class="loading-evaluations">
+          <mat-spinner diameter="20"></mat-spinner>
+          <span>Loading evaluations...</span>
+        </div>
+      </div>
+
+      <!-- Additional Options -->
+      <div class="options-section">
+        <mat-checkbox [(ngModel)]="includeAllIssues">
+          Include all issues (not just top issues)
+        </mat-checkbox>
+      </div>
+
+      <button 
+        mat-raised-button 
+        color="primary" 
+        (click)="generatePack()" 
+        [disabled]="generating || (exportType === 'evaluation' && !evaluationId) || (exportType === 'dateRange' && (!dateFrom || !dateTo))">
+        <mat-icon>file_download</mat-icon>
+        Generate Audit Pack
+      </button>
+    </mat-card>
+
+    <!-- Generation Status -->
+    <mat-card *ngIf="generating || packStatus" class="status-card">
+      <h3>Generation Status</h3>
+      
+      <div *ngIf="generating && !packStatus" class="status-loading">
+        <mat-spinner diameter="30"></mat-spinner>
+        <p>Starting pack generation...</p>
+      </div>
+
+      <div *ngIf="packStatus" class="status-info">
+        <div class="status-header">
+          <strong>Pack ID:</strong> {{ currentPackId }}
+          <mat-chip [class]="'status-' + packStatus.status">
+            {{ packStatus.status | titlecase }}
+          </mat-chip>
+        </div>
+
+        <div *ngIf="packStatus.status === 'processing'" class="status-processing">
+          <mat-progress-bar mode="indeterminate"></mat-progress-bar>
+          <p>{{ packStatus.message || 'Generating pack...' }}</p>
+        </div>
+
+        <div *ngIf="packStatus.status === 'failed'" class="status-error">
+          <mat-icon color="warn">error</mat-icon>
+          <p>Generation failed: {{ packStatus.error || 'Unknown error' }}</p>
+        </div>
+
+        <div *ngIf="packStatus.status === 'completed'" class="status-completed">
+          <div class="download-section">
+            <h4>Download Files</h4>
+            <div class="download-buttons">
+              <button mat-raised-button color="primary" (click)="downloadPDF()">
+                <mat-icon>picture_as_pdf</mat-icon>
+                Download PDF
+              </button>
+              <button mat-raised-button (click)="downloadJSON()">
+                <mat-icon>code</mat-icon>
+                Download JSON
+              </button>
+              <button mat-raised-button (click)="downloadCSV()">
+                <mat-icon>table_chart</mat-icon>
+                Download CSV
+              </button>
+            </div>
+            <div *ngIf="packStatus.checksum" class="checksum">
+              <strong>Checksum:</strong> {{ packStatus.checksum }}
+            </div>
+          </div>
+        </div>
+      </div>
+    </mat-card>
+
+    <!-- Information Card -->
+    <mat-card class="info-card">
+      <h3>About Audit Packs</h3>
+      <p>Audit packs provide a defensible export bundle for compliance purposes, including:</p>
+      <ul>
+        <li><strong>PDF Report:</strong> Executive summary, top issues with score breakdowns, evidence quotes, and run integrity information</li>
+        <li><strong>JSON Export:</strong> Complete IssueV2 array with scoring components and reasons</li>
+        <li><strong>CSV Export:</strong> Flattened issue rows for analysis in spreadsheet tools</li>
+      </ul>
+      <p>All files include traceability information (input hash, config hash, engine version) for reproducibility.</p>
+    </mat-card>
+  </div>
+</div>
+

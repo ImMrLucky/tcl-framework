@@ -1,6 +1,7 @@
 [build]
-  command = "npm run build"
+  command = "npm ci && npm run build -- --configuration production"
   publish = "dist/tcl-ui/browser"
+  timeout = 300
 
 # Force HTTPS - redirect all HTTP traffic to HTTPS
 [[redirects]]
