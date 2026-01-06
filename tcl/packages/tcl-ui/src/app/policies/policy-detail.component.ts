@@ -65,10 +65,10 @@ export class PolicyDetailComponent implements OnInit {
       }
     } catch (error: any) {
       console.error('Failed to load policy:', error);
-      this.snackBar.open('Failed to load policy: ' + (error.error?.error || error.message), 'Close', {
+      const snackBarRef = this.snackBar.open('Failed to load policy: ' + (error.error?.error || error.message), 'Close', {
         duration: 5000
       });
-    } finally {
+      snackBarRef.onAction().subscribe(() => snackBarRef.dismiss()); finally {
       this.loading = false;
     }
   }
@@ -78,14 +78,15 @@ export class PolicyDetailComponent implements OnInit {
 
     try {
       await this.policiesService.activatePolicy(this.policyDetail.policy.id).toPromise();
-      this.snackBar.open('Policy activated successfully', 'Close', { duration: 3000 });
+      const snackBarRef = this.snackBar.open('Policy activated successfully', 'Close', { duration: 3000 });
+      snackBarRef.onAction().subscribe(() => snackBarRef.dismiss());
       this.loadPolicy(this.policyDetail.policy.id);
     } catch (error: any) {
       console.error('Failed to activate policy:', error);
-      this.snackBar.open('Failed to activate policy: ' + (error.error?.error || error.message), 'Close', {
+      const snackBarRef = this.snackBar.open('Failed to activate policy: ' + (error.error?.error || error.message), 'Close', {
         duration: 5000
       });
-    }
+      snackBarRef.onAction().subscribe(() => snackBarRef.dismiss());
   }
 
   async archivePolicy() {
@@ -97,14 +98,15 @@ export class PolicyDetailComponent implements OnInit {
 
     try {
       await this.policiesService.archivePolicy(this.policyDetail.policy.id).toPromise();
-      this.snackBar.open('Policy archived successfully', 'Close', { duration: 3000 });
+      const snackBarRef = this.snackBar.open('Policy archived successfully', 'Close', { duration: 3000 });
+      snackBarRef.onAction().subscribe(() => snackBarRef.dismiss());
       this.loadPolicy(this.policyDetail.policy.id);
     } catch (error: any) {
       console.error('Failed to archive policy:', error);
-      this.snackBar.open('Failed to archive policy: ' + (error.error?.error || error.message), 'Close', {
+      const snackBarRef = this.snackBar.open('Failed to archive policy: ' + (error.error?.error || error.message), 'Close', {
         duration: 5000
       });
-    }
+      snackBarRef.onAction().subscribe(() => snackBarRef.dismiss());
   }
 
   getStatusClass(status: string): string {
@@ -114,7 +116,8 @@ export class PolicyDetailComponent implements OnInit {
   viewIssue(issueId: string) {
     // Navigate to issue detail (if issue detail page exists)
     // For now, just show a message
-    this.snackBar.open(`Issue ID: ${issueId}`, 'Close', { duration: 3000 });
+    const snackBarRef = this.snackBar.open(`Issue ID: ${issueId}`, 'Close', { duration: 3000 });
+      snackBarRef.onAction().subscribe(() => snackBarRef.dismiss());
   }
 }
 

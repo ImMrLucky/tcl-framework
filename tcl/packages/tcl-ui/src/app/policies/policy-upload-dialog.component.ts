@@ -108,13 +108,15 @@ export class PolicyUploadDialogComponent {
         version: this.version || '1.0.0',
       }).toPromise();
       
-      this.snackBar.open('Policy uploaded successfully', 'Close', { duration: 3000 });
+      const snackBarRef = this.snackBar.open('Policy uploaded successfully', 'Close', { duration: 3000 });
+      snackBarRef.onAction().subscribe(() => snackBarRef.dismiss());
       this.dialogRef.close(true);
     } catch (error: any) {
       console.error('Failed to upload policy:', error);
-      this.snackBar.open('Failed to upload policy: ' + (error.error?.error || error.message), 'Close', {
+      const snackBarRef = this.snackBar.open('Failed to upload policy: ' + (error.error?.error || error.message), 'Close', {
         duration: 5000
       });
+      snackBarRef.onAction().subscribe(() => snackBarRef.dismiss());
     } finally {
       this.uploading = false;
     }

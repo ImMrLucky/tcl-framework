@@ -892,7 +892,8 @@ getMetricTooltip(metric: string): string {
   // IssueV2 Export Functions
   exportIssuesV2CSV() {
     if (!this.evaluationId || this.allIssuesV2.length === 0) {
-      this.snackBar.open('No IssueV2 data available to export', 'Close', { duration: 3000 });
+      const snackBarRef = this.snackBar.open('No IssueV2 data available to export', 'Close', { duration: 3000 });
+      snackBarRef.onAction().subscribe(() => snackBarRef.dismiss());
       return;
     }
     window.open(`/api/evaluations/${this.evaluationId}/export/issues-v2/csv`, '_blank');
@@ -900,7 +901,8 @@ getMetricTooltip(metric: string): string {
 
   exportIssuesV2JSON() {
     if (!this.evaluationId || this.allIssuesV2.length === 0) {
-      this.snackBar.open('No IssueV2 data available to export', 'Close', { duration: 3000 });
+      const snackBarRef = this.snackBar.open('No IssueV2 data available to export', 'Close', { duration: 3000 });
+      snackBarRef.onAction().subscribe(() => snackBarRef.dismiss());
       return;
     }
     window.open(`/api/evaluations/${this.evaluationId}/export/issues-v2/json`, '_blank');
@@ -908,7 +910,8 @@ getMetricTooltip(metric: string): string {
 
   exportIssuesV2PDF() {
     if (!this.evaluationId || this.allIssuesV2.length === 0) {
-      this.snackBar.open('No IssueV2 data available to export', 'Close', { duration: 3000 });
+      const snackBarRef = this.snackBar.open('No IssueV2 data available to export', 'Close', { duration: 3000 });
+      snackBarRef.onAction().subscribe(() => snackBarRef.dismiss());
       return;
     }
     window.open(`/api/evaluations/${this.evaluationId}/export/issues-v2/pdf`, '_blank');
@@ -1545,6 +1548,7 @@ getMetricTooltip(metric: string): string {
           'Close',
           { duration: 5000 }
         );
+        snackBarRef3.onAction().subscribe(() => snackBarRef3.dismiss());
       }
     });
   }

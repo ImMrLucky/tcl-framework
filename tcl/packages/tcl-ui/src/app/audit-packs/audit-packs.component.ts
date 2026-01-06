@@ -95,12 +95,14 @@ export class AuditPacksComponent implements OnInit, OnDestroy {
 
   async generatePack() {
     if (this.exportType === 'evaluation' && !this.evaluationId) {
-      this.snackBar.open('Please select an evaluation', 'Close', { duration: 3000 });
+      const snackBarRef = this.snackBar.open('Please select an evaluation', 'Close', { duration: 3000 });
+      snackBarRef.onAction().subscribe(() => snackBarRef.dismiss());
       return;
     }
 
     if (this.exportType === 'dateRange' && (!this.dateFrom || !this.dateTo)) {
-      this.snackBar.open('Please select a date range', 'Close', { duration: 3000 });
+      const snackBarRef = this.snackBar.open('Please select a date range', 'Close', { duration: 3000 });
+      snackBarRef.onAction().subscribe(() => snackBarRef.dismiss());
       return;
     }
 
@@ -129,14 +131,16 @@ export class AuditPacksComponent implements OnInit, OnDestroy {
         if (response.status === 'processing') {
           this.startStatusPolling();
         } else if (response.status === 'completed') {
-          this.snackBar.open('Audit pack generated successfully!', 'Close', { duration: 3000 });
+          const snackBarRef = this.snackBar.open('Audit pack generated successfully!', 'Close', { duration: 3000 });
+      snackBarRef.onAction().subscribe(() => snackBarRef.dismiss());
         }
       }
     } catch (error: any) {
       console.error('Failed to generate pack:', error);
-      this.snackBar.open('Failed to generate pack: ' + (error.error?.error || error.message), 'Close', {
+      const snackBarRef = this.snackBar.open('Failed to generate pack: ' + (error.error?.error || error.message), 'Close', {
         duration: 5000
       });
+      snackBarRef.onAction().subscribe(() => snackBarRef.dismiss());
     } finally {
       this.generating = false;
     }
@@ -158,12 +162,14 @@ export class AuditPacksComponent implements OnInit, OnDestroy {
 
           if (status.status === 'completed') {
             this.stopStatusPolling();
-            this.snackBar.open('Audit pack generated successfully!', 'Close', { duration: 3000 });
+            const snackBarRef = this.snackBar.open('Audit pack generated successfully!', 'Close', { duration: 3000 });
+      snackBarRef.onAction().subscribe(() => snackBarRef.dismiss());
           } else if (status.status === 'failed') {
             this.stopStatusPolling();
-            this.snackBar.open('Pack generation failed: ' + (status.error || 'Unknown error'), 'Close', {
+            const snackBarRef = this.snackBar.open('Pack generation failed: ' + (status.error || 'Unknown error'), 'Close', {
               duration: 5000
             });
+            snackBarRef.onAction().subscribe(() => snackBarRef.dismiss());
           }
         }
       } catch (error) {

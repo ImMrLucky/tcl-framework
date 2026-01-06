@@ -130,7 +130,7 @@ export class ProfileComponent implements OnInit {
           horizontalPosition: 'center',
           verticalPosition: 'top',
           panelClass: ['success-snackbar']
-        });
+        })
         
         // Handle the action click
         snackBarRef.onAction().subscribe(() => {

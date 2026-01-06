@@ -495,9 +495,10 @@ export class IssueV2DetailModalComponent implements OnInit {
       }
     } catch (error: any) {
       console.error('Failed to load activity:', error);
-      this.snackBar.open('Failed to load activity: ' + (error.error?.error || error.message), 'Close', {
+      const snackBarRef = this.snackBar.open('Failed to load activity: ' + (error.error?.error || error.message), 'Close', {
         duration: 5000
       });
+      snackBarRef.onAction().subscribe(() => snackBarRef.dismiss());
     } finally {
       this.loadingActivity = false;
     }
@@ -512,13 +513,15 @@ export class IssueV2DetailModalComponent implements OnInit {
     try {
       await this.issuesService.addComment(this.data.issue.issueId, this.newComment).toPromise();
       this.newComment = '';
-      this.snackBar.open('Comment added successfully', 'Close', { duration: 3000 });
+      const snackBarRef = this.snackBar.open('Comment added successfully', 'Close', { duration: 3000 });
+      snackBarRef.onAction().subscribe(() => snackBarRef.dismiss());
       this.loadActivity();
     } catch (error: any) {
       console.error('Failed to add comment:', error);
-      this.snackBar.open('Failed to add comment: ' + (error.error?.error || error.message), 'Close', {
+      const snackBarRef = this.snackBar.open('Failed to add comment: ' + (error.error?.error || error.message), 'Close', {
         duration: 5000
       });
+      snackBarRef.onAction().subscribe(() => snackBarRef.dismiss());
     } finally {
       this.addingComment = false;
     }

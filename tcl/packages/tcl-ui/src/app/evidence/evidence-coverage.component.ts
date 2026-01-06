@@ -74,9 +74,10 @@ export class EvidenceCoverageComponent implements OnInit {
       }
     } catch (error: any) {
       console.error('Failed to load evidence data:', error);
-      this.snackBar.open('Failed to load evidence data: ' + (error.error?.error || error.message), 'Close', {
+      const snackBarRef = this.snackBar.open('Failed to load evidence data: ' + (error.error?.error || error.message), 'Close', {
         duration: 5000
       });
+      snackBarRef.onAction().subscribe(() => snackBarRef.dismiss());
     } finally {
       this.loading = false;
     }

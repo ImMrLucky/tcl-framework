@@ -115,9 +115,10 @@ export class ScoringProfilesComponent implements OnInit {
       }
     } catch (error: any) {
       console.error('Failed to load profiles:', error);
-      this.snackBar.open('Failed to load profiles: ' + (error.error?.error || error.message), 'Close', {
+      const snackBarRef = this.snackBar.open('Failed to load profiles: ' + (error.error?.error || error.message), 'Close', {
         duration: 5000
       });
+      snackBarRef.onAction().subscribe(() => snackBarRef.dismiss());
     } finally {
       this.loading = false;
     }
@@ -250,12 +251,14 @@ export class ScoringProfilesComponent implements OnInit {
 
   async saveProfile() {
     if (!this.validateForm()) {
-      this.snackBar.open('Please fix validation errors before saving', 'Close', { duration: 5000 });
+      const snackBarRef = this.snackBar.open('Please fix validation errors before saving', 'Close', { duration: 5000 });
+      snackBarRef.onAction().subscribe(() => snackBarRef.dismiss());
       return;
     }
 
     if (!this.profileName.trim()) {
-      this.snackBar.open('Profile name is required', 'Close', { duration: 3000 });
+      const snackBarRef = this.snackBar.open('Profile name is required', 'Close', { duration: 3000 });
+      snackBarRef.onAction().subscribe(() => snackBarRef.dismiss());
       return;
     }
 
@@ -333,7 +336,8 @@ export class ScoringProfilesComponent implements OnInit {
       };
 
       await this.scoringProfilesService.createProfile(request).toPromise();
-      this.snackBar.open('Profile created successfully', 'Close', { duration: 3000 });
+      const snackBarRef = this.snackBar.open('Profile created successfully', 'Close', { duration: 3000 });
+      snackBarRef.onAction().subscribe(() => snackBarRef.dismiss());
       this.editing = false;
       await this.loadProfiles();
     } catch (error: any) {
@@ -341,13 +345,15 @@ export class ScoringProfilesComponent implements OnInit {
       const validationError = error.error as ValidationError;
       if (validationError?.errors) {
         this.validationErrors = validationError.errors;
-        this.snackBar.open('Validation failed: ' + validationError.errors.join(', '), 'Close', {
+        const snackBarRef = this.snackBar.open('Validation failed: ' + validationError.errors.join(', '), 'Close', {
           duration: 5000
         });
+        snackBarRef.onAction().subscribe(() => snackBarRef.dismiss());
       } else {
-        this.snackBar.open('Failed to save profile: ' + (error.error?.error || error.message), 'Close', {
+        const snackBarRef = this.snackBar.open('Failed to save profile: ' + (error.error?.error || error.message), 'Close', {
           duration: 5000
         });
+        snackBarRef.onAction().subscribe(() => snackBarRef.dismiss());
       }
     } finally {
       this.loading = false;
@@ -363,16 +369,18 @@ export class ScoringProfilesComponent implements OnInit {
     try {
       const response = await this.scoringProfilesService.activateProfile(profile.id).toPromise();
       if (response) {
-        this.snackBar.open(response.message + ` Config hash: ${response.configHash}`, 'Close', {
+        const snackBarRef = this.snackBar.open(response.message + ` Config hash: ${response.configHash}`, 'Close', {
           duration: 5000
         });
+      snackBarRef.onAction().subscribe(() => snackBarRef.dismiss());
         await this.loadProfiles();
       }
     } catch (error: any) {
       console.error('Failed to activate profile:', error);
-      this.snackBar.open('Failed to activate profile: ' + (error.error?.error || error.message), 'Close', {
+      const snackBarRef = this.snackBar.open('Failed to activate profile: ' + (error.error?.error || error.message), 'Close', {
         duration: 5000
       });
+      snackBarRef.onAction().subscribe(() => snackBarRef.dismiss());
     } finally {
       this.loading = false;
     }

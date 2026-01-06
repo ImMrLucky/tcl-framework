@@ -285,9 +285,10 @@ export class IssuesListComponent implements OnInit, OnDestroy {
       }
     } catch (error: any) {
       console.error('Failed to load issue queue:', error);
-      this.snackBar.open('Failed to load issue queue: ' + (error.error?.error || error.message), 'Close', {
+      const snackBarRef = this.snackBar.open('Failed to load issue queue: ' + (error.error?.error || error.message), 'Close', {
         duration: 5000
       });
+      snackBarRef.onAction().subscribe(() => snackBarRef.dismiss());
     } finally {
       this.loading = false;
     }
@@ -351,7 +352,8 @@ export class IssuesListComponent implements OnInit, OnDestroy {
   
   async bulkUpdateStatus(status: 'OPEN' | 'ACKNOWLEDGED' | 'RESOLVED' | 'FALSE_POSITIVE') {
     if (this.selectedPatterns.size === 0) {
-      this.snackBar.open('Please select at least one pattern', 'Close', { duration: 3000 });
+      const snackBarRef = this.snackBar.open('Please select at least one pattern', 'Close', { duration: 3000 });
+      snackBarRef.onAction().subscribe(() => snackBarRef.dismiss());
       return;
     }
     
@@ -361,21 +363,24 @@ export class IssuesListComponent implements OnInit, OnDestroy {
       );
       await Promise.all(updates);
       
-      this.snackBar.open(`Updated ${this.selectedPatterns.size} patterns`, 'Close', { duration: 3000 });
+      const snackBarRef = this.snackBar.open(`Updated ${this.selectedPatterns.size} patterns`, 'Close', { duration: 3000 });
+      snackBarRef.onAction().subscribe(() => snackBarRef.dismiss());
       this.selectedPatterns.clear();
       this.selectAll = false;
       this.loadQueue();
     } catch (error: any) {
       console.error('Bulk update failed:', error);
-      this.snackBar.open('Failed to update patterns: ' + (error.error?.error || error.message), 'Close', {
+      const snackBarRef = this.snackBar.open('Failed to update patterns: ' + (error.error?.error || error.message), 'Close', {
         duration: 5000
       });
+      snackBarRef.onAction().subscribe(() => snackBarRef.dismiss());
     }
   }
   
   async bulkAssign(assigneeUserId: string | null) {
     if (this.selectedPatterns.size === 0) {
-      this.snackBar.open('Please select at least one pattern', 'Close', { duration: 3000 });
+      const snackBarRef = this.snackBar.open('Please select at least one pattern', 'Close', { duration: 3000 });
+      snackBarRef.onAction().subscribe(() => snackBarRef.dismiss());
       return;
     }
     
@@ -385,15 +390,17 @@ export class IssuesListComponent implements OnInit, OnDestroy {
       );
       await Promise.all(updates);
       
-      this.snackBar.open(`Assigned ${this.selectedPatterns.size} patterns`, 'Close', { duration: 3000 });
+      const snackBarRef = this.snackBar.open(`Assigned ${this.selectedPatterns.size} patterns`, 'Close', { duration: 3000 });
+      snackBarRef.onAction().subscribe(() => snackBarRef.dismiss());
       this.selectedPatterns.clear();
       this.selectAll = false;
       this.loadQueue();
     } catch (error: any) {
       console.error('Bulk assign failed:', error);
-      this.snackBar.open('Failed to assign patterns: ' + (error.error?.error || error.message), 'Close', {
+      const snackBarRef = this.snackBar.open('Failed to assign patterns: ' + (error.error?.error || error.message), 'Close', {
         duration: 5000
       });
+      snackBarRef.onAction().subscribe(() => snackBarRef.dismiss());
     }
   }
   
@@ -407,9 +414,10 @@ export class IssuesListComponent implements OnInit, OnDestroy {
       this.patternDetail = await this.auditService.getPatternDetail(pattern.patternKey).toPromise() || null;
     } catch (error: any) {
       console.error('Failed to load pattern detail:', error);
-      this.snackBar.open('Failed to load pattern detail: ' + (error.error?.error || error.message), 'Close', {
+      const snackBarRef = this.snackBar.open('Failed to load pattern detail: ' + (error.error?.error || error.message), 'Close', {
         duration: 5000
       });
+      snackBarRef.onAction().subscribe(() => snackBarRef.dismiss());
     } finally {
       this.loadingDetail = false;
     }
@@ -435,16 +443,18 @@ export class IssuesListComponent implements OnInit, OnDestroy {
     try {
       // Use AuditService as per spec
       await this.auditService.updatePattern(this.selectedPatternKey, { status }).toPromise();
-      this.snackBar.open('Pattern status updated', 'Close', { duration: 3000 });
+      const snackBarRef = this.snackBar.open('Pattern status updated', 'Close', { duration: 3000 });
+      snackBarRef.onAction().subscribe(() => snackBarRef.dismiss());
       this.loadQueue();
       if (this.patternDetail) {
         this.patternDetail.status = status as any;
       }
     } catch (error: any) {
       console.error('Failed to update pattern status:', error);
-      this.snackBar.open('Failed to update status: ' + (error.error?.error || error.message), 'Close', {
+      const snackBarRef = this.snackBar.open('Failed to update status: ' + (error.error?.error || error.message), 'Close', {
         duration: 5000
       });
+      snackBarRef.onAction().subscribe(() => snackBarRef.dismiss());
     }
   }
   
@@ -453,16 +463,18 @@ export class IssuesListComponent implements OnInit, OnDestroy {
     
     try {
       await this.auditService.updatePattern(this.selectedPatternKey, { assignee }).toPromise();
-      this.snackBar.open('Pattern assignee updated', 'Close', { duration: 3000 });
+      const snackBarRef = this.snackBar.open('Pattern assignee updated', 'Close', { duration: 3000 });
+      snackBarRef.onAction().subscribe(() => snackBarRef.dismiss());
       this.loadQueue();
       if (this.patternDetail) {
         this.patternDetail.assignee = assignee;
       }
     } catch (error: any) {
       console.error('Failed to update pattern assignee:', error);
-      this.snackBar.open('Failed to update assignee: ' + (error.error?.error || error.message), 'Close', {
+      const snackBarRef = this.snackBar.open('Failed to update assignee: ' + (error.error?.error || error.message), 'Close', {
         duration: 5000
       });
+      snackBarRef.onAction().subscribe(() => snackBarRef.dismiss());
     }
   }
   
@@ -473,7 +485,8 @@ export class IssuesListComponent implements OnInit, OnDestroy {
   copyPatternKey() {
     if (this.patternDetail?.patternKey) {
       navigator.clipboard.writeText(this.patternDetail.patternKey).then(() => {
-        this.snackBar.open('Pattern key copied to clipboard', 'Close', { duration: 2000 });
+        const snackBarRef = this.snackBar.open('Pattern key copied to clipboard', 'Close', { duration: 2000 });
+        snackBarRef.onAction().subscribe(() => snackBarRef.dismiss());
       });
     }
   }
@@ -630,12 +643,14 @@ export class IssuesListComponent implements OnInit, OnDestroy {
     
     const url = this.issuesService.exportQueue(format, queueFilters);
     window.open(url, '_blank');
-    this.snackBar.open(`Exporting queue as ${format.toUpperCase()}...`, 'Close', { duration: 2000 });
+    const snackBarRef = this.snackBar.open(`Exporting queue as ${format.toUpperCase()}...`, 'Close', { duration: 2000 });
+    snackBarRef.onAction().subscribe(() => snackBarRef.dismiss());
   }
   
   exportSelected(format: 'csv' | 'json') {
     if (this.selectedPatterns.size === 0) {
-      this.snackBar.open('Please select at least one pattern', 'Close', { duration: 3000 });
+      const snackBarRef = this.snackBar.open('Please select at least one pattern', 'Close', { duration: 3000 });
+      snackBarRef.onAction().subscribe(() => snackBarRef.dismiss());
       return;
     }
     
@@ -650,7 +665,8 @@ export class IssuesListComponent implements OnInit, OnDestroy {
       link.download = `issue-patterns-${new Date().toISOString().split('T')[0]}.json`;
       link.click();
       URL.revokeObjectURL(url);
-      this.snackBar.open(`Exported ${selectedPatterns.length} patterns as JSON`, 'Close', { duration: 2000 });
+      const snackBarRef = this.snackBar.open(`Exported ${selectedPatterns.length} patterns as JSON`, 'Close', { duration: 2000 });
+      snackBarRef.onAction().subscribe(() => snackBarRef.dismiss());
     } else if (format === 'csv') {
       const headers = ['Pattern Key', 'Title', 'Category', 'Type', 'Occurrences', 'Avg Risk', 'Priority Score', 'Status', 'Last Seen'];
       const rows = selectedPatterns.map(p => [
@@ -677,7 +693,8 @@ export class IssuesListComponent implements OnInit, OnDestroy {
       link.download = `issue-patterns-${new Date().toISOString().split('T')[0]}.csv`;
       link.click();
       URL.revokeObjectURL(url);
-      this.snackBar.open(`Exported ${selectedPatterns.length} patterns as CSV`, 'Close', { duration: 2000 });
+      const snackBarRef = this.snackBar.open(`Exported ${selectedPatterns.length} patterns as CSV`, 'Close', { duration: 2000 });
+      snackBarRef.onAction().subscribe(() => snackBarRef.dismiss());
     }
   }
 }

@@ -89,7 +89,8 @@ export class MemberManagementComponent implements OnInit {
     this.orgId = this.route.snapshot.paramMap.get('orgId');
     
     if (!this.orgId) {
-      this.snackBar.open('Organization ID is required', 'Close', { duration: 3000 });
+      const snackBarRef = this.snackBar.open('Organization ID is required', 'Close', { duration: 3000 });
+      snackBarRef.onAction().subscribe(() => snackBarRef.dismiss());
       return;
     }
 
@@ -129,7 +130,8 @@ export class MemberManagementComponent implements OnInit {
       },
       error: (error) => {
         console.error('Failed to load members:', error);
-        this.snackBar.open('Failed to load members: ' + (error.error?.error || error.message), 'Close', { duration: 5000 });
+        const snackBarRef = this.snackBar.open('Failed to load members: ' + (error.error?.error || error.message), 'Close', { duration: 5000 });
+        snackBarRef.onAction().subscribe(() => snackBarRef.dismiss());
         this.loading = false;
       }
     });
@@ -155,18 +157,21 @@ export class MemberManagementComponent implements OnInit {
     this.memberService.inviteMember(this.orgId, this.currentUserId, email, role).subscribe({
       next: (response) => {
         if (response.success) {
-          this.snackBar.open(response.message || 'Member invited successfully', 'Close', { duration: 3000 });
+          const snackBarRef = this.snackBar.open(response.message || 'Member invited successfully', 'Close', { duration: 3000 });
+      snackBarRef.onAction().subscribe(() => snackBarRef.dismiss());
           this.inviteForm.reset({ role: 'viewer' });
           this.showInviteForm = false;
           this.loadMembers();
         } else {
-          this.snackBar.open(response.message || 'Failed to invite member', 'Close', { duration: 5000 });
+          const snackBarRef = this.snackBar.open(response.message || 'Failed to invite member', 'Close', { duration: 5000 });
+      snackBarRef.onAction().subscribe(() => snackBarRef.dismiss());
         }
         this.loading = false;
       },
       error: (error) => {
         console.error('Failed to invite member:', error);
-        this.snackBar.open('Failed to invite member: ' + (error.error?.error || error.message), 'Close', { duration: 5000 });
+        const snackBarRef = this.snackBar.open('Failed to invite member: ' + (error.error?.error || error.message), 'Close', { duration: 5000 });
+        snackBarRef.onAction().subscribe(() => snackBarRef.dismiss());
         this.loading = false;
       }
     });
@@ -180,16 +185,19 @@ export class MemberManagementComponent implements OnInit {
     this.memberService.updateMemberRole(this.orgId, this.currentUserId, member.userId, newRole).subscribe({
       next: (response) => {
         if (response.success) {
-          this.snackBar.open(response.message || 'Role updated successfully', 'Close', { duration: 3000 });
+          const snackBarRef = this.snackBar.open(response.message || 'Role updated successfully', 'Close', { duration: 3000 });
+      snackBarRef.onAction().subscribe(() => snackBarRef.dismiss());
           this.loadMembers();
         } else {
-          this.snackBar.open(response.message || 'Failed to update role', 'Close', { duration: 5000 });
+          const snackBarRef = this.snackBar.open(response.message || 'Failed to update role', 'Close', { duration: 5000 });
+      snackBarRef.onAction().subscribe(() => snackBarRef.dismiss());
         }
         this.loading = false;
       },
       error: (error) => {
         console.error('Failed to update role:', error);
-        this.snackBar.open('Failed to update role: ' + (error.error?.error || error.message), 'Close', { duration: 5000 });
+        const snackBarRef = this.snackBar.open('Failed to update role: ' + (error.error?.error || error.message), 'Close', { duration: 5000 });
+        snackBarRef.onAction().subscribe(() => snackBarRef.dismiss());
         this.loading = false;
       }
     });
@@ -206,16 +214,19 @@ export class MemberManagementComponent implements OnInit {
     this.memberService.removeMember(this.orgId, this.currentUserId, member.userId).subscribe({
       next: (response) => {
         if (response.success) {
-          this.snackBar.open(response.message || 'Member removed successfully', 'Close', { duration: 3000 });
+          const snackBarRef = this.snackBar.open(response.message || 'Member removed successfully', 'Close', { duration: 3000 });
+      snackBarRef.onAction().subscribe(() => snackBarRef.dismiss());
           this.loadMembers();
         } else {
-          this.snackBar.open(response.message || 'Failed to remove member', 'Close', { duration: 5000 });
+          const snackBarRef = this.snackBar.open(response.message || 'Failed to remove member', 'Close', { duration: 5000 });
+      snackBarRef.onAction().subscribe(() => snackBarRef.dismiss());
         }
         this.loading = false;
       },
       error: (error) => {
         console.error('Failed to remove member:', error);
-        this.snackBar.open('Failed to remove member: ' + (error.error?.error || error.message), 'Close', { duration: 5000 });
+        const snackBarRef = this.snackBar.open('Failed to remove member: ' + (error.error?.error || error.message), 'Close', { duration: 5000 });
+        snackBarRef.onAction().subscribe(() => snackBarRef.dismiss());
         this.loading = false;
       }
     });
