@@ -21,7 +21,7 @@ import { FormsModule, FormGroup, FormControl, ReactiveFormsModule } from '@angul
 import { MatDialog, MatDialogModule } from '@angular/material/dialog';
 import { MatSnackBar, MatSnackBarModule } from '@angular/material/snack-bar';
 import { MatDividerModule } from '@angular/material/divider';
-import { MatDrawerModule, MatDrawer } from '@angular/material/sidenav';
+import { MatSidenavModule } from '@angular/material/sidenav';
 import { MatTabsModule } from '@angular/material/tabs';
 import { Subject, debounceTime, distinctUntilChanged, takeUntil } from 'rxjs';
 import { AppHeaderComponent } from '../shared/app-header.component';
@@ -55,7 +55,7 @@ import { AuthService } from '../auth.service';
     MatDialogModule,
     MatSnackBarModule,
     MatDividerModule,
-    MatDrawerModule,
+    MatSidenavModule,
     MatTabsModule,
     AppHeaderComponent
   ],
@@ -64,7 +64,7 @@ import { AuthService } from '../auth.service';
 })
 export class IssuesListComponent implements OnInit, OnDestroy {
   @ViewChild(MatPaginator) paginator!: MatPaginator;
-  @ViewChild('drawer') drawer!: MatDrawer;
+  @ViewChild('drawer') drawer!: any; // MatDrawer from MatSidenavModule
   
   private destroy$ = new Subject<void>();
   
