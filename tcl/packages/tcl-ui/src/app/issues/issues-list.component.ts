@@ -20,6 +20,7 @@ import { MatNativeDateModule } from '@angular/material/core';
 import { FormsModule } from '@angular/forms';
 import { MatDialog, MatDialogModule } from '@angular/material/dialog';
 import { MatSnackBar, MatSnackBarModule } from '@angular/material/snack-bar';
+import { MatDividerModule } from '@angular/material/divider';
 import { AppHeaderComponent } from '../shared/app-header.component';
 import { IssuesService, IssueV2, IssueFilters } from '../issues.service';
 import { IssueV2DetailModalComponent } from '../issue-v2-detail-modal/issue-v2-detail-modal.component';
