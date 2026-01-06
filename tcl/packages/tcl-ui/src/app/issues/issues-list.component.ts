@@ -27,6 +27,7 @@ import { Subject, debounceTime, distinctUntilChanged, takeUntil } from 'rxjs';
 import { ActivatedRoute, Params } from '@angular/router';
 import { AppHeaderComponent } from '../shared/app-header.component';
 import { IssuesService, IssuePatternRow, IssuePatternDetail, QueueFilters } from '../issues.service';
+import { IssuePatternOccurrence } from './issue.model';
 import { AuditService } from '../audit.service';
 import { AuthService } from '../auth.service';
 
@@ -475,6 +476,39 @@ export class IssuesListComponent implements OnInit, OnDestroy {
         this.snackBar.open('Pattern key copied to clipboard', 'Close', { duration: 2000 });
       });
     }
+  }
+  
+  updatePatternAssigneeFromInput(event: Event) {
+    const target = event.target as HTMLInputElement;
+    const value = target.value?.trim() || null;
+    if (value === 'Unassigned' || value === '') {
+      this.updatePatternAssignee(null);
+    } else {
+      this.updatePatternAssignee(value);
+    }
+  }
+  
+  hasConflicts(): boolean {
+    if (!this.patternDetail?.occurrencesList) return false;
+    return this.patternDetail.occurrencesList.some(occ => 
+      occ.tracePreview?.contradictionPairs && occ.tracePreview.contradictionPairs.length > 0
+    );
+  }
+  
+  getConflictsForOccurrence(occ: IssuePatternOccurrence): Array<{ claimA: string; claimB: string; weight: number }> {
+    if (!occ.tracePreview?.contradictionPairs) return [];
+    return occ.tracePreview.contradictionPairs.slice(0, 3);
+  }
+  
+  hasEvidence(): boolean {
+    if (!this.patternDetail?.occurrencesList) return false;
+    return this.patternDetail.occurrencesList.some(occ => 
+      occ.evidencePreview && occ.evidencePreview.length > 0
+    );
+  }
+  
+  getEvidenceForOccurrence(occ: IssuePatternOccurrence): Array<{ sourceType: string; quote: string; turnIndex?: number }> {
+    return occ.evidencePreview || [];
   }
   
   getSeverityColor(severity: string | undefined): string {

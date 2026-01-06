@@ -379,7 +379,7 @@
                   
                   <mat-form-field appearance="outline">
                     <mat-label>Assignee</mat-label>
-                    <input matInput [value]="patternDetail.assignee || 'Unassigned'" (blur)="updatePatternAssignee($event.target?.value || null)">
+                    <input matInput [value]="patternDetail.assignee || 'Unassigned'" (blur)="updatePatternAssigneeFromInput($event)">
                   </mat-form-field>
                 </div>
 
@@ -467,11 +467,11 @@
                   </div>
                 </div>
                 
-                <div *ngIf="patternDetail.occurrencesList && patternDetail.occurrencesList.some(o => o.tracePreview?.contradictionPairs && o.tracePreview.contradictionPairs.length > 0)">
+                <div *ngIf="hasConflicts()">
                   <h4>Conflicts (Contradictions)</h4>
                   <div class="conflicts-list">
                     <div *ngFor="let occ of patternDetail.occurrencesList" class="conflict-item">
-                      <div *ngFor="let conflict of occ.tracePreview?.contradictionPairs?.slice(0, 3)">
+                      <div *ngFor="let conflict of getConflictsForOccurrence(occ)">
                         <div class="conflict-pair">
                           <span>{{ conflict.claimA }}</span>
                           <span>contradicts</span>
@@ -502,11 +502,11 @@
             <!-- Evidence Tab -->
             <mat-tab label="Evidence">
               <div class="tab-content">
-                <div *ngIf="patternDetail.occurrencesList && patternDetail.occurrencesList.some(o => o.evidencePreview && o.evidencePreview.length > 0)">
+                <div *ngIf="hasEvidence()">
                   <h4>Evidence References</h4>
                   <div class="evidence-list">
                     <div *ngFor="let occ of patternDetail.occurrencesList" class="evidence-item">
-                      <div *ngFor="let evidence of occ.evidencePreview" class="evidence-ref">
+                      <div *ngFor="let evidence of getEvidenceForOccurrence(occ)" class="evidence-ref">
                         <div class="evidence-source-type">{{ evidence.sourceType }}</div>
                         <div class="evidence-quote">{{ evidence.quote }}</div>
                         <div class="evidence-turn" *ngIf="evidence.turnIndex !== undefined">Turn: {{ evidence.turnIndex }}</div>
@@ -514,7 +514,7 @@
                     </div>
                   </div>
                 </div>
-                <div *ngIf="!patternDetail.occurrencesList || !patternDetail.occurrencesList.some(o => o.evidencePreview && o.evidencePreview.length > 0)" class="empty-state">
+                <div *ngIf="!hasEvidence()" class="empty-state">
                   <p>No evidence references available</p>
                 </div>
               </div>

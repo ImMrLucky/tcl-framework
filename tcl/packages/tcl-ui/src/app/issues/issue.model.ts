@@ -94,6 +94,9 @@ export interface IssuePatternDetail {
     }>;
   };
   scoring?: any;
+  // Additional fields for drawer display
+  severityDisplay?: 'low' | 'medium' | 'high' | 'critical';
+  priorityScore?: number;
 }
 
 export interface QueueFilters {
