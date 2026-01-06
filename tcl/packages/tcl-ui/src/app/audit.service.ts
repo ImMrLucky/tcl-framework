@@ -468,5 +468,64 @@ export class AuditService {
       `${this.apiBase}/evaluations/${evaluationId}`
     );
   }
+
+  /**
+   * Get issue queue (pattern aggregation)
+   */
+  getIssueQueue(filters: {
+    from?: string;
+    to?: string;
+    severity?: string;
+    verification?: string;
+    status?: string;
+    type?: string;
+    category?: string;
+    assignee?: string;
+    q?: string;
+    page?: number;
+    pageSize?: number;
+  }): Observable<{
+    rows: any[];
+    total: number;
+    page: number;
+    pageSize: number;
+    diagnostics?: { mode?: string; warnings?: string[] };
+  }> {
+    const queryParams = new URLSearchParams();
+    if (filters.from) queryParams.set('from', filters.from);
+    if (filters.to) queryParams.set('to', filters.to);
+    if (filters.severity) queryParams.set('severity', filters.severity);
+    if (filters.verification) queryParams.set('verification', filters.verification);
+    if (filters.status) queryParams.set('status', filters.status);
+    if (filters.type) queryParams.set('type', filters.type);
+    if (filters.category) queryParams.set('category', filters.category);
+    if (filters.assignee) queryParams.set('assignee', filters.assignee);
+    if (filters.q) queryParams.set('q', filters.q);
+    if (filters.page) queryParams.set('page', filters.page.toString());
+    if (filters.pageSize) queryParams.set('pageSize', filters.pageSize.toString());
+
+    const query = queryParams.toString();
+    return this.http.get<{
+      rows: any[];
+      total: number;
+      page: number;
+      pageSize: number;
+      diagnostics?: { mode?: string; warnings?: string[] };
+    }>(`${this.apiBase}/issues/queue${query ? '?' + query : ''}`);
+  }
+
+  /**
+   * Get pattern detail for drawer
+   */
+  getPatternDetail(patternKey: string): Observable<any> {
+    return this.http.get<any>(`${this.apiBase}/issues/pattern/${patternKey}`);
+  }
+
+  /**
+   * Update pattern status/assignee
+   */
+  updatePattern(patternKey: string, patch: { status?: string; assignee?: string | null }): Observable<any> {
+    return this.http.patch<any>(`${this.apiBase}/issues/pattern/${patternKey}`, patch);
+  }
 }
 

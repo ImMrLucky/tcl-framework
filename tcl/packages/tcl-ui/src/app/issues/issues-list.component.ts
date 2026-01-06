@@ -24,8 +24,10 @@ import { MatDividerModule } from '@angular/material/divider';
 import { MatSidenavModule } from '@angular/material/sidenav';
 import { MatTabsModule } from '@angular/material/tabs';
 import { Subject, debounceTime, distinctUntilChanged, takeUntil } from 'rxjs';
+import { ActivatedRoute, Params } from '@angular/router';
 import { AppHeaderComponent } from '../shared/app-header.component';
 import { IssuesService, IssuePatternRow, IssuePatternDetail, QueueFilters } from '../issues.service';
+import { AuditService } from '../audit.service';
 import { AuthService } from '../auth.service';
 
 @Component({
@@ -111,8 +113,10 @@ export class IssuesListComponent implements OnInit, OnDestroy {
   
   constructor(
     private issuesService: IssuesService,
+    private auditService: AuditService,
     private authService: AuthService,
     private router: Router,
+    private route: ActivatedRoute,
     private dialog: MatDialog,
     private snackBar: MatSnackBar
   ) {}
@@ -123,43 +127,91 @@ export class IssuesListComponent implements OnInit, OnDestroy {
     const from = new Date();
     from.setDate(from.getDate() - 7);
     
-    // Initialize form with default values
-    this.filters = new FormGroup({
-      dateRange: new FormControl('7d'),
-      severity: new FormControl('all'),
-      verification: new FormControl('all'),
-      status: new FormControl('OPEN'),
-      type: new FormControl('all'),
-      category: new FormControl('all'),
-      assignee: new FormControl('all'),
-      q: new FormControl(''),
-      from: new FormControl(from.toISOString().split('T')[0]),
-      to: new FormControl(to.toISOString().split('T')[0]),
-    });
-    
-    // Debounce search
-    this.filters.get('q')?.valueChanges
-      .pipe(
-        debounceTime(300),
-        distinctUntilChanged(),
-        takeUntil(this.destroy$)
-      )
-      .subscribe(() => {
-        this.pageIndex = 0;
-        this.loadQueue();
+    // Load filters from query params or use defaults
+    this.route.queryParams.subscribe(params => {
+      const filterValues = {
+        dateRange: params['dateRange'] || '7d',
+        severity: params['severity'] || 'all',
+        verification: params['verification'] || 'all',
+        status: params['status'] || 'OPEN',
+        type: params['type'] || 'all',
+        category: params['category'] || 'all',
+        assignee: params['assignee'] || 'all',
+        q: params['q'] || '',
+        from: params['from'] || from.toISOString().split('T')[0],
+        to: params['to'] || to.toISOString().split('T')[0],
+        hideResolved: params['hideResolved'] === 'true',
+      };
+      
+      this.pageIndex = parseInt(params['page'] || '0');
+      this.pageSize = parseInt(params['pageSize'] || '25');
+      
+      // Initialize form with values from query params
+      this.filters = new FormGroup({
+        dateRange: new FormControl(filterValues.dateRange),
+        severity: new FormControl(filterValues.severity),
+        verification: new FormControl(filterValues.verification),
+        status: new FormControl(filterValues.status),
+        type: new FormControl(filterValues.type),
+        category: new FormControl(filterValues.category),
+        assignee: new FormControl(filterValues.assignee),
+        q: new FormControl(filterValues.q),
+        from: new FormControl(filterValues.from),
+        to: new FormControl(filterValues.to),
+        hideResolved: new FormControl(filterValues.hideResolved),
       });
-    
-    // Watch other filter changes
-    this.filters.valueChanges
-      .pipe(takeUntil(this.destroy$))
-      .subscribe(() => {
-        if (this.filters.get('q')?.value === '') {
+      
+      // Debounce search (250ms as per spec)
+      this.filters.get('q')?.valueChanges
+        .pipe(
+          debounceTime(250),
+          distinctUntilChanged(),
+          takeUntil(this.destroy$)
+        )
+        .subscribe(() => {
           this.pageIndex = 0;
+          this.updateQueryParams();
           this.loadQueue();
-        }
-      });
+        });
+      
+      // Watch other filter changes
+      this.filters.valueChanges
+        .pipe(takeUntil(this.destroy$))
+        .subscribe(() => {
+          if (this.filters.get('q')?.value === '') {
+            this.pageIndex = 0;
+            this.updateQueryParams();
+            this.loadQueue();
+          }
+        });
+      
+      this.loadQueue();
+    });
+  }
+  
+  updateQueryParams() {
+    const filterValues = this.filters.value;
+    const params: Params = {};
     
-    this.loadQueue();
+    if (filterValues.dateRange !== '7d') params['dateRange'] = filterValues.dateRange;
+    if (filterValues.severity !== 'all') params['severity'] = filterValues.severity;
+    if (filterValues.verification !== 'all') params['verification'] = filterValues.verification;
+    if (filterValues.status !== 'OPEN') params['status'] = filterValues.status;
+    if (filterValues.type !== 'all') params['type'] = filterValues.type;
+    if (filterValues.category !== 'all') params['category'] = filterValues.category;
+    if (filterValues.assignee !== 'all') params['assignee'] = filterValues.assignee;
+    if (filterValues.q) params['q'] = filterValues.q;
+    if (filterValues.from) params['from'] = filterValues.from;
+    if (filterValues.to) params['to'] = filterValues.to;
+    if (filterValues.hideResolved) params['hideResolved'] = 'true';
+    if (this.pageIndex > 0) params['page'] = this.pageIndex.toString();
+    if (this.pageSize !== 25) params['pageSize'] = this.pageSize.toString();
+    
+    this.router.navigate([], {
+      relativeTo: this.route,
+      queryParams: params,
+      replaceUrl: true
+    });
   }
   
   ngOnDestroy() {
@@ -193,12 +245,18 @@ export class IssuesListComponent implements OnInit, OnDestroy {
         to = filterValues.to;
       }
       
+      // Apply "Hide Resolved" filter
+      let statusFilter = filterValues.status === 'all' ? undefined : filterValues.status;
+      if (filterValues.hideResolved && !statusFilter) {
+        statusFilter = 'OPEN'; // Default to OPEN if hiding resolved
+      }
+      
       const queueFilters: QueueFilters = {
         from,
         to,
         severity: filterValues.severity === 'all' ? undefined : filterValues.severity,
         verification: filterValues.verification === 'all' ? undefined : filterValues.verification,
-        status: filterValues.status === 'all' ? undefined : filterValues.status,
+        status: statusFilter,
         type: filterValues.type === 'all' ? undefined : filterValues.type,
         category: filterValues.category === 'all' ? undefined : filterValues.category,
         assignee: filterValues.assignee === 'all' ? undefined : filterValues.assignee,
@@ -207,7 +265,8 @@ export class IssuesListComponent implements OnInit, OnDestroy {
         pageSize: this.pageSize,
       };
       
-      const response = await this.issuesService.getIssueQueue(queueFilters).toPromise();
+      // Use AuditService as per spec
+      const response = await this.auditService.getIssueQueue(queueFilters).toPromise();
       
       if (response) {
         this.dataSource.data = response.rows;
@@ -235,6 +294,7 @@ export class IssuesListComponent implements OnInit, OnDestroy {
   
   applyFilters() {
     this.pageIndex = 0;
+    this.updateQueryParams();
     this.loadQueue();
   }
   
@@ -260,6 +320,7 @@ export class IssuesListComponent implements OnInit, OnDestroy {
   onPageChange(event: PageEvent) {
     this.pageSize = event.pageSize;
     this.pageIndex = event.pageIndex;
+    this.updateQueryParams();
     this.loadQueue();
   }
   
@@ -341,7 +402,8 @@ export class IssuesListComponent implements OnInit, OnDestroy {
     this.loadingDetail = true;
     
     try {
-      this.patternDetail = await this.issuesService.getPatternDetail(pattern.patternKey).toPromise() || null;
+      // Use AuditService as per spec
+      this.patternDetail = await this.auditService.getPatternDetail(pattern.patternKey).toPromise() || null;
     } catch (error: any) {
       console.error('Failed to load pattern detail:', error);
       this.snackBar.open('Failed to load pattern detail: ' + (error.error?.error || error.message), 'Close', {
@@ -370,7 +432,8 @@ export class IssuesListComponent implements OnInit, OnDestroy {
     if (!this.selectedPatternKey) return;
     
     try {
-      await this.issuesService.updatePattern(this.selectedPatternKey, { status }).toPromise();
+      // Use AuditService as per spec
+      await this.auditService.updatePattern(this.selectedPatternKey, { status }).toPromise();
       this.snackBar.open('Pattern status updated', 'Close', { duration: 3000 });
       this.loadQueue();
       if (this.patternDetail) {
@@ -384,8 +447,34 @@ export class IssuesListComponent implements OnInit, OnDestroy {
     }
   }
   
+  async updatePatternAssignee(assignee: string | null) {
+    if (!this.selectedPatternKey) return;
+    
+    try {
+      await this.auditService.updatePattern(this.selectedPatternKey, { assignee }).toPromise();
+      this.snackBar.open('Pattern assignee updated', 'Close', { duration: 3000 });
+      this.loadQueue();
+      if (this.patternDetail) {
+        this.patternDetail.assignee = assignee;
+      }
+    } catch (error: any) {
+      console.error('Failed to update pattern assignee:', error);
+      this.snackBar.open('Failed to update assignee: ' + (error.error?.error || error.message), 'Close', {
+        duration: 5000
+      });
+    }
+  }
+  
   viewEvaluation(evaluationId: string) {
     this.router.navigate(['/evaluations', evaluationId]);
+  }
+  
+  copyPatternKey() {
+    if (this.patternDetail?.patternKey) {
+      navigator.clipboard.writeText(this.patternDetail.patternKey).then(() => {
+        this.snackBar.open('Pattern key copied to clipboard', 'Close', { duration: 2000 });
+      });
+    }
   }
   
   getSeverityColor(severity: string | undefined): string {
@@ -462,15 +551,12 @@ export class IssuesListComponent implements OnInit, OnDestroy {
   }
   
   getVerificationMixLabel(counts: IssuePatternRow['verificationCounts']): string {
-    const total = counts.EXTERNAL_VERIFIED + counts.TRANSCRIPT_ONLY + counts.NONE;
-    if (total === 0) return 'N/A';
-    const verified = counts.EXTERNAL_VERIFIED;
-    const transcript = counts.TRANSCRIPT_ONLY;
+    // Format as per spec: "External 0 • Transcript 0 • None 15"
     const parts: string[] = [];
-    if (verified > 0) parts.push(`${verified}V`);
-    if (transcript > 0) parts.push(`${transcript}T`);
-    if (counts.NONE > 0) parts.push(`${counts.NONE}U`);
-    return parts.join('/');
+    parts.push(`External ${counts.EXTERNAL_VERIFIED}`);
+    parts.push(`Transcript ${counts.TRANSCRIPT_ONLY}`);
+    parts.push(`None ${counts.NONE}`);
+    return parts.join(' • ');
   }
   
   exportQueue(format: 'csv' | 'json') {

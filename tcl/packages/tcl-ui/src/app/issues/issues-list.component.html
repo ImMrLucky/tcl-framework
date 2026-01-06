@@ -74,6 +74,10 @@
           <mat-icon matSuffix>search</mat-icon>
         </mat-form-field>
 
+        <mat-checkbox formControlName="hideResolved" (change)="applyFilters()">
+          Hide Resolved
+        </mat-checkbox>
+
         <button mat-button (click)="clearFilters()">
           <mat-icon>clear</mat-icon>
           Clear Filters
@@ -132,7 +136,7 @@
 
         <!-- Patterns Table -->
         <mat-card *ngIf="!loading" class="table-card">
-          <table mat-table [dataSource]="dataSource" matSort>
+          <table mat-table [dataSource]="dataSource" matSort [matSortActive]="'priorityScore'" [matSortDirection]="'desc'">
             <!-- Select Column -->
             <ng-container matColumnDef="select">
               <th mat-header-cell *matHeaderCellDef>
@@ -200,16 +204,7 @@
               <th mat-header-cell *matHeaderCellDef>Verification</th>
               <td mat-cell *matCellDef="let pattern">
                 <div class="verification-mix">
-                  <mat-chip *ngIf="pattern.verificationCounts.EXTERNAL_VERIFIED > 0" class="verification-chip verified">
-                    {{ pattern.verificationCounts.EXTERNAL_VERIFIED }}V
-                  </mat-chip>
-                  <mat-chip *ngIf="pattern.verificationCounts.TRANSCRIPT_ONLY > 0" class="verification-chip transcript-only">
-                    {{ pattern.verificationCounts.TRANSCRIPT_ONLY }}T
-                  </mat-chip>
-                  <mat-chip *ngIf="pattern.verificationCounts.NONE > 0" class="verification-chip unverified">
-                    {{ pattern.verificationCounts.NONE }}U
-                  </mat-chip>
-                  <span *ngIf="pattern.verificationCounts.EXTERNAL_VERIFIED === 0 && pattern.verificationCounts.TRANSCRIPT_ONLY === 0 && pattern.verificationCounts.NONE === 0" class="no-data">-</span>
+                  {{ getVerificationMixLabel(pattern.verificationCounts) }}
                 </div>
               </td>
             </ng-container>
@@ -317,11 +312,28 @@
 
       <!-- Pattern Detail Drawer -->
       <mat-drawer #drawer mode="side" position="end" [(opened)]="drawerOpen" class="pattern-drawer">
-        <div class="drawer-header">
-          <h2>Pattern Details</h2>
-          <button mat-icon-button (click)="closeDrawer()">
-            <mat-icon>close</mat-icon>
-          </button>
+        <div class="drawer-header" *ngIf="patternDetail">
+          <div class="header-top">
+            <div class="header-chips">
+              <mat-chip [class]="'severity-chip ' + getSeverityColor(patternDetail.severityDisplay || 'medium')">
+                {{ patternDetail.severityDisplay || 'medium' | titlecase }}
+              </mat-chip>
+              <mat-chip [class]="'status-chip ' + getStatusColor(patternDetail.status)">
+                {{ patternDetail.status }}
+              </mat-chip>
+              <span class="priority-score">Priority: {{ patternDetail.priorityScore || 0 }}</span>
+            </div>
+            <button mat-icon-button (click)="closeDrawer()">
+              <mat-icon>close</mat-icon>
+            </button>
+          </div>
+          <div class="header-pattern-key">
+            <span class="pattern-key-label">Pattern Key:</span>
+            <code class="pattern-key-value">{{ patternDetail.patternKey }}</code>
+            <button mat-icon-button (click)="copyPatternKey()" [matTooltip]="'Copy pattern key'">
+              <mat-icon>content_copy</mat-icon>
+            </button>
+          </div>
         </div>
 
         <div *ngIf="loadingDetail" class="drawer-loading">
@@ -331,8 +343,8 @@
 
         <div *ngIf="!loadingDetail && patternDetail" class="drawer-content">
           <mat-tab-group>
-            <!-- Overview Tab -->
-            <mat-tab label="Overview">
+            <!-- Summary Tab -->
+            <mat-tab label="Summary">
               <div class="tab-content">
                 <div class="pattern-header">
                   <h3>{{ patternDetail.title }}</h3>
@@ -364,13 +376,18 @@
                       <mat-option value="FALSE_POSITIVE">False Positive</mat-option>
                     </mat-select>
                   </mat-form-field>
+                  
+                  <mat-form-field appearance="outline">
+                    <mat-label>Assignee</mat-label>
+                    <input matInput [value]="patternDetail.assignee || 'Unassigned'" (blur)="updatePatternAssignee($event.target?.value || null)">
+                  </mat-form-field>
                 </div>
 
                 <div class="verification-breakdown">
                   <h4>Verification Breakdown</h4>
                   <div class="verification-stats">
                     <div class="verification-stat">
-                      <span class="stat-label">Verified:</span>
+                      <span class="stat-label">External Verified:</span>
                       <span class="stat-value">{{ patternDetail.verificationCounts.EXTERNAL_VERIFIED }}</span>
                     </div>
                     <div class="verification-stat">
@@ -432,9 +449,40 @@
               </div>
             </mat-tab>
 
-            <!-- Traceability Tab -->
-            <mat-tab label="Traceability">
+            <!-- Trace Tab -->
+            <mat-tab label="Trace">
               <div class="tab-content">
+                <div *ngIf="patternDetail.occurrencesList && patternDetail.occurrencesList.length > 0">
+                  <h4>Claim Details</h4>
+                  <div *ngFor="let occ of patternDetail.occurrencesList.slice(0, 5)" class="trace-item">
+                    <div class="trace-claim">
+                      <strong>Claim:</strong> {{ occ.what.claimText || occ.what.issueSummary }}
+                    </div>
+                    <div class="trace-excerpt" *ngIf="occ.evidencePreview && occ.evidencePreview.length > 0">
+                      <strong>Excerpt:</strong> {{ occ.evidencePreview[0].quote }}
+                    </div>
+                    <div class="trace-turns" *ngIf="occ.who.turnIndex !== undefined">
+                      <strong>Turn:</strong> {{ occ.who.turnIndex }}
+                    </div>
+                  </div>
+                </div>
+                
+                <div *ngIf="patternDetail.occurrencesList && patternDetail.occurrencesList.some(o => o.tracePreview?.contradictionPairs && o.tracePreview.contradictionPairs.length > 0)">
+                  <h4>Conflicts (Contradictions)</h4>
+                  <div class="conflicts-list">
+                    <div *ngFor="let occ of patternDetail.occurrencesList" class="conflict-item">
+                      <div *ngFor="let conflict of occ.tracePreview?.contradictionPairs?.slice(0, 3)">
+                        <div class="conflict-pair">
+                          <span>{{ conflict.claimA }}</span>
+                          <span>contradicts</span>
+                          <span>{{ conflict.claimB }}</span>
+                          <span class="conflict-weight">Weight: {{ conflict.weight }}</span>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+                
                 <div *ngIf="patternDetail.traceability && patternDetail.traceability.topEdges.length > 0">
                   <h4>Top Edges</h4>
                   <div class="edges-list">
@@ -448,8 +496,50 @@
                     </div>
                   </div>
                 </div>
-                <div *ngIf="!patternDetail.traceability || patternDetail.traceability.topEdges.length === 0" class="empty-state">
-                  <p>No traceability data available</p>
+              </div>
+            </mat-tab>
+            
+            <!-- Evidence Tab -->
+            <mat-tab label="Evidence">
+              <div class="tab-content">
+                <div *ngIf="patternDetail.occurrencesList && patternDetail.occurrencesList.some(o => o.evidencePreview && o.evidencePreview.length > 0)">
+                  <h4>Evidence References</h4>
+                  <div class="evidence-list">
+                    <div *ngFor="let occ of patternDetail.occurrencesList" class="evidence-item">
+                      <div *ngFor="let evidence of occ.evidencePreview" class="evidence-ref">
+                        <div class="evidence-source-type">{{ evidence.sourceType }}</div>
+                        <div class="evidence-quote">{{ evidence.quote }}</div>
+                        <div class="evidence-turn" *ngIf="evidence.turnIndex !== undefined">Turn: {{ evidence.turnIndex }}</div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+                <div *ngIf="!patternDetail.occurrencesList || !patternDetail.occurrencesList.some(o => o.evidencePreview && o.evidencePreview.length > 0)" class="empty-state">
+                  <p>No evidence references available</p>
+                </div>
+              </div>
+            </mat-tab>
+            
+            <!-- Audit Tab -->
+            <mat-tab label="Audit">
+              <div class="tab-content">
+                <div *ngIf="patternDetail.occurrencesList && patternDetail.occurrencesList.length > 0">
+                  <h4>Evaluation Details</h4>
+                  <div class="audit-list">
+                    <div *ngFor="let occ of patternDetail.occurrencesList.slice(0, 10)" class="audit-item">
+                      <div class="audit-evaluation-id">
+                        <strong>Evaluation ID:</strong> 
+                        <a (click)="viewEvaluation(occ.evaluationId)" class="evaluation-link">{{ occ.evaluationId }}</a>
+                      </div>
+                      <div class="audit-created-at">
+                        <strong>Created:</strong> {{ formatRelativeTime(occ.occurredAt) }}
+                      </div>
+                      <div class="audit-placeholders">
+                        <span>Engine: (placeholder)</span>
+                        <span>Scorer: (placeholder)</span>
+                      </div>
+                    </div>
+                  </div>
                 </div>
               </div>
             </mat-tab>
