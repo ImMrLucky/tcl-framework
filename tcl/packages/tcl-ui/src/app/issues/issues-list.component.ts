@@ -234,16 +234,26 @@ export class IssuesListComponent implements OnInit, OnDestroy {
         const fromDate = new Date();
         fromDate.setDate(fromDate.getDate() - 7);
         from = fromDate.toISOString().split('T')[0];
-        to = toDate.toISOString().split('T')[0];
+        // Set end date to end of day (23:59:59) to include all records from that day
+        toDate.setHours(23, 59, 59, 999);
+        to = toDate.toISOString();
       } else if (dateRange === '30d') {
         const toDate = new Date();
         const fromDate = new Date();
         fromDate.setDate(fromDate.getDate() - 30);
         from = fromDate.toISOString().split('T')[0];
-        to = toDate.toISOString().split('T')[0];
+        // Set end date to end of day (23:59:59) to include all records from that day
+        toDate.setHours(23, 59, 59, 999);
+        to = toDate.toISOString();
       } else if (dateRange === 'custom' && filterValues.from && filterValues.to) {
         from = filterValues.from;
-        to = filterValues.to;
+        // For custom dates, if 'to' is just a date (YYYY-MM-DD), set it to end of day
+        if (filterValues.to.match(/^\d{4}-\d{2}-\d{2}$/)) {
+          const toDate = new Date(filterValues.to + 'T23:59:59.999Z');
+          to = toDate.toISOString();
+        } else {
+          to = filterValues.to;
+        }
       }
       
       // Apply "Hide Resolved" filter
@@ -617,16 +627,26 @@ export class IssuesListComponent implements OnInit, OnDestroy {
       const fromDate = new Date();
       fromDate.setDate(fromDate.getDate() - 7);
       from = fromDate.toISOString().split('T')[0];
-      to = toDate.toISOString().split('T')[0];
+      // Set end date to end of day (23:59:59) to include all records from that day
+      toDate.setHours(23, 59, 59, 999);
+      to = toDate.toISOString();
     } else if (dateRange === '30d') {
       const toDate = new Date();
       const fromDate = new Date();
       fromDate.setDate(fromDate.getDate() - 30);
       from = fromDate.toISOString().split('T')[0];
-      to = toDate.toISOString().split('T')[0];
+      // Set end date to end of day (23:59:59) to include all records from that day
+      toDate.setHours(23, 59, 59, 999);
+      to = toDate.toISOString();
     } else if (dateRange === 'custom' && filterValues.from && filterValues.to) {
       from = filterValues.from;
-      to = filterValues.to;
+      // For custom dates, if 'to' is just a date (YYYY-MM-DD), set it to end of day
+      if (filterValues.to.match(/^\d{4}-\d{2}-\d{2}$/)) {
+        const toDate = new Date(filterValues.to + 'T23:59:59.999Z');
+        to = toDate.toISOString();
+      } else {
+        to = filterValues.to;
+      }
     }
     
     const queueFilters: QueueFilters = {

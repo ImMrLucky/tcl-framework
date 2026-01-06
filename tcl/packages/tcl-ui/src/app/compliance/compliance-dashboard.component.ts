@@ -65,7 +65,10 @@ export class ComplianceDashboardComponent implements OnInit {
     this.loading = true;
     try {
       const from = this.dateFrom.toISOString().split('T')[0];
-      const to = this.dateTo.toISOString().split('T')[0];
+      // Set end date to end of day (23:59:59) to include all records from that day
+      const endOfDay = new Date(this.dateTo);
+      endOfDay.setHours(23, 59, 59, 999);
+      const to = endOfDay.toISOString();
       
       // Load all data in parallel
       const [summary, timeseries, topCategories, topTypes, coverage, patterns] = await Promise.all([

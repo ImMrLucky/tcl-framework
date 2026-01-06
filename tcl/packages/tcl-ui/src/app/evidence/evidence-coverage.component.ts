@@ -56,9 +56,12 @@ export class EvidenceCoverageComponent implements OnInit {
   async loadData() {
     this.loading = true;
     try {
+      // Set end date to end of day (23:59:59) to include all records from that day
+      const endOfDay = new Date(this.dateTo);
+      endOfDay.setHours(23, 59, 59, 999);
       const filters = {
         from: this.dateFrom.toISOString().split('T')[0],
-        to: this.dateTo.toISOString().split('T')[0],
+        to: endOfDay.toISOString(),
       };
 
       const [coverage, gapsResponse] = await Promise.all([
