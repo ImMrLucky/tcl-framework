@@ -187,8 +187,10 @@ export function getRiskRankingConfig(): RiskRankingConfig {
       ],
     };
     
-    // Validate defaults
-    validateRiskRankingConfig(cachedConfig);
+    // Validate defaults (cachedConfig is guaranteed to be non-null here)
+    if (cachedConfig) {
+      validateRiskRankingConfig(cachedConfig);
+    }
   }
   
   return cachedConfig!;

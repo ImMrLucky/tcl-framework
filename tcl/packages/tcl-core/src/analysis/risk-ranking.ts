@@ -428,7 +428,7 @@ function computeRiskScore(issue: IssueV2, config: RiskRankingConfig): IssueV2 {
   const riskScore = compositeScore / 100;
   
   // Determine severity from composite score thresholds
-  const severity = computeSeverity(riskScore, config.severityThresholds);
+  const severity = deriveSeverity(riskScore, config);
   
   // Update legal hold suggestion (high/critical + agent + disclosure/billing)
   const legalHoldSuggested = 
@@ -480,9 +480,16 @@ function generateSummary(
     byType[issue.type] = (byType[issue.type] || 0) + 1;
     
     // Choose severity for summary based on mode
-    const sevForSummary = useSeverityDisplay 
-      ? ((issue as any).severityDisplay ?? issue.severity)
-      : issue.severity;
+    // Note: severityDisplay is 'low' | 'medium' | 'high' (no 'critical')
+    // but bySeverity expects SeverityV2 which includes 'critical'
+    let sevForSummary: SeverityV2;
+    if (useSeverityDisplay && (issue as any).severityDisplay) {
+      // Map severityDisplay to SeverityV2 (severityDisplay doesn't have 'critical')
+      const sevDisplay = (issue as any).severityDisplay as SeverityDisplayV2;
+      sevForSummary = sevDisplay === 'high' ? 'high' : sevDisplay === 'medium' ? 'medium' : 'low';
+    } else {
+      sevForSummary = issue.severity;
+    }
     
     bySeverity[sevForSummary] = (bySeverity[sevForSummary] || 0) + 1;
     byCategory[issue.category] = (byCategory[issue.category] || 0) + 1;
