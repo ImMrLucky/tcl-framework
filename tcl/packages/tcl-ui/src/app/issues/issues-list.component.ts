@@ -113,7 +113,6 @@ export class IssuesListComponent implements OnInit, OnDestroy {
   
   constructor(
     private issuesService: IssuesService,
-    private auditService: AuditService,
     private authService: AuthService,
     private router: Router,
     private route: ActivatedRoute,
@@ -275,8 +274,8 @@ export class IssuesListComponent implements OnInit, OnDestroy {
         pageSize: this.pageSize,
       };
       
-      // Use AuditService as per spec
-      const response = await this.auditService.getIssueQueue(queueFilters).toPromise();
+      // Use IssuesService to get issue queue
+      const response = await this.issuesService.getIssueQueue(queueFilters).toPromise();
       
       if (response) {
         this.dataSource.data = response.rows;
@@ -285,7 +284,7 @@ export class IssuesListComponent implements OnInit, OnDestroy {
         // Extract unique categories and types for filter options
         const categories = new Set<string>();
         const types = new Set<string>();
-        response.rows.forEach(row => {
+        response.rows.forEach((row: IssuePatternRow) => {
           if (row.category) categories.add(row.category);
           if (row.type) types.add(row.type);
         });
@@ -504,8 +503,8 @@ export class IssuesListComponent implements OnInit, OnDestroy {
     if (!this.selectedPatternKey) return;
     
     try {
-      // Use AuditService as per spec
-      await this.auditService.updatePattern(this.selectedPatternKey, { status }).toPromise();
+      // Use IssuesService to update pattern
+      await this.issuesService.updatePattern(this.selectedPatternKey, { status }).toPromise();
       const snackBarRef = this.snackBar.open('Pattern status updated', 'Close', { duration: 3000 });
       snackBarRef.onAction().subscribe(() => snackBarRef.dismiss());
       this.loadQueue();
@@ -525,7 +524,7 @@ export class IssuesListComponent implements OnInit, OnDestroy {
     if (!this.selectedPatternKey) return;
     
     try {
-      await this.auditService.updatePattern(this.selectedPatternKey, { assignee }).toPromise();
+      await this.issuesService.updatePattern(this.selectedPatternKey, { assignee }).toPromise();
       const snackBarRef = this.snackBar.open('Pattern assignee updated', 'Close', { duration: 3000 });
       snackBarRef.onAction().subscribe(() => snackBarRef.dismiss());
       this.loadQueue();
