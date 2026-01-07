@@ -99,8 +99,18 @@ export const routes: Routes = [
     canActivate: [AuthGuard]
   },
   {
+    path: 'admin',
+    loadComponent: () => import('./admin/admin.component').then(m => m.AdminComponent),
+    canActivate: [AuthGuard]
+  },
+  {
     path: 'admin/scoring',
     loadComponent: () => import('./admin/scoring/scoring-profiles.component').then(m => m.ScoringProfilesComponent),
+    canActivate: [AuthGuard]
+  },
+  {
+    path: 'admin/instructions',
+    loadComponent: () => import('./admin/instructions.component').then(m => m.AdminInstructionsComponent),
     canActivate: [AuthGuard]
   },
   

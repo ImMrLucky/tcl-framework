@@ -43,18 +43,28 @@ export interface PlanContext {
 }
 
 export interface MeResponse {
-  user: {
+  user?: {
     id: string;
-    email: string;
+    email?: string;
     fullName?: string;
   };
-  orgs: Array<{
+  org?: {
+    id: string;
+    name: string;
+    slug: string;
+    planTier: PlanTier;
+    planStatus: PlanStatus;
+    isInternalTest?: boolean;
+    billingMode?: string;
+  };
+  orgs?: Array<{
     id: string;
     name: string;
     planTier: PlanTier;
     planStatus: PlanStatus;
   }>;
   planContext?: PlanContext;
+  isSuperuser?: boolean;
 }
 
 @Injectable({
@@ -66,6 +76,9 @@ export class PlanService {
   
   private loadingSubject = new BehaviorSubject<boolean>(false);
   public loading$ = this.loadingSubject.asObservable();
+
+  private isSuperuserSubject = new BehaviorSubject<boolean>(false);
+  public isSuperuser$ = this.isSuperuserSubject.asObservable();
 
   private get apiUrl(): string {
     // Use same pattern as other services
@@ -92,6 +105,9 @@ export class PlanService {
         tap(response => {
           if (response.planContext) {
             this.planContextSubject.next(response.planContext);
+          }
+          if (response.isSuperuser !== undefined) {
+            this.isSuperuserSubject.next(response.isSuperuser);
           }
         }),
         catchError(error => {
@@ -180,6 +196,13 @@ export class PlanService {
    */
   isUnlimited(metric: keyof PlanLimits): boolean {
     return this.getLimit(metric) === -1;
+  }
+
+  /**
+   * Check if current user is a superuser
+   */
+  isSuperuser(): boolean {
+    return this.isSuperuserSubject.value;
   }
 }
 

@@ -1,0 +1,155 @@
+<div class="admin-container">
+  <h1>Admin Dashboard</h1>
+  <p class="subtitle">Superuser controls for testing and management</p>
+
+  <mat-tab-group>
+    <!-- Org Switch Tab -->
+    <mat-tab label="Org Switch">
+      <div class="tab-content">
+        <mat-card>
+          <mat-card-header>
+            <mat-card-title>Switch Active Organization</mat-card-title>
+            <mat-card-subtitle>Change which organization you're currently viewing</mat-card-subtitle>
+          </mat-card-header>
+          <mat-card-content>
+            <div class="form-group">
+              <mat-form-field appearance="outline">
+                <mat-label>Select Organization</mat-label>
+                <mat-select [(ngModel)]="selectedOrgId">
+                  <mat-option *ngFor="let org of orgs" [value]="org.id">
+                    {{ org.name }} ({{ org.planTier }})
+                  </mat-option>
+                </mat-select>
+              </mat-form-field>
+            </div>
+            <button 
+              mat-raised-button 
+              color="primary" 
+              (click)="switchOrg()"
+              [disabled]="loading || !selectedOrgId">
+              <mat-spinner *ngIf="loading" diameter="20" class="inline-spinner"></mat-spinner>
+              Switch Organization
+            </button>
+            <p class="help-text">Current org: {{ currentOrgId || 'Loading...' }}</p>
+          </mat-card-content>
+        </mat-card>
+      </div>
+    </mat-tab>
+
+    <!-- Emulation Tab -->
+    <mat-tab label="Emulation">
+      <div class="tab-content">
+        <mat-card>
+          <mat-card-header>
+            <mat-card-title>Plan Tier Emulation</mat-card-title>
+            <mat-card-subtitle>Temporarily override plan tier for testing (session-only)</mat-card-subtitle>
+          </mat-card-header>
+          <mat-card-content>
+            <div class="form-group">
+              <mat-form-field appearance="outline">
+                <mat-label>Emulate Plan Tier</mat-label>
+                <mat-select [(ngModel)]="emulationTier" [disabled]="emulationEnabled">
+                  <mat-option value="SANDBOX">Sandbox</mat-option>
+                  <mat-option value="TEAM">Team</mat-option>
+                  <mat-option value="ENTERPRISE">Enterprise</mat-option>
+                </mat-select>
+              </mat-form-field>
+            </div>
+            <div class="emulation-status">
+              <p>Status: <strong>{{ emulationEnabled ? 'Enabled' : 'Disabled' }}</strong></p>
+              <p *ngIf="emulationEnabled" class="warning">
+                ⚠️ Emulation is active. Your session will behave as if you have {{ emulationTier }} plan.
+              </p>
+            </div>
+            <button 
+              mat-raised-button 
+              [color]="emulationEnabled ? 'warn' : 'primary'" 
+              (click)="toggleEmulation()"
+              [disabled]="loading">
+              <mat-spinner *ngIf="loading" diameter="20" class="inline-spinner"></mat-spinner>
+              {{ emulationEnabled ? 'Disable Emulation' : 'Enable Emulation' }}
+            </button>
+            <p class="help-text">
+              Emulation only affects your current session. It does not modify the database or Stripe.
+            </p>
+          </mat-card-content>
+        </mat-card>
+      </div>
+    </mat-tab>
+
+    <!-- Internal Orgs Tab -->
+    <mat-tab label="Internal Test Orgs">
+      <div class="tab-content">
+        <mat-card>
+          <mat-card-header>
+            <mat-card-title>Internal Test Organizations</mat-card-title>
+            <mat-card-subtitle>Manage plan tiers for internal test organizations</mat-card-subtitle>
+          </mat-card-header>
+          <mat-card-content>
+            <table mat-table [dataSource]="allOrgs" class="orgs-table">
+              <ng-container matColumnDef="name">
+                <th mat-header-cell *matHeaderCellDef>Name</th>
+                <td mat-cell *matCellDef="let org">{{ org.name }}</td>
+              </ng-container>
+
+              <ng-container matColumnDef="planTier">
+                <th mat-header-cell *matHeaderCellDef>Plan Tier</th>
+                <td mat-cell *matCellDef="let org">
+                  <mat-chip [color]="getPlanTierColor(org.planTier)">{{ org.planTier }}</mat-chip>
+                </td>
+              </ng-container>
+
+              <ng-container matColumnDef="planStatus">
+                <th mat-header-cell *matHeaderCellDef>Status</th>
+                <td mat-cell *matCellDef="let org">{{ org.planStatus }}</td>
+              </ng-container>
+
+              <ng-container matColumnDef="isInternalTest">
+                <th mat-header-cell *matHeaderCellDef>Internal Test</th>
+                <td mat-cell *matCellDef="let org">
+                  <mat-icon [color]="org.isInternalTest ? 'primary' : ''">
+                    {{ org.isInternalTest ? 'check_circle' : 'cancel' }}
+                  </mat-icon>
+                </td>
+              </ng-container>
+
+              <ng-container matColumnDef="actions">
+                <th mat-header-cell *matHeaderCellDef>Actions</th>
+                <td mat-cell *matCellDef="let org">
+                  <div class="action-buttons" *ngIf="org.isInternalTest">
+                    <button 
+                      mat-button 
+                      color="primary" 
+                      (click)="setOrgPlan(org, 'SANDBOX')"
+                      [disabled]="loading || org.planTier === 'SANDBOX'">
+                      Set Sandbox
+                    </button>
+                    <button 
+                      mat-button 
+                      color="primary" 
+                      (click)="setOrgPlan(org, 'TEAM')"
+                      [disabled]="loading || org.planTier === 'TEAM'">
+                      Set Team
+                    </button>
+                    <button 
+                      mat-button 
+                      color="primary" 
+                      (click)="setOrgPlan(org, 'ENTERPRISE')"
+                      [disabled]="loading || org.planTier === 'ENTERPRISE'">
+                      Set Enterprise
+                    </button>
+                  </div>
+                  <span *ngIf="!org.isInternalTest" class="muted">N/A</span>
+                </td>
+              </ng-container>
+
+              <tr mat-header-row *matHeaderRowDef="displayedColumns"></tr>
+              <tr mat-row *matRowDef="let row; columns: displayedColumns;"></tr>
+            </table>
+          </mat-card-content>
+        </mat-card>
+      </div>
+    </mat-tab>
+  </mat-tab-group>
+</div>
+

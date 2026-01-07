@@ -35,8 +35,12 @@
         <mat-icon matListItemIcon>verified</mat-icon>
         <span *ngIf="sidebarOpen" matListItemTitle>Evidence</span>
       </a>
-      <mat-divider></mat-divider>
-      <a mat-list-item routerLink="/admin/scoring" routerLinkActive="active" [routerLinkActiveOptions]="{exact: false}">
+      <mat-divider *ngIf="isSuperuser"></mat-divider>
+      <a *ngIf="isSuperuser" mat-list-item routerLink="/admin" routerLinkActive="active" [routerLinkActiveOptions]="{exact: false}">
+        <mat-icon matListItemIcon>admin_panel_settings</mat-icon>
+        <span *ngIf="sidebarOpen" matListItemTitle>Admin Dashboard</span>
+      </a>
+      <a *ngIf="isSuperuser" mat-list-item routerLink="/admin/scoring" routerLinkActive="active" [routerLinkActiveOptions]="{exact: false}">
         <mat-icon matListItemIcon>tune</mat-icon>
         <span *ngIf="sidebarOpen" matListItemTitle>Admin → Scoring</span>
       </a>
@@ -66,6 +70,29 @@
             
             <!-- Page-specific actions (projected content) -->
             <ng-content select="[headerActions]"></ng-content>
+
+            <!-- Admin Controls (superuser only) -->
+            <ng-container *ngIf="isAuthenticated && isSuperuser">
+              <button mat-button [matMenuTriggerFor]="adminMenu" class="admin-button">
+                <mat-icon>admin_panel_settings</mat-icon>
+                <span>Admin</span>
+              </button>
+              <mat-menu #adminMenu="matMenu">
+                <button mat-menu-item routerLink="/admin">
+                  <mat-icon>dashboard</mat-icon>
+                  <span>Admin Dashboard</span>
+                </button>
+                <button mat-menu-item routerLink="/admin/instructions">
+                  <mat-icon>help</mat-icon>
+                  <span>Admin Instructions</span>
+                </button>
+                <mat-divider></mat-divider>
+                <button mat-menu-item routerLink="/admin/scoring">
+                  <mat-icon>tune</mat-icon>
+                  <span>Scoring Profiles</span>
+                </button>
+              </mat-menu>
+            </ng-container>
 
             <!-- Plan badge (only when authenticated) -->
             <ng-container *ngIf="isAuthenticated && planTier">
@@ -125,9 +152,18 @@
                      <mat-icon>verified</mat-icon>
                      <span>Evidence</span>
                    </button>
-                   <button mat-menu-item routerLink="/admin/scoring">
+                   <mat-divider *ngIf="isSuperuser"></mat-divider>
+                   <button *ngIf="isSuperuser" mat-menu-item routerLink="/admin">
+                     <mat-icon>admin_panel_settings</mat-icon>
+                     <span>Admin Dashboard</span>
+                   </button>
+                   <button *ngIf="isSuperuser" mat-menu-item routerLink="/admin/instructions">
+                     <mat-icon>help</mat-icon>
+                     <span>Admin Instructions</span>
+                   </button>
+                   <button *ngIf="isSuperuser" mat-menu-item routerLink="/admin/scoring">
                      <mat-icon>tune</mat-icon>
-                     <span>Admin → Scoring</span>
+                     <span>Scoring Profiles</span>
                    </button>
                    <mat-divider></mat-divider>
                    <button mat-menu-item routerLink="/profile">
@@ -167,6 +203,29 @@
 
         <!-- Page-specific actions (projected content) -->
         <ng-content select="[headerActions]"></ng-content>
+
+        <!-- Admin Controls (superuser only) -->
+        <ng-container *ngIf="isAuthenticated && isSuperuser">
+          <button mat-button [matMenuTriggerFor]="adminMenu2" class="admin-button">
+            <mat-icon>admin_panel_settings</mat-icon>
+            <span>Admin</span>
+          </button>
+          <mat-menu #adminMenu2="matMenu">
+            <button mat-menu-item routerLink="/admin">
+              <mat-icon>dashboard</mat-icon>
+              <span>Admin Dashboard</span>
+            </button>
+            <button mat-menu-item routerLink="/admin/instructions">
+              <mat-icon>help</mat-icon>
+              <span>Admin Instructions</span>
+            </button>
+            <mat-divider></mat-divider>
+            <button mat-menu-item routerLink="/admin/scoring">
+              <mat-icon>tune</mat-icon>
+              <span>Scoring Profiles</span>
+            </button>
+          </mat-menu>
+        </ng-container>
 
         <!-- Plan badge (only when authenticated) -->
         <ng-container *ngIf="isAuthenticated && planTier">
@@ -226,9 +285,18 @@
                      <mat-icon>verified</mat-icon>
                      <span>Evidence</span>
                    </button>
-                   <button mat-menu-item routerLink="/admin/scoring">
+                   <mat-divider *ngIf="isSuperuser"></mat-divider>
+                   <button *ngIf="isSuperuser" mat-menu-item routerLink="/admin">
+                     <mat-icon>admin_panel_settings</mat-icon>
+                     <span>Admin Dashboard</span>
+                   </button>
+                   <button *ngIf="isSuperuser" mat-menu-item routerLink="/admin/instructions">
+                     <mat-icon>help</mat-icon>
+                     <span>Admin Instructions</span>
+                   </button>
+                   <button *ngIf="isSuperuser" mat-menu-item routerLink="/admin/scoring">
                      <mat-icon>tune</mat-icon>
-                     <span>Admin → Scoring</span>
+                     <span>Scoring Profiles</span>
                    </button>
                    <mat-divider></mat-divider>
                    <button mat-menu-item routerLink="/profile">

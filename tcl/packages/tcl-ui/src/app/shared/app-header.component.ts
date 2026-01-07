@@ -42,6 +42,7 @@ export class AppHeaderComponent implements OnInit {
   currentUser: User | null = null;
   isAuthenticated = false;
   sidebarOpen = true; // Start with sidebar open
+  isSuperuser = false;
   
   planTier: PlanTier | null = null;
   planContext$ = this.planService.planContext$;
@@ -76,6 +77,11 @@ export class AppHeaderComponent implements OnInit {
     // Subscribe to plan context changes
     this.planContext$.subscribe(context => {
       this.planTier = context?.tier ?? null;
+    });
+
+    // Subscribe to superuser status
+    this.planService.isSuperuser$.subscribe(isSuperuser => {
+      this.isSuperuser = isSuperuser;
     });
   }
 
