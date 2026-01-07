@@ -415,12 +415,15 @@ export class IssuesListComponent implements OnInit, OnDestroy {
   }
   
   async viewPattern(pattern: IssuePatternRow) {
+    // Set the selected pattern key first
     this.selectedPatternKey = pattern.patternKey;
+    
+    // Open drawer immediately (two-way binding will handle it)
     this.drawerOpen = true;
     this.loadingDetail = true;
     
     try {
-      // Use AuditService as per spec
+      // Load pattern detail from API
       this.patternDetail = await this.auditService.getPatternDetail(pattern.patternKey).toPromise() || null;
     } catch (error: any) {
       console.error('Failed to load pattern detail:', error);
@@ -430,11 +433,6 @@ export class IssuesListComponent implements OnInit, OnDestroy {
       snackBarRef.onAction().subscribe(() => snackBarRef.dismiss());
     } finally {
       this.loadingDetail = false;
-    }
-    
-    // Open drawer if not already open
-    if (this.drawer && !this.drawer.opened) {
-      this.drawer.open();
     }
   }
   
