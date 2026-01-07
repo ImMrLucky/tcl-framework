@@ -4,6 +4,7 @@ import { provideHttpClient, withInterceptorsFromDi, HTTP_INTERCEPTORS } from '@a
 import { provideRouter } from '@angular/router';
 import { routes } from './app/app.routes';
 import { AuthInterceptor } from './app/auth.interceptor';
+import {provideAnimations} from "@angular/platform-browser/animations";
 
 bootstrapApplication(AppComponent, {
   providers: [
@@ -14,7 +15,8 @@ bootstrapApplication(AppComponent, {
       useClass: AuthInterceptor,
       multi: true
     },
-    provideRouter(routes)
+    provideRouter(routes),
+      provideAnimations()
   ]
 }).catch(err => console.error(err));
 
