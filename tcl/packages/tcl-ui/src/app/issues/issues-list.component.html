@@ -314,25 +314,32 @@
       <mat-drawer #drawer mode="side" position="end" [opened]="drawerOpen" class="pattern-drawer">
         <div class="drawer-header" *ngIf="patternDetail || loadingDetail">
           <div class="header-top">
-            <div class="header-chips">
-              <mat-chip [class]="'severity-chip ' + getSeverityColor(patternDetail.severityDisplay || 'medium')">
-                {{ patternDetail.severityDisplay || 'medium' | titlecase }}
+            <div class="header-chips" *ngIf="patternDetail">
+              <mat-chip [class]="'severity-chip ' + getSeverityColor(patternDetail?.severityDisplay || 'medium')">
+                {{ patternDetail?.severityDisplay || 'medium' | titlecase }}
               </mat-chip>
-              <mat-chip [class]="'status-chip ' + getStatusColor(patternDetail.status)">
-                {{ patternDetail.status }}
+              <mat-chip [class]="'status-chip ' + getStatusColor(patternDetail?.status || 'OPEN')">
+                {{ patternDetail?.status }}
               </mat-chip>
-              <span class="priority-score">Priority: {{ patternDetail.priorityScore || 0 }}</span>
+              <span class="priority-score">Priority: {{ patternDetail?.priorityScore || 0 }}</span>
+            </div>
+            <div class="header-chips" *ngIf="!patternDetail && loadingDetail">
+              <span>Loading pattern details...</span>
             </div>
             <button mat-icon-button (click)="closeDrawer()">
               <mat-icon>close</mat-icon>
             </button>
           </div>
-          <div class="header-pattern-key">
+          <div class="header-pattern-key" *ngIf="patternDetail">
             <span class="pattern-key-label">Pattern Key:</span>
-            <code class="pattern-key-value">{{ patternDetail.patternKey }}</code>
+            <code class="pattern-key-value">{{ patternDetail?.patternKey }}</code>
             <button mat-icon-button (click)="copyPatternKey()" [matTooltip]="'Copy pattern key'">
               <mat-icon>content_copy</mat-icon>
             </button>
+          </div>
+          <div class="header-pattern-key" *ngIf="!patternDetail && selectedPatternKey">
+            <span class="pattern-key-label">Pattern Key:</span>
+            <code class="pattern-key-value">{{ selectedPatternKey }}</code>
           </div>
         </div>
 
