@@ -343,12 +343,12 @@
           </div>
         </div>
 
-        <div *ngIf="loadingDetail" class="drawer-loading">
+        <div *ngIf="loadingDetail && !patternDetail" class="drawer-loading">
           <mat-spinner diameter="40"></mat-spinner>
           <p>Loading pattern details...</p>
         </div>
 
-        <div *ngIf="!loadingDetail && patternDetail" class="drawer-content">
+        <div *ngIf="patternDetail" class="drawer-content">
           <mat-tab-group>
             <!-- Summary Tab -->
             <mat-tab label="Summary">

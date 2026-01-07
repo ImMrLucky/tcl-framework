@@ -426,6 +426,8 @@ table {
   .pattern-drawer {
     width: 560px;
     max-width: 90vw;
+    overflow-y: auto;
+    background: white;
     
       .drawer-header {
         padding: 16px;
@@ -488,6 +490,8 @@ table {
     
     .drawer-content {
       padding: 16px;
+      overflow-y: auto;
+      max-height: calc(100vh - 200px);
       
       .tab-content {
         padding: 16px 0;

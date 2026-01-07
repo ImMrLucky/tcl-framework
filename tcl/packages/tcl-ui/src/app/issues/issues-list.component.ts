@@ -478,6 +478,8 @@ export class IssuesListComponent implements OnInit, OnDestroy {
       console.log('Pattern detail after merge:', this.patternDetail);
       console.log('Has occurrencesList:', !!this.patternDetail.occurrencesList);
       console.log('OccurrencesList length:', this.patternDetail.occurrencesList?.length || 0);
+      this.loadingDetail = false; // Set loading to false immediately after data is loaded
+      console.log('loadingDetail set to false, patternDetail exists:', !!this.patternDetail);
     } catch (error: any) {
       console.error('Failed to load pattern detail:', error);
       const snackBarRef = this.snackBar.open('Failed to load pattern detail: ' + (error.error?.error || error.message), 'Close', {
@@ -485,7 +487,6 @@ export class IssuesListComponent implements OnInit, OnDestroy {
       });
       snackBarRef.onAction().subscribe(() => snackBarRef.dismiss());
       this.patternDetail = null;
-    } finally {
       this.loadingDetail = false;
     }
   }
