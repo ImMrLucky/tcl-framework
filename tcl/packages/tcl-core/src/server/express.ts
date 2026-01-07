@@ -3349,6 +3349,9 @@ console.log("Registering billing routes...");
 setupBillingRoutes(app);
 console.log("Billing routes registered successfully");
 
+setupAdminRoutes(app);
+console.log("Admin routes registered successfully");
+
 // Stripe webhook endpoint (raw body required)
 app.post('/api/billing/webhook', express.raw({ type: 'application/json' }), async (req, res) => {
   await handleStripeWebhook(req, res);

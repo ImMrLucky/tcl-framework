@@ -37,6 +37,7 @@ import { setupIntegrationConnectionsRoutes } from "./integrations/connections.js
 import { setupBillingRoutes } from "./billing/routes.js";
 import { handleStripeWebhook } from "./billing/webhook.js";
 import { setupDowngradeJobRoute } from "./billing/downgrade-job.js";
+import { setupAdminRoutes } from "./admin/routes.js";
 import { loadPlanConfig, validatePlanConfig } from "../config/plan-config.js";
 import { buildIssuesList } from "./audit/reproducibility.js";
 import { exportAsJSON, exportAsCSV, exportAsHTML } from "../issues/index.js";
@@ -2938,6 +2939,8 @@ console.log("Integration connections routes registered successfully");
 console.log("Registering billing routes...");
 setupBillingRoutes(app);
 console.log("Billing routes registered successfully");
+setupAdminRoutes(app);
+console.log("Admin routes registered successfully");
 // Stripe webhook endpoint (raw body required)
 app.post('/api/billing/webhook', express.raw({ type: 'application/json' }), async (req, res) => {
     await handleStripeWebhook(req, res);
