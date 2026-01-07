@@ -51,6 +51,10 @@ export function buildIssueNarratives(clusters, claims, edges, spectralData) {
         const narrative = generateNarrativeText(template, cluster, clusterClaims, evidenceQuotes, contradictionPairs, taxonomyConfig);
         // Get top edges for traceability
         const topEdges = getTopEdgesForCluster(cluster, edges, 5);
+        // Determine support basis - check if any claims in this cluster are grounded
+        const hasGrounding = cluster.groundingMass > 0;
+        const supportBasis = hasGrounding ? 'TRANSCRIPT' : 'NONE';
+        const verificationLevel = 'TRANSCRIPT_ONLY'; // Default for this path
         const issueNarrative = {
             issueId: `issue_${cluster.id}`,
             category: cluster.category,
@@ -59,6 +63,8 @@ export function buildIssueNarratives(clusters, claims, edges, spectralData) {
             severity: mapToSeverity(scores.riskScore, scoringConfig),
             confidence: mapToConfidence(scores.compositeScore, scoringConfig),
             status: 'OPEN',
+            supportBasis,
+            verificationLevel,
             scope: {
                 turnRange: cluster.turnRange,
                 claimIds: cluster.claimIds,

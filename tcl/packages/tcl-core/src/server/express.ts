@@ -48,7 +48,7 @@ import { setupScoringProfilesRoutes } from "./admin/scoring-profiles.js";
 import { buildIssuesList } from "./audit/reproducibility.js";
 import { analyzeForIssues, exportAsJSON, exportAsCSV, exportAsHTML, type IssueAnalysisOutput } from "../issues/index.js";
 import { buildIssueNarratives } from "../analysis/issue-narratives.js";
-import { computeHeadlineCounts } from "../analysis/headline-counts.js";
+// computeHeadlineCounts removed - unused import (see CLEANUP_NOTES.md)
 import { exportNarrativesAsCSV, exportNarrativesAsJSON, exportNarrativesAsHTML } from "../analysis/exports.js";
 import { getOrgContext } from "./auth-context.js";
 import { registerIngestEndpoints } from "./ingestion/ingest-endpoint.js";

@@ -1,6 +1,9 @@
 import { SparseHashEmbeddingProvider, BruteForceIndex, HnswIndex } from "./ann.js";
 import { SemanticCache, NoopCache } from "./cache.js";
 import { createHash } from "crypto";
+import { shouldConsiderContradiction } from "../claim_classifier.js";
+import { getScoringConfig } from "../config/scoring.js";
+import { entitySimilarity, detectAmountConflicts, detectPolarityConflicts } from "../nlp/entity_patterns.js";
 function clamp01(x) {
     return Math.max(0, Math.min(1, x));
 }
@@ -490,6 +493,7 @@ export async function buildClaimGraph(claims, sources, opts = {}) {
     let pairsScored = 0;
     let filteredBelowSupport = 0;
     let filteredBelowContradiction = 0;
+    let filteredByGating = 0; // Track contradictions filtered by eligibility gating
     let droppedByMaxEdges = 0;
     let supportsAdded = 0;
     let contradictionsAdded = 0;
@@ -620,18 +624,37 @@ export async function buildClaimGraph(claims, sources, opts = {}) {
             con = 0.0;
         }
         pairsScored++;
-        if (con >= tCon) {
-            contradictions.push({ claimA: A.id, claimB: B.id, weight: clamp01(con) });
+        // Apply contradiction eligibility gating BEFORE checking threshold
+        const config = getScoringConfig();
+        const gateResult = shouldConsiderContradiction(A, B, config);
+        // Only create contradiction edge if gating passes AND score is above threshold
+        if (gateResult.shouldCreate && con >= tCon) {
+            contradictions.push({
+                claimA: A.id,
+                claimB: B.id,
+                weight: clamp01(con),
+                contradictionType: gateResult.contradictionType,
+                reasonCodes: gateResult.reasonCodes,
+                overlapScore: gateResult.overlapScore
+            });
             contradictionsAdded++;
             if (contradictionsAdded <= 5) {
-                console.log(`  ✅ Contradiction: ${A.id} → ${B.id} (${con.toFixed(3)} >= ${tCon.toFixed(3)})`);
+                console.log(`  ✅ Contradiction: ${A.id} → ${B.id} (${con.toFixed(3)} >= ${tCon.toFixed(3)}, type=${gateResult.contradictionType})`);
                 console.log(`     "${A.text.substring(0, 60)}..." vs "${B.text.substring(0, 60)}..."`);
             }
         }
         else {
-            filteredBelowContradiction++;
-            if (pairsScored <= 3) {
-                console.log(`  ❌ Below threshold: ${A.id} vs ${B.id} contradiction = ${con.toFixed(3)} < ${tCon.toFixed(3)}`);
+            if (!gateResult.shouldCreate) {
+                filteredByGating = (filteredByGating || 0) + 1;
+                if (pairsScored <= 3) {
+                    console.log(`  🚫 Gated out: ${A.id} vs ${B.id} (${gateResult.reasonCodes.join(', ')})`);
+                }
+            }
+            else {
+                filteredBelowContradiction++;
+                if (pairsScored <= 3) {
+                    console.log(`  ❌ Below threshold: ${A.id} vs ${B.id} contradiction = ${con.toFixed(3)} < ${tCon.toFixed(3)}`);
+                }
             }
         }
         // Score entailment (support) - check local map FIRST
@@ -659,17 +682,58 @@ export async function buildClaimGraph(claims, sources, opts = {}) {
             console.error(`❌ Error scoring entailment for ${A.id} → ${B.id}:`, error);
             ent = 0.0;
         }
-        if (ent >= tSup) {
-            supports.push({ claimA: A.id, claimB: B.id, weight: clamp01(ent) });
+        // ENTITY-BASED BOOSTING: Boost entailment score if claims share entities
+        // This helps conversational transcripts where NLI alone struggles
+        const entitySim = entitySimilarity(A.text, B.text);
+        const boostedEnt = entitySim > 0.2 ? Math.min(1.0, ent + (entitySim * 0.25)) : ent;
+        if (boostedEnt >= tSup) {
+            supports.push({ claimA: A.id, claimB: B.id, weight: clamp01(boostedEnt) });
             supportsAdded++;
             if (supportsAdded <= 5) {
-                console.log(`  ✅ Support: ${A.id} → ${B.id} (${ent.toFixed(3)} >= ${tSup.toFixed(3)})`);
+                const boostNote = entitySim > 0.2 ? ` (entity-boosted from ${ent.toFixed(3)})` : '';
+                console.log(`  ✅ Support: ${A.id} → ${B.id} (${boostedEnt.toFixed(3)} >= ${tSup.toFixed(3)}${boostNote})`);
             }
         }
         else {
             filteredBelowSupport++;
             if (pairsScored <= 3) {
-                console.log(`  ❌ Below threshold: ${A.id} → ${B.id} entailment = ${ent.toFixed(3)} < ${tSup.toFixed(3)}`);
+                console.log(`  ❌ Below threshold: ${A.id} → ${B.id} entailment = ${boostedEnt.toFixed(3)} < ${tSup.toFixed(3)}`);
+            }
+        }
+        // ENTITY-BASED CONTRADICTION DETECTION: Check for amount/polarity conflicts
+        // This catches conflicts that NLI might miss
+        const amountConflicts = detectAmountConflicts(A.text, B.text);
+        const polarityConflicts = detectPolarityConflicts(A.text, B.text);
+        if (amountConflicts.length > 0 && !gateResult.shouldCreate) {
+            // Amount conflict found but NLI didn't flag it - create entity-based contradiction
+            for (const conflict of amountConflicts) {
+                if (conflict.percentDiff > 10) { // More than 10% difference
+                    contradictions.push({
+                        claimA: A.id,
+                        claimB: B.id,
+                        weight: clamp01(0.7 + (conflict.percentDiff / 200)), // Higher weight for bigger differences
+                        contradictionType: 'direct',
+                        reasonCodes: [`AMOUNT_CONFLICT:${conflict.entity}:$${conflict.amountA}≠$${conflict.amountB}`],
+                        overlapScore: entitySim,
+                    });
+                    contradictionsAdded++;
+                    console.log(`  ⚡ Amount conflict: ${A.id} → ${B.id} (${conflict.entity}: $${conflict.amountA} vs $${conflict.amountB})`);
+                }
+            }
+        }
+        if (polarityConflicts.length > 0 && !gateResult.shouldCreate && entitySim > 0.3) {
+            // Polarity conflict on shared entity - create entity-based contradiction
+            for (const conflict of polarityConflicts) {
+                contradictions.push({
+                    claimA: A.id,
+                    claimB: B.id,
+                    weight: 0.75,
+                    contradictionType: 'direct',
+                    reasonCodes: [`POLARITY_CONFLICT:${conflict.sharedEntity}:${conflict.polarityA}≠${conflict.polarityB}`],
+                    overlapScore: entitySim,
+                });
+                contradictionsAdded++;
+                console.log(`  ⚡ Polarity conflict: ${A.id} → ${B.id} (${conflict.sharedEntity}: ${conflict.polarityA} vs ${conflict.polarityB})`);
             }
         }
     }
@@ -733,6 +797,7 @@ export async function buildClaimGraph(claims, sources, opts = {}) {
             belowSupportThreshold: filteredBelowSupport,
             belowContradictionThreshold: filteredBelowContradiction,
             belowGroundingThreshold: filteredBelowGrounding,
+            filteredByContradictionGating: filteredByGating,
             droppedByMaxEdges: droppedByMaxEdges
         },
         model: {

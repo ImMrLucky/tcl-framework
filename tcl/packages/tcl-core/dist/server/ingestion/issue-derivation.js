@@ -25,13 +25,32 @@ import { createHash } from "crypto";
  * 6. Else: not an issue (return null)
  */
 export function deriveIssueType(claimId, truthState, topBadContradictions, topBadSupports) {
-    // Rule 1: Contradicted claims
-    if (truthState === "Contradicted") {
+    // Normalize truth state to uppercase for comparison
+    const normalizedState = truthState?.toUpperCase();
+    // Rule 1: Contradicted claims (handle both "Contradicted" and "CONTRADICTED")
+    if (normalizedState === "CONTRADICTED") {
         return "contradiction";
     }
-    // Rule 2: Ungrounded claims
-    if (truthState === "Ungrounded") {
+    // Rule 2: Ungrounded claims (NO evidence at all)
+    if (normalizedState === "UNGROUNDED") {
         return "ungrounded";
+    }
+    // Rule 2b: Unverified claims (has transcript evidence but no external verification)
+    // IMPORTANT: UNVERIFIED is not inherently an issue - it's expected in transcript-only mode
+    // Only flag as issue if claim is in bad edges
+    if (normalizedState === "UNVERIFIED") {
+        // Check if claim is in any problematic edges
+        const inBadContradictions = topBadContradictions.some(e => e.claimAId === claimId || e.claimBId === claimId);
+        const inBadSupports = topBadSupports.some(e => e.claimAId === claimId || e.claimBId === claimId);
+        // Only flag UNVERIFIED claims that are in problematic edges
+        if (inBadContradictions) {
+            return "inconsistent_contradiction";
+        }
+        if (inBadSupports) {
+            return "inconsistent_support";
+        }
+        // UNVERIFIED with no bad edges is NOT an issue - it's normal for transcript-only mode
+        return null;
     }
     // Rule 3: Claims in bad supports (inconsistent support relationships)
     const inBadSupports = topBadSupports.some(e => e.claimAId === claimId || e.claimBId === claimId);
@@ -44,8 +63,12 @@ export function deriveIssueType(claimId, truthState, topBadContradictions, topBa
         return "inconsistent_contradiction";
     }
     // Rule 5: Inconclusive claims
-    if (truthState === "Inconclusive") {
+    if (normalizedState === "INCONCLUSIVE") {
         return "needs_review";
+    }
+    // Rule 6: SUPPORTED claims are NOT issues - they're verified
+    if (normalizedState === "SUPPORTED") {
+        return null;
     }
     // Not an issue
     return null;
@@ -301,6 +324,7 @@ function generateDeterministicClaimId(artifactId, turnIndex, sentenceIndex, clai
 export const ISSUE_TYPE_LABELS = {
     contradiction: "Contradiction",
     ungrounded: "Ungrounded Claim",
+    unverified: "Unverified (Transcript Only)",
     inconsistent_support: "Inconsistent Support",
     inconsistent_contradiction: "Inconsistent Contradiction",
     needs_review: "Needs Review",

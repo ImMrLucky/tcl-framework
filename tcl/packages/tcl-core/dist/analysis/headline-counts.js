@@ -4,23 +4,48 @@
  * Computes SupportedClaimsCount, ContradictedClaimsCount, UngroundedClaimsCount
  * using configurable thresholds and spectral data.
  *
- * NO hard-coded thresholds - everything comes from config.
+ * IMPORTANT: These counts use the ACTUAL edges that were built by the graph builder.
+ * If an edge exists, it already passed its threshold during creation.
+ * We should NOT re-apply different thresholds when counting!
+ *
+ * DEPRECATED: Use computeCountsFromClaims() from counts-from-claims.ts instead.
+ * This function is kept for backward compatibility but should be replaced.
  */
-import { getScoringConfig } from "../config/scoring.js";
+import { getEngineConfig } from "../config/engine-config.js";
 /**
- * Compute headline counts with configurable thresholds.
+ * Compute headline counts using ACTUAL edges from the graph builder.
+ *
+ * CRITICAL: If an edge EXISTS, it already passed its threshold during creation.
+ * We should NOT re-apply different thresholds when counting!
+ *
+ * The spectral truthStates are the authoritative source for claim classification.
  */
 export function computeHeadlineCounts(input) {
-    const config = input.config || getScoringConfig();
-    const { claims, contradictions, spectral } = input;
-    // Get thresholds from config (with defaults)
-    const contradictionThreshold = config.thresholds.contradictionThreshold || 0.55;
-    const highBadnessThreshold = 0.7; // TODO: Add to config if needed
-    // Build sets for efficient lookup
+    const engineConfig = getEngineConfig();
+    const { claims, contradictions, supports = [], grounding = [], spectral } = input;
+    // Build sets from ACTUAL edges (if an edge exists, it passed its threshold)
     const claimIdToIndex = new Map();
     claims.forEach((c, idx) => claimIdToIndex.set(c.id, idx));
-    // Track which claims are involved in high-badness contradictions
+    // Claims involved in ANY contradiction edge (edge exists = passed threshold)
+    const contradictedClaimIds = new Set();
+    for (const edge of contradictions) {
+        contradictedClaimIds.add(edge.claimA);
+        contradictedClaimIds.add(edge.claimB);
+    }
+    // Claims involved in support edges
+    const supportedByEdgeClaimIds = new Set();
+    for (const edge of supports) {
+        supportedByEdgeClaimIds.add(edge.claimA);
+        supportedByEdgeClaimIds.add(edge.claimB);
+    }
+    // Claims with grounding edges (has transcript evidence)
+    const groundedClaimIds = new Set();
+    for (const edge of grounding) {
+        groundedClaimIds.add(edge.claimId);
+    }
+    // Also track high-badness contradictions from spectral
     const highBadnessContradictionClaims = new Set();
+    const highBadnessThreshold = 0.7;
     if (spectral?.topBadContradictions) {
         for (const badContra of spectral.topBadContradictions) {
             if (badContra.badness >= highBadnessThreshold) {
@@ -33,35 +58,35 @@ export function computeHeadlineCounts(input) {
             }
         }
     }
-    // Also check contradiction edges above threshold
-    const contradictionEdgesAboveThreshold = contradictions.filter(e => (e.weight || 0) >= contradictionThreshold);
-    const contradictionClaimIds = new Set();
-    for (const edge of contradictionEdgesAboveThreshold) {
-        contradictionClaimIds.add(edge.claimA);
-        contradictionClaimIds.add(edge.claimB);
-    }
     // Compute counts
     let supportedCount = 0;
     let contradictedCount = 0;
     let ungroundedCount = 0;
+    let unverifiedCount = 0;
     for (const claim of claims) {
         const claimIdx = claimIdToIndex.get(claim.id);
-        // Get truth state from spectral or claim
+        // Get truth state from spectral if available
         let truthState = claim.truthState;
         if (spectral?.truthStates && claimIdx !== undefined && claimIdx < spectral.truthStates.length) {
             truthState = spectral.truthStates[claimIdx];
         }
-        // Check if claim is contradicted
+        // Check if claim has transcript evidence (grounding edge exists or good grounding score)
+        const hasTranscriptEvidence = groundedClaimIds.has(claim.id) ||
+            (claim.evidence && claim.evidence.length > 0) ||
+            (claim.confidenceMetrics?.groundingScore !== undefined && claim.confidenceMetrics.groundingScore > 0.5);
+        // Check if claim is contradicted (contradiction edge exists OR spectral says so)
         const isContradicted = truthState === "Contradicted" ||
-            contradictionClaimIds.has(claim.id);
-        // Check if claim is ungrounded
-        const isUngrounded = truthState === "Ungrounded" ||
-            (claim.grounding?.kind === "none" || !claim.grounding) ||
-            (claim.grounding?.evidenceIds.length === 0);
-        // Check if claim is supported (and not contradicted)
+            contradictedClaimIds.has(claim.id) ||
+            highBadnessContradictionClaims.has(claim.id);
+        // Check if claim is truly ungrounded (NO evidence at all)
+        // Important: if hasTranscriptEvidence, it's UNVERIFIED not UNGROUNDED
+        const isUngrounded = !hasTranscriptEvidence && truthState !== "Supported";
+        // Check if claim is unverified (has transcript evidence but that's it)
+        // In transcript_only mode, most claims are UNVERIFIED because we can't verify against external docs
+        const isUnverified = hasTranscriptEvidence && truthState !== "Contradicted" && truthState !== "Supported";
+        // Check if claim is supported (spectral says supported AND not contradicted)
         const isSupported = truthState === "Supported" &&
-            !isContradicted &&
-            !highBadnessContradictionClaims.has(claim.id);
+            !isContradicted;
         if (isContradicted) {
             contradictedCount++;
         }
@@ -71,17 +96,26 @@ export function computeHeadlineCounts(input) {
         else if (isSupported) {
             supportedCount++;
         }
+        else if (isUnverified) {
+            unverifiedCount++;
+        }
+        // Note: some claims may not fall into any bucket (e.g., "Inconclusive" with evidence)
     }
     // Generate definitions for tooltips
+    const mode = engineConfig.mode;
     const definitions = {
-        supported: `Claims with truthState="Supported" that are not involved in high-badness contradictions (badness >= ${highBadnessThreshold}) and have contradiction edge weight < ${contradictionThreshold.toFixed(2)}.`,
-        contradicted: `Claims with truthState="Contradicted" OR claims with contradiction edges above threshold (weight >= ${contradictionThreshold.toFixed(2)}).`,
-        ungrounded: `Claims with truthState="Ungrounded" OR claims with no grounding evidence (grounding.kind="none" or evidenceIds.length=0).`,
+        supported: `Claims with spectral truthState="Supported" that are not involved in contradictions.`,
+        contradicted: `Claims with truthState="Contradicted" OR involved in contradiction edges.`,
+        ungrounded: `Claims with NO transcript evidence (no grounding edges, no evidence array).`,
+        unverified: mode === 'transcript_only'
+            ? `Claims with transcript evidence but not externally verified. This is normal in transcript-only mode.`
+            : `Claims with transcript evidence but no external policy/document verification.`,
     };
     return {
         supported: supportedCount,
         contradicted: contradictedCount,
         ungrounded: ungroundedCount,
+        unverified: unverifiedCount,
         total: claims.length,
         definitions,
     };

@@ -1,3 +1,20 @@
+// CRITICAL: Set WASM-only environment variables BEFORE any imports
+// This must happen before @xenova/transformers or any module that uses it is imported
+// to prevent onnxruntime-node from trying to load native bindings
+if (typeof process !== 'undefined' && process.env) {
+    if (!process.env.USE_WASM)
+        process.env.USE_WASM = '1';
+    if (!process.env.ONNXRUNTIME_EXECUTION_PROVIDERS)
+        process.env.ONNXRUNTIME_EXECUTION_PROVIDERS = '';
+    if (!process.env.ONNXRUNTIME_DISABLE_NATIVE)
+        process.env.ONNXRUNTIME_DISABLE_NATIVE = '1';
+    if (!process.env.TRANSFORMERS_USE_WASM)
+        process.env.TRANSFORMERS_USE_WASM = '1';
+    if (!process.env.USE_BROWSER)
+        process.env.USE_BROWSER = '0';
+    if (!process.env.USE_WASM_ONLY)
+        process.env.USE_WASM_ONLY = '1';
+}
 import express from "express";
 import multer from "multer";
 import { transcribeAudio, isValidAudioFormat } from "./transcription.js";
@@ -5,10 +22,17 @@ import { supabaseAdmin, provisionUser, getUserOrgs, getUserRole, checkUserPermis
 import { inviteMember, updateMemberRole, removeMember, listMembers } from "./member-management.js";
 import { setupIntegrationRoutes } from "./integrations/routes.js";
 import { setupAuditRoutes } from "./audit/routes.js";
+import { setupIssueWorkflowRoutes } from "./issues/routes.js";
+import { setupAnalyticsRoutes } from "./analytics/routes.js";
+import { setupExportRoutes } from "./exports/routes.js";
+import { setupEvaluationSearchRoutes } from "./evaluations/search.js";
+import { setupPolicyRoutes } from "./policies/routes.js";
+import { setupEvidenceRoutes } from "./evidence/routes.js";
+import { setupScoringProfilesRoutes } from "./admin/scoring-profiles.js";
 import { buildIssuesList } from "./audit/reproducibility.js";
-import { analyzeForIssues, exportAsJSON, exportAsCSV, exportAsHTML } from "../issues/index.js";
+import { exportAsJSON, exportAsCSV, exportAsHTML } from "../issues/index.js";
 import { buildIssueNarratives } from "../analysis/issue-narratives.js";
-import { computeHeadlineCounts } from "../analysis/headline-counts.js";
+// computeHeadlineCounts removed - unused import (see CLEANUP_NOTES.md)
 import { exportNarrativesAsCSV, exportNarrativesAsJSON, exportNarrativesAsHTML } from "../analysis/exports.js";
 import { getOrgContext } from "./auth-context.js";
 import { registerIngestEndpoints } from "./ingestion/ingest-endpoint.js";
@@ -510,6 +534,18 @@ app.post("/validate", async (req, res) => {
         }
         console.log("Starting validation...");
         const startTime = Date.now();
+        // Get org context early (for scoring profile lookup)
+        let orgContextForProfile = null;
+        try {
+            const contextForProfile = await getOrgContext(req);
+            if (contextForProfile && !contextForProfile.error && contextForProfile.orgId) {
+                orgContextForProfile = { orgId: contextForProfile.orgId };
+            }
+        }
+        catch (contextError) {
+            // Non-fatal - will use defaults
+            console.debug('Could not get org context for scoring profile:', contextError);
+        }
         const out = await validate(input);
         const latency = Date.now() - startTime;
         console.log("Validation complete");
@@ -669,104 +705,191 @@ app.post("/validate", async (req, res) => {
                             weight: g?.weight || 1,
                             quote: g?.quote
                         })).filter((g) => g.claimId && g.sourceId);
-                        const issueAnalysis = analyzeForIssues({
+                        // =================================================================
+                        // FIX A: CANONICAL ISSUE GENERATION (single source of truth)
+                        // =================================================================
+                        // Generate ONLY issueNarratives as the canonical issue list.
+                        // issueAnalysis is kept as an alias for backward compatibility.
+                        // =================================================================
+                        // Use the transcript variable already declared above
+                        // Determine evidence mode (transcript-only vs external)
+                        const hasExternalEvidence = (input.sources?.length ?? 0) > 0;
+                        const evidenceMode = hasExternalEvidence ? 'TRANSCRIPT_PLUS_EXTERNAL' : 'TRANSCRIPT_ONLY';
+                        // Build grounded claim IDs from grounding edges
+                        const groundedClaimIds = [...new Set(safeGrounding.map((g) => g.claimId || g.claimA).filter(Boolean))];
+                        const narrativesResult = buildIssueNarratives({
+                            claims: claimsForIssues.map((c) => ({
+                                id: c.id,
+                                text: c.text,
+                                confidence: c.confidence || 0,
+                                evidence: c.evidence || [],
+                                claimKind: c.claimKind,
+                                grounding: c.grounding,
+                                verification: c.verification,
+                                consistency: c.consistency,
+                                confidenceMetrics: c.confidenceMetrics,
+                                meta: c.meta,
+                                truthState: c.truthState,
+                                // FIX C: Add supportBasis and verificationLevel
+                                supportBasis: groundedClaimIds.includes(c.id)
+                                    ? (hasExternalEvidence ? 'EXTERNAL' : 'TRANSCRIPT')
+                                    : 'NONE',
+                                verificationLevel: evidenceMode === 'TRANSCRIPT_ONLY' ? 'TRANSCRIPT_ONLY' : 'EXTERNALLY_VERIFIED',
+                            })),
+                            contradictions: graphContradictions,
+                            supports: graphSupports,
+                            grounding: safeGrounding.map((g) => ({
+                                claimId: g.claimId || g.claimA,
+                                sourceId: g.sourceId || g.evidenceId || g.claimB,
+                                weight: g.weight || 1,
+                                quote: g.quote,
+                            })),
+                            spectral: out.report?.spectral,
+                            destructiveClaims: out.report?.destructiveClaims,
                             transcript: transcript || "",
-                            claims: claimsForIssues,
-                            edges: {
-                                contradictions: safeContradictions,
-                                supports: safeSupports,
-                                grounding: safeGrounding
-                            }
+                            // Pass evidence mode for proper labeling
+                            evidenceMode,
                         });
-                        // Store the clustered issues analysis alongside the per-claim issues
-                        // This is ADDITIVE - it doesn't modify existing report structure
-                        out.report.issueAnalysis = {
-                            summary: issueAnalysis.summary,
-                            clusteredIssues: issueAnalysis.issues,
-                            reproducibility: issueAnalysis.reproducibility,
-                            processingTimeMs: issueAnalysis.processingTimeMs
+                        // FIX B: Ensure ALL narratives are included (no truncation)
+                        // The narrativesResult.narratives contains the FULL list
+                        const canonicalNarratives = narrativesResult.narratives;
+                        const canonicalSummary = {
+                            ...narrativesResult.summary,
+                            // Ensure totalIssues matches actual narratives length
+                            totalIssues: canonicalNarratives.length,
+                            evidenceMode,
                         };
-                        console.log("8️⃣ CLUSTERED ISSUES (Manager-grade):", {
-                            totalIssues: issueAnalysis.summary.totalIssues,
-                            bySeverity: issueAnalysis.summary.bySeverity,
-                            primaryCategories: issueAnalysis.summary.primaryRiskCategories,
-                            topIssue: issueAnalysis.issues[0] ? {
-                                title: issueAnalysis.issues[0].title,
-                                severity: issueAnalysis.issues[0].severity,
-                                riskScore: issueAnalysis.issues[0].metrics.riskScore
+                        // CANONICAL issue payload - single source of truth
+                        out.report.issueNarratives = {
+                            narratives: canonicalNarratives,
+                            summary: canonicalSummary,
+                        };
+                        // issueAnalysis is NOW an alias to issueNarratives (same object, same totals)
+                        // This ensures UI compatibility while maintaining consistency
+                        out.report.issueAnalysis = {
+                            narratives: canonicalNarratives,
+                            summary: canonicalSummary,
+                        };
+                        // FIX D: Add grounded claim IDs to graph for consistency
+                        if (out.report?.graph) {
+                            out.report.graph.grounded = groundedClaimIds;
+                            out.report.graph.groundedClaimIds = groundedClaimIds;
+                        }
+                        // Add evidenceMode to manifest
+                        if (out.report?.manifest) {
+                            out.report.manifest.evidenceMode = evidenceMode;
+                        }
+                        console.log("8️⃣ CANONICAL ISSUES (single source of truth):", {
+                            totalNarratives: canonicalNarratives.length,
+                            summaryTotal: canonicalSummary.totalIssues,
+                            bySeverity: canonicalSummary.bySeverity,
+                            topCategories: canonicalSummary.topCategories,
+                            evidenceMode,
+                            groundedClaimsCount: groundedClaimIds.length,
+                            topNarrative: canonicalNarratives[0] ? {
+                                title: canonicalNarratives[0].title,
+                                severity: canonicalNarratives[0].severity,
+                                category: canonicalNarratives[0].category,
+                                compositeScore: canonicalNarratives[0].scoring?.compositeScore,
                             } : "none"
                         });
-                    }
-                    else {
-                        console.log("8️⃣ CLUSTERED ISSUES: Skipped (no claims or edges available)");
-                    }
-                    // NEW: Generate QA-Manager Grade Issue Narratives
-                    try {
-                        if (claimsForIssues.length > 0 && (graphContradictions.length > 0 || graphSupports.length > 0 || graphGrounding.length > 0)) {
-                            const transcript = (input.answer && input.answer.trim().length > 0) ? input.answer : input.question;
-                            const narrativesResult = buildIssueNarratives({
-                                claims: claimsForIssues.map((c) => ({
-                                    id: c.id,
-                                    text: c.text,
-                                    confidence: c.confidence || 0,
-                                    evidence: c.evidence || [],
-                                    claimKind: c.claimKind,
-                                    grounding: c.grounding,
-                                    verification: c.verification,
-                                    consistency: c.consistency,
-                                    confidenceMetrics: c.confidenceMetrics,
-                                    meta: c.meta,
-                                    truthState: c.truthState,
-                                })),
+                        // =================================================================
+                        // ISSUE V2 EXPANSION (Enterprise-Grade)
+                        // =================================================================
+                        // Expand graph edges into allIssuesV2 (uncapped)
+                        // Then rank and slice topIssuesV2
+                        // =================================================================
+                        try {
+                            const { expandIssueCandidates } = await import('../analysis/issue-expansion.js');
+                            const { rankIssuesV2 } = await import('../analysis/risk-ranking.js');
+                            // Get evaluation ID for runId (will be set later, use placeholder for now)
+                            const evaluationIdPlaceholder = 'pending';
+                            // Expand issues from graph
+                            const expansionResult = expandIssueCandidates({
+                                claims: claimsForIssues,
                                 contradictions: graphContradictions,
                                 supports: graphSupports,
-                                grounding: graphGrounding.map((g) => ({
-                                    claimId: g.claimId || g.claimA,
-                                    sourceId: g.sourceId || g.evidenceId || g.claimB,
-                                    weight: g.weight || 1,
-                                    quote: g.quote,
-                                })),
-                                spectral: out.report?.spectral,
-                                destructiveClaims: out.report?.destructiveClaims,
-                                transcript: transcript || "",
+                                grounding: safeGrounding,
+                                runId: evaluationIdPlaceholder,
+                                conversationId: input.conversationId || '',
+                                evidenceMode,
+                                audit: {
+                                    engineVersion: out.engineVersion || 'unknown',
+                                    scorerId: out.scorerId || 'unknown',
+                                    modelFingerprint: out.report?.manifest?.modelFingerprint,
+                                    configHash: out.report?.manifest?.configHash,
+                                    inputHash: out.report?.manifest?.inputHash,
+                                },
                             });
-                            // Store issue narratives in report
-                            out.report.issueNarratives = {
-                                narratives: narrativesResult.narratives,
-                                summary: narrativesResult.summary,
+                            // Check for active scoring profile (use orgContextForProfile retrieved earlier)
+                            let rankingConfig = undefined;
+                            let profileConfigHash = undefined;
+                            if (orgContextForProfile && orgContextForProfile.orgId) {
+                                try {
+                                    const { getActiveScoringProfile } = await import('./admin/scoring-profiles.js');
+                                    const activeProfile = await getActiveScoringProfile(orgContextForProfile.orgId);
+                                    if (activeProfile) {
+                                        rankingConfig = activeProfile.riskRankingConfig;
+                                        profileConfigHash = activeProfile.configHash;
+                                        // Update manifest configHash to include profile
+                                        if (out.report?.manifest) {
+                                            out.report.manifest.configHash = profileConfigHash;
+                                            out.report.manifest.scoringProfileHash = profileConfigHash;
+                                        }
+                                        console.log('Using active scoring profile:', {
+                                            configHash: profileConfigHash,
+                                            orgId: orgContextForProfile.orgId
+                                        });
+                                    }
+                                }
+                                catch (profileError) {
+                                    console.warn('Failed to load active scoring profile, using defaults:', profileError);
+                                }
+                            }
+                            // Rank issues (deterministic) with scoring context
+                            const scoringContext = {
+                                mode: (evidenceMode === 'TRANSCRIPT_ONLY' ? 'transcript_only' : 'with_evidence'),
+                                numSources: (input.sources?.length ?? 0),
+                                graphStatus: out.report?.graph?.status,
+                                templateId: out.report?.manifest?.templateId,
+                                isRegulatedTemplate: false, // TODO: detect from template
                             };
-                            console.log("9️⃣ ISSUE NARRATIVES (QA-Manager Grade):", {
-                                totalNarratives: narrativesResult.narratives.length,
-                                bySeverity: narrativesResult.summary.bySeverity,
-                                topCategories: narrativesResult.summary.topCategories,
-                                topNarrative: narrativesResult.narratives[0] ? {
-                                    title: narrativesResult.narratives[0].title,
-                                    severity: narrativesResult.narratives[0].severity,
-                                    category: narrativesResult.narratives[0].category,
-                                    compositeScore: narrativesResult.narratives[0].scoring.compositeScore,
+                            const rankedResult = rankIssuesV2(expansionResult.allIssues, rankingConfig, scoringContext);
+                            // Store in report
+                            out.report.allIssuesV2 = rankedResult.allIssues;
+                            out.report.topIssuesV2 = rankedResult.topIssues;
+                            out.report.issueSummaryV2 = rankedResult.summary;
+                            out.report.issuesByClaim = expansionResult.issuesByClaim;
+                            console.log("9️⃣ ISSUE V2 EXPANSION:", {
+                                allIssuesCount: rankedResult.allIssues.length,
+                                topIssuesCount: rankedResult.topIssues.length,
+                                byType: rankedResult.summary.byType,
+                                bySeverity: rankedResult.summary.bySeverity,
+                                topIssue: rankedResult.topIssues[0] ? {
+                                    type: rankedResult.topIssues[0].type,
+                                    severity: rankedResult.topIssues[0].severity,
+                                    riskScore: rankedResult.topIssues[0].riskScore,
+                                    issueKey: rankedResult.topIssues[0].issueKey,
                                 } : "none"
                             });
                         }
-                        else {
-                            console.log("9️⃣ ISSUE NARRATIVES: Skipped (no claims or edges available)");
+                        catch (expansionErr) {
+                            console.warn('Failed to expand IssueV2:', expansionErr.message);
+                            console.error('Error stack:', expansionErr.stack);
+                            // Don't fail the whole request - this is additive
                         }
                     }
-                    catch (narrativeErr) {
-                        // Log error but don't break the main flow
-                        console.error('Failed to generate issue narratives:', narrativeErr);
-                        console.error('Error stack:', narrativeErr.stack);
-                        // Don't throw - this is optional functionality
+                    else {
+                        console.log("8️⃣ CANONICAL ISSUES: Skipped (no claims or edges available)");
                     }
                 }
-                catch (clusterErr) {
-                    // Log error but don't break the main flow
-                    console.error('Failed to generate clustered issues:', clusterErr);
-                    console.error('Error stack:', clusterErr.stack);
-                    // Don't throw - this is optional functionality
+                catch (issueErr) {
+                    console.warn('Failed to build canonical issues:', issueErr.message);
+                    console.error('Error stack:', issueErr.stack);
                 }
             }
-            catch (issueErr) {
-                console.warn('Failed to build issues list:', issueErr.message);
+            catch (outerErr) {
+                console.warn('Failed to build issues list:', outerErr.message);
             }
         }
         // Log spectral data for debugging
@@ -850,12 +973,24 @@ app.post("/validate", async (req, res) => {
                 const spectralSkipped = spectralReport.spectralSkipped === true;
                 // Calculate coherence - use spectral if available, fallback to orchestrator score
                 const coherenceScore = spectralReport.coherenceScore ?? out.scores?.coherence;
-                // Compute headline counts with configurable thresholds
-                const headlineCounts = computeHeadlineCounts({
-                    claims: out.report?.claims || [],
-                    contradictions: out.report?.graph?.contradictions || [],
-                    spectral: spectralReport,
-                });
+                // Use truthDerivationSummary from unified graph builder as SINGLE SOURCE OF TRUTH
+                // This ensures counts are consistent with manifest.truthDerivationSummary
+                const manifest = out.report?.manifest;
+                const truthSummary = manifest?.truthDerivationSummary;
+                // Get diagnostics info from manifest
+                const diagnostics = manifest?.diagnostics;
+                const graphStatus = diagnostics?.status || 'OK';
+                const isTranscriptOnly = (out.report?.graph?.supports?.length || 0) === 0;
+                // Build definitions based on mode
+                const mode = isTranscriptOnly ? 'transcript_only' : 'verified';
+                const definitions = {
+                    supported: `Claims with external evidence support (policy/document/system_fact). In transcript-only mode, this should be 0.`,
+                    contradicted: `Claims involved in contradiction edges on the same subject slot.`,
+                    ungrounded: `Claims with NO evidence at all (no grounding edges, isolated nodes).`,
+                    unverified: mode === 'transcript_only'
+                        ? `Claims grounded in transcript but not externally verified. This is expected in transcript-only mode.`
+                        : `Claims with transcript evidence but no external policy/document verification.`,
+                };
                 const scoresForDb = {
                     // Top-level scores from orchestrator
                     truth: out.scores?.truth,
@@ -875,19 +1010,26 @@ app.post("/validate", async (req, res) => {
                         cycleMass: spectralReport.cycleMass,
                         heatTrace: spectralReport.heatTrace
                     },
-                    // Counts (computed with configurable thresholds)
+                    // Counts from truthDerivationSummary (SINGLE SOURCE OF TRUTH)
+                    // These MUST match manifest.truthDerivationSummary exactly
                     counts: {
-                        claims: headlineCounts.total,
-                        contradicted: headlineCounts.contradicted,
-                        ungrounded: headlineCounts.ungrounded,
-                        supported: headlineCounts.supported,
+                        claims: truthSummary?.total ?? out.report?.claims?.length ?? 0,
+                        contradicted: truthSummary?.contradicted ?? 0,
+                        ungrounded: truthSummary?.ungrounded ?? 0,
+                        unverified: truthSummary?.unverified ?? 0, // Claims with transcript evidence only
+                        supported: truthSummary?.supported ?? 0, // Claims with EXTERNAL evidence
+                        // Edge counts (for debugging)
                         supports: out.report?.graph?.supports?.length || 0,
                         contradictions: out.report?.graph?.contradictions?.length || 0,
+                        grounding: out.report?.graph?.grounding?.length || 0,
                         // Include definitions for tooltips
-                        definitions: headlineCounts.definitions
+                        definitions,
+                        // Mode indicator
+                        mode,
+                        graphStatus,
                     }
                 };
-                const { error: dbError } = await supabaseAdmin
+                const { data: insertedEvaluation, error: dbError } = await supabaseAdmin
                     .from('evaluations')
                     .insert({
                     org_id: context.orgId,
@@ -900,7 +1042,9 @@ app.post("/validate", async (req, res) => {
                     engine_version: process.env.ENGINE_VERSION || '0.2.0',
                     latency_ms: latency,
                     report: reportWithIssues
-                });
+                })
+                    .select('id')
+                    .single();
                 if (dbError) {
                     console.error('Failed to store evaluation:', dbError);
                 }
@@ -914,6 +1058,30 @@ app.post("/validate", async (req, res) => {
                         targetType: 'evaluation',
                         meta: { question: input.question.substring(0, 100), latency, env: context.env }
                     });
+                    // Include evaluation ID in response
+                    out.evaluationId = insertedEvaluation?.id;
+                    // Update runId in allIssuesV2 and topIssuesV2 if they exist
+                    if (insertedEvaluation?.id && out.report) {
+                        const { createHash } = await import('crypto');
+                        const updateRunId = (issue) => {
+                            if (issue && issue.runId === 'pending') {
+                                issue.runId = insertedEvaluation.id;
+                                // Regenerate issueId with correct runId
+                                const hash = createHash('sha256')
+                                    .update(`${insertedEvaluation.id}:${issue.issueKey}`)
+                                    .digest('hex')
+                                    .substring(0, 16);
+                                issue.issueId = `issue_${hash}`;
+                            }
+                            return issue;
+                        };
+                        if (out.report.allIssuesV2) {
+                            out.report.allIssuesV2 = out.report.allIssuesV2.map(updateRunId);
+                        }
+                        if (out.report.topIssuesV2) {
+                            out.report.topIssuesV2 = out.report.topIssuesV2.map(updateRunId);
+                        }
+                    }
                 }
             }
             catch (dbErr) {
@@ -1210,7 +1378,7 @@ app.post("/auth/provision", async (req, res) => {
     }
 });
 // Get user's organizations
-app.post("/me/orgs", async (req, res) => {
+app.post("/api/me/orgs", async (req, res) => {
     try {
         // Get userId from request body
         const userId = req.body.userId;
@@ -1234,7 +1402,7 @@ app.post("/me/orgs", async (req, res) => {
 // Member Management Endpoints
 // ============================================
 // List members of an organization
-app.get("/orgs/:orgId/members", async (req, res) => {
+app.get("/api/orgs/:orgId/members", async (req, res) => {
     try {
         const { orgId } = req.params;
         const userId = req.body.userId || req.query.userId;
@@ -1258,7 +1426,7 @@ app.get("/orgs/:orgId/members", async (req, res) => {
     }
 });
 // Invite a member to an organization
-app.post("/orgs/:orgId/members/invite", async (req, res) => {
+app.post("/api/orgs/:orgId/members/invite", async (req, res) => {
     try {
         const { orgId } = req.params;
         const { email, role } = req.body;
@@ -1293,7 +1461,7 @@ app.post("/orgs/:orgId/members/invite", async (req, res) => {
     }
 });
 // Update a member's role
-app.patch("/orgs/:orgId/members/:memberUserId", async (req, res) => {
+app.patch("/api/orgs/:orgId/members/:memberUserId", async (req, res) => {
     try {
         const { orgId, memberUserId } = req.params;
         const { role } = req.body;
@@ -1328,7 +1496,7 @@ app.patch("/orgs/:orgId/members/:memberUserId", async (req, res) => {
     }
 });
 // Remove a member from an organization
-app.delete("/orgs/:orgId/members/:memberUserId", async (req, res) => {
+app.delete("/api/orgs/:orgId/members/:memberUserId", async (req, res) => {
     try {
         const { orgId, memberUserId } = req.params;
         const userId = req.body.userId || req.query.userId;
@@ -1358,7 +1526,7 @@ app.delete("/orgs/:orgId/members/:memberUserId", async (req, res) => {
     }
 });
 // API Key management endpoints
-app.post("/orgs/:orgId/api-keys", async (req, res) => {
+app.post("/api/orgs/:orgId/api-keys", async (req, res) => {
     try {
         const { orgId } = req.params;
         const { name } = req.body;
@@ -1408,7 +1576,7 @@ app.post("/orgs/:orgId/api-keys", async (req, res) => {
         });
     }
 });
-app.get("/orgs/:orgId/projects/:projectId/api-keys", async (req, res) => {
+app.get("/api/orgs/:orgId/projects/:projectId/api-keys", async (req, res) => {
     try {
         const { orgId, projectId } = req.params;
         if (!supabaseAdmin) {
@@ -1954,8 +2122,287 @@ app.get("/evaluations/:evaluationId/export/narratives/html", async (req, res) =>
         res.status(500).json({ error: e?.message ?? "unknown error" });
     }
 });
+// ============================================================================
+// ISSUE V2 EXPORTS (Enterprise-Grade)
+// ============================================================================
+// Export IssueV2 as CSV
+app.get("/evaluations/:evaluationId/export/issues-v2/csv", async (req, res) => {
+    try {
+        const { evaluationId } = req.params;
+        const context = await getOrgContext(req);
+        if (!context || context.error) {
+            return res.status(401).json({ error: context?.error || "Authorization required" });
+        }
+        if (!supabaseAdmin) {
+            return res.status(503).json({ error: "Supabase not configured" });
+        }
+        const { data: evaluation, error: evalError } = await supabaseAdmin
+            .from('evaluations')
+            .select('*')
+            .eq('id', evaluationId)
+            .eq('org_id', context.orgId)
+            .single();
+        if (evalError || !evaluation) {
+            return res.status(404).json({ error: "Evaluation not found" });
+        }
+        const report = evaluation.report;
+        const allIssuesV2 = report?.allIssuesV2 || [];
+        if (allIssuesV2.length === 0) {
+            return res.status(404).json({ error: "IssueV2 data not found for this evaluation" });
+        }
+        // Build CSV
+        const headers = [
+            'Rank', 'Issue ID', 'Issue Key', 'Type', 'Category', 'Severity', 'Risk Score',
+            'Confidence', 'Review Required', 'Verification Level', 'Speaker', 'Turn Index',
+            'Primary Claim ID', 'Related Claim IDs', 'Issue Summary', 'Issue Detail',
+            'Evidence Count', 'Compliance Tags', 'Legal Hold Suggested', 'Disclaimers'
+        ];
+        const rows = allIssuesV2.map((issue, idx) => [
+            idx + 1,
+            issue.issueId || '',
+            issue.issueKey || '',
+            issue.type || '',
+            issue.category || '',
+            issue.severity || '',
+            (issue.riskScore * 100).toFixed(2),
+            (issue.confidence * 100).toFixed(2),
+            issue.reviewRequired ? 'Yes' : 'No',
+            issue.verification?.level || '',
+            issue.who?.speaker || '',
+            issue.who?.turnIndex || '',
+            issue.what?.primaryClaimId || '',
+            (issue.what?.relatedClaimIds || []).join('; '),
+            (issue.what?.issueSummary || '').replace(/"/g, '""'),
+            (issue.what?.issueDetail || '').replace(/"/g, '""'),
+            (issue.evidence?.refs || []).length,
+            (issue.compliance?.tags || []).join('; '),
+            issue.compliance?.legalHoldSuggested ? 'Yes' : 'No',
+            (issue.compliance?.disclaimers || []).join('; ').replace(/"/g, '""')
+        ]);
+        const csv = [
+            headers.map((h) => `"${h}"`).join(','),
+            ...rows.map((row) => row.map((cell) => `"${cell}"`).join(','))
+        ].join('\n');
+        res.setHeader('Content-Type', 'text/csv');
+        res.setHeader('Content-Disposition', `attachment; filename="evaluation-${evaluationId}-issues-v2.csv"`);
+        return res.send(csv);
+    }
+    catch (e) {
+        console.error("Export IssueV2 CSV error:", e);
+        res.status(500).json({ error: e?.message ?? "unknown error" });
+    }
+});
+// Export IssueV2 as JSON
+app.get("/evaluations/:evaluationId/export/issues-v2/json", async (req, res) => {
+    try {
+        const { evaluationId } = req.params;
+        const context = await getOrgContext(req);
+        if (!context || context.error) {
+            return res.status(401).json({ error: context?.error || "Authorization required" });
+        }
+        if (!supabaseAdmin) {
+            return res.status(503).json({ error: "Supabase not configured" });
+        }
+        const { data: evaluation, error: evalError } = await supabaseAdmin
+            .from('evaluations')
+            .select('*')
+            .eq('id', evaluationId)
+            .eq('org_id', context.orgId)
+            .single();
+        if (evalError || !evaluation) {
+            return res.status(404).json({ error: "Evaluation not found" });
+        }
+        const report = evaluation.report;
+        const allIssuesV2 = report?.allIssuesV2 || [];
+        const topIssuesV2 = report?.topIssuesV2 || [];
+        const issueSummaryV2 = report?.issueSummaryV2 || {};
+        const manifest = report?.manifest || {};
+        if (allIssuesV2.length === 0) {
+            return res.status(404).json({ error: "IssueV2 data not found for this evaluation" });
+        }
+        const exportData = {
+            evaluationId,
+            runId: evaluation.id,
+            conversationId: evaluation.conversation_id,
+            exportedAt: new Date().toISOString(),
+            allIssues: allIssuesV2,
+            topIssues: topIssuesV2,
+            summary: issueSummaryV2,
+            reproducibility: {
+                inputHash: manifest.inputHash,
+                configHash: manifest.configHash,
+                codeVersion: manifest.codeVersion,
+                engineVersion: manifest.engineVersion,
+                modelFingerprint: manifest.modelFingerprint,
+                evidenceMode: manifest.evidenceMode,
+            },
+        };
+        res.setHeader('Content-Type', 'application/json');
+        res.setHeader('Content-Disposition', `attachment; filename="evaluation-${evaluationId}-issues-v2.json"`);
+        return res.json(exportData);
+    }
+    catch (e) {
+        console.error("Export IssueV2 JSON error:", e);
+        res.status(500).json({ error: e?.message ?? "unknown error" });
+    }
+});
+// Export IssueV2 as PDF (HTML printable)
+app.get("/evaluations/:evaluationId/export/issues-v2/pdf", async (req, res) => {
+    try {
+        const { evaluationId } = req.params;
+        const context = await getOrgContext(req);
+        if (!context || context.error) {
+            return res.status(401).json({ error: context?.error || "Authorization required" });
+        }
+        if (!supabaseAdmin) {
+            return res.status(503).json({ error: "Supabase not configured" });
+        }
+        const { data: evaluation, error: evalError } = await supabaseAdmin
+            .from('evaluations')
+            .select('*')
+            .eq('id', evaluationId)
+            .eq('org_id', context.orgId)
+            .single();
+        if (evalError || !evaluation) {
+            return res.status(404).json({ error: "Evaluation not found" });
+        }
+        const report = evaluation.report;
+        const allIssuesV2 = report?.allIssuesV2 || [];
+        const topIssuesV2 = report?.topIssuesV2 || [];
+        const issueSummaryV2 = report?.issueSummaryV2 || {};
+        const manifest = report?.manifest || {};
+        if (allIssuesV2.length === 0) {
+            return res.status(404).json({ error: "IssueV2 data not found for this evaluation" });
+        }
+        // Generate HTML report
+        const html = `<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Evaluation Issues V2 - ${evaluationId}</title>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 20px; }
+    h1 { color: #333; }
+    h2 { color: #666; border-bottom: 2px solid #ddd; padding-bottom: 5px; }
+    .summary { background: #f5f5f5; padding: 15px; border-radius: 5px; margin: 20px 0; }
+    .summary-item { margin: 5px 0; }
+    .issue { margin: 20px 0; padding: 15px; border-left: 4px solid #ddd; }
+    .issue.critical { border-left-color: #991b1b; }
+    .issue.high { border-left-color: #ea580c; }
+    .issue.medium { border-left-color: #2563eb; }
+    .issue.low { border-left-color: #16a34a; }
+    .issue-header { display: flex; gap: 15px; margin-bottom: 10px; }
+    .issue-meta { font-size: 0.9em; color: #666; }
+    .badge { display: inline-block; padding: 3px 8px; border-radius: 3px; font-size: 0.85em; margin-right: 5px; }
+    .badge-transcript-only { background: #e3f2fd; color: #1976d2; }
+    .evidence-section { margin-top: 10px; padding: 10px; background: #f9f9f9; }
+    .evidence-quote { margin: 5px 0; padding: 5px; background: white; border-left: 3px solid #ccc; }
+    .compliance-tags { margin-top: 10px; }
+    .compliance-tag { background: #e0e0e0; padding: 2px 6px; border-radius: 3px; font-size: 0.85em; margin-right: 5px; }
+    table { width: 100%; border-collapse: collapse; margin: 20px 0; }
+    th, td { padding: 8px; text-align: left; border-bottom: 1px solid #ddd; }
+    th { background: #f5f5f5; font-weight: bold; }
+    @media print { .no-print { display: none; } }
+  </style>
+</head>
+<body>
+  <h1>Evaluation Issues V2 Report</h1>
+  <div class="summary">
+    <h2>Summary</h2>
+    <div class="summary-item"><strong>Evaluation ID:</strong> ${evaluationId}</div>
+    <div class="summary-item"><strong>Total Issues:</strong> ${allIssuesV2.length}</div>
+    <div class="summary-item"><strong>Top Issues:</strong> ${topIssuesV2.length}</div>
+    <div class="summary-item"><strong>Evidence Mode:</strong> ${manifest.evidenceMode || 'N/A'}</div>
+    <div class="summary-item"><strong>Exported:</strong> ${new Date().toISOString()}</div>
+  </div>
+  
+  <h2>Top ${topIssuesV2.length} Issues (Ranked by Risk)</h2>
+  ${topIssuesV2.map((issue, idx) => `
+    <div class="issue ${issue.severity}">
+      <div class="issue-header">
+        <strong>#${idx + 1}: ${issue.type}</strong>
+        <span class="badge severity-${issue.severity}">${issue.severity.toUpperCase()}</span>
+        <span class="badge">Risk: ${(issue.riskScore * 100).toFixed(0)}%</span>
+        ${issue.verification.level === 'TRANSCRIPT_ONLY' ? '<span class="badge badge-transcript-only">TRANSCRIPT_ONLY</span>' : ''}
+        ${issue.reviewRequired ? '<span class="badge">Review Required</span>' : ''}
+      </div>
+      <div class="issue-meta">
+        <strong>Category:</strong> ${issue.category} | 
+        <strong>Speaker:</strong> ${issue.who.speaker} | 
+        <strong>Confidence:</strong> ${(issue.confidence * 100).toFixed(0)}%
+      </div>
+      <div><strong>Summary:</strong> ${issue.what.issueSummary}</div>
+      <div><strong>Detail:</strong> ${issue.what.issueDetail}</div>
+      ${issue.evidence.refs.length > 0 ? `
+        <div class="evidence-section">
+          <strong>Evidence (${issue.evidence.refs.length}):</strong>
+          ${issue.evidence.refs.map((ref) => `
+            <div class="evidence-quote">
+              <strong>${ref.sourceType}</strong> (${ref.sourceId}): "${ref.quote}"
+            </div>
+          `).join('')}
+        </div>
+      ` : ''}
+      ${issue.compliance.tags.length > 0 ? `
+        <div class="compliance-tags">
+          <strong>Compliance Tags:</strong>
+          ${issue.compliance.tags.map((tag) => `<span class="compliance-tag">${tag}</span>`).join('')}
+        </div>
+      ` : ''}
+      ${issue.compliance.disclaimers.length > 0 ? `
+        <div><strong>Disclaimers:</strong> ${issue.compliance.disclaimers.join('; ')}</div>
+      ` : ''}
+    </div>
+  `).join('')}
+  
+  ${allIssuesV2.length > topIssuesV2.length ? `
+    <h2>All Issues (${allIssuesV2.length})</h2>
+    <table>
+      <thead>
+        <tr>
+          <th>Rank</th>
+          <th>Type</th>
+          <th>Severity</th>
+          <th>Risk Score</th>
+          <th>Summary</th>
+          <th>Verification</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${allIssuesV2.map((issue, idx) => `
+          <tr>
+            <td>${idx + 1}</td>
+            <td>${issue.type}</td>
+            <td>${issue.severity.toUpperCase()}</td>
+            <td>${(issue.riskScore * 100).toFixed(0)}%</td>
+            <td>${issue.what.issueSummary}</td>
+            <td>${issue.verification.level}</td>
+          </tr>
+        `).join('')}
+      </tbody>
+    </table>
+  ` : ''}
+  
+  <div class="summary" style="margin-top: 40px;">
+    <h2>Reproducibility</h2>
+    <div class="summary-item"><strong>Engine Version:</strong> ${manifest.engineVersion || 'N/A'}</div>
+    <div class="summary-item"><strong>Input Hash:</strong> ${manifest.inputHash || 'N/A'}</div>
+    <div class="summary-item"><strong>Config Hash:</strong> ${manifest.configHash || 'N/A'}</div>
+    <div class="summary-item"><strong>Code Version:</strong> ${manifest.codeVersion || 'N/A'}</div>
+  </div>
+</body>
+</html>`;
+        res.setHeader('Content-Type', 'text/html');
+        res.setHeader('Content-Disposition', `attachment; filename="evaluation-${evaluationId}-issues-v2.html"`);
+        res.send(html);
+    }
+    catch (e) {
+        console.error("Export IssueV2 PDF error:", e);
+        res.status(500).json({ error: e?.message ?? "unknown error" });
+    }
+});
 // Get projects for an org
-app.get("/orgs/:orgId/projects", async (req, res) => {
+app.get("/api/orgs/:orgId/projects", async (req, res) => {
     try {
         const { orgId } = req.params;
         if (!supabaseAdmin) {
@@ -1973,7 +2420,7 @@ app.get("/orgs/:orgId/projects", async (req, res) => {
     }
 });
 // Get project environments
-app.get("/projects/:projectId/envs", async (req, res) => {
+app.get("/api/projects/:projectId/envs", async (req, res) => {
     try {
         const { projectId } = req.params;
         if (!supabaseAdmin) {
@@ -1991,7 +2438,7 @@ app.get("/projects/:projectId/envs", async (req, res) => {
     }
 });
 // Revoke API key
-app.post("/orgs/:orgId/projects/:projectId/api-keys/:keyId/revoke", async (req, res) => {
+app.post("/api/orgs/:orgId/projects/:projectId/api-keys/:keyId/revoke", async (req, res) => {
     try {
         const { orgId, projectId, keyId } = req.params;
         if (!supabaseAdmin) {
@@ -2028,7 +2475,7 @@ app.post("/orgs/:orgId/projects/:projectId/api-keys/:keyId/revoke", async (req, 
     }
 });
 // Create conversation (ingest transcript)
-app.post("/conversations", async (req, res) => {
+app.post("/api/conversations", async (req, res) => {
     try {
         const context = await getOrgContext(req);
         if (!context || context.error) {
@@ -2078,7 +2525,7 @@ app.post("/conversations", async (req, res) => {
     }
 });
 // Get conversations
-app.get("/conversations", async (req, res) => {
+app.get("/api/conversations", async (req, res) => {
     try {
         const context = await getOrgContext(req);
         if (!context || context.error) {
@@ -2117,7 +2564,7 @@ app.get("/conversations", async (req, res) => {
     }
 });
 // Get evaluations for a conversation
-app.get("/conversations/:conversationId/evaluations", async (req, res) => {
+app.get("/api/conversations/:conversationId/evaluations", async (req, res) => {
     try {
         const context = await getOrgContext(req);
         const { conversationId } = req.params;
@@ -2248,10 +2695,39 @@ app.post("/transcribe", upload.single('audio'), async (req, res) => {
 });
 // Setup integration routes
 setupIntegrationRoutes(app);
+// Setup evaluation search routes FIRST (before /api/evaluations)
+// This ensures /api/evaluations/search matches before the more general /api/evaluations route
+console.log("Registering evaluation search routes...");
+setupEvaluationSearchRoutes(app);
+console.log("Evaluation search routes registered successfully");
 // Setup audit-grade analysis routes
 console.log("Registering audit routes...");
 setupAuditRoutes(app);
 console.log("Audit routes registered successfully");
+// Setup issue workflow routes
+console.log("Registering issue workflow routes...");
+setupIssueWorkflowRoutes(app);
+console.log("Issue workflow routes registered successfully");
+// Setup analytics routes
+console.log("Registering analytics routes...");
+setupAnalyticsRoutes(app);
+console.log("Analytics routes registered successfully");
+// Setup export routes
+console.log("Registering export routes...");
+setupExportRoutes(app);
+console.log("Export routes registered successfully");
+// Setup policy routes
+console.log("Registering policy routes...");
+setupPolicyRoutes(app);
+console.log("Policy routes registered successfully");
+// Setup evidence routes
+console.log("Registering evidence routes...");
+setupEvidenceRoutes(app);
+console.log("Evidence routes registered successfully");
+// Setup admin scoring profiles routes
+console.log("Registering admin scoring profiles routes...");
+setupScoringProfilesRoutes(app);
+console.log("Admin scoring profiles routes registered successfully");
 // Setup ingestion routes (normalization pipeline)
 console.log("Registering ingestion routes...");
 registerIngestEndpoints(app);

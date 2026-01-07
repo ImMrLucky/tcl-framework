@@ -146,20 +146,33 @@ export function computeDestructiveClaims(args) {
                 detail: "Claim is contradicted by spectral analysis"
             });
         }
-        destructiveClaims.push({
-            claimId: claim.id,
-            text: claim.text,
-            importance,
-            truthState,
-            truthValue,
-            nodeBlameNorm,
-            contradictionIncident: conNorm,
-            confidenceOverall: confOverall,
-            groundingScore: gndScore,
-            policySeverity: policySev,
-            policyRuleIds: ruleIds,
-            reasons
-        });
+        // Only include claims that have actual issues (reasons to be flagged)
+        // A claim is "destructive" if:
+        // 1. It has non-zero importance AND at least one reason, OR
+        // 2. It has a policy violation, OR
+        // 3. It's contradicted or ungrounded
+        const hasActualIssue = reasons.length > 0 ||
+            policySev !== "none" ||
+            truthState === "Contradicted" ||
+            truthState === "Ungrounded" ||
+            nodeBlameNorm > 0.1 ||
+            conNorm > 0.1;
+        if (hasActualIssue || importance > 0.1) {
+            destructiveClaims.push({
+                claimId: claim.id,
+                text: claim.text,
+                importance,
+                truthState,
+                truthValue,
+                nodeBlameNorm,
+                contradictionIncident: conNorm,
+                confidenceOverall: confOverall,
+                groundingScore: gndScore,
+                policySeverity: policySev,
+                policyRuleIds: ruleIds,
+                reasons
+            });
+        }
     }
     // Sort by importance descending
     destructiveClaims.sort((a, b) => b.importance - a.importance);

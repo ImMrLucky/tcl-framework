@@ -13,12 +13,12 @@ import { getOrgContext } from "../auth-context.js";
 // =============================================================================
 export function registerIngestEndpoints(app) {
     /**
-     * POST /ingest
+     * POST /api/ingest
      *
      * Ingest a file and normalize it to the canonical format.
      * Optionally runs evaluation immediately.
      */
-    app.post("/ingest", async (req, res) => {
+    app.post("/api/ingest", async (req, res) => {
         try {
             const context = await getOrgContext(req);
             if (!context || context.error) {
@@ -65,6 +65,49 @@ export function registerIngestEndpoints(app) {
             if (!supabaseAdmin) {
                 return res.status(503).json({ error: "Database not configured" });
             }
+            // Ensure project exists - create default if missing
+            let projectId = context.projectId;
+            if (!projectId || projectId.trim() === '') {
+                // Check if org has any projects
+                const { data: existingProjects } = await supabaseAdmin
+                    .from('projects')
+                    .select('id')
+                    .eq('org_id', context.orgId)
+                    .limit(1);
+                if (existingProjects && existingProjects.length > 0) {
+                    projectId = existingProjects[0].id;
+                }
+                else {
+                    // Create default project
+                    const { data: newProject, error: projectError } = await supabaseAdmin
+                        .from('projects')
+                        .insert({
+                        org_id: context.orgId,
+                        name: 'Default Project',
+                        slug: 'default',
+                        is_default: true,
+                        description: 'Default project created automatically'
+                    })
+                        .select('id')
+                        .single();
+                    if (projectError || !newProject) {
+                        console.error("Failed to create default project:", projectError);
+                        return res.status(500).json({
+                            error: "Failed to create default project",
+                            details: projectError?.message || "Unknown error"
+                        });
+                    }
+                    projectId = newProject.id;
+                    // Create default environment for the project
+                    await supabaseAdmin
+                        .from('project_envs')
+                        .insert({
+                        project_id: projectId,
+                        env: 'sandbox',
+                        limits: { evaluations_per_month: 1000, conversations_per_month: 500 }
+                    });
+                }
+            }
             // Create or get conversation
             let conversationId = body.conversationId;
             if (!conversationId) {
@@ -77,7 +120,7 @@ export function registerIngestEndpoints(app) {
                     .from("conversations")
                     .insert({
                     org_id: context.orgId,
-                    project_id: context.projectId || null,
+                    project_id: projectId,
                     env: context.env || "production",
                     external_id: null,
                     title: body.title || `Ingested: ${body.filename}`,
@@ -114,7 +157,7 @@ export function registerIngestEndpoints(app) {
                 .from("conversation_artifacts")
                 .insert({
                 org_id: context.orgId,
-                project_id: context.projectId || null,
+                project_id: projectId,
                 env: context.env || "production",
                 conversation_id: conversationId,
                 artifact_type: artifactType,
@@ -169,12 +212,12 @@ export function registerIngestEndpoints(app) {
         }
     });
     /**
-     * POST /ingest/preview
+     * POST /api/ingest/preview
      *
      * Preview normalization without saving to database.
      * Useful for showing user the parsed result before confirming.
      */
-    app.post("/ingest/preview", async (req, res) => {
+    app.post("/api/ingest/preview", async (req, res) => {
         try {
             const context = await getOrgContext(req);
             if (!context || context.error) {

@@ -25,8 +25,11 @@ export declare function classifyClaimKind(claimText: string, speakerLabel?: stri
  */
 export declare function extractKeywords(text: string, config?: ScoringConfig): Set<string>;
 /**
- * Calculate topic overlap between two claims using Jaccard similarity.
+ * Calculate topic overlap between two claims using NLP-enhanced similarity.
  * Returns 0-1 where 1 = identical topics.
+ *
+ * IMPROVED: Uses synonym-aware tokenization and entity matching
+ * instead of simple keyword Jaccard.
  */
 export declare function calculateTopicOverlap(claimA: string | {
     text: string;
@@ -38,17 +41,33 @@ export interface ContradictionGateResult {
     contradictionType: ContradictionType;
     reasonCodes: string[];
     overlapScore: number;
+    /**
+     * Polarity/opposition signal strength (0-1)
+     * Only set if shouldCreate is true
+     */
+    polarityOppositionScore?: number;
+    /**
+     * Whether timeframe overlap check passed (if applicable)
+     */
+    timeframeOverlap?: boolean;
 }
 /**
  * Determine if two claims should be considered for contradiction.
- * This is the main fix for false contradictions.
+ * Enhanced version with all gating requirements from spec.
  *
  * Returns:
  * - shouldCreate: false if this pair should NOT create any contradiction edge
  * - contradictionType: "direct" | "topic_mismatch" | "low_overlap" | "needs_review"
  * - reasonCodes: why this decision was made
+ * - overlapScore: topic overlap score (0-1)
+ * - polarityOppositionScore: how strongly one negates the other (0-1)
  */
-export declare function shouldConsiderContradiction(claimA: Claim, claimB: Claim, config?: ScoringConfig): ContradictionGateResult;
+export declare function shouldConsiderContradiction(claimA: Claim, claimB: Claim, config?: ScoringConfig & {
+    thresholds?: {
+        topicOverlapThreshold?: number;
+        polarityOppositionThreshold?: number;
+    };
+}): ContradictionGateResult;
 /**
  * Classify all claims in an array, adding claimKind field.
  */

@@ -1,7 +1,7 @@
-import { extractClaims } from "./claim_extractor.js";
+import { extractClaims, extractClaimsWithTypes } from "./claim_extractor.js";
 import { attachEvidenceAndFindViolations } from "./evidence.js";
 import { findLogicViolations } from "./logic.js";
-import { blendScores, shouldRefuse } from "./scoring.js";
+import { blendScores, assessRunQuality } from "./scoring.js";
 import { collectFailingClaimIds, repairOnce } from "./repair.js";
 import { buildClaimGraph, HttpNliScorer, TokenHeuristicScorer } from "./graph/edge_builder.js";
 import { TransformersNliScorer } from "./graph/transformers_scorer.js";
@@ -15,13 +15,33 @@ import { generateSourcesFromRawTranscript, retrieveEvidenceForClaims } from "./e
 import { startPipelineTimer } from "./pipeline_timer.js";
 // NEW: Deterministic Truth Engine (replaces NLI)
 import { runTruthEngine, toLegacyGraph, buildIssuesFromGraph } from "./engine/index.js";
-import { generateReproducibilityMetadata } from "./analysis/reproducibility.js";
+import { generateReproducibilityMetadata, getEngineVersion } from "./analysis/reproducibility.js";
+import { computeTruthFromGraph } from "./analysis/compute-truth-from-graph.js";
+import { getEngineConfig } from "./config/engine-config.js";
+// NEW: Unified Graph Builder (3-stage pipeline with subject slots)
+import { buildGraph as buildUnifiedGraph, toSpectralInput, setTemplateConfig } from "./graph/graph-builder.js";
 // Cache for scorer to avoid re-initialization on every request
 let cachedScorer = null;
 const SCORER_CACHE_TTL = 5 * 60 * 1000; // 5 minutes
-// Feature flag: Use deterministic Truth Engine instead of NLI
-// Set via environment variable or options
-const USE_TRUTH_ENGINE = process.env.TCL_USE_TRUTH_ENGINE === "true";
+function getGraphBuilderMode() {
+    const envMode = process.env.TCL_GRAPH_BUILDER?.toLowerCase();
+    // Explicit mode selection
+    if (envMode === "legacy")
+        return "legacy";
+    if (envMode === "truth-engine" || envMode === "truth_engine")
+        return "truth-engine";
+    if (envMode === "unified")
+        return "unified";
+    // Legacy environment variables for backward compatibility
+    if (process.env.TCL_USE_TRUTH_ENGINE === "true")
+        return "truth-engine";
+    if (process.env.TCL_USE_LEGACY_GRAPH === "true")
+        return "legacy";
+    // DEFAULT: Unified Graph Builder (produces best edges for spectral)
+    return "unified";
+}
+const GRAPH_BUILDER_MODE = getGraphBuilderMode();
+console.log(`📊 Graph Builder Mode: ${GRAPH_BUILDER_MODE}`);
 async function callSpectralService(spectralServiceUrl, claims, supports, contradictions, groundedClaimIds) {
     const url = `${spectralServiceUrl.replace(/\/$/, "")}/spectral/score`;
     console.log(`Spectral request URL: ${url}`);
@@ -85,17 +105,412 @@ async function callSpectralAnalyzeService(spectralServiceUrl, claims, supports, 
     });
     return result;
 }
+// =============================================================================
+// UNIFIED GRAPH PATH (DEFAULT - Best for spectral.py)
+// =============================================================================
+// Uses the 3-stage pipeline with Subject Slots:
+// 1. Candidate Generation (per-claim budgets)
+// 2. Edge Classification (slot-first gating)
+// 3. Weight Calibration
+// =============================================================================
+async function runUnifiedGraphPath(input, timer, validationStartTime, adapter) {
+    const { question, answer, sources: externalSources, options } = input;
+    timer.start('unified_graph');
+    console.log("🏗️ Using Unified Graph Builder (slot-first edges)");
+    // Determine the transcript
+    const transcript = answer && answer.trim().length > 0 ? answer : question;
+    // Set template based on content or options
+    const templateId = options?.template ?? detectTemplate(transcript);
+    setTemplateConfig(templateId);
+    console.log(`📋 Template: ${templateId}`);
+    // Extract claims first using the existing extractor
+    timer.start('claim_extraction');
+    const isCallTranscript = transcript.includes('Agent:') || transcript.includes('Customer:') ||
+        transcript.includes('AGENT:') || transcript.includes('CUSTOMER:');
+    // extractClaimsWithTypes is synchronous and returns { claims, allItems, stats }
+    const extractResult = extractClaimsWithTypes(transcript);
+    const extractedClaims = extractResult.claims;
+    timer.end('claim_extraction');
+    console.log(`📝 Extracted ${extractedClaims.length} claims (${timer.duration('claim_extraction')}ms)`);
+    if (extractedClaims.length === 0) {
+        console.warn("⚠️ No claims extracted, returning empty result");
+        timer.end('unified_graph');
+        return createEmptyResult(input, timer, validationStartTime);
+    }
+    // Convert to raw claims format for graph builder
+    const rawClaims = extractedClaims.map((c, i) => ({
+        id: c.id || `c${i}`,
+        text: c.text,
+        speakerRole: normalizeSpeaker(c.meta?.speaker),
+        span: {
+            turnId: `turn-${c.meta?.turnIndex ?? i}`,
+            startChar: 0,
+            endChar: c.text.length
+        },
+        modality: undefined, // Will be detected by graph builder
+        meta: c.meta,
+    }));
+    // Build the unified graph
+    // CRITICAL: Pass transcript so graph-builder can create transcript EvidenceNodes for grounding
+    timer.start('graph_build');
+    const graphResult = buildUnifiedGraph({
+        transcript, // ✅ Required for grounding edges
+        rawClaims,
+        evidence: externalSources?.map(s => ({
+            id: s.id,
+            kind: 'document',
+            content: s.text,
+        })),
+        template: templateId,
+        conversationId: options?.conversationId,
+    });
+    timer.end('graph_build');
+    console.log(`🔗 Graph built: ${graphResult.metrics.totalEdges} edges in ${timer.duration('graph_build')}ms`);
+    console.log(`   Status: ${graphResult.graph.diagnostics.status}`);
+    if (graphResult.graph.diagnostics.reasons.length > 0) {
+        console.log(`   Reasons: ${graphResult.graph.diagnostics.reasons.join(', ')}`);
+    }
+    // Build grounding lookup: claimId -> grounding edges
+    const groundingByClaimId = new Map();
+    for (const g of graphResult.legacy.grounding) {
+        const existing = groundingByClaimId.get(g.claimId) || [];
+        existing.push(g);
+        groundingByClaimId.set(g.claimId, existing);
+    }
+    // Convert claims to the expected Claim type WITH evidenceRefs from grounding
+    const claims = graphResult.graph.nodes.claims.map(c => {
+        const claimGrounding = groundingByClaimId.get(c.id) || [];
+        // Build evidenceRefs from grounding edges
+        const evidenceRefs = claimGrounding.map(g => {
+            // Find the evidence node to get the quote
+            const evidenceNode = graphResult.graph.nodes.evidence.find(e => e.id === g.sourceId);
+            const turnMatch = g.sourceId.match(/turn-(\d+)/);
+            const turnIndex = turnMatch ? parseInt(turnMatch[1], 10) : undefined;
+            return {
+                sourceId: g.sourceId,
+                quote: g.quote || evidenceNode?.content?.substring(0, 200),
+                turnIndex,
+                weight: g.weight,
+            };
+        });
+        // Get truth state from derivation
+        const truthResult = graphResult.truthDerivation.results.find(r => r.claimId === c.id);
+        return {
+            id: c.id,
+            text: c.text,
+            confidence: c.confidence ?? 0.7,
+            evidence: [], // Legacy field
+            evidenceRefs, // NEW: Actual grounding refs
+            truthState: truthResult?.truthState,
+            meta: {
+                speaker: c.speakerRole === 'agent' ? 'Agent' : c.speakerRole === 'customer' ? 'Customer' : undefined,
+                turnIndex: parseInt(c.span.turnId.replace(/[^\d]/g, ''), 10) || 0,
+            },
+            claimKind: c.modality === 'question' ? 'question' :
+                c.modality === 'promise' ? 'promise' :
+                    c.modality === 'deny' ? 'assertion' : 'assertion',
+        };
+    });
+    // Call spectral with the unified graph
+    const spectralEnabled = options?.spectral !== false;
+    const spectralServiceUrl = options?.spectralServiceUrl ?? process.env.TCL_SPECTRAL_URL ?? "";
+    let spectral;
+    let coherenceScore = null;
+    // Check grounding status BEFORE calling spectral
+    const groundingEdgeCount = graphResult.legacy.grounding.length;
+    const hasRealGrounding = groundingEdgeCount > 0;
+    let spectralDegraded = false;
+    let spectralDegradedReason = null;
+    if (!hasRealGrounding) {
+        console.warn(`⚠️ No grounding edges created. Marking as DEGRADED.`);
+        console.warn(`   Transcript evidence nodes: ${graphResult.graph.nodes.evidence.filter(e => e.evidenceKind === 'transcript').length}`);
+        console.warn(`   Grounding candidates processed: ${graphResult.metrics.candidateGeneration?.totalCandidatesGenerated ?? 'unknown'}`);
+        spectralDegraded = true;
+        spectralDegradedReason = 'NO_GROUNDING_EDGES';
+        // Update graph diagnostics to reflect degraded status
+        if (graphResult.graph.diagnostics.status === 'OK') {
+            graphResult.graph.diagnostics.status = 'DEGRADED';
+        }
+        if (!graphResult.graph.diagnostics.reasons.includes('NO_GROUNDING_EDGES')) {
+            graphResult.graph.diagnostics.reasons.push('NO_GROUNDING_EDGES');
+        }
+    }
+    if (spectralEnabled && spectralServiceUrl && claims.length > 0) {
+        timer.start('spectral');
+        try {
+            const spectralInput = toSpectralInput(graphResult);
+            // Use ONLY real grounded claims - NO synthetic grounding
+            const groundedForSpectral = spectralInput.grounded;
+            if (groundedForSpectral.length === 0) {
+                // Log warning but DO NOT fabricate grounding
+                console.warn(`⚠️ Spectral: 0 grounded claims. Results may be less meaningful.`);
+                console.warn(`   Run will proceed with degraded quality indicator.`);
+            }
+            else {
+                console.log(`📌 Spectral: ${groundedForSpectral.length} claims grounded from transcript`);
+            }
+            spectral = await callSpectralAnalyzeService(spectralServiceUrl, spectralInput.claims, spectralInput.supports, spectralInput.contradictions, groundedForSpectral, {});
+            coherenceScore = spectral.coherenceScore;
+            // Mark spectral as degraded if no grounding
+            if (spectralDegraded) {
+                spectral.degraded = true;
+                spectral.degradedReason = spectralDegradedReason;
+            }
+            timer.end('spectral');
+            console.log(`✅ Spectral: coherence=${coherenceScore}${spectralDegraded ? ' (DEGRADED)' : ''} (${timer.duration('spectral')}ms)`);
+        }
+        catch (error) {
+            timer.end('spectral');
+            console.error("❌ Spectral error:", error?.message);
+            spectral = { spectralSkipped: true, debugReason: `spectral_error: ${error?.message}` };
+        }
+    }
+    timer.end('unified_graph');
+    // Build the result
+    const totalLatency = Date.now() - validationStartTime;
+    // Compute scores from graph result
+    const truthScore = graphResult.truthScores.auditTruth;
+    const consistencyScore = graphResult.truthScores.consistency;
+    const overall = blendScores(truthScore, consistencyScore, coherenceScore);
+    // Assess run quality
+    const hasExternalEvidence = (externalSources?.length ?? 0) > 0;
+    const runQualityResult = assessRunQuality(overall, truthScore, consistencyScore, {
+        claimsCount: claims.length,
+        supportsCount: graphResult.legacy.supports.length,
+        contradictionsCount: graphResult.legacy.contradictions.length,
+        groundingCount: graphResult.legacy.grounding.length,
+        hasExternalEvidence, // NEW: Pass whether external docs were provided
+    }, options?.thresholds);
+    const { refusal } = runQualityResult;
+    // Compute destructive claims from spectral
+    const destructiveClaims = spectral?.nodeBlameNorm
+        ? computeDestructiveClaims({
+            claims,
+            contradictions: graphResult.legacy.contradictions,
+            grounding: graphResult.legacy.grounding,
+            customRuleViolations: [],
+            spectral,
+        })
+        : [];
+    return {
+        answer: input.answer,
+        refusal,
+        scores: {
+            truth: truthScore,
+            consistency: consistencyScore,
+            coherence: coherenceScore,
+            overall
+        },
+        enhancedScores: {
+            groundednessScore: graphResult.truthScores.transcriptGrounding,
+            verificationScore: graphResult.truthScores.externalVerification,
+            consistencyScore: graphResult.truthScores.consistency,
+            coherenceScore,
+            truth: truthScore,
+            consistency: consistencyScore,
+            coherence: coherenceScore,
+            overall,
+        },
+        summaryStats: {
+            totalClaims: claims.length,
+            groundedClaims: graphResult.truthDerivation.summary.unverified + graphResult.truthDerivation.summary.supported,
+            verifiedClaims: graphResult.truthDerivation.summary.supported,
+            directContradictions: graphResult.legacy.contradictions.length,
+            needsReviewCount: destructiveClaims.length,
+            hasExternalEvidence: (externalSources?.length ?? 0) > 0,
+        },
+        scorerId: 'unified-graph-v1',
+        latency: totalLatency,
+        engineVersion: getEngineVersion(),
+        report: {
+            claims,
+            violations: [],
+            missingEvidence: [],
+            contradictions: graphResult.legacy.contradictions.map(c => ({
+                claimA: c.claimA,
+                claimB: c.claimB,
+                reason: `Contradiction with weight ${c.weight.toFixed(2)}`,
+            })),
+            spectral,
+            graph: {
+                supports: graphResult.legacy.supports,
+                contradictions: graphResult.legacy.contradictions,
+                grounding: graphResult.legacy.grounding,
+                // FIX D: Add grounded claim IDs for consistency
+                grounded: graphResult.legacy.grounding.map(g => g.claimId),
+                groundedClaimIds: graphResult.legacy.grounding.map(g => g.claimId),
+                debug: {
+                    numClaims: claims.length,
+                    numSources: externalSources?.length ?? 0,
+                    transcriptEvidenceNodes: graphResult.graph.nodes.evidence.filter(e => e.evidenceKind === 'transcript').length,
+                    annEnabled: false,
+                    cacheEnabled: false,
+                    spectralEnabled,
+                    spectralDegraded,
+                    spectralDegradedReason: spectralDegradedReason ?? undefined,
+                    graphBuilderMode: 'unified',
+                    graphStatus: graphResult.graph.diagnostics.status,
+                    graphReasons: graphResult.graph.diagnostics.reasons,
+                    supportThreshold: 0.65, // From template config
+                    contradictionThreshold: 0.70, // From template config
+                    groundingThreshold: 0.60, // From template config
+                    // Candidate generation stats
+                    pairsGenerated: graphResult.metrics.candidateGeneration?.totalCandidatesGenerated ?? 0,
+                    claimsWithZeroCandidates: graphResult.metrics.candidateGeneration?.claimsWithZeroCandidates ?? 0,
+                    // Edge classification stats (NOT just scoring - this is where gating happens)
+                    pairsScored: graphResult.metrics.edgeClassification?.candidatesProcessed ?? 0,
+                    edgesCreated: graphResult.metrics.edgeClassification?.edgesCreated ?? 0,
+                    // Rejection breakdown (WHY pairs were filtered in edge-classification.ts)
+                    rejectionBreakdown: {
+                        bySlotGating: graphResult.metrics.edgeClassification?.rejectedBySlotGating ?? 0,
+                        byTopicGating: graphResult.metrics.edgeClassification?.rejectedByTopicGating ?? 0,
+                        byPolarityGating: graphResult.metrics.edgeClassification?.rejectedByPolarityGating ?? 0,
+                        byThreshold: graphResult.metrics.edgeClassification?.rejectedByThreshold ?? 0,
+                    },
+                    // Sample of first 10 rejected pairs for debugging
+                    sampleRejections: graphResult.metrics.edgeClassification?.sampleRejections?.slice(0, 10) ?? [],
+                    edges: {
+                        supportsAdded: graphResult.legacy.supports.length,
+                        contradictionsAdded: graphResult.legacy.contradictions.length,
+                        groundingAdded: graphResult.legacy.grounding.length,
+                    },
+                    model: {
+                        scorerId: 'unified-graph-v1',
+                    },
+                    reasonIfEmptyGraph: graphResult.metrics.totalEdges === 0
+                        ? 'Check sampleRejections for why pairs were filtered; check transcriptEvidenceNodes for grounding'
+                        : null,
+                },
+            },
+            destructiveClaims,
+            suggestions: generateSuggestions(claims, [], // violations
+            graphResult.legacy.contradictions.map(c => ({
+                claimA: c.claimA,
+                claimB: c.claimB,
+                reason: `Contradiction (weight ${c.weight.toFixed(2)})`
+            })), [], // missingEvidence
+            graphResult.legacy.supports, undefined, // customRules
+            undefined, // importanceByClaimId
+            graphResult.legacy.grounding),
+            // Manifest for reproducibility and schema versioning
+            manifest: {
+                schemaVersion: '2.0.0',
+                engineVersion: getEngineVersion(),
+                graphBuilderMode: 'unified',
+                templateId,
+                inputHash: graphResult.graph.meta.inputHash,
+                configHash: graphResult.graph.meta.configHash,
+                timestamp: new Date().toISOString(),
+                // FIX C: Add evidenceMode to manifest
+                evidenceMode: hasExternalEvidence ? 'TRANSCRIPT_PLUS_EXTERNAL' : 'TRANSCRIPT_ONLY',
+                diagnostics: {
+                    status: graphResult.graph.diagnostics.status,
+                    reasons: graphResult.graph.diagnostics.reasons,
+                    transcriptEvidenceNodes: graphResult.graph.nodes.evidence.filter(e => e.evidenceKind === 'transcript').length,
+                    supportsAdded: graphResult.legacy.supports.length,
+                    groundingAdded: graphResult.legacy.grounding.length,
+                    groundedClaimCount: graphResult.legacy.grounding.length,
+                    contradictionsAdded: graphResult.legacy.contradictions.length,
+                    spectralDegraded,
+                    spectralDegradedReason,
+                    // FIX E: Add notes for transcript-only mode
+                    notes: !hasExternalEvidence ? ['TRANSCRIPT_ONLY_NO_EXTERNAL'] : [],
+                },
+                truthDerivationSummary: {
+                    supported: graphResult.truthDerivation.summary.supported,
+                    contradicted: graphResult.truthDerivation.summary.contradicted,
+                    unverified: graphResult.truthDerivation.summary.unverified,
+                    ungrounded: graphResult.truthDerivation.summary.ungrounded,
+                    total: graphResult.truthDerivation.summary.total,
+                },
+            },
+        },
+    };
+}
+// Helper: Detect template from transcript content
+function detectTemplate(transcript) {
+    const lower = transcript.toLowerCase();
+    // Telco indicators
+    if (lower.includes('router') || lower.includes('billing') || lower.includes('plan') ||
+        lower.includes('streaming') || lower.includes('cable') || lower.includes('internet')) {
+        return 'telco';
+    }
+    // Loans indicators
+    if (lower.includes('loan') || lower.includes('mortgage') || lower.includes('interest rate') ||
+        lower.includes('apr') || lower.includes('principal') || lower.includes('underwriting')) {
+        return 'loans';
+    }
+    // AI chat indicators
+    if (lower.includes('assistant') || lower.includes('ai') || lower.includes('chatbot') ||
+        lower.includes('tool call') || lower.includes('api')) {
+        return 'ai_chat';
+    }
+    return 'generic';
+}
+// Helper: Normalize speaker to SpeakerRole
+function normalizeSpeaker(speaker) {
+    if (!speaker)
+        return 'unknown';
+    const lower = speaker.toLowerCase();
+    if (lower === 'agent')
+        return 'agent';
+    if (lower === 'customer')
+        return 'customer';
+    if (lower === 'system')
+        return 'system';
+    if (lower === 'assistant')
+        return 'assistant';
+    return 'unknown';
+}
+// Helper: Create empty result
+function createEmptyResult(input, timer, startTime) {
+    return {
+        answer: input.answer,
+        refusal: false,
+        scores: { truth: null, consistency: null, coherence: null, overall: null },
+        report: {
+            claims: [],
+            violations: [],
+            missingEvidence: [],
+            contradictions: [],
+        },
+    };
+}
 async function validateOnce(input, adapter, startTime) {
     const timer = startPipelineTimer();
     const validationStartTime = startTime ?? Date.now();
     try {
         const { question, answer, sources: externalSources, options } = input;
         // =========================================================================
-        // FAST PATH: Use deterministic Truth Engine instead of NLI
-        // This is 100-1000x faster and more reproducible
+        // GRAPH BUILDER MODE SELECTION
         // =========================================================================
-        const useTruthEngine = options?.useTruthEngine ?? USE_TRUTH_ENGINE;
-        if (useTruthEngine) {
+        // Options can override the default mode:
+        //   options.graphBuilder = "unified" | "legacy" | "truth-engine"
+        //   options.useTruthEngine = true (legacy: equivalent to truth-engine)
+        //   options.useLegacyGraph = true (legacy: equivalent to legacy)
+        // =========================================================================
+        let graphMode = GRAPH_BUILDER_MODE;
+        // Check options for explicit mode override
+        if (options?.graphBuilder) {
+            graphMode = options.graphBuilder;
+        }
+        else if (options?.useTruthEngine) {
+            graphMode = "truth-engine";
+        }
+        else if (options?.useLegacyGraph) {
+            graphMode = "legacy";
+        }
+        console.log(`📊 Using graph builder: ${graphMode}`);
+        // =========================================================================
+        // PATH 1: UNIFIED GRAPH BUILDER (DEFAULT - Best for spectral.py)
+        // =========================================================================
+        if (graphMode === "unified") {
+            return await runUnifiedGraphPath(input, timer, validationStartTime, adapter);
+        }
+        // =========================================================================
+        // PATH 2: TRUTH ENGINE (Deterministic, rule-based)
+        // =========================================================================
+        if (graphMode === "truth-engine") {
             console.log("🚀 Using deterministic Truth Engine (NLI disabled)");
             // Run the Truth Engine
             const transcript = answer && answer.trim().length > 0 ? answer : question;
@@ -239,9 +654,11 @@ async function validateOnce(input, adapter, startTime) {
             };
         }
         // =========================================================================
-        // LEGACY PATH: NLI-based edge generation (slow, ~100s)
+        // PATH 3: LEGACY NLI-based edge generation
+        // Not recommended - uses ML model calls, slower, less reproducible
+        // To use: set TCL_GRAPH_BUILDER=legacy or options.graphBuilder="legacy"
         // =========================================================================
-        console.log("⚠️ Using NLI-based edge generation (slow). Set TCL_USE_TRUTH_ENGINE=true for 100x speedup.");
+        console.log("⚠️ Using Legacy NLI-based edge generation. Consider using unified graph builder (default) for better edges.");
         // Spectral is the CORE VALUE of the app - enabled by default
         // Only disable if explicitly set to false
         const spectralEnabled = options?.spectral !== false;
@@ -401,8 +818,16 @@ async function validateOnce(input, adapter, startTime) {
         // For N claims and M sources:
         //   - Old: N*M grounding pairs + N*(N-1)/2 claim pairs = O(N*M + N²)
         //   - New: N*K grounding pairs + N*K claim pairs = O(N*K) where K << M
-        const MAX_GROUNDING_PAIRS_PER_CLAIM = 10; // Only ground against top 10 sources
-        const MAX_CLAIM_PAIRS = 100; // Limit total claim-to-claim pairs
+        // 
+        // FIX: The old MAX_CLAIM_PAIRS=100 was WAY too low for N=62 claims.
+        // This caused 0 support edges because almost no pairs got scored.
+        // New approach: per-claim budget, not global cap.
+        const MAX_GROUNDING_PAIRS_PER_CLAIM = 15; // Ground against top 15 sources per claim
+        const PAIRS_PER_CLAIM = 10; // Score top 10 claim pairs per claim
+        const numClaims = evidenceRes.claims.length;
+        // Total pairs = N * PAIRS_PER_CLAIM, capped at N*(N-1)/2 (all pairs)
+        const maxPossiblePairs = numClaims > 1 ? (numClaims * (numClaims - 1)) / 2 : 0;
+        const MAX_CLAIM_PAIRS = Math.min(numClaims * PAIRS_PER_CLAIM, maxPossiblePairs, 5000); // Cap at 5000 for very large transcripts
         let graph;
         timer.start('graph_build');
         timer.start('nli_total');
@@ -597,11 +1022,25 @@ async function validateOnce(input, adapter, startTime) {
         else {
             console.log("Spectral disabled in options");
         }
-        // 6) scores - ensure all scores are valid numbers in 0-100 range
-        // Only compute from real data - no fallbacks
-        const truthScore = evidenceRes.truthScore !== undefined
-            ? Math.max(0, Math.min(100, Math.round(evidenceRes.truthScore)))
-            : null; // null if not computed
+        // 6) scores - compute truth score incorporating contradictions
+        // FIX: Use graph-based truth score that incorporates contradictions
+        let truthScore = null;
+        try {
+            const engineConfig = getEngineConfig();
+            const mode = sources && sources.length > 0 ? 'with_external_docs' : 'transcript_only';
+            const graphBasedTruth = computeTruthFromGraph(evidenceRes.claims, uniqueContradictions, graph.supports, graph.grounding, mode);
+            // Use graph-based truth score (incorporates contradictions)
+            if (graphBasedTruth.truth !== undefined && !isNaN(graphBasedTruth.truth)) {
+                truthScore = graphBasedTruth.truth;
+            }
+        }
+        catch (error) {
+            console.warn('Error computing graph-based truth score, falling back:', error);
+        }
+        // Fallback to evidenceRes.truthScore if graph-based computation failed
+        if (truthScore === null && evidenceRes.truthScore !== undefined) {
+            truthScore = Math.max(0, Math.min(100, Math.round(evidenceRes.truthScore)));
+        }
         const pairsScored = graph.debug?.pairsScored || 0;
         const finalConsistencyScore = pairsScored > 0 && consistencyScore !== undefined
             ? Math.max(0, Math.min(100, Math.round(consistencyScore)))
@@ -610,8 +1049,18 @@ async function validateOnce(input, adapter, startTime) {
             ? Math.max(0, Math.min(100, Math.round(coherenceScore)))
             : null; // null if Spectral skipped or failed
         const overall = blendScores(truthScore ?? null, finalConsistencyScore ?? null, finalCoherenceScore);
-        const refusal = shouldRefuse(overall, truthScore ?? null, finalConsistencyScore ?? null, options?.thresholds);
-        console.log(`Final scores: truth=${truthScore}, consistency=${finalConsistencyScore}, coherence=${finalCoherenceScore}, overall=${overall}, refusal=${refusal}`);
+        // Assess run quality with detailed reasons (replaces simple boolean refusal)
+        const hasExternalEvidenceLegacy = (externalSources?.length ?? 0) > 0;
+        const runQuality = assessRunQuality(overall, truthScore ?? null, finalConsistencyScore ?? null, {
+            supportsCount: graph.supports.length,
+            contradictionsCount: uniqueContradictions.length,
+            groundingCount: graph.grounding.length,
+            claimsCount: evidenceRes.claims.length,
+            hasExternalEvidence: hasExternalEvidenceLegacy, // NEW: Pass whether external docs were provided
+        }, options?.thresholds);
+        const refusal = runQuality.refusal; // Legacy compatibility
+        console.log(`Final scores: truth=${truthScore}, consistency=${finalConsistencyScore}, coherence=${finalCoherenceScore}, overall=${overall}`);
+        console.log(`Run quality: status=${runQuality.status}, reasons=${runQuality.degradedReasons.join(', ') || 'none'}`);
         // Calculate latency
         const latency = Date.now() - validationStartTime;
         // Get cache hit rate from graph
@@ -703,7 +1152,11 @@ async function validateOnce(input, adapter, startTime) {
         timer.logSummary();
         const result = {
             answer,
-            refusal,
+            refusal, // Legacy boolean (deprecated)
+            runQuality: {
+                status: runQuality.status,
+                degradedReasons: runQuality.degradedReasons
+            },
             scores: { truth: truthScore, consistency: finalConsistencyScore, coherence: finalCoherenceScore, overall },
             scorerId: scorer.id,
             latency,

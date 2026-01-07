@@ -8,6 +8,7 @@ import { createHash } from 'crypto';
 import { supabaseAdmin } from '../supabase.js';
 import { getOrgContext } from '../auth-context.js';
 import { logAudit } from '../supabase.js';
+import { toIssueDto, toIssueDtoArray } from '../dto/issue.dto.js';
 
 export function setupIssueWorkflowRoutes(app: express.Application) {
   // ============================================================================
@@ -126,63 +127,21 @@ export function setupIssueWorkflowRoutes(app: express.Application) {
           
           const derivedSeverity = deriveSeverityFromScore(computedRiskScore);
           
-          // Derive impact from severity and contradiction presence
-          const deriveImpact = (severity: string, hasContradictions: boolean): 'low' | 'medium' | 'high' => {
-            if (severity === 'high' || (severity === 'medium' && hasContradictions)) return 'high';
-            if (severity === 'medium') return 'medium';
-            return 'low';
-          };
-          
-          const transformedIssue: any = {
+          // Use DTO mapper to ensure no raw object spreading
+          // Preserve computed score if issue doesn't have one
+          const issueWithComputedScore = {
             ...issue,
-            evaluationId: eval_.id,
-            evaluationCreatedAt: eval_.created_at,
-            
-            // Use existing scoring if available, otherwise compute from data
-            severity: issue.severity || derivedSeverity,
-            severityDisplay: issue.severityDisplay || (derivedSeverity === 'high' ? 'high' : derivedSeverity === 'medium' ? 'medium' : 'low'),
-            
-            // Map category from risk.category or use existing
-            category: issue.category || issue.risk?.category || 'evidence',
-            
-            // Map type from what.issueType or use existing
-            type: issue.type || issue.what?.issueType || 'UNVERIFIED_CLAIM',
-            
-            // Derive impact from computed severity and contradictions
-            impact: issue.impact || deriveImpact(derivedSeverity, hasContradictions),
-            
-            // Use computed score if not present
+            // Override score/riskScore if not present (DTO will use these)
             score: issue.score ?? Math.round(computedRiskScore * 100),
             riskScore: issue.riskScore ?? computedRiskScore,
-            
-            // Map what.issueSummary from what.claimSummary or use existing
-            what: {
-              ...issue.what,
-              issueSummary: issue.what?.issueSummary || issue.what?.claimSummary || issue.what?.claimText || '',
-              issueDetail: issue.what?.issueDetail || issue.what?.description || issue.what?.claimText || '',
-              primaryClaimId: issue.what?.primaryClaimId || issue.claimId || '',
-              claimText: issue.what?.claimText || issue.what?.claimSummary || '',
-            },
-            
-            // Ensure verification exists
-            verification: issue.verification || { level: 'NONE', reasonCodes: [] },
-            
-            // Ensure who exists
-            who: issue.who || { speaker: 'UNKNOWN' },
-            
-            // Ensure evidence exists
-            evidence: issue.evidence || { refs: [] },
-            
-            // Ensure compliance exists
-            compliance: issue.compliance || { tags: [], disclaimers: [] },
-            
-            // Ensure audit exists
-            audit: issue.audit || { 
-              createdAt: eval_.created_at, 
-              engineVersion: '', 
-              scorerId: '' 
-            },
+            // Override severity/impact if not present (DTO will use these)
+            severity: issue.severity || derivedSeverity,
+            severityDisplay: issue.severityDisplay || (derivedSeverity === 'high' ? 'high' : derivedSeverity === 'medium' ? 'medium' : 'low'),
+            impact: issue.impact || (derivedSeverity === 'high' || (derivedSeverity === 'medium' && hasContradictions) ? 'high' : derivedSeverity === 'medium' ? 'medium' : 'low'),
           };
+          
+          // Use DTO mapper (explicit field mapping, no spreading)
+          const transformedIssue = toIssueDto(issueWithComputedScore, eval_.id, eval_.created_at);
           
           allIssues.push(transformedIssue);
         }
@@ -891,14 +850,19 @@ export function setupIssueWorkflowRoutes(app: express.Application) {
 
       const workflowMap = new Map(workflows.map((w: any) => [w.issue_id, w]));
 
-      // Enrich issues with workflow data
+      // Enrich issues with workflow data (DTO already includes workflow fields)
       const enrichedIssues = allIssues.map(issue => {
         const workflow = workflowMap.get(issue.issueId) as any;
-        return {
-          ...issue,
-          status: workflow?.status || 'OPEN',
-          assigneeUserId: workflow?.assignee_user_id || null,
-        };
+        // DTO already has status/assigneeUserId fields, just update them
+        if (workflow) {
+          issue.status = workflow.status || 'OPEN';
+          issue.assigneeUserId = workflow.assignee_user_id || null;
+          issue.workflowUpdatedAt = workflow.updated_at || null;
+        } else {
+          issue.status = issue.status || 'OPEN';
+          issue.assigneeUserId = issue.assigneeUserId || null;
+        }
+        return issue;
       });
 
       // Generate pattern keys and group

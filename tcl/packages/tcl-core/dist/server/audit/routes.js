@@ -160,10 +160,11 @@ export function setupAuditRoutes(app) {
             const offset = parseInt(req.query.offset) || 0;
             const env = req.query.env;
             const projectId = req.query.projectId;
-            // Build query
+            // Build query - exclude 'report' field to reduce response size
+            // The 'report' field can be very large (6MB+) and causes Netlify function size limits
             let query = supabaseAdmin
                 .from('evaluations')
-                .select('id, org_id, project_id, env, conversation_id, scores, engine_version, latency_ms, report, created_at', { count: 'exact' })
+                .select('id, org_id, project_id, env, conversation_id, scores, engine_version, latency_ms, created_at', { count: 'exact' })
                 .eq('org_id', context.orgId)
                 .order('created_at', { ascending: false });
             if (env) {
@@ -203,6 +204,7 @@ export function setupAuditRoutes(app) {
                 return res.status(503).json({ error: "Supabase not configured" });
             }
             const { id } = req.params;
+            const mode = req.query.mode; // 'slim' or undefined
             const { data: evaluation, error } = await supabaseAdmin
                 .from('evaluations')
                 .select('*')
@@ -212,7 +214,12 @@ export function setupAuditRoutes(app) {
             if (error) {
                 return res.status(404).json({ error: "Evaluation not found" });
             }
-            res.json({ evaluation });
+            // Use DTO to control response shape
+            const { toEvaluationDto, toEvaluationSlimDto } = await import('../dto/evaluation.dto.js');
+            const dto = mode === 'slim'
+                ? toEvaluationSlimDto(evaluation)
+                : toEvaluationDto(evaluation, true); // Default: include report for backward compatibility
+            res.json({ evaluation: dto });
         }
         catch (e) {
             console.error("Get evaluation error:", e);

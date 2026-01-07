@@ -1,0 +1,94 @@
+{
+  "weights": {
+    "baseWeights": {
+      "impact": 0.55,
+      "verification": 0.30,
+      "confidence": 0.15
+    },
+    "impact": {
+      "low": 0.2,
+      "medium": 0.5,
+      "high": 0.8
+    },
+    "verification": {
+      "EXTERNAL_VERIFIED": 1.0,
+      "TRANSCRIPT_ONLY": 0.45,
+      "NONE": 0.20
+    },
+    "disputeBoostPoints": 6,
+    "contradictionBoostPoints": 3,
+    "commitmentBoostPoints": 4,
+    "escalationBoostPoints": 8,
+    "regulatedTemplateBoostPoints": 4,
+    "disputeBoost": 0.3,
+    "contradictionBoost": 0.4,
+    "commitmentBoost": 0.35,
+    "escalationBoost": 0.5,
+    "regulatedTemplateBoost": 0.25
+  },
+  "caps": {
+    "transcriptOnlyMaxSeverityDisplay": "medium",
+    "transcriptOnlyHighExceptions": {
+      "allowIfEscalation": true,
+      "allowIfStrictContradiction": true,
+      "allowIfDisputedCommitment": true
+    }
+  },
+  "contradiction": {
+    "requireSameSlotType": true,
+    "requireSameEntityKey": true,
+    "requireOppositePolarity": true,
+    "requireSameTopicId": true,
+    "minModelScore": 0.55
+  },
+  "taxonomy": {
+    "refundKeywords": ["refund", "reimburse", "money back", "return payment"],
+    "creditKeywords": ["credit", "adjustment", "promo", "discount", "coupon"],
+    "regulatoryFeeKeywords": ["regulatory fee", "tax", "government fee", "mandatory fee"],
+    "escalationKeywords": [
+      "attorney general",
+      "state attorney",
+      "bbb",
+      "better business bureau",
+      "lawsuit",
+      "sue",
+      "legal action",
+      "chargeback",
+      "dispute charge",
+      "file complaint",
+      "regulatory complaint"
+    ],
+    "commitmentKeywords": [
+      "will",
+      "promise",
+      "guarantee",
+      "commit",
+      "assure",
+      "definitely",
+      "absolutely"
+    ]
+  },
+  "impactMapping": {
+    "CONTRADICTION": "high",
+    "COMMITMENT_INCONSISTENCY": "high",
+    "FEE_DISCLOSURE_RISK": "high",
+    "DATA_INTEGRITY": "high",
+    "POLICY": "medium",
+    "RISK_SIGNAL": "medium",
+    "NUMERIC_MISMATCH": "medium",
+    "UNSUPPORTED_CLAIM": "low",
+    "UNVERIFIED_CLAIM": "low",
+    "UNGROUNDED": "low",
+    "OTHER": "low"
+  },
+  "categoryImpactMapping": {
+    "compliance": "high",
+    "billing": "medium",
+    "disclosure": "high",
+    "data_integrity": "high",
+    "consistency": "medium",
+    "evidence": "low",
+    "other": "low"
+  }
+}
+

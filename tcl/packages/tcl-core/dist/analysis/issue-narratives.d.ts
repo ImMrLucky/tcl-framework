@@ -19,6 +19,8 @@ export interface BuildNarrativesInput {
     spectral?: SpectralReport;
     destructiveClaims?: DestructiveClaim[];
     transcript?: string;
+    /** Evidence mode: TRANSCRIPT_ONLY or TRANSCRIPT_PLUS_EXTERNAL */
+    evidenceMode?: 'TRANSCRIPT_ONLY' | 'TRANSCRIPT_PLUS_EXTERNAL';
 }
 export interface BuildNarrativesOutput {
     narratives: IssueNarrative[];

@@ -34,6 +34,12 @@ export type Claim = {
         span?: string;
         weight?: number;
     }[];
+    evidenceRefs?: Array<{
+        sourceId: string;
+        quote?: string;
+        turnIndex?: number;
+        weight?: number;
+    }>;
     claimKind?: ClaimKind;
     grounding?: ClaimGrounding;
     verification?: ClaimVerification;
@@ -49,7 +55,7 @@ export type Claim = {
         speaker?: string;
         turnIndex?: number;
     };
-    truthState?: "Supported" | "Contradicted" | "Ungrounded" | "Inconclusive";
+    truthState?: "SUPPORTED" | "CONTRADICTED" | "UNVERIFIED" | "UNGROUNDED" | "Supported" | "Contradicted" | "Ungrounded" | "Inconclusive";
     whyFlagged?: {
         reasons: string[];
         evidence: Array<{
@@ -84,6 +90,12 @@ export type ContradictionPair = {
     explanation: string;
     quoteIds: [string, string];
 };
+/** Support basis for a claim - where is it supported from? */
+export type SupportBasis = 'TRANSCRIPT' | 'EXTERNAL' | 'NONE';
+/** Verification level based on available evidence */
+export type VerificationLevel = 'TRANSCRIPT_ONLY' | 'EXTERNALLY_VERIFIED';
+/** Evidence mode for the evaluation run */
+export type EvidenceMode = 'TRANSCRIPT_ONLY' | 'TRANSCRIPT_PLUS_EXTERNAL';
 export type IssueNarrative = {
     issueId: string;
     category: string;
@@ -92,6 +104,10 @@ export type IssueNarrative = {
     severity: "LOW" | "MEDIUM" | "HIGH" | "CRITICAL";
     confidence: "LOW" | "MEDIUM" | "HIGH";
     status: "OPEN" | "RESOLVED" | "DISMISSED";
+    /** Support basis for claims in this issue */
+    supportBasis: SupportBasis;
+    /** Verification level based on available evidence */
+    verificationLevel: VerificationLevel;
     scope: {
         turnRange: [number, number];
         claimIds: string[];
@@ -123,6 +139,119 @@ export type IssueNarrative = {
         rationale: string[];
     };
 };
+export type IssueTypeV2 = "CONTRADICTION" | "UNVERIFIED_CLAIM" | "UNSUPPORTED_CLAIM" | "UNGROUNDED" | "RISK_SIGNAL" | "POLICY" | "NUMERIC_MISMATCH" | "COMMITMENT_INCONSISTENCY" | "FEE_DISCLOSURE_RISK" | "DATA_INTEGRITY" | "OTHER";
+export type IssueCategoryV2 = "evidence" | "consistency" | "compliance" | "billing" | "disclosure" | "data_integrity" | "other";
+export type SeverityV2 = "low" | "medium" | "high" | "critical";
+export type ImpactV2 = "low" | "medium" | "high";
+export type SeverityDisplayV2 = "low" | "medium" | "high";
+export type SpeakerV2 = "AGENT" | "CUSTOMER" | "SYSTEM" | "UNKNOWN";
+export type VerificationLevelV2 = "EXTERNAL_VERIFIED" | "TRANSCRIPT_ONLY" | "NONE";
+export type RecommendedActionType = "NEEDS_EXTERNAL_EVIDENCE" | "QA_REVIEW" | "COACH_AGENT" | "LEGAL_ESCALATION" | "BILLING_FOLLOWUP";
+export interface IssueV2 {
+    issueId: string;
+    issueKey: string;
+    runId: string;
+    conversationId: string;
+    type: IssueTypeV2;
+    category: IssueCategoryV2;
+    severity: SeverityV2;
+    severityDisplay: SeverityDisplayV2;
+    impact: ImpactV2;
+    riskScore: number;
+    score: number;
+    confidence: number;
+    reviewRequired: boolean;
+    verification: {
+        level: VerificationLevelV2;
+        reasonCodes: string[];
+    };
+    scoreBreakdown?: {
+        impactScore: number;
+        verificationScore: number;
+        disputeScore: number;
+        contradictionScore: number;
+        commitmentScore: number;
+        escalationScore: number;
+        templateScore: number;
+        penalties: {
+            transcriptOnlyCapPenalty?: number;
+            [key: string]: number | undefined;
+        };
+    };
+    scoring?: {
+        components: {
+            impact01: number;
+            evidence01: number;
+            signal01: number;
+            category01: number;
+        };
+        weights: {
+            impact: number;
+            evidence: number;
+            signal: number;
+            category: number;
+        };
+        reasons: string[];
+    };
+    severityReason?: string[];
+    capsApplied?: string[];
+    recommendedAction?: {
+        actionType: RecommendedActionType;
+        explanation: string;
+        requiredEvidence?: string[];
+    };
+    who: {
+        speaker: SpeakerV2;
+        turnIndex?: number;
+    };
+    what: {
+        primaryClaimId: string;
+        relatedClaimIds?: string[];
+        claimText?: string;
+        issueSummary: string;
+        issueDetail: string;
+    };
+    evidence: {
+        refs: Array<{
+            sourceType: "TRANSCRIPT" | "POLICY" | "DOC" | "SYSTEM_FACT";
+            sourceId: string;
+            quote: string;
+            weight?: number;
+            turnIndex?: number;
+        }>;
+        edges?: Array<{
+            kind: "grounding" | "support" | "contradiction";
+            claimA: string;
+            claimB?: string;
+            weight: number;
+        }>;
+    };
+    compliance: {
+        tags: string[];
+        impactedPolicies?: Array<{
+            policyId: string;
+            section?: string;
+        }>;
+        legalHoldSuggested?: boolean;
+        disclaimers: string[];
+    };
+    audit: {
+        createdAt: string;
+        engineVersion: string;
+        scorerId: string;
+        modelFingerprint?: any;
+        configHash?: string;
+        inputHash?: string;
+    };
+}
+export interface IssueSummaryV2 {
+    totalIssues: number;
+    byType: Record<IssueTypeV2, number>;
+    bySeverity: Record<SeverityV2, number>;
+    byCategory: Record<IssueCategoryV2, number>;
+    topIssuesCount: number;
+    allIssuesCount: number;
+}
 export type Violation = {
     type: "MISSING_EVIDENCE";
     claimId: string;
@@ -247,6 +376,22 @@ export type ValidationOptions = {
     spectralServiceUrl?: string;
     llmAdapter?: LLMAdapter;
     requireCitations?: boolean;
+    /**
+     * Graph builder mode:
+     * - "unified" (DEFAULT): 3-stage pipeline with Subject Slots
+     *   - Prevents nonsense contradictions via slot matching
+     *   - Config-driven thresholds and gating
+     *   - Best edge quality for spectral.py
+     * - "legacy": NLI-based edge scoring (slower, ML model calls)
+     * - "truth-engine": Deterministic rule-based (no ML, reproducible)
+     */
+    graphBuilder?: 'unified' | 'legacy' | 'truth-engine';
+    /**
+     * Template ID for unified graph builder.
+     * Options: "generic" | "telco" | "loans" | "ai_chat"
+     * Auto-detected from transcript content if not specified.
+     */
+    template?: string;
     nliEndpoint?: string;
     nliApiKey?: string;
     nliModelId?: string;
@@ -361,26 +506,51 @@ export type GraphDebugInfo = {
     numClaims: number;
     numSources: number;
     transcriptSourcesGenerated?: number;
+    transcriptEvidenceNodes?: number;
     annEnabled: boolean;
     cacheEnabled: boolean;
     spectralEnabled: boolean;
-    neighborK: number;
+    spectralDegraded?: boolean;
+    spectralDegradedReason?: string;
+    neighborK?: number;
+    graphBuilderMode?: 'unified' | 'legacy' | 'truth-engine';
+    graphStatus?: 'OK' | 'DEGRADED' | 'FAILED';
+    graphReasons?: string[];
     supportThreshold: number;
     contradictionThreshold: number;
     groundingThreshold: number;
     pairsGenerated: number;
     pairsScored: number;
+    edgesCreated?: number;
+    claimsWithZeroCandidates?: number;
     edges: {
         supportsAdded: number;
         contradictionsAdded: number;
         groundingAdded: number;
     };
-    filtered: {
+    filtered?: {
         belowSupportThreshold: number;
         belowContradictionThreshold: number;
         belowGroundingThreshold: number;
         droppedByMaxEdges: number;
     };
+    /** NEW: Detailed breakdown of WHY pairs were rejected (unified graph builder) */
+    rejectionBreakdown?: {
+        bySlotGating: number;
+        byTopicGating: number;
+        byPolarityGating: number;
+        byThreshold: number;
+    };
+    /** NEW: Sample rejected pairs for debugging */
+    sampleRejections?: Array<{
+        claimA: string;
+        claimB: string;
+        reason: string;
+        slotA: string;
+        slotB: string;
+        textA: string;
+        textB: string;
+    }>;
     model: {
         scorerId: string;
         labelMap?: Record<string, string>;
@@ -394,52 +564,85 @@ export type GraphDebugInfo = {
  * Required for enterprise adoption and compliance.
  */
 export type RunManifest = {
+    /** Schema version for backward compatibility */
+    schemaVersion?: string;
     /** SHA-256 hash of input */
-    inputHash: string;
+    inputHash?: string;
     /** SHA-256 hash of config bundle (scoring + templates + taxonomy) */
-    configHash: string;
+    configHash?: string;
     /** Artifact ID if provided */
     artifactId?: string;
     /** Claim extractor version */
-    claimExtractorVersion: string;
-    /** NLI model ID */
-    nliModelId: string;
-    /** NLI thresholds used */
-    nliThresholds: {
+    claimExtractorVersion?: string;
+    /** NLI model ID (legacy, use graphBuilderMode for unified) */
+    nliModelId?: string;
+    /** NLI thresholds used (legacy) */
+    nliThresholds?: {
         support: number;
         contradiction: number;
         grounding: number;
     };
     /** Embedding model for retrieval */
-    embeddingModel: string;
+    embeddingModel?: string;
     /** Retrieval k (top-k chunks per claim) */
-    retrievalK: number;
+    retrievalK?: number;
     /** Spectral engine version */
     spectralEngineVersion?: string;
     /** Code version (git commit SHA) */
-    codeVersion: string;
+    codeVersion?: string;
     /** Engine version */
-    engineVersion: string;
+    engineVersion?: string;
+    /** Graph builder mode: unified (default) | legacy | truth-engine */
+    graphBuilderMode?: 'unified' | 'legacy' | 'truth-engine';
+    /** Template ID used for unified graph builder */
+    templateId?: string;
+    /** Timestamp */
+    timestamp?: string;
+    /** Legacy: createdAt */
+    createdAt?: string;
+    /** Evidence mode: TRANSCRIPT_ONLY or TRANSCRIPT_PLUS_EXTERNAL */
+    evidenceMode?: EvidenceMode;
     /** Model fingerprint (all model versions used) */
-    modelFingerprint: {
+    modelFingerprint?: {
         nliModel?: string;
         claimExtractor?: string;
         embeddingModel?: string;
         spectralEngine?: string;
         configHash?: string;
     };
-    /** Timestamp */
-    createdAt: string;
-    /** Number of transcript sources generated */
-    transcriptSourcesCount: number;
-    /** Graph health check results */
-    graphHealth: {
+    /** Number of transcript sources generated (legacy) */
+    transcriptSourcesCount?: number;
+    /** Graph health check results (legacy) */
+    graphHealth?: {
         supportEdges: number;
         contradictionEdges: number;
         groundingEdges: number;
         totalEdges: number;
         healthy: boolean;
         reason?: string;
+    };
+    /** NEW: Unified graph builder diagnostics */
+    diagnostics?: {
+        status: 'OK' | 'DEGRADED' | 'FAILED';
+        reasons: string[];
+        transcriptEvidenceNodes: number;
+        supportsAdded: number;
+        groundingAdded: number;
+        /** Count of grounded claims (for consistency check) */
+        groundedClaimCount?: number;
+        contradictionsAdded: number;
+        spectralDegraded?: boolean;
+        spectralDegradedReason?: string | null;
+        /** Notes for transcript-only mode */
+        notes?: string[];
+    };
+    /** NEW: Truth derivation summary from graph */
+    truthDerivationSummary?: {
+        supported: number;
+        contradicted: number;
+        unverified: number;
+        ungrounded: number;
+        total: number;
     };
 };
 export type ValidateOutput = {
@@ -478,6 +681,10 @@ export type ValidateOutput = {
             supports: SupportEdge[];
             contradictions: ContradictionEdge[];
             grounding: GroundingEdge[];
+            /** Grounded claim IDs (for consistency check) */
+            grounded?: string[];
+            /** Alias for grounded (for spectral input) */
+            groundedClaimIds?: string[];
             debug?: GraphDebugInfo;
         };
         reviewItems?: ReviewItem[];

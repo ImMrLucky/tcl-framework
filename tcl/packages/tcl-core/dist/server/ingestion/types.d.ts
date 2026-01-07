@@ -150,7 +150,7 @@ export interface ClaimWithAnchors {
         confidence?: number;
     };
 }
-export type IssueType = "contradiction" | "ungrounded" | "inconsistent_support" | "inconsistent_contradiction" | "needs_review";
+export type IssueType = "contradiction" | "ungrounded" | "unverified" | "inconsistent_support" | "inconsistent_contradiction" | "needs_review";
 export interface IssueDTO {
     /** 1-indexed rank */
     rank: number;

@@ -258,6 +258,7 @@ export function setupAuditRoutes(app: express.Application) {
       }
       
       const { id } = req.params;
+      const mode = req.query.mode as string; // 'slim' or undefined
       
       const { data: evaluation, error } = await supabaseAdmin
         .from('evaluations')
@@ -270,7 +271,13 @@ export function setupAuditRoutes(app: express.Application) {
         return res.status(404).json({ error: "Evaluation not found" });
       }
       
-      res.json({ evaluation });
+      // Use DTO to control response shape
+      const { toEvaluationDto, toEvaluationSlimDto } = await import('../dto/evaluation.dto.js');
+      const dto = mode === 'slim' 
+        ? toEvaluationSlimDto(evaluation)
+        : toEvaluationDto(evaluation, true); // Default: include report for backward compatibility
+      
+      res.json({ evaluation: dto });
     } catch (e: any) {
       console.error("Get evaluation error:", e);
       res.status(500).json({ 
