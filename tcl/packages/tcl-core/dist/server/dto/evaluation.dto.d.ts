@@ -40,6 +40,7 @@ export interface EvaluationDto {
         issues?: any[];
         topIssuesV2?: any[];
         allIssuesV2?: any[];
+        issueSummaryV2?: any;
         claims?: any[];
         graph?: {
             contradictions?: any[];

@@ -8,6 +8,8 @@
  * Always explicitly map fields.
  */
 
+import { computeIssueSummaryV2, isIssueSummaryV2MissingOrIncomplete } from '../issues/issue-summary.js';
+
 export interface EvaluationDto {
   id: string;
   org_id: string;
@@ -43,6 +45,7 @@ export interface EvaluationDto {
     issues?: any[];
     topIssuesV2?: any[];
     allIssuesV2?: any[];
+    issueSummaryV2?: any; // Added for backfill support
     claims?: any[];
     graph?: {
       contradictions?: any[];
@@ -138,6 +141,22 @@ export function toEvaluationDto(
         modelFingerprint: evaluation.report.run.modelFingerprint,
       } : undefined,
     };
+
+    // Backfill issueSummaryV2 if missing or incomplete (read-time backfill for older evaluations)
+    const allIssuesV2 = dto.report.allIssuesV2 || [];
+    if (allIssuesV2.length > 0) {
+      const existingSummary = evaluation.report.issueSummaryV2;
+      if (isIssueSummaryV2MissingOrIncomplete(existingSummary, allIssuesV2.length)) {
+        // Compute summary from actual issues
+        dto.report.issueSummaryV2 = computeIssueSummaryV2(allIssuesV2);
+      } else {
+        // Use existing summary if it's valid
+        dto.report.issueSummaryV2 = existingSummary;
+      }
+    } else if (evaluation.report.issueSummaryV2) {
+      // Keep existing summary even if no issues (for consistency)
+      dto.report.issueSummaryV2 = evaluation.report.issueSummaryV2;
+    }
   }
 
   return dto;

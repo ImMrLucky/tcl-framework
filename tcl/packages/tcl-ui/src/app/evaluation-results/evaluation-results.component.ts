@@ -324,14 +324,28 @@ export class EvaluationResultsComponent implements OnInit {
         this.allIssuesV2 = report.allIssuesV2;
         // Use topIssuesV2 from report, or default to first 10 (not 4)
         this.topIssuesV2 = report.topIssuesV2 || report.allIssuesV2.slice(0, 10);
-        this.issueSummaryV2 = report.issueSummaryV2 || {
-          totalIssues: this.allIssuesV2.length,
-          byType: {},
-          bySeverity: { low: 0, medium: 0, high: 0, critical: 0 },
-          byCategory: {},
-          topIssuesCount: this.topIssuesV2.length,
-          allIssuesCount: this.allIssuesV2.length,
-        };
+        
+        // Defense in depth: compute summary from issues if backend summary is missing/incomplete
+        const existingSummary = report.issueSummaryV2;
+        const issueCount = this.allIssuesV2.length;
+        
+        // Check if summary is missing or incomplete (all zeros but we have issues)
+        const isSummaryMissing = !existingSummary || !existingSummary.bySeverity;
+        const totalSeverityCount = existingSummary?.bySeverity 
+          ? (existingSummary.bySeverity.low || 0) + 
+            (existingSummary.bySeverity.medium || 0) + 
+            (existingSummary.bySeverity.high || 0) + 
+            (existingSummary.bySeverity.critical || 0)
+          : 0;
+        const isSummaryIncomplete = totalSeverityCount === 0 && issueCount > 0;
+        
+        if (isSummaryMissing || isSummaryIncomplete) {
+          // Compute summary from actual issues (frontend fallback)
+          this.issueSummaryV2 = this.computeIssueSummaryV2FromIssues(this.allIssuesV2, this.topIssuesV2.length);
+        } else {
+          // Use backend summary if it's valid
+          this.issueSummaryV2 = existingSummary;
+        }
         
         // Initialize pagination for top issues (use allIssuesV2 so user can see all issues)
         this.updatePaginatedTopIssues();
@@ -359,6 +373,46 @@ export class EvaluationResultsComponent implements OnInit {
     } finally {
       this.loading = false;
     }
+  }
+
+  /**
+   * Compute IssueSummaryV2 from issues array (frontend fallback)
+   * Prefers severityDisplay over severity for display counts
+   */
+  private computeIssueSummaryV2FromIssues(issues: IssueV2[], topIssuesCount: number): any {
+    const byType: Record<string, number> = {};
+    const bySeverity: Record<string, number> = { low: 0, medium: 0, high: 0, critical: 0 };
+    const byCategory: Record<string, number> = {};
+
+    for (const issue of issues) {
+      // Count by type
+      const type = issue.type || 'OTHER';
+      byType[type] = (byType[type] || 0) + 1;
+
+      // Count by category
+      const category = issue.category || 'other';
+      byCategory[category] = (byCategory[category] || 0) + 1;
+
+      // Count by severity - prefer severityDisplay, fall back to severity
+      const severity = (issue.severityDisplay || issue.severity || 'medium') as string;
+      
+      // Normalize to valid severity values
+      if (severity === 'low' || severity === 'medium' || severity === 'high' || severity === 'critical') {
+        bySeverity[severity] = (bySeverity[severity] || 0) + 1;
+      } else {
+        // Unknown severity - count as medium (safe default)
+        bySeverity['medium'] = (bySeverity['medium'] || 0) + 1;
+      }
+    }
+
+    return {
+      totalIssues: issues.length,
+      byType,
+      bySeverity,
+      byCategory,
+      topIssuesCount,
+      allIssuesCount: issues.length,
+    };
   }
 
   /**
