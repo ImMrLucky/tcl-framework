@@ -690,9 +690,31 @@ function createRiskSignalIssue(
 }
 
 /**
- * Generate stable issue ID from runId + issueKey
+ * Generate stable issue ID
+ * 
+ * Formula: hash(templateId + topicId + sortedClaimIds + issueType)
+ * For backwards compatibility, if templateId/topicId not available, use runId + issueKey
  */
-function generateIssueId(runId: string, issueKey: string): string {
+function generateIssueId(
+  runId: string,
+  issueKey: string,
+  templateId?: string,
+  topicId?: string,
+  claimIds?: string[],
+  issueType?: string
+): string {
+  // Use templateId + topicId + sortedClaimIds + issueType if available (V3 contract)
+  if (templateId && topicId && claimIds && issueType) {
+    const sortedClaimIds = [...claimIds].sort().join(',');
+    const stableKey = `${templateId}:${topicId}:${sortedClaimIds}:${issueType}`;
+    const hash = createHash('sha256')
+      .update(stableKey)
+      .digest('hex')
+      .substring(0, 16);
+    return `issue_${hash}`;
+  }
+
+  // Fallback to runId + issueKey (backwards compatibility)
   const hash = createHash('sha256')
     .update(`${runId}:${issueKey}`)
     .digest('hex')
