@@ -1,0 +1,191 @@
+<app-header pageTitle="Integrations"></app-header>
+
+<div class="integrations-container">
+  <div class="integrations-content">
+    <div class="integrations-grid" *ngIf="!loading; else loadingTemplate">
+      <!-- API Access Card -->
+      <mat-card class="integration-card">
+        <mat-card-header>
+          <mat-card-title>
+            <mat-icon>vpn_key</mat-icon>
+            API Access
+          </mat-card-title>
+        </mat-card-header>
+        <mat-card-content>
+          <p>Generate API keys for programmatic access to ProtectQA. Test keys available in Sandbox, production keys require Team+.</p>
+          <div class="card-status" *ngIf="getIntegrationCard('API')">
+            <mat-chip [color]="getStatusColor('CONNECTED')">Active</mat-chip>
+          </div>
+        </mat-card-content>
+        <mat-card-actions>
+          <button 
+            mat-raised-button 
+            color="primary"
+            [routerLink]="getActionRoute('API')">
+            <mat-icon>vpn_key</mat-icon>
+            {{ getActionButtonText('API') }}
+          </button>
+        </mat-card-actions>
+      </mat-card>
+
+      <!-- Webhooks Card -->
+      <mat-card class="integration-card">
+        <mat-card-header>
+          <mat-card-title>
+            <mat-icon>webhook</mat-icon>
+            Webhooks
+          </mat-card-title>
+        </mat-card-header>
+        <mat-card-content>
+          <p>Receive real-time notifications when analyses complete. Test webhooks in Sandbox, production webhooks require Team+.</p>
+          <div class="card-status" *ngIf="getIntegrationCard('WEBHOOKS')?.connection">
+            <mat-chip [color]="getStatusColor(getIntegrationCard('WEBHOOKS')!.connection!.status)">
+              {{ getStatusText(getIntegrationCard('WEBHOOKS')!.connection!.status) }}
+            </mat-chip>
+          </div>
+        </mat-card-content>
+        <mat-card-actions>
+          <button 
+            mat-raised-button 
+            color="primary"
+            [routerLink]="getActionRoute('WEBHOOKS')">
+            <mat-icon>webhook</mat-icon>
+            {{ getActionButtonText('WEBHOOKS') }}
+          </button>
+        </mat-card-actions>
+      </mat-card>
+
+      <!-- Amazon S3 Card -->
+      <mat-card class="integration-card" [class.disabled]="!canAccessFeature('S3') || getIntegrationCard('S3')?.comingSoon">
+        <mat-card-header>
+          <mat-card-title>
+            <mat-icon>storage</mat-icon>
+            Amazon S3
+          </mat-card-title>
+        </mat-card-header>
+        <mat-card-content>
+          <p>Connect to S3 buckets for automatic file ingestion and analysis.</p>
+          <div class="card-status" *ngIf="getIntegrationCard('S3')?.connection">
+            <mat-chip [color]="getStatusColor(getIntegrationCard('S3')!.connection!.status)">
+              {{ getStatusText(getIntegrationCard('S3')!.connection!.status) }}
+            </mat-chip>
+          </div>
+          <div class="coming-soon" *ngIf="getIntegrationCard('S3')?.comingSoon">
+            <mat-chip color="accent">Coming Soon</mat-chip>
+          </div>
+        </mat-card-content>
+        <mat-card-actions>
+          <button 
+            mat-raised-button 
+            color="primary"
+            [disabled]="isDisabled('S3')"
+            [routerLink]="getActionRoute('S3')">
+            <mat-icon>storage</mat-icon>
+            {{ getActionButtonText('S3') }}
+          </button>
+        </mat-card-actions>
+      </mat-card>
+
+      <!-- Google Drive Card -->
+      <mat-card class="integration-card" [class.disabled]="!canAccessFeature('GDRIVE') || getIntegrationCard('GDRIVE')?.comingSoon">
+        <mat-card-header>
+          <mat-card-title>
+            <mat-icon>folder</mat-icon>
+            Google Drive
+          </mat-card-title>
+        </mat-card-header>
+        <mat-card-content>
+          <p>Connect to Google Drive folders for automatic file ingestion and analysis.</p>
+          <div class="card-status" *ngIf="getIntegrationCard('GDRIVE')?.connection">
+            <mat-chip [color]="getStatusColor(getIntegrationCard('GDRIVE')!.connection!.status)">
+              {{ getStatusText(getIntegrationCard('GDRIVE')!.connection!.status) }}
+            </mat-chip>
+          </div>
+          <div class="coming-soon" *ngIf="getIntegrationCard('GDRIVE')?.comingSoon">
+            <mat-chip color="accent">Coming Soon</mat-chip>
+          </div>
+        </mat-card-content>
+        <mat-card-actions>
+          <button 
+            mat-raised-button 
+            color="primary"
+            [disabled]="isDisabled('GDRIVE')"
+            [routerLink]="getActionRoute('GDRIVE')">
+            <mat-icon>folder</mat-icon>
+            {{ getActionButtonText('GDRIVE') }}
+          </button>
+        </mat-card-actions>
+      </mat-card>
+
+      <!-- Dropbox Card -->
+      <mat-card class="integration-card" [class.disabled]="!canAccessFeature('DROPBOX') || getIntegrationCard('DROPBOX')?.comingSoon">
+        <mat-card-header>
+          <mat-card-title>
+            <mat-icon>cloud</mat-icon>
+            Dropbox
+          </mat-card-title>
+        </mat-card-header>
+        <mat-card-content>
+          <p>Connect to Dropbox folders for automatic file ingestion and analysis.</p>
+          <div class="card-status" *ngIf="getIntegrationCard('DROPBOX')?.connection">
+            <mat-chip [color]="getStatusColor(getIntegrationCard('DROPBOX')!.connection!.status)">
+              {{ getStatusText(getIntegrationCard('DROPBOX')!.connection!.status) }}
+            </mat-chip>
+          </div>
+          <div class="coming-soon" *ngIf="getIntegrationCard('DROPBOX')?.comingSoon">
+            <mat-chip color="accent">Coming Soon</mat-chip>
+          </div>
+        </mat-card-content>
+        <mat-card-actions>
+          <button 
+            mat-raised-button 
+            color="primary"
+            [disabled]="isDisabled('DROPBOX')"
+            [routerLink]="getActionRoute('DROPBOX')">
+            <mat-icon>cloud</mat-icon>
+            {{ getActionButtonText('DROPBOX') }}
+          </button>
+        </mat-card-actions>
+      </mat-card>
+
+      <!-- SharePoint Card -->
+      <mat-card class="integration-card" [class.disabled]="!canAccessFeature('SHAREPOINT') || getIntegrationCard('SHAREPOINT')?.comingSoon">
+        <mat-card-header>
+          <mat-card-title>
+            <mat-icon>business</mat-icon>
+            Microsoft SharePoint
+          </mat-card-title>
+        </mat-card-header>
+        <mat-card-content>
+          <p>Connect to SharePoint sites for automatic file ingestion and analysis. Enterprise only.</p>
+          <div class="card-status" *ngIf="getIntegrationCard('SHAREPOINT')?.connection">
+            <mat-chip [color]="getStatusColor(getIntegrationCard('SHAREPOINT')!.connection!.status)">
+              {{ getStatusText(getIntegrationCard('SHAREPOINT')!.connection!.status) }}
+            </mat-chip>
+          </div>
+          <div class="coming-soon" *ngIf="getIntegrationCard('SHAREPOINT')?.comingSoon">
+            <mat-chip color="accent">Coming Soon</mat-chip>
+          </div>
+        </mat-card-content>
+        <mat-card-actions>
+          <button 
+            mat-raised-button 
+            [color]="planTier === 'ENTERPRISE' ? 'primary' : 'accent'"
+            [disabled]="isDisabled('SHAREPOINT')"
+            [routerLink]="getActionRoute('SHAREPOINT')">
+            <mat-icon>business</mat-icon>
+            {{ getActionButtonText('SHAREPOINT') }}
+          </button>
+        </mat-card-actions>
+      </mat-card>
+    </div>
+
+    <ng-template #loadingTemplate>
+      <div class="loading-state">
+        <mat-spinner diameter="50"></mat-spinner>
+        <p>Loading integrations...</p>
+      </div>
+    </ng-template>
+  </div>
+</div>
+

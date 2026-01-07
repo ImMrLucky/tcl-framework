@@ -5,6 +5,7 @@ export interface OrgContext {
     env: string;
     userId?: string;
     role?: string;
+    apiKeyMode?: 'SANDBOX' | 'PROD';
     error?: string;
 }
 /**

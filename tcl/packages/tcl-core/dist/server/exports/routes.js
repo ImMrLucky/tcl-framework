@@ -5,13 +5,16 @@
 import { supabaseAdmin } from '../supabase.js';
 import { getOrgContext } from '../auth-context.js';
 import { generateAuditPack } from './audit-pack.js';
+import { requireCapability } from '../plans/capability-middleware.js';
+import { Capability } from '../plans/capabilities.js';
 // Store pack status in memory (in production, use Redis or database)
 const packStatus = new Map();
 export function setupExportRoutes(app) {
     // ============================================================================
     // POST /api/exports/audit-pack - Generate audit pack
     // ============================================================================
-    app.post('/api/exports/audit-pack', async (req, res) => {
+    // Requires EXPORT_JSON capability (audit pack includes JSON)
+    app.post('/api/exports/audit-pack', requireCapability(Capability.EXPORT_JSON), async (req, res) => {
         try {
             const context = await getOrgContext(req);
             if (!context || context.error) {

@@ -1,0 +1,191 @@
+<app-header pageTitle="Account & Billing"></app-header>
+
+<div class="account-container">
+  <div class="account-content">
+    <!-- Current Plan Summary -->
+    <mat-card class="plan-summary-card" *ngIf="planContext">
+      <mat-card-header>
+        <mat-card-title>Current Plan</mat-card-title>
+      </mat-card-header>
+      <mat-card-content>
+        <div class="plan-info">
+          <mat-chip [color]="getPlanTierColor(planContext.tier)" class="plan-chip-large">
+            {{ getPlanTierDisplay(planContext.tier) }}
+          </mat-chip>
+          <div class="plan-status">
+            Status: <strong>{{ planContext.status }}</strong>
+          </div>
+        </div>
+
+        <!-- Usage Limits -->
+        <div class="usage-section">
+          <h3>Usage Today</h3>
+          <div class="usage-item">
+            <div class="usage-label">
+              <span>Analysis Runs</span>
+              <span class="usage-value">
+                {{ planContext.remainingToday.analysisRuns }} / 
+                {{ planService.isUnlimited('analysisRunsPerDay') ? 'Unlimited' : planContext.limits.analysisRunsPerDay }}
+              </span>
+            </div>
+            <mat-progress-bar 
+              mode="determinate" 
+              [value]="getRemainingPercentage('analysisRuns')"
+              [color]="getRemainingPercentage('analysisRuns') < 20 ? 'warn' : 'primary'">
+            </mat-progress-bar>
+          </div>
+
+          <div class="usage-item">
+            <div class="usage-label">
+              <span>API Calls</span>
+              <span class="usage-value">
+                {{ planContext.remainingToday.apiCalls }} / 
+                {{ planService.isUnlimited('apiCallsPerDay') ? 'Unlimited' : planContext.limits.apiCallsPerDay }}
+              </span>
+            </div>
+            <mat-progress-bar 
+              mode="determinate" 
+              [value]="getRemainingPercentage('apiCalls')"
+              [color]="getRemainingPercentage('apiCalls') < 20 ? 'warn' : 'primary'">
+            </mat-progress-bar>
+          </div>
+
+          <div class="usage-item">
+            <div class="usage-label">
+              <span>File Uploads</span>
+              <span class="usage-value">
+                {{ planContext.remainingToday.uploads }} / 
+                {{ planService.isUnlimited('uploadsPerDay') ? 'Unlimited' : planContext.limits.uploadsPerDay }}
+              </span>
+            </div>
+            <mat-progress-bar 
+              mode="determinate" 
+              [value]="getRemainingPercentage('uploads')"
+              [color]="getRemainingPercentage('uploads') < 20 ? 'warn' : 'primary'">
+            </mat-progress-bar>
+          </div>
+        </div>
+
+        <!-- Limits -->
+        <div class="limits-section">
+          <h3>Plan Limits</h3>
+          <table class="limits-table">
+            <tr>
+              <td>Max Files per Analysis</td>
+              <td>{{ planContext.limits.maxFilesPerAnalysis === -1 ? 'Unlimited' : planContext.limits.maxFilesPerAnalysis }}</td>
+            </tr>
+            <tr>
+              <td>Max File Size</td>
+              <td>{{ formatBytes(planContext.limits.maxBytesPerFile) }}</td>
+            </tr>
+          </table>
+        </div>
+
+        <!-- Actions -->
+        <div class="plan-actions">
+          <button 
+            *ngIf="planContext.tier === 'SANDBOX'" 
+            mat-raised-button 
+            color="primary"
+            (click)="onUpgradeClick()">
+            <mat-icon>arrow_upward</mat-icon>
+            Upgrade to Team
+          </button>
+          <button 
+            *ngIf="planContext.tier === 'TEAM'" 
+            mat-stroked-button 
+            color="primary"
+            (click)="onManageBillingClick()">
+            <mat-icon>payment</mat-icon>
+            Manage Billing
+          </button>
+          <button 
+            *ngIf="planContext.tier === 'ENTERPRISE'" 
+            mat-stroked-button 
+            color="accent"
+            (click)="onContactAdminClick()">
+            <mat-icon>email</mat-icon>
+            Contact Admin
+          </button>
+        </div>
+      </mat-card-content>
+    </mat-card>
+
+    <!-- Plan Comparison -->
+    <mat-card class="plan-comparison-card" *ngIf="planContext && planContext.tier === 'SANDBOX'">
+      <mat-card-header>
+        <mat-card-title>Plan Comparison</mat-card-title>
+      </mat-card-header>
+      <mat-card-content>
+        <table class="comparison-table">
+          <thead>
+            <tr>
+              <th>Feature</th>
+              <th>Sandbox</th>
+              <th>Team</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>Analysis Runs per Day</td>
+              <td>10</td>
+              <td>500</td>
+            </tr>
+            <tr>
+              <td>API Calls per Day</td>
+              <td>3</td>
+              <td>5,000</td>
+            </tr>
+            <tr>
+              <td>File Uploads per Day</td>
+              <td>10</td>
+              <td>500</td>
+            </tr>
+            <tr>
+              <td>Max Files per Analysis</td>
+              <td>3</td>
+              <td>10</td>
+            </tr>
+            <tr>
+              <td>Max File Size</td>
+              <td>20 MB</td>
+              <td>100 MB</td>
+            </tr>
+            <tr>
+              <td>API Access</td>
+              <td>Sandbox Only</td>
+              <td>Sandbox + Production</td>
+            </tr>
+            <tr>
+              <td>Webhooks</td>
+              <td>Test Only</td>
+              <td>Test + Production</td>
+            </tr>
+            <tr>
+              <td>Cloud Connectors</td>
+              <td>❌</td>
+              <td>✅</td>
+            </tr>
+            <tr>
+              <td>Batch Ingestion</td>
+              <td>❌</td>
+              <td>✅</td>
+            </tr>
+          </tbody>
+        </table>
+        <div class="comparison-actions">
+          <button mat-raised-button color="primary" (click)="onUpgradeClick()">
+            Upgrade to Team
+          </button>
+        </div>
+      </mat-card-content>
+    </mat-card>
+
+    <!-- Loading State -->
+    <div *ngIf="loading" class="loading-state">
+      <mat-progress-bar mode="indeterminate"></mat-progress-bar>
+      <p>Loading plan information...</p>
+    </div>
+  </div>
+</div>
+

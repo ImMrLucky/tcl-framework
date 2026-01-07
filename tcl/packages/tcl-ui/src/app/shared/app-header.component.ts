@@ -9,6 +9,9 @@ import { MatTooltipModule } from '@angular/material/tooltip';
 import { MatListModule } from '@angular/material/list';
 import { LogoComponent } from './logo.component';
 import { AuthService, User } from '../auth.service';
+import { PlanService, PlanTier } from '../plan.service';
+import { Router } from '@angular/router';
+import { MatChipsModule } from '@angular/material/chips';
 
 @Component({
   selector: 'app-header',
@@ -22,6 +25,7 @@ import { AuthService, User } from '../auth.service';
     MatDividerModule,
     MatTooltipModule,
     MatListModule,
+    MatChipsModule,
     LogoComponent
   ],
   templateUrl: './app-header.component.html',
@@ -38,8 +42,15 @@ export class AppHeaderComponent implements OnInit {
   currentUser: User | null = null;
   isAuthenticated = false;
   sidebarOpen = true; // Start with sidebar open
+  
+  planTier: PlanTier | null = null;
+  planContext$ = this.planService.planContext$;
 
-  constructor(private authService: AuthService) {}
+  constructor(
+    private authService: AuthService,
+    private planService: PlanService,
+    private router: Router
+  ) {}
 
   ngOnInit() {
     this.authService.currentUser$.subscribe(user => {
@@ -55,6 +66,16 @@ export class AppHeaderComponent implements OnInit {
           document.body.classList.remove('has-sidebar', 'sidebar-collapsed');
         }
       }
+      
+      // Load plan context when user is authenticated
+      if (user) {
+        this.planService.loadPlanContext();
+      }
+    });
+    
+    // Subscribe to plan context changes
+    this.planContext$.subscribe(context => {
+      this.planTier = context?.tier ?? null;
     });
   }
 
@@ -75,6 +96,59 @@ export class AppHeaderComponent implements OnInit {
   toggleSidebar() {
     this.sidebarOpen = !this.sidebarOpen;
     this.updateSidebarClass();
+  }
+
+  /**
+   * Handle plan badge click
+   */
+  onPlanBadgeClick(): void {
+    if (!this.planTier) return;
+    
+    switch (this.planTier) {
+      case 'SANDBOX':
+        this.router.navigate(['/account'], { queryParams: { upgrade: '1' } });
+        break;
+      case 'TEAM':
+        this.router.navigate(['/account'], { queryParams: { manage: '1' } });
+        break;
+      case 'ENTERPRISE':
+        // Could open contact modal or navigate to support
+        window.open('mailto:support@protectqa.com?subject=Enterprise%20Support', '_blank');
+        break;
+    }
+  }
+
+  /**
+   * Get plan tier display name
+   */
+  getPlanTierDisplay(): string {
+    if (!this.planTier) return '';
+    return this.planService.getPlanTierDisplay(this.planTier);
+  }
+
+  /**
+   * Get plan tier color
+   */
+  getPlanTierColor(): string {
+    if (!this.planTier) return '';
+    return this.planService.getPlanTierColor(this.planTier);
+  }
+
+  /**
+   * Get plan badge button text
+   */
+  getPlanBadgeText(): string {
+    if (!this.planTier) return '';
+    switch (this.planTier) {
+      case 'SANDBOX':
+        return 'Upgrade';
+      case 'TEAM':
+        return 'Manage Billing';
+      case 'ENTERPRISE':
+        return 'Contact Admin';
+      default:
+        return '';
+    }
   }
 }
 

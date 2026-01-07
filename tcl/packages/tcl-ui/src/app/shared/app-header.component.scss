@@ -133,6 +133,24 @@ header {
   align-items: center;
 }
 
+.plan-badge {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 12px;
+}
+
+.plan-chip {
+  font-size: 12px;
+  font-weight: 500;
+  height: 24px;
+}
+
+.plan-action {
+  font-size: 12px;
+  font-weight: 500;
+}
+
 .header-actions a.active,
 .header-actions button.active {
   background-color: #3b82f6;

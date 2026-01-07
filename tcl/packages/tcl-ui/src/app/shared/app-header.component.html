@@ -67,6 +67,20 @@
             <!-- Page-specific actions (projected content) -->
             <ng-content select="[headerActions]"></ng-content>
 
+            <!-- Plan badge (only when authenticated) -->
+            <ng-container *ngIf="isAuthenticated && planTier">
+              <button 
+                mat-stroked-button 
+                [color]="getPlanTierColor()"
+                (click)="onPlanBadgeClick()"
+                class="plan-badge">
+                <mat-chip [color]="getPlanTierColor()" class="plan-chip">
+                  {{ getPlanTierDisplay() }}
+                </mat-chip>
+                <span class="plan-action">{{ getPlanBadgeText() }}</span>
+              </button>
+            </ng-container>
+
             <!-- User menu (only when authenticated) -->
         <ng-container *ngIf="isAuthenticated">
           <button mat-icon-button [matMenuTriggerFor]="userMenu">
@@ -153,6 +167,20 @@
 
         <!-- Page-specific actions (projected content) -->
         <ng-content select="[headerActions]"></ng-content>
+
+        <!-- Plan badge (only when authenticated) -->
+        <ng-container *ngIf="isAuthenticated && planTier">
+          <button 
+            mat-stroked-button 
+            [color]="getPlanTierColor()"
+            (click)="onPlanBadgeClick()"
+            class="plan-badge">
+            <mat-chip [color]="getPlanTierColor()" class="plan-chip">
+              {{ getPlanTierDisplay() }}
+            </mat-chip>
+            <span class="plan-action">{{ getPlanBadgeText() }}</span>
+          </button>
+        </ng-container>
 
         <!-- User menu (only when authenticated) -->
         <ng-container *ngIf="isAuthenticated">

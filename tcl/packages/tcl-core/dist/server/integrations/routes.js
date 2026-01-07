@@ -8,6 +8,8 @@ import { supabaseAdmin } from '../supabase.js';
 import { verifyApiKeyExtended } from '../supabase.js';
 import { verifyWebhookSignature } from './security/hmac.js';
 import { processArtifacts, checkIdempotency, storeIdempotencyKey } from './artifacts/processor.js';
+import { Capability } from '../plans/capabilities.js';
+import { planService } from '../plans/plan-service.js';
 // Reuse getOrgContext from express.ts
 async function getOrgContext(req) {
     const authHeader = req.headers.authorization;
@@ -68,6 +70,20 @@ export function setupIntegrationRoutes(app) {
                 projectId: integration.project_id,
                 env: integration.env,
             };
+            // Check webhook capability based on environment
+            const requiredCapability = integration.env === 'production'
+                ? Capability.WEBHOOKS_PROD
+                : Capability.WEBHOOKS_TEST;
+            const hasCap = await planService.hasCapability(orgContext.orgId, requiredCapability);
+            if (!hasCap) {
+                const planContext = await planService.getOrgPlanContext(orgContext.orgId);
+                return res.status(403).json({
+                    error: 'UPGRADE_REQUIRED',
+                    requiredCapability: requiredCapability,
+                    currentPlan: planContext.tier,
+                    message: `Webhooks in ${integration.env} environment require ${requiredCapability}. Your current plan (${planContext.tier}) does not include this capability.`,
+                });
+            }
             // Check idempotency
             const existingConvId = await checkIdempotency(orgContext.orgId, 'webhook', body.external_id);
             let conversationId;

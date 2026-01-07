@@ -26,7 +26,8 @@ export async function getOrgContext(req) {
         return {
             orgId: verified.orgId,
             projectId: verified.projectId,
-            env: verified.env
+            env: verified.env,
+            apiKeyMode: verified.mode, // Attach mode to context for capability checks
         };
     }
     // If not an API key, try Supabase JWT verification

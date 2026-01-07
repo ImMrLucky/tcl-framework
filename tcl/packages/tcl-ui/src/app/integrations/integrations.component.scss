@@ -1,0 +1,85 @@
+.integrations-container {
+  padding-top: 98px;
+  min-height: 100vh;
+  background-color: #f5f5f5;
+}
+
+.integrations-content {
+  max-width: 1400px;
+  margin: 0 auto;
+  padding: 24px;
+}
+
+.integrations-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  gap: 24px;
+}
+
+.integration-card {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+.integration-card.disabled {
+  opacity: 0.6;
+}
+
+.integration-card mat-card-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.integration-card mat-card-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 18px;
+  font-weight: 500;
+}
+
+.integration-card mat-card-content {
+  flex: 1;
+  padding: 16px;
+}
+
+.integration-card mat-card-content p {
+  color: #666;
+  margin: 0 0 16px 0;
+  line-height: 1.5;
+}
+
+.card-status {
+  margin-top: 8px;
+}
+
+.coming-soon {
+  margin-top: 8px;
+}
+
+.integration-card mat-card-actions {
+  padding: 16px;
+  display: flex;
+  gap: 8px;
+}
+
+.integration-card mat-card-actions button {
+  flex: 1;
+}
+
+.loading-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 48px;
+  gap: 16px;
+}
+
+.loading-state p {
+  color: #666;
+  margin: 0;
+}
+

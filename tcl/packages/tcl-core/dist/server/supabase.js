@@ -48,7 +48,7 @@ export async function verifyApiKey(key) {
     };
 }
 /**
- * Verify API key and return org/project/env info (extended)
+ * Verify API key and return org/project/env/mode info (extended)
  */
 export async function verifyApiKeyExtended(key) {
     if (!supabaseAdmin)
@@ -56,17 +56,28 @@ export async function verifyApiKeyExtended(key) {
     const hash = hashApiKey(key);
     const { data, error } = await supabaseAdmin
         .from('api_keys')
-        .select('org_id, project_id, env, scopes')
+        .select('org_id, project_id, env, mode, scopes')
         .eq('key_hash', hash)
         .eq('is_active', true)
         .is('revoked_at', null)
         .single();
     if (error || !data)
         return null;
+    // Update last_used_at (non-blocking)
+    try {
+        await supabaseAdmin.rpc('update_api_key_last_used', { p_key_hash: hash });
+    }
+    catch (e) {
+        // Non-fatal if update fails
+    }
+    // Determine mode from database field or fallback to env
+    const mode = data.mode ||
+        (data.env === 'production' ? 'PROD' : 'SANDBOX');
     return {
         orgId: data.org_id,
         projectId: data.project_id || '',
         env: data.env || 'sandbox',
+        mode,
         scopes: data.scopes || []
     };
 }
@@ -278,6 +289,9 @@ export async function provisionUser(userId, email) {
         console.log(`Step 1: User ID: ${userId}, Email: ${email}`);
         const profileEnsured = await ensureProfile(userId, email);
         console.log(`Step 1: ensureProfile returned: ${profileEnsured}`);
+        // Step 1.5: Auto-grant superuser if in allowlist (dev/staging only)
+        const { maybeGrantSuperuser } = await import('./admin/superuser-auto-grant.js');
+        await maybeGrantSuperuser(userId, email);
         // Verify profile exists regardless of return value
         const { data: profileCheck } = await supabaseAdmin
             .from('profiles')

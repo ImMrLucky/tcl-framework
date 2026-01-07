@@ -21,12 +21,13 @@ export declare function verifyApiKey(key: string): Promise<{
     scopes: string[];
 } | null>;
 /**
- * Verify API key and return org/project/env info (extended)
+ * Verify API key and return org/project/env/mode info (extended)
  */
 export declare function verifyApiKeyExtended(key: string): Promise<{
     orgId: string;
     projectId: string;
     env: string;
+    mode: 'SANDBOX' | 'PROD';
     scopes: string[];
 } | null>;
 /**

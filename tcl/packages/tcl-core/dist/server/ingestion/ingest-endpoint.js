@@ -8,6 +8,8 @@ import { normalizeFile } from "./normalizers/index.js";
 import { extractClaimsWithAnchors, buildIssueDTOs } from "./issue-derivation.js";
 import { supabaseAdmin } from "../supabase.js";
 import { getOrgContext } from "../auth-context.js";
+import { requireCapability } from "../plans/capability-middleware.js";
+import { Capability } from "../plans/capabilities.js";
 // =============================================================================
 // INGEST ENDPOINT
 // =============================================================================
@@ -18,7 +20,7 @@ export function registerIngestEndpoints(app) {
      * Ingest a file and normalize it to the canonical format.
      * Optionally runs evaluation immediately.
      */
-    app.post("/api/ingest", async (req, res) => {
+    app.post("/api/ingest", requireCapability(Capability.ANALYZE_MANUAL_UPLOAD), async (req, res) => {
         try {
             const context = await getOrgContext(req);
             if (!context || context.error) {

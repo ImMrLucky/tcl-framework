@@ -161,7 +161,7 @@
             </div>
           </div>
 
-          <div *ngIf="patternDetail?.traceability?.topEdges && patternDetail.traceability.topEdges.length > 0">
+          <div *ngIf="patternDetail?.traceability?.topEdges && patternDetail?.traceability?.topEdges.length > 0">
             <h4>Top Edges</h4>
             <div *ngFor="let edge of patternDetail?.traceability?.topEdges" class="edge-item">
               <span class="edge-kind">{{ edge.kind }}</span>

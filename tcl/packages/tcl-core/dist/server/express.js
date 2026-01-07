@@ -29,6 +29,15 @@ import { setupEvaluationSearchRoutes } from "./evaluations/search.js";
 import { setupPolicyRoutes } from "./policies/routes.js";
 import { setupEvidenceRoutes } from "./evidence/routes.js";
 import { setupScoringProfilesRoutes } from "./admin/scoring-profiles.js";
+import { setupApiKeyRoutes } from "./api-keys/routes.js";
+import { setupAnalyzeEndpoint } from "./api-keys/analyze-endpoint.js";
+import { setupWebhookRoutes } from "./webhooks/routes.js";
+import { deliverAnalysisCompletedWebhook } from "./webhooks/delivery.js";
+import { setupIntegrationConnectionsRoutes } from "./integrations/connections.js";
+import { setupBillingRoutes } from "./billing/routes.js";
+import { handleStripeWebhook } from "./billing/webhook.js";
+import { setupDowngradeJobRoute } from "./billing/downgrade-job.js";
+import { loadPlanConfig, validatePlanConfig } from "../config/plan-config.js";
 import { buildIssuesList } from "./audit/reproducibility.js";
 import { exportAsJSON, exportAsCSV, exportAsHTML } from "../issues/index.js";
 import { buildIssueNarratives } from "../analysis/issue-narratives.js";
@@ -36,6 +45,9 @@ import { buildIssueNarratives } from "../analysis/issue-narratives.js";
 import { exportNarrativesAsCSV, exportNarrativesAsJSON, exportNarrativesAsHTML } from "../analysis/exports.js";
 import { getOrgContext } from "./auth-context.js";
 import { registerIngestEndpoints } from "./ingestion/ingest-endpoint.js";
+import { planService } from "./plans/plan-service.js";
+import { requireCapability } from "./plans/capability-middleware.js";
+import { Capability } from "./plans/capabilities.js";
 const app = express();
 // CORS middleware - allows frontend to call Railway directly
 // This is necessary when the frontend calls Railway directly for /validate
@@ -495,7 +507,7 @@ async function checkPermission(userId, orgId, permission) {
         role
     };
 }
-app.post("/validate", async (req, res) => {
+app.post("/validate", requireCapability(Capability.ANALYZE_MANUAL_UPLOAD), async (req, res) => {
     const timeout = setTimeout(() => {
         if (!res.headersSent) {
             res.status(504).json({ error: "Request timeout" });
@@ -513,6 +525,58 @@ app.post("/validate", async (req, res) => {
         console.log("Received validate request");
         console.log("Request body:", JSON.stringify(req.body, null, 2));
         const input = req.body;
+        // Get org context for plan checks and usage tracking
+        const context = await getOrgContext(req);
+        if (!context || context.error || !context.orgId) {
+            clearTimeout(timeout);
+            return res.status(401).json({ error: context?.error || "Authorization required" });
+        }
+        // Get plan context for limits and mode
+        const planContext = await planService.getOrgPlanContext(context.orgId);
+        // Check file limits for manual uploads (if sources are provided)
+        if (input.sources && Array.isArray(input.sources)) {
+            const fileCount = input.sources.length;
+            const maxFiles = planContext.limits.maxFilesPerAnalysis;
+            if (maxFiles !== -1 && fileCount > maxFiles) {
+                clearTimeout(timeout);
+                return res.status(400).json({
+                    error: "FILE_LIMIT_EXCEEDED",
+                    message: `Maximum ${maxFiles} files per analysis allowed on ${planContext.tier} plan`,
+                    limit: maxFiles,
+                    provided: fileCount,
+                });
+            }
+            // Check file size limits
+            const maxBytes = planContext.limits.maxBytesPerFile;
+            if (maxBytes !== -1) {
+                for (const source of input.sources) {
+                    if (source.text) {
+                        const textBytes = Buffer.byteLength(source.text, 'utf8');
+                        if (textBytes > maxBytes) {
+                            clearTimeout(timeout);
+                            return res.status(400).json({
+                                error: "FILE_SIZE_EXCEEDED",
+                                message: `Maximum ${Math.round(maxBytes / 1024 / 1024)}MB per file allowed on ${planContext.tier} plan`,
+                                limit: maxBytes,
+                                provided: textBytes,
+                                filename: source.title || source.id || 'unknown',
+                            });
+                        }
+                    }
+                }
+            }
+        }
+        // Consume usage quota (will throw RateLimitError if exceeded)
+        try {
+            await planService.consumeUsage(context.orgId, 'analysis_runs', 1);
+        }
+        catch (usageError) {
+            if (usageError.error === 'RATE_LIMIT') {
+                clearTimeout(timeout);
+                return res.status(429).json(usageError);
+            }
+            throw usageError; // Re-throw other errors
+        }
         // Validate question (required)
         if (!input.question || typeof input.question !== 'string' || input.question.trim().length === 0) {
             clearTimeout(timeout);
@@ -963,7 +1027,7 @@ app.post("/validate", async (req, res) => {
             reportKeys: Object.keys(reportWithIssues)
         });
         // Store validation in Supabase if configured
-        const context = await getOrgContext(req);
+        // Note: context is already defined earlier in the function
         if (context && supabaseAdmin) {
             try {
                 // Check if conversation_id is provided in request body
@@ -1103,11 +1167,43 @@ app.post("/validate", async (req, res) => {
                 console.error('Database error (non-fatal):', dbErr);
             }
         }
+        // Add mode/plan tagging to response
+        const limitations = [];
+        if (planContext.tier === 'SANDBOX') {
+            limitations.push('NO_LIVE_WEBHOOKS');
+            limitations.push('LIMITED_API_CALLS');
+            if (planContext.limits.maxFilesPerAnalysis !== -1) {
+                limitations.push('LIMITED_FILES_PER_ANALYSIS');
+            }
+            if (planContext.limits.maxBytesPerFile !== -1) {
+                limitations.push('LIMITED_FILE_SIZE');
+            }
+        }
         clearTimeout(timeout);
+        // Deliver webhook for analysis.completed (async, non-blocking)
+        const issueSummary = reportWithIssues?.issueSummaryV2;
+        if (issueSummary) {
+            deliverAnalysisCompletedWebhook(context.orgId, out.evaluationId || 'unknown', {
+                totalIssues: issueSummary.totalIssues || 0,
+                bySeverity: issueSummary.bySeverity || { low: 0, medium: 0, high: 0, critical: 0 },
+                byType: issueSummary.byType || {},
+                byCategory: issueSummary.byCategory || {},
+            }, out.report?.spectral ? {
+                energy: out.report.spectral.energy,
+                gap: out.report.spectral.gap,
+                cycleMass: out.report.spectral.cycleMass,
+            } : undefined).catch((err) => {
+                console.error('Webhook delivery error (non-fatal):', err);
+            });
+        }
         // Return output with issues included
         res.json({
             ...out,
-            report: reportWithIssues
+            report: reportWithIssues,
+            // Add mode/plan tagging
+            mode: context.env === 'production' ? 'prod' : 'sandbox',
+            planTier: planContext.tier,
+            limitations: limitations.length > 0 ? limitations : undefined,
         });
     }
     catch (e) {
@@ -1387,6 +1483,72 @@ app.post("/auth/provision", async (req, res) => {
     }
     catch (e) {
         console.error("Provision error:", e);
+        res.status(500).json({
+            error: e?.message ?? "unknown error"
+        });
+    }
+});
+// Get current user info with plan context
+app.get("/api/me", async (req, res) => {
+    try {
+        const context = await getOrgContext(req);
+        if (!context || context.error || !context.orgId) {
+            return res.status(401).json({ error: context?.error || "Authorization required" });
+        }
+        if (!supabaseAdmin) {
+            return res.status(503).json({ error: "Supabase not configured" });
+        }
+        // Get user ID from token
+        const authHeader = req.headers.authorization;
+        let userId;
+        if (authHeader?.startsWith('Bearer ')) {
+            const token = authHeader.substring(7);
+            const { data: { user } } = await supabaseAdmin.auth.getUser(token).catch(() => ({ data: { user: null } }));
+            userId = user?.id;
+        }
+        // Get org details
+        const { data: org, error: orgError } = await supabaseAdmin
+            .from('organizations')
+            .select('id, name, slug, plan_tier, plan_status')
+            .eq('id', context.orgId)
+            .single();
+        if (orgError || !org) {
+            return res.status(404).json({ error: "Organization not found" });
+        }
+        // Check for emulation (superuser only)
+        const emulation = req.emulation;
+        // Get plan context (with emulation if active)
+        const planContext = await planService.getOrgPlanContext(context.orgId, emulation);
+        // Get admin context to check if superuser
+        const { getAdminContext } = await import('./admin/middleware.js');
+        const adminContext = await getAdminContext(req);
+        res.json({
+            user: userId ? { id: userId } : undefined,
+            org: {
+                id: org.id,
+                name: org.name,
+                slug: org.slug,
+                planTier: org.plan_tier || 'SANDBOX',
+                planStatus: org.plan_status || 'ACTIVE',
+            },
+            planContext: {
+                tier: planContext.tier,
+                status: planContext.status,
+                capabilities: planContext.capabilities,
+                limits: planContext.limits,
+                remainingToday: planContext.remainingToday,
+                // Include emulation metadata if present
+                ...(planContext.emulated && {
+                    emulated: planContext.emulated,
+                    realPlanTier: planContext.realPlanTier,
+                    effectivePlanTier: planContext.effectivePlanTier,
+                }),
+            },
+            isSuperuser: adminContext?.isSuperuser || false,
+        });
+    }
+    catch (e) {
+        console.error("Get /api/me error:", e);
         res.status(500).json({
             error: e?.message ?? "unknown error"
         });
@@ -1781,7 +1943,7 @@ app.patch("/evaluations/:evaluationId/issues/:issueId", async (req, res) => {
 // ISSUE EXPORT ENDPOINTS
 // ============================================================================
 // Export evaluation issues as JSON
-app.get("/evaluations/:evaluationId/export/json", async (req, res) => {
+app.get("/evaluations/:evaluationId/export/json", requireCapability(Capability.EXPORT_JSON), async (req, res) => {
     try {
         const { evaluationId } = req.params;
         const context = await getOrgContext(req);
@@ -1850,7 +2012,7 @@ app.get("/evaluations/:evaluationId/export/json", async (req, res) => {
     }
 });
 // Export evaluation issues as CSV
-app.get("/evaluations/:evaluationId/export/csv", async (req, res) => {
+app.get("/evaluations/:evaluationId/export/csv", requireCapability(Capability.EXPORT_CSV), async (req, res) => {
     try {
         const { evaluationId } = req.params;
         const context = await getOrgContext(req);
@@ -1908,7 +2070,7 @@ app.get("/evaluations/:evaluationId/export/csv", async (req, res) => {
     }
 });
 // Export evaluation as HTML report (printable/PDF-ready)
-app.get("/evaluations/:evaluationId/export/html", async (req, res) => {
+app.get("/evaluations/:evaluationId/export/html", requireCapability(Capability.EXPORT_JSON), async (req, res) => {
     try {
         const { evaluationId } = req.params;
         const context = await getOrgContext(req);
@@ -1985,7 +2147,7 @@ app.get("/evaluations/:evaluationId/export/html", async (req, res) => {
     }
 });
 // Export issue narratives as CSV
-app.get("/evaluations/:evaluationId/export/narratives/csv", async (req, res) => {
+app.get("/evaluations/:evaluationId/export/narratives/csv", requireCapability(Capability.EXPORT_CSV), async (req, res) => {
     try {
         const { evaluationId } = req.params;
         const context = await getOrgContext(req);
@@ -2036,7 +2198,7 @@ app.get("/evaluations/:evaluationId/export/narratives/csv", async (req, res) => 
     }
 });
 // Export issue narratives as JSON
-app.get("/evaluations/:evaluationId/export/narratives/json", async (req, res) => {
+app.get("/evaluations/:evaluationId/export/narratives/json", requireCapability(Capability.EXPORT_JSON), async (req, res) => {
     try {
         const { evaluationId } = req.params;
         const context = await getOrgContext(req);
@@ -2087,7 +2249,7 @@ app.get("/evaluations/:evaluationId/export/narratives/json", async (req, res) =>
     }
 });
 // Export issue narratives as HTML (PDF-ready)
-app.get("/evaluations/:evaluationId/export/narratives/html", async (req, res) => {
+app.get("/evaluations/:evaluationId/export/narratives/html", requireCapability(Capability.EXPORT_JSON), async (req, res) => {
     try {
         const { evaluationId } = req.params;
         const context = await getOrgContext(req);
@@ -2141,7 +2303,7 @@ app.get("/evaluations/:evaluationId/export/narratives/html", async (req, res) =>
 // ISSUE V2 EXPORTS (Enterprise-Grade)
 // ============================================================================
 // Export IssueV2 as CSV
-app.get("/evaluations/:evaluationId/export/issues-v2/csv", async (req, res) => {
+app.get("/evaluations/:evaluationId/export/issues-v2/csv", requireCapability(Capability.EXPORT_CSV), async (req, res) => {
     try {
         const { evaluationId } = req.params;
         const context = await getOrgContext(req);
@@ -2208,7 +2370,7 @@ app.get("/evaluations/:evaluationId/export/issues-v2/csv", async (req, res) => {
     }
 });
 // Export IssueV2 as JSON
-app.get("/evaluations/:evaluationId/export/issues-v2/json", async (req, res) => {
+app.get("/evaluations/:evaluationId/export/issues-v2/json", requireCapability(Capability.EXPORT_JSON), async (req, res) => {
     try {
         const { evaluationId } = req.params;
         const context = await getOrgContext(req);
@@ -2262,7 +2424,7 @@ app.get("/evaluations/:evaluationId/export/issues-v2/json", async (req, res) => 
     }
 });
 // Export IssueV2 as PDF (HTML printable)
-app.get("/evaluations/:evaluationId/export/issues-v2/pdf", async (req, res) => {
+app.get("/evaluations/:evaluationId/export/issues-v2/pdf", requireCapability(Capability.EXPORT_JSON), async (req, res) => {
     try {
         const { evaluationId } = req.params;
         const context = await getOrgContext(req);
@@ -2622,6 +2784,17 @@ app.get("/api/conversations/:conversationId/evaluations", async (req, res) => {
  * - Managing API keys
  * - Modifying integrations
  */
+// Helper to check and auto-grant superuser after authentication
+async function checkAndGrantSuperuser(userId, email) {
+    try {
+        const { maybeGrantSuperuser } = await import('./admin/superuser-auto-grant.js');
+        await maybeGrantSuperuser(userId, email);
+    }
+    catch (error) {
+        // Don't fail auth if superuser grant fails
+        console.error('Failed to check superuser auto-grant:', error);
+    }
+}
 app.post("/auth/verify-password", async (req, res) => {
     try {
         const { password } = req.body;
@@ -2649,6 +2822,8 @@ app.post("/auth/verify-password", async (req, res) => {
         if (signInError) {
             return res.status(401).json({ error: "Invalid password", verified: false });
         }
+        // Check and auto-grant superuser if in allowlist
+        await checkAndGrantSuperuser(context.userId, user.email);
         // Log audit event
         await logAudit({
             orgId: context.orgId,
@@ -2743,10 +2918,53 @@ console.log("Evidence routes registered successfully");
 console.log("Registering admin scoring profiles routes...");
 setupScoringProfilesRoutes(app);
 console.log("Admin scoring profiles routes registered successfully");
+// Setup API key management routes
+console.log("Registering API key routes...");
+setupApiKeyRoutes(app);
+console.log("API key routes registered successfully");
+// Setup API analyze endpoint
+console.log("Registering API analyze endpoint...");
+setupAnalyzeEndpoint(app);
+console.log("API analyze endpoint registered successfully");
+// Setup webhook routes
+console.log("Registering webhook routes...");
+setupWebhookRoutes(app);
+console.log("Webhook routes registered successfully");
+// Setup integration connections routes
+console.log("Registering integration connections routes...");
+setupIntegrationConnectionsRoutes(app);
+console.log("Integration connections routes registered successfully");
+// Setup billing routes
+console.log("Registering billing routes...");
+setupBillingRoutes(app);
+console.log("Billing routes registered successfully");
+// Stripe webhook endpoint (raw body required)
+app.post('/api/billing/webhook', express.raw({ type: 'application/json' }), async (req, res) => {
+    await handleStripeWebhook(req, res);
+});
+console.log("Stripe webhook endpoint registered");
+// Setup downgrade job route (admin)
+setupDowngradeJobRoute(app);
+console.log("Downgrade job route registered");
 // Setup ingestion routes (normalization pipeline)
 console.log("Registering ingestion routes...");
 registerIngestEndpoints(app);
 console.log("Ingestion routes registered successfully");
+// Load and validate plan configuration at startup
+console.log("Loading plan configuration...");
+try {
+    const planConfig = loadPlanConfig();
+    validatePlanConfig(planConfig);
+    console.log("✅ Plan configuration loaded and validated successfully");
+    console.log(`   - SANDBOX: ${planConfig.plans.SANDBOX.capabilities.length} capabilities`);
+    console.log(`   - TEAM: ${planConfig.plans.TEAM.capabilities.length} capabilities`);
+    console.log(`   - ENTERPRISE: ${planConfig.plans.ENTERPRISE.capabilities.length} capabilities`);
+}
+catch (error) {
+    console.error("❌ Failed to load plan configuration:", error.message);
+    console.error("   Server will not start with invalid plan configuration.");
+    process.exit(1);
+}
 // Railway sets PORT automatically, but we default to 8787
 const port = Number(process.env.PORT || 8787);
 console.log(`Starting server...`);

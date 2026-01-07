@@ -1,5 +1,6 @@
 import { Routes } from '@angular/router';
 import { AuthGuard } from './auth.guard';
+import { PlanGuard } from './plan.guard';
 
 export const routes: Routes = [
   // Public routes (no auth required)
@@ -25,6 +26,11 @@ export const routes: Routes = [
   {
     path: 'onboarding',
     loadComponent: () => import('./auth/onboarding.component').then(m => m.OnboardingComponent),
+    canActivate: [AuthGuard]
+  },
+  {
+    path: 'account',
+    loadComponent: () => import('./account/account.component').then(m => m.AccountComponent),
     canActivate: [AuthGuard]
   },
   {

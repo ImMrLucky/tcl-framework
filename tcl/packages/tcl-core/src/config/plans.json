@@ -1,0 +1,69 @@
+{
+  "plans": {
+    "SANDBOX": {
+      "capabilities": [
+        "ANALYZE_MANUAL_UPLOAD",
+        "GRAPH_VIEW",
+        "SPECTRAL_SUMMARY",
+        "EXPORT_JSON",
+        "EXPORT_CSV",
+        "API_ACCESS_SANDBOX",
+        "WEBHOOKS_TEST"
+      ],
+      "limits": {
+        "analysesPerDay": 10,
+        "apiCallsPerDay": 3,
+        "uploadsPerDay": 10,
+        "maxFilesPerAnalysis": 3,
+        "maxBytesPerFile": 20971520
+      }
+    },
+    "TEAM": {
+      "capabilities": [
+        "ANALYZE_MANUAL_UPLOAD",
+        "GRAPH_VIEW",
+        "SPECTRAL_SUMMARY",
+        "EXPORT_JSON",
+        "EXPORT_CSV",
+        "API_ACCESS_SANDBOX",
+        "API_ACCESS_PROD",
+        "WEBHOOKS_TEST",
+        "WEBHOOKS_PROD",
+        "BATCH_INGEST",
+        "USAGE_DASHBOARD"
+      ],
+      "limits": {
+        "analysesPerDay": 500,
+        "apiCallsPerDay": 5000,
+        "uploadsPerDay": 500,
+        "maxFilesPerAnalysis": 10,
+        "maxBytesPerFile": 104857600
+      }
+    },
+    "ENTERPRISE": {
+      "capabilities": [
+        "ANALYZE_MANUAL_UPLOAD",
+        "GRAPH_VIEW",
+        "SPECTRAL_SUMMARY",
+        "EXPORT_JSON",
+        "EXPORT_CSV",
+        "API_ACCESS_SANDBOX",
+        "API_ACCESS_PROD",
+        "WEBHOOKS_TEST",
+        "WEBHOOKS_PROD",
+        "BATCH_INGEST",
+        "CLOUD_CONNECTORS",
+        "USAGE_DASHBOARD",
+        "TEMPLATE_CUSTOMIZATION"
+      ],
+      "limits": {
+        "analysesPerDay": -1,
+        "apiCallsPerDay": -1,
+        "uploadsPerDay": -1,
+        "maxFilesPerAnalysis": -1,
+        "maxBytesPerFile": -1
+      }
+    }
+  }
+}
+

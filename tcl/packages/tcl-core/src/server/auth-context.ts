@@ -7,6 +7,7 @@ export interface OrgContext {
   env: string;
   userId?: string;
   role?: string;
+  apiKeyMode?: 'SANDBOX' | 'PROD'; // Set when authenticated via API key
   error?: string;
 }
 
@@ -41,7 +42,8 @@ export async function getOrgContext(req: express.Request): Promise<OrgContext | 
     return {
       orgId: verified.orgId,
       projectId: verified.projectId,
-      env: verified.env
+      env: verified.env,
+      apiKeyMode: verified.mode, // Attach mode to context for capability checks
     };
   }
   
