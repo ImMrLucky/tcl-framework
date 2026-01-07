@@ -9,7 +9,9 @@ import type { IssueV2, IssueSummaryV2 } from '../../types.js';
  * Compute IssueSummaryV2 from an array of IssueV2 issues
  *
  * Rules:
- * - Prefer severityDisplay over severity for display counts
+ * - Executive summary should count impact severity (severity), NOT display severity (severityDisplay)
+ * - This ensures high/critical counts are accurate regardless of transcript-only mode
+ * - severityDisplay is only for UI convenience, not for analytics
  * - Normalize severity to: low | medium | high | critical
  * - Count by type, category, and severity
  * - Handle missing fields gracefully

@@ -329,11 +329,21 @@
                   <div class="issue-v2-header">
                     <span class="issue-rank">#{{ pageIndex * pageSize + i + 1 }}</span>
                     <span class="issue-type">{{ issue.type }}</span>
-                    <span class="issue-severity" [class]="'severity-' + (issue.severityDisplay || issue.severity)">
-                      {{ getSeverityDisplay(issue) }}
+                    <!-- Chip A: Impact Severity (severity) - what this would be if verified -->
+                    <span class="issue-severity" [class]="'severity-' + issue.severity"
+                          [matTooltip]="'Impact Severity: ' + issue.severity.toUpperCase() + (issue.severityDisplay && issue.severityDisplay !== issue.severity ? ' (Display: ' + issue.severityDisplay.toUpperCase() + ')' : '')"
+                          matTooltipPosition="above">
+                      {{ issue.severity.toUpperCase() }}
                     </span>
+                    <!-- Chip B: Verification Level -->
+                    <span class="verification-badge" 
+                          [class.transcript-only]="issue.verification.level === 'TRANSCRIPT_ONLY'"
+                          [matTooltip]="issue.verification.level === 'TRANSCRIPT_ONLY' ? 'Unverified (Transcript-only)' : issue.verification.level === 'EXTERNAL_VERIFIED' ? 'Externally Verified' : 'No Verification'"
+                          [class.verified]="issue.verification.level === 'EXTERNAL_VERIFIED'">
+                        {{ getVerificationLabel(issue) }}
+                      </span>
                     <span class="issue-impact" *ngIf="issue.impact">
-                      {{ getImpactLabel(issue) }}
+                      Impact: {{ getImpactLabel(issue) }}
                     </span>
                     <span class="issue-risk-score" 
                           [matTooltip]="getScoreTooltip(issue)"
@@ -343,12 +353,6 @@
                   <div class="issue-v2-body">
                     <div class="issue-summary">{{ issue.what.issueSummary }}</div>
                     <div class="issue-meta">
-                      <span class="verification-badge" 
-                            [class.transcript-only]="issue.verification.level === 'TRANSCRIPT_ONLY'"
-                            [matTooltip]="issue.verification.level === 'TRANSCRIPT_ONLY' ? 'Unverified (Transcript-only)' : issue.verification.level === 'EXTERNAL_VERIFIED' ? 'Externally Verified' : 'No Verification'"
-                            [class.verified]="issue.verification.level === 'EXTERNAL_VERIFIED'">
-                        {{ getVerificationLabel(issue) }}
-                      </span>
                       <span class="speaker-badge">{{ issue.who.speaker }}</span>
                       <span class="category-badge">{{ issue.category }}</span>
                       <span *ngIf="issue.reviewRequired" class="review-required">Review Required</span>
@@ -408,7 +412,8 @@
                   <mat-header-cell *matHeaderCellDef>Verification</mat-header-cell>
                   <mat-cell *matCellDef="let issue">
                     <span [class.transcript-only]="issue.verification.level === 'TRANSCRIPT_ONLY'"
-                          [class.verified]="issue.verification.level === 'EXTERNAL_VERIFIED'">
+                          [class.verified]="issue.verification.level === 'EXTERNAL_VERIFIED'"
+                          [matTooltip]="getVerificationTooltip(issue)">
                       {{ getVerificationLabel(issue) }}
                     </span>
                   </mat-cell>

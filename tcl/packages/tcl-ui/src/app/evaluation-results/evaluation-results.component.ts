@@ -377,7 +377,8 @@ export class EvaluationResultsComponent implements OnInit {
 
   /**
    * Compute IssueSummaryV2 from issues array (frontend fallback)
-   * Prefers severityDisplay over severity for display counts
+   * Executive summary should count impact severity (severity), NOT display severity (severityDisplay)
+   * This ensures high/critical counts are accurate regardless of transcript-only mode
    */
   private computeIssueSummaryV2FromIssues(issues: IssueV2[], topIssuesCount: number): any {
     const byType: Record<string, number> = {};
@@ -393,8 +394,10 @@ export class EvaluationResultsComponent implements OnInit {
       const category = issue.category || 'other';
       byCategory[category] = (byCategory[category] || 0) + 1;
 
-      // Count by severity - prefer severityDisplay, fall back to severity
-      const severity = (issue.severityDisplay || issue.severity || 'medium') as string;
+      // Executive summary should count impact severity (severity), not display severity (severityDisplay)
+      // This ensures high/critical counts are accurate regardless of transcript-only mode
+      // severityDisplay is only for UI convenience, not for analytics
+      const severity = (issue.severity || 'medium') as string;
       
       // Normalize to valid severity values
       if (severity === 'low' || severity === 'medium' || severity === 'high' || severity === 'critical') {
@@ -1128,9 +1131,20 @@ getMetricTooltip(metric: string): string {
       return 'Unverified (Transcript-only)';
     }
     if (issue.verification.level === 'EXTERNAL_VERIFIED') {
-      return 'Verified';
+      return 'Externally Verified';
     }
-    return 'Unverified';
+    return 'No Verification';
+  }
+
+  getVerificationTooltip(issue: IssueV2): string {
+    const impactSeverity = issue.severity.toUpperCase();
+    const displaySeverity = issue.severityDisplay ? issue.severityDisplay.toUpperCase() : impactSeverity;
+    let tooltip = `Impact Severity: ${impactSeverity}`;
+    if (issue.severityDisplay && issue.severityDisplay !== issue.severity.toLowerCase()) {
+      tooltip += `\nDisplay Severity: ${displaySeverity} (downgraded for transcript-only)`;
+    }
+    tooltip += `\nVerification: ${this.getVerificationLabel(issue)}`;
+    return tooltip;
   }
 
   /**

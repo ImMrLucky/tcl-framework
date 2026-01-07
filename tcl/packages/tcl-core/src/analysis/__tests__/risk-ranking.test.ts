@@ -171,9 +171,17 @@ describe('Risk Ranking', () => {
       expect(result.allIssues[0].type).toBe('CONTRADICTION');
       expect(result.allIssues[0].riskScore).toBeGreaterThan(result.allIssues[1].riskScore);
       
-      // Both should have severityDisplay capped to medium in transcript-only
-      expect(result.allIssues[0].severityDisplay).toBe('medium');
-      expect(result.allIssues[1].severityDisplay).toBe('medium');
+      // In transcript-only mode, severityDisplay should NOT be blanket-capped to medium
+      // Only UNVERIFIED_CLAIM types should be downgraded
+      // CONTRADICTION should keep its severity (high) in severityDisplay
+      expect(result.allIssues[0].severity).toBe('high'); // Impact severity unchanged
+      expect(result.allIssues[0].severityDisplay).toBe('high'); // Not downgraded (not UNVERIFIED type)
+      
+      // Unverified claim may be downgraded by one band
+      expect(result.allIssues[1].severity).toBe('low'); // Impact severity
+      // severityDisplay may be downgraded for UNVERIFIED in transcript-only, but not forced to medium
+      // Low stays low (can't downgrade below low)
+      expect(result.allIssues[1].severityDisplay).toBe('low');
       
       // But impact should be unchanged
       expect(result.allIssues[0].impact).toBe('high');

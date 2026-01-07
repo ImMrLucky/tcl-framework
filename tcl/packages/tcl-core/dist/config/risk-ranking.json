@@ -9,10 +9,10 @@
     "evidenceQuotesMax": 5
   },
   "severityThresholds": {
-    "low": 0.20,
+    "low": 0.0,
     "medium": 0.45,
-    "high": 0.70,
-    "critical": 0.85
+    "high": 0.75,
+    "critical": 0.90
   },
   "impactMap": {
     "low": 0.3,

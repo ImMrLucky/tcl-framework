@@ -14,7 +14,7 @@
  * - severityDisplay capped for mode
  */
 
-import type { IssueV2, SeverityV2, ImpactV2, SeverityDisplayV2, VerificationLevelV2 } from '../types.js';
+import type { IssueV2, SeverityV2, ImpactV2, SeverityDisplayV2, VerificationLevelV2, IssueTypeV2 } from '../types.js';
 import { getRiskRankingConfig, type RiskRankingConfig } from '../config/risk-ranking.js';
 
 export interface RankedIssues {
@@ -156,13 +156,18 @@ function scoreIssue(
   // Step 5: Convert to 0..100 score
   const score = Math.round(riskScore * 100);
   
-  // Step 6: Derive severity from riskScore
-  const severity = deriveSeverity(riskScore, config);
+  // Step 6: Derive severity from riskScore (canonical severity, independent of mode)
+  let severity = deriveSeverity(riskScore, config);
   
-  // Step 7: Cap severityDisplay for mode
-  const severityDisplay = capSeverityForMode(
+  // Apply category-based minimums (e.g., CONTRADICTION involving MONEY/FEES/REFUND => min "high")
+  severity = applyCategoryMinimums(severity, issue, config);
+  
+  // Step 7: Compute severityDisplay with conditional downgrade (not blanket cap)
+  const severityDisplay = computeSeverityDisplay(
     severity,
     issue.verification.level,
+    issue.type,
+    issue.compliance,
     scoringContext
   );
   
@@ -212,14 +217,10 @@ function scoreIssue(
     scoringReasons.push(`High-risk category: ${issue.category}`);
   }
   
-  // Severity display cap reason
-  if (scoringContext?.mode === 'transcript_only' && issue.verification.level === 'TRANSCRIPT_ONLY') {
-    if (severity === 'critical' || severity === 'high') {
-      if (severityDisplay === 'high') {
-        scoringReasons.push('Severity capped to high in transcript-only mode (exception applied)');
-      } else {
-        scoringReasons.push('Severity capped to medium in transcript-only mode');
-      }
+  // Severity display downgrade reason (only for UNVERIFIED types in transcript-only)
+  if (scoringContext?.mode === 'transcript_only' && issue.verification.level === 'TRANSCRIPT_ONLY' && issue.type === 'UNVERIFIED_CLAIM') {
+    if (severityDisplay !== severity.toLowerCase() && severityDisplay !== severity) {
+      scoringReasons.push('Display severity downgraded for unverified claim in transcript-only mode');
     }
   }
   
@@ -228,8 +229,8 @@ function scoreIssue(
     impact: finalImpact,
     riskScore,
     score,
-    severity,
-    severityDisplay,
+    severity, // Canonical severity (impact severity, independent of mode)
+    severityDisplay, // UI convenience (may be downgraded for UNVERIFIED in transcript-only)
     scoring: {
       components: {
         impact01: Math.round(impact01 * 1000) / 1000, // Round to 3 decimals
@@ -330,30 +331,86 @@ function deriveSeverity(riskScore: number, config: RiskRankingConfig): SeverityV
 }
 
 /**
- * Cap severityDisplay for transcript-only mode
- * MODE SAFETY RULE: In transcript-only, severityDisplay MUST be capped at MEDIUM
- * severityDisplay is 'low' | 'medium' | 'high' (no 'critical')
+ * Compute severityDisplay with conditional downgrade (not blanket cap)
+ * 
+ * Rules:
+ * - Never downgrade legal hold / critical compliance signals
+ * - Only downgrade UNVERIFIED type issues in transcript-only mode
+ * - Downgrade by one band (critical->high->medium->low), not forced to medium
+ * - Do not downgrade contradictions, risk_signals, safety, harassment, etc.
  */
-function capSeverityForMode(
+function computeSeverityDisplay(
   severity: SeverityV2,
   verificationLevel: VerificationLevelV2,
+  issueType: IssueTypeV2,
+  compliance?: { legalHoldSuggested?: boolean },
   scoringContext?: ScoringContext
 ): SeverityDisplayV2 {
-  // MODE SAFETY: In transcript-only mode, ALWAYS cap to medium (no exceptions)
-  if (scoringContext?.mode === 'transcript_only' && verificationLevel === 'TRANSCRIPT_ONLY') {
-    // Enforce: severityDisplay capped at MEDIUM in transcript-only
-    if (severity === 'critical' || severity === 'high') {
-      return 'medium'; // Cap high/critical to medium in transcript-only
-    }
-    // medium and low stay as-is
-    return severity === 'medium' ? 'medium' : 'low';
+  // Never downgrade legal hold / critical compliance signals
+  if (compliance?.legalHoldSuggested) {
+    // Map critical -> high for display (severityDisplay doesn't have 'critical')
+    return severity === 'critical' ? 'high' : severity === 'high' ? 'high' : severity === 'medium' ? 'medium' : 'low';
   }
   
-  // With evidence, map severity to display (critical -> high, others stay)
+  // Only downgrade evidence-type "UNVERIFIED" items in transcript-only mode
+  if (scoringContext?.mode === 'transcript_only' && verificationLevel === 'TRANSCRIPT_ONLY' && issueType === 'UNVERIFIED_CLAIM') {
+    // Downgrade by one band (critical->high->medium->low), but do NOT force medium
+    return downgradeOneBand(severity);
+  }
+  
+  // Do not downgrade contradictions, risk_signals, safety, harassment, etc.
+  // Map severity to display (critical -> high, others stay)
   if (severity === 'critical') return 'high';
   if (severity === 'high') return 'high';
   if (severity === 'medium') return 'medium';
   return 'low';
+}
+
+/**
+ * Downgrade severity by one band (critical->high->medium->low)
+ */
+function downgradeOneBand(severity: SeverityV2): SeverityDisplayV2 {
+  if (severity === 'critical') return 'high';
+  if (severity === 'high') return 'medium';
+  if (severity === 'medium') return 'low';
+  return 'low';
+}
+
+/**
+ * Apply category-based minimums to severity
+ * Examples:
+ * - CONTRADICTION involving MONEY/FEES/REFUND => min "high"
+ * - LEGAL_HOLD suggested => min "high" or "critical"
+ */
+function applyCategoryMinimums(
+  severity: SeverityV2,
+  issue: IssueV2,
+  config: RiskRankingConfig
+): SeverityV2 {
+  // Legal hold suggested => min "high"
+  if (issue.compliance?.legalHoldSuggested) {
+    if (severity === 'low' || severity === 'medium') {
+      return 'high';
+    }
+    return severity;
+  }
+  
+  // CONTRADICTION involving MONEY/FEES/REFUND => min "high"
+  if (issue.type === 'CONTRADICTION') {
+    const hasMoneyCategory = issue.category === 'billing' || 
+                            issue.category === 'compliance' ||
+                            issue.compliance?.tags?.some(tag => 
+                              tag.toLowerCase().includes('fee') ||
+                              tag.toLowerCase().includes('money') ||
+                              tag.toLowerCase().includes('refund') ||
+                              tag.toLowerCase().includes('billing')
+                            );
+    if (hasMoneyCategory && (severity === 'low' || severity === 'medium')) {
+      return 'high';
+    }
+  }
+  
+  return severity;
 }
 
 /**
@@ -472,26 +529,14 @@ function generateSummary(
   };
   const byCategory: Record<string, number> = {};
   
-  // In transcript-only mode, use severityDisplay for summary (matches what manager sees)
-  // Otherwise, use severity (true underlying risk)
-  const useSeverityDisplay = scoringContext?.mode === 'transcript_only';
-  
+  // Executive summary should count impact severity (severity), not display severity (severityDisplay)
+  // This ensures high/critical counts are accurate regardless of transcript-only mode
   for (const issue of issues) {
     byType[issue.type] = (byType[issue.type] || 0) + 1;
     
-    // Choose severity for summary based on mode
-    // Note: severityDisplay is 'low' | 'medium' | 'high' (no 'critical')
-    // but bySeverity expects SeverityV2 which includes 'critical'
-    let sevForSummary: SeverityV2;
-    if (useSeverityDisplay && (issue as any).severityDisplay) {
-      // Map severityDisplay to SeverityV2 (severityDisplay doesn't have 'critical')
-      const sevDisplay = (issue as any).severityDisplay as SeverityDisplayV2;
-      sevForSummary = sevDisplay === 'high' ? 'high' : sevDisplay === 'medium' ? 'medium' : 'low';
-    } else {
-      sevForSummary = issue.severity;
-    }
-    
-    bySeverity[sevForSummary] = (bySeverity[sevForSummary] || 0) + 1;
+    // Always use severity (impact severity) for summary counts
+    // severityDisplay is only for UI convenience, not for analytics
+    bySeverity[issue.severity] = (bySeverity[issue.severity] || 0) + 1;
     byCategory[issue.category] = (byCategory[issue.category] || 0) + 1;
   }
   

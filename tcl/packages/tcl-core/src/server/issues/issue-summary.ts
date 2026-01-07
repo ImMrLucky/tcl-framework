@@ -11,7 +11,9 @@ import type { IssueV2, IssueSummaryV2, SeverityV2, IssueTypeV2, IssueCategoryV2 
  * Compute IssueSummaryV2 from an array of IssueV2 issues
  * 
  * Rules:
- * - Prefer severityDisplay over severity for display counts
+ * - Executive summary should count impact severity (severity), NOT display severity (severityDisplay)
+ * - This ensures high/critical counts are accurate regardless of transcript-only mode
+ * - severityDisplay is only for UI convenience, not for analytics
  * - Normalize severity to: low | medium | high | critical
  * - Count by type, category, and severity
  * - Handle missing fields gracefully
@@ -48,8 +50,9 @@ export function computeIssueSummaryV2(issues: IssueV2[]): IssueSummaryV2 {
     const category = issue.category || 'other';
     byCategory[category] = (byCategory[category] || 0) + 1;
 
-    // Count by severity - prefer severityDisplay, fall back to severity
-    const severity = (issue.severityDisplay || issue.severity || 'medium') as SeverityV2;
+    // Count by severity (impact severity) - NOT severityDisplay
+    // Executive summary should count impact severity, not display severity
+    const severity = (issue.severity || 'medium') as SeverityV2;
     
     // Normalize severity to valid values only
     if (severity === 'low' || severity === 'medium' || severity === 'high' || severity === 'critical') {
