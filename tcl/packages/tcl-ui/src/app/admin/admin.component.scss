@@ -19,19 +19,14 @@ h1 {
   min-height: 300px;
 }
 
-/* Force tab content to be visible - Angular Material may hide inactive tabs */
-::ng-deep .mat-mdc-tab-body-content {
-  overflow: visible !important;
-}
-
+/* Ensure tab content is visible when active */
 ::ng-deep .mat-mdc-tab-body-active {
   overflow: visible !important;
+  height: auto !important;
 }
 
-::ng-deep .mat-mdc-tab-body-active .tab-content {
-  display: block !important;
-  visibility: visible !important;
-  opacity: 1 !important;
+::ng-deep .mat-mdc-tab-body-active .mat-mdc-tab-body-content {
+  overflow: visible !important;
   height: auto !important;
 }
 
