@@ -43,12 +43,12 @@ export function computeIssueSummaryV2(issues) {
         // Count by category
         const category = issue.category || 'other';
         byCategory[category] = (byCategory[category] || 0) + 1;
-        // Count by severity (impact severity) - NOT severityDisplay
-        // Executive summary should count impact severity, not display severity
-        const severity = (issue.severity || 'medium');
+        // Count by severity: use severityDisplay ?? severity ?? "medium"
+        // This ensures the summary matches what the UI displays
+        const sev = (issue.severityDisplay ?? issue.severity ?? 'medium');
         // Normalize severity to valid values only
-        if (severity === 'low' || severity === 'medium' || severity === 'high' || severity === 'critical') {
-            bySeverity[severity] = (bySeverity[severity] || 0) + 1;
+        if (sev === 'low' || sev === 'medium' || sev === 'high' || sev === 'critical') {
+            bySeverity[sev] = (bySeverity[sev] || 0) + 1;
         }
         else {
             // Unknown severity - count as medium (safe default)

@@ -1012,22 +1012,37 @@ app.post("/validate", async (req, res) => {
                     },
                     // Counts from truthDerivationSummary (SINGLE SOURCE OF TRUTH)
                     // These MUST match manifest.truthDerivationSummary exactly
-                    counts: {
-                        claims: truthSummary?.total ?? out.report?.claims?.length ?? 0,
-                        contradicted: truthSummary?.contradicted ?? 0,
-                        ungrounded: truthSummary?.ungrounded ?? 0,
-                        unverified: truthSummary?.unverified ?? 0, // Claims with transcript evidence only
-                        supported: truthSummary?.supported ?? 0, // Claims with EXTERNAL evidence
-                        // Edge counts (for debugging)
-                        supports: out.report?.graph?.supports?.length || 0,
-                        contradictions: out.report?.graph?.contradictions?.length || 0,
-                        grounding: out.report?.graph?.grounding?.length || 0,
-                        // Include definitions for tooltips
-                        definitions,
-                        // Mode indicator
-                        mode,
-                        graphStatus,
-                    }
+                    counts: (() => {
+                        // Fix contradicted count: compute from unique claim IDs in contradiction edges
+                        // If contradictions > 0, then contradicted must be the number of unique claim IDs
+                        const contradictionEdges = out.report?.graph?.contradictions || [];
+                        const contradictedClaimIds = new Set();
+                        for (const edge of contradictionEdges) {
+                            if (edge.claimA)
+                                contradictedClaimIds.add(edge.claimA);
+                            if (edge.claimB)
+                                contradictedClaimIds.add(edge.claimB);
+                        }
+                        const contradictedCount = contradictionEdges.length > 0
+                            ? contradictedClaimIds.size
+                            : (truthSummary?.contradicted ?? 0);
+                        return {
+                            claims: truthSummary?.total ?? out.report?.claims?.length ?? 0,
+                            contradicted: contradictedCount,
+                            ungrounded: truthSummary?.ungrounded ?? 0,
+                            unverified: truthSummary?.unverified ?? 0, // Claims with transcript evidence only
+                            supported: truthSummary?.supported ?? 0, // Claims with EXTERNAL evidence
+                            // Edge counts (for debugging)
+                            supports: out.report?.graph?.supports?.length || 0,
+                            contradictions: contradictionEdges.length,
+                            grounding: out.report?.graph?.grounding?.length || 0,
+                            // Include definitions for tooltips
+                            definitions,
+                            // Mode indicator
+                            mode,
+                            graphStatus,
+                        };
+                    })()
                 };
                 const { data: insertedEvaluation, error: dbError } = await supabaseAdmin
                     .from('evaluations')

@@ -7,7 +7,7 @@
  * IMPORTANT: Never spread raw engine/report objects into DTOs.
  * Always explicitly map fields.
  */
-import { computeIssueSummaryV2, isIssueSummaryV2MissingOrIncomplete } from '../issues/issue-summary.js';
+import { computeIssueSummaryV2 } from '../issues/issue-summary.js';
 /**
  * Convert database evaluation row to DTO
  *
@@ -50,21 +50,17 @@ export function toEvaluationDto(evaluation, includeReport = true) {
                 modelFingerprint: evaluation.report.run.modelFingerprint,
             } : undefined,
         };
-        // Backfill issueSummaryV2 if missing or incomplete (read-time backfill for older evaluations)
+        // CRITICAL: Compute issueSummaryV2 from canonical allIssuesV2 array
+        // This ensures the summary matches the exact list the UI displays
+        // Never use legacy report.issues or multiple conflicting summaries
         const allIssuesV2 = dto.report.allIssuesV2 || [];
         if (allIssuesV2.length > 0) {
-            const existingSummary = evaluation.report.issueSummaryV2;
-            if (isIssueSummaryV2MissingOrIncomplete(existingSummary, allIssuesV2.length)) {
-                // Compute summary from actual issues
-                dto.report.issueSummaryV2 = computeIssueSummaryV2(allIssuesV2);
-            }
-            else {
-                // Use existing summary if it's valid
-                dto.report.issueSummaryV2 = existingSummary;
-            }
+            // Always compute from canonical issues array (single source of truth)
+            // This ensures consistency: summary counts match the issues list
+            dto.report.issueSummaryV2 = computeIssueSummaryV2(allIssuesV2);
         }
         else if (evaluation.report.issueSummaryV2) {
-            // Keep existing summary even if no issues (for consistency)
+            // Keep existing summary only if no issues (for consistency)
             dto.report.issueSummaryV2 = evaluation.report.issueSummaryV2;
         }
     }

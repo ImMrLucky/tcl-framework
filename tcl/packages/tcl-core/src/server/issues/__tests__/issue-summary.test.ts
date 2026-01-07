@@ -90,7 +90,7 @@ describe('computeIssueSummaryV2', () => {
     expect(summary.byCategory.billing).toBe(2);
   });
 
-  it('should use severity (impact severity) for summary counts, not severityDisplay', () => {
+  it('should use severityDisplay ?? severity ?? "medium" for summary counts (matches UI display)', () => {
     const issues: IssueV2[] = [
       {
         issueId: 'issue-1',
@@ -99,8 +99,8 @@ describe('computeIssueSummaryV2', () => {
         conversationId: 'conv-1',
         type: 'CONTRADICTION',
         category: 'evidence',
-        severity: 'high', // This should be used (impact severity)
-        severityDisplay: 'medium', // This is for UI display only, not for summary counts
+        severity: 'high', // Impact severity
+        severityDisplay: 'medium', // UI display severity (what user sees)
         impact: 'high',
         riskScore: 0.8,
         score: 80,
@@ -117,9 +117,10 @@ describe('computeIssueSummaryV2', () => {
 
     const summary = computeIssueSummaryV2(issues);
 
-    // Executive summary should count by severity (impact severity), not severityDisplay
-    expect(summary.bySeverity.high).toBe(1);
-    expect(summary.bySeverity.medium).toBe(0);
+    // Summary should match what UI displays: severityDisplay ?? severity ?? "medium"
+    // Since severityDisplay is 'medium', summary should count as medium
+    expect(summary.bySeverity.medium).toBe(1);
+    expect(summary.bySeverity.high).toBe(0);
   });
 
   it('should fall back to severity when severityDisplay is missing', () => {
