@@ -1,4 +1,4 @@
-import { Component, Inject } from '@angular/core';
+import { Component, Inject, ChangeDetectorRef } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { MatDialogModule, MAT_DIALOG_DATA, MatDialogRef } from '@angular/material/dialog';
@@ -96,10 +96,9 @@ export interface SimulationModifications {
             <div class="claims-list">
               <div *ngFor="let claim of data.claims" 
                    class="claim-item"
-                   [class.removed]="removedClaims.has(claim.id)"
-                   (click)="toggleRemoveClaim(claim.id)">
+                   [class.removed]="removedClaims.has(claim.id)">
                 <mat-checkbox [checked]="removedClaims.has(claim.id)" 
-                              (click)="$event.stopPropagation()">
+                              (change)="toggleRemoveClaim(claim.id)">
                 </mat-checkbox>
                 <div class="claim-content">
                   <span class="claim-speaker" [class]="'speaker-' + (claim.speaker?.toLowerCase() || 'unknown')">
@@ -123,10 +122,9 @@ export interface SimulationModifications {
             <div class="claims-list">
               <div *ngFor="let claim of getUngroundedClaims()" 
                    class="claim-item"
-                   [class.grounded]="addedGrounded.has(claim.id)"
-                   (click)="toggleAddGrounded(claim.id)">
+                   [class.grounded]="addedGrounded.has(claim.id)">
                 <mat-checkbox [checked]="addedGrounded.has(claim.id)"
-                              (click)="$event.stopPropagation()">
+                              (change)="toggleAddGrounded(claim.id)">
                 </mat-checkbox>
                 <div class="claim-content">
                   <span class="claim-speaker" [class]="'speaker-' + (claim.speaker?.toLowerCase() || 'unknown')">
@@ -155,10 +153,9 @@ export interface SimulationModifications {
             <div class="edges-list" *ngIf="data.contradictions.length > 0">
               <div *ngFor="let edge of data.contradictions; let i = index" 
                    class="edge-item"
-                   [class.removed]="isContradictionRemoved(edge)"
-                   (click)="toggleRemoveContradiction(edge)">
+                   [class.removed]="isContradictionRemoved(edge)">
                 <mat-checkbox [checked]="isContradictionRemoved(edge)"
-                              (click)="$event.stopPropagation()">
+                              (change)="toggleRemoveContradiction(edge)">
                 </mat-checkbox>
                 <div class="edge-content">
                   <code>{{ edge.claimA | slice:0:20 }}</code>
@@ -173,10 +170,9 @@ export interface SimulationModifications {
             <div class="edges-list" *ngIf="data.supports.length > 0">
               <div *ngFor="let edge of data.supports; let i = index" 
                    class="edge-item"
-                   [class.removed]="isSupportRemoved(edge)"
-                   (click)="toggleRemoveSupport(edge)">
+                   [class.removed]="isSupportRemoved(edge)">
                 <mat-checkbox [checked]="isSupportRemoved(edge)"
-                              (click)="$event.stopPropagation()">
+                              (change)="toggleRemoveSupport(edge)">
                 </mat-checkbox>
                 <div class="edge-content">
                   <code>{{ edge.claimA | slice:0:20 }}</code>
@@ -419,7 +415,8 @@ export class SimulationDialogComponent {
 
   constructor(
     public dialogRef: MatDialogRef<SimulationDialogComponent>,
-    @Inject(MAT_DIALOG_DATA) public data: SimulationDialogData
+    @Inject(MAT_DIALOG_DATA) public data: SimulationDialogData,
+    private cdr: ChangeDetectorRef
   ) {}
 
   toggleRemoveClaim(claimId: string) {
@@ -430,6 +427,7 @@ export class SimulationDialogComponent {
       // Also remove from grounded if it was there
       this.addedGrounded.delete(claimId);
     }
+    this.cdr.detectChanges();
   }
 
   toggleAddGrounded(claimId: string) {
@@ -438,6 +436,7 @@ export class SimulationDialogComponent {
     } else {
       this.addedGrounded.add(claimId);
     }
+    this.cdr.detectChanges();
   }
 
   toggleRemoveContradiction(edge: Edge) {
@@ -449,6 +448,7 @@ export class SimulationDialogComponent {
     } else {
       this.removedContradictions.push(edge);
     }
+    this.cdr.detectChanges();
   }
 
   toggleRemoveSupport(edge: Edge) {
@@ -460,6 +460,7 @@ export class SimulationDialogComponent {
     } else {
       this.removedSupports.push(edge);
     }
+    this.cdr.detectChanges();
   }
 
   isContradictionRemoved(edge: Edge): boolean {
