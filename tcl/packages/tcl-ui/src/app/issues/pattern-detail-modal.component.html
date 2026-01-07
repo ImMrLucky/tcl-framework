@@ -58,14 +58,14 @@
           <div class="pattern-actions">
           <div class="action-group">
             <label>Status</label>
-            <mat-select [value]="patternDetail?.status || 'OPEN'" (selectionChange)="updateStatus($event.value)">
+            <mat-select [value]="getPatternStatus()" (selectionChange)="updateStatus($event.value)">
               <mat-option *ngFor="let status of statusOptions" [value]="status">{{ status }}</mat-option>
             </mat-select>
           </div>
             <div class="action-group">
               <label>Assignee</label>
               <input matInput 
-                     [value]="patternDetail?.assignee || ''" 
+                     [value]="getPatternAssignee()" 
                      placeholder="Unassigned"
                      (blur)="updateAssigneeFromInput($event)">
             </div>
@@ -78,15 +78,15 @@
             <div class="verification-stats">
               <div class="verification-stat">
                 <span class="stat-label">External Verified:</span>
-                <span class="stat-value">{{ patternDetail?.verificationCounts?.EXTERNAL_VERIFIED || 0 }}</span>
+                <span class="stat-value">{{ getVerificationCount('EXTERNAL_VERIFIED') }}</span>
               </div>
               <div class="verification-stat">
                 <span class="stat-label">Transcript Only:</span>
-                <span class="stat-value">{{ patternDetail?.verificationCounts?.TRANSCRIPT_ONLY || 0 }}</span>
+                <span class="stat-value">{{ getVerificationCount('TRANSCRIPT_ONLY') }}</span>
               </div>
               <div class="verification-stat">
                 <span class="stat-label">No Verification:</span>
-                <span class="stat-value">{{ patternDetail?.verificationCounts?.NONE || 0 }}</span>
+                <span class="stat-value">{{ getVerificationCount('NONE') }}</span>
               </div>
             </div>
           </div>
@@ -96,7 +96,7 @@
       <!-- Occurrences Tab -->
       <mat-tab label="Occurrences">
         <div class="tab-content">
-          <table mat-table [dataSource]="patternDetail?.occurrencesList || []" class="occurrences-table">
+          <table mat-table [dataSource]="getOccurrencesList()" class="occurrences-table">
             <ng-container matColumnDef="occurredAt">
               <th mat-header-cell *matHeaderCellDef>Occurred</th>
               <td mat-cell *matCellDef="let occ">{{ formatDate(occ.occurredAt) }}</td>
@@ -141,13 +141,13 @@
       <!-- Traceability Tab -->
       <mat-tab label="Traceability">
         <div class="tab-content">
-          <div *ngIf="patternDetail.occurrencesList && patternDetail.occurrencesList.length > 0">
+          <div *ngIf="hasOccurrences()">
             <h4>Claim Details</h4>
-            <div *ngFor="let occ of patternDetail.occurrencesList.slice(0, 5)" class="trace-item">
+            <div *ngFor="let occ of getOccurrencesList().slice(0, 5)" class="trace-item">
               <div class="trace-claim">
-                <strong>Claim ID:</strong> {{ occ.what?.primaryClaimId }}
+                <strong>Claim ID:</strong> {{ getClaimId(occ) }}
                 <br>
-                <strong>Summary:</strong> {{ occ.what?.issueSummary || occ.what?.claimText }}
+                <strong>Summary:</strong> {{ getClaimSummary(occ) }}
               </div>
               
               <div *ngIf="hasConflicts(occ)" class="conflicts-list">
@@ -161,9 +161,9 @@
             </div>
           </div>
 
-          <div *ngIf="patternDetail?.traceability?.topEdges && patternDetail?.traceability?.topEdges.length > 0">
+          <div *ngIf="hasTopEdges()">
             <h4>Top Edges</h4>
-            <div *ngFor="let edge of patternDetail?.traceability?.topEdges" class="edge-item">
+            <div *ngFor="let edge of getTopEdges()" class="edge-item">
               <span class="edge-kind">{{ edge.kind }}</span>
               <span class="edge-claim">{{ edge.claimA }}</span>
               <span *ngIf="edge.claimB" class="edge-claim">↔ {{ edge.claimB }}</span>
@@ -176,8 +176,8 @@
       <!-- Evidence Tab -->
       <mat-tab label="Evidence">
         <div class="tab-content">
-          <div *ngIf="patternDetail?.occurrencesList && patternDetail.occurrencesList.length > 0">
-            <div *ngFor="let occ of patternDetail.occurrencesList.slice(0, 5)" class="evidence-item">
+          <div *ngIf="hasOccurrences()">
+            <div *ngFor="let occ of getOccurrencesList().slice(0, 5)" class="evidence-item">
               <h5>Occurrence {{ formatDate(occ.occurredAt) }}</h5>
               <div *ngIf="hasEvidence(occ)">
                 <div *ngFor="let evidence of getEvidenceForOccurrence(occ)" class="evidence-ref">
@@ -197,9 +197,9 @@
       <!-- Audit Tab -->
       <mat-tab label="Audit">
         <div class="tab-content">
-          <div *ngIf="patternDetail?.occurrencesList && patternDetail.occurrencesList.length > 0">
+          <div *ngIf="hasOccurrences()">
             <h4>Evaluation References</h4>
-            <div *ngFor="let occ of patternDetail.occurrencesList" class="audit-item">
+            <div *ngFor="let occ of getOccurrencesList()" class="audit-item">
               <div class="audit-evaluation">
                 <strong>Evaluation ID:</strong>
                 <a (click)="viewEvaluation(occ.evaluationId)" class="evaluation-link">{{ occ.evaluationId }}</a>

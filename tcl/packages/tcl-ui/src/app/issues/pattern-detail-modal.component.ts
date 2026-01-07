@@ -233,5 +233,41 @@ export class PatternDetailModalComponent implements OnInit {
   getEvidenceForOccurrence(occurrence: IssuePatternOccurrence): Array<{ sourceType: string; quote: string; turnIndex?: number }> {
     return occurrence.evidencePreview || [];
   }
+
+  hasTopEdges(): boolean {
+    return !!(this.patternDetail?.traceability?.topEdges && this.patternDetail.traceability.topEdges.length > 0);
+  }
+
+  getTopEdges() {
+    return this.patternDetail?.traceability?.topEdges || [];
+  }
+
+  getPatternStatus(): string {
+    return this.patternDetail?.status || 'OPEN';
+  }
+
+  getPatternAssignee(): string {
+    return this.patternDetail?.assignee || '';
+  }
+
+  getVerificationCount(level: 'EXTERNAL_VERIFIED' | 'TRANSCRIPT_ONLY' | 'NONE'): number {
+    return this.patternDetail?.verificationCounts?.[level] || 0;
+  }
+
+  getOccurrencesList() {
+    return this.patternDetail?.occurrencesList || [];
+  }
+
+  hasOccurrences(): boolean {
+    return !!(this.patternDetail?.occurrencesList && this.patternDetail.occurrencesList.length > 0);
+  }
+
+  getClaimId(occ: IssuePatternOccurrence): string {
+    return occ.what?.primaryClaimId || 'N/A';
+  }
+
+  getClaimSummary(occ: IssuePatternOccurrence): string {
+    return (occ.what?.issueSummary || occ.what?.claimText) || 'N/A';
+  }
 }
 
