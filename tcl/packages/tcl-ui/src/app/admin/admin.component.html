@@ -26,7 +26,7 @@
               mat-raised-button 
               color="primary" 
               (click)="switchOrg()"
-              [disabled]="loading || !selectedOrgId">
+              [disabled]="loadingOrgs || !selectedOrgId">
               <mat-spinner *ngIf="loading" diameter="20" class="inline-spinner"></mat-spinner>
               Switch Organization
             </button>
@@ -86,7 +86,15 @@
             <mat-card-subtitle>Manage plan tiers for internal test organizations</mat-card-subtitle>
           </mat-card-header>
           <mat-card-content>
-            <table mat-table [dataSource]="allOrgs" class="orgs-table">
+            <div *ngIf="loadingAllOrgs" class="loading-container">
+              <mat-spinner diameter="40"></mat-spinner>
+              <p>Loading organizations...</p>
+            </div>
+            <div *ngIf="!loadingAllOrgs && allOrgs.length === 0" class="empty-state">
+              <p>No organizations found.</p>
+              <p class="help-text">Make sure you are logged in as a superuser and have access to organizations.</p>
+            </div>
+            <table *ngIf="!loadingAllOrgs && allOrgs.length > 0" mat-table [dataSource]="allOrgs" class="orgs-table">
               <ng-container matColumnDef="name">
                 <th mat-header-cell *matHeaderCellDef>Name</th>
                 <td mat-cell *matCellDef="let org">{{ org.name }}</td>
@@ -121,21 +129,21 @@
                       mat-button 
                       color="primary" 
                       (click)="setOrgPlan(org, 'SANDBOX')"
-                      [disabled]="loading || org.planTier === 'SANDBOX'">
+                      [disabled]="loadingAllOrgs || org.planTier === 'SANDBOX'">
                       Set Sandbox
                     </button>
                     <button 
                       mat-button 
                       color="primary" 
                       (click)="setOrgPlan(org, 'TEAM')"
-                      [disabled]="loading || org.planTier === 'TEAM'">
+                      [disabled]="loadingAllOrgs || org.planTier === 'TEAM'">
                       Set Team
                     </button>
                     <button 
                       mat-button 
                       color="primary" 
                       (click)="setOrgPlan(org, 'ENTERPRISE')"
-                      [disabled]="loading || org.planTier === 'ENTERPRISE'">
+                      [disabled]="loadingAllOrgs || org.planTier === 'ENTERPRISE'">
                       Set Enterprise
                     </button>
                   </div>

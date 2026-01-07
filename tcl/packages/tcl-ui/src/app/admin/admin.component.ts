@@ -43,6 +43,8 @@ export class AdminComponent implements OnInit {
   allOrgs: Org[] = [];
   selectedOrgId: string = '';
   loading = false;
+  loadingOrgs = false;
+  loadingAllOrgs = false;
   
   emulationEnabled = false;
   emulationTier: 'SANDBOX' | 'TEAM' | 'ENTERPRISE' = 'SANDBOX';
@@ -62,32 +64,52 @@ export class AdminComponent implements OnInit {
     await this.loadAllOrgs();
     // Get current org from plan context
     const planContext = this.planService.getPlanContext();
+    // Check if emulation is active from plan context
+    if (planContext && (planContext as any).emulated) {
+      this.emulationEnabled = true;
+      this.emulationTier = (planContext as any).effectivePlanTier || 'SANDBOX';
+    }
     // We'll need to get this from /api/me response
     this.loadCurrentOrg();
   }
 
   async loadOrgs() {
-    this.loading = true;
+    this.loadingOrgs = true;
     try {
       this.orgs = await this.adminService.getOrgs().toPromise() || [];
       if (this.orgs.length > 0 && !this.selectedOrgId) {
         this.selectedOrgId = this.orgs[0].id;
       }
     } catch (error: any) {
+      console.error('Failed to load orgs:', error);
       const snackBarRef = this.snackBar.open('Failed to load organizations: ' + (error.error?.error || error.message), 'Close', {
         duration: 5000
       });
       snackBarRef.onAction().subscribe(() => snackBarRef.dismiss());
     } finally {
-      this.loading = false;
+      this.loadingOrgs = false;
     }
   }
 
   async loadAllOrgs() {
+    this.loadingAllOrgs = true;
     try {
       this.allOrgs = await this.adminService.getAllOrgs().toPromise() || [];
+      console.log('Loaded all orgs:', this.allOrgs.length);
+      if (this.allOrgs.length === 0) {
+        const snackBarRef = this.snackBar.open('No organizations found. Make sure you are a superuser.', 'Close', {
+          duration: 5000
+        });
+        snackBarRef.onAction().subscribe(() => snackBarRef.dismiss());
+      }
     } catch (error: any) {
       console.error('Failed to load all orgs:', error);
+      const snackBarRef = this.snackBar.open('Failed to load organizations: ' + (error.error?.error || error.message), 'Close', {
+        duration: 5000
+      });
+      snackBarRef.onAction().subscribe(() => snackBarRef.dismiss());
+    } finally {
+      this.loadingAllOrgs = false;
     }
   }
 
