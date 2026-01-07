@@ -87,7 +87,7 @@ export class PlanService {
   loadPlanContext(): void {
     this.loadingSubject.next(true);
     
-    this.http.post<MeResponse>(`${this.apiUrl}/api/me`, {})
+    this.http.get<MeResponse>(`${this.apiUrl}/api/me`)
       .pipe(
         tap(response => {
           if (response.planContext) {
