@@ -28,7 +28,6 @@ import { ActivatedRoute, Params } from '@angular/router';
 import { AppHeaderComponent } from '../shared/app-header.component';
 import { IssuesService, IssuePatternRow, IssuePatternDetail, QueueFilters } from '../issues.service';
 import { IssuePatternOccurrence } from './issue.model';
-import { AuditService } from '../audit.service';
 import { AuthService } from '../auth.service';
 
 @Component({
@@ -440,14 +439,53 @@ export class IssuesListComponent implements OnInit, OnDestroy {
     try {
       // Load pattern detail from API
       console.log('Loading pattern detail for:', pattern.patternKey);
-      this.patternDetail = await this.auditService.getPatternDetail(pattern.patternKey).toPromise() || null;
-      console.log('Pattern detail loaded:', this.patternDetail);
+      const detail = await this.issuesService.getPatternDetail(pattern.patternKey).toPromise();
+      console.log('Pattern detail loaded:', detail);
+      console.log('Detail type:', typeof detail);
+      console.log('Detail keys:', detail ? Object.keys(detail) : 'null');
+      
+      if (!detail) {
+        console.error('Pattern detail is null or undefined');
+        const snackBarRef = this.snackBar.open('Failed to load pattern detail: No data returned', 'Close', {
+          duration: 5000
+        });
+        snackBarRef.onAction().subscribe(() => snackBarRef.dismiss());
+        this.loadingDetail = false;
+        return;
+      }
+      
+      // Ensure required fields are present (fallback to pattern row data if missing)
+      this.patternDetail = {
+        patternKey: detail.patternKey || pattern.patternKey,
+        title: detail.title || pattern.title || 'Untitled Pattern',
+        summary: detail.summary || pattern.summary || '',
+        occurrences: detail.occurrences || pattern.occurrences || 0,
+        verificationCounts: detail.verificationCounts || pattern.verificationCounts || {
+          EXTERNAL_VERIFIED: 0,
+          TRANSCRIPT_ONLY: 0,
+          NONE: 0,
+        },
+        status: detail.status || pattern.status || 'OPEN',
+        assignee: detail.assignee || pattern.assignee || null,
+        firstSeenAt: detail.firstSeenAt || pattern.firstSeenAt || new Date().toISOString(),
+        lastSeenAt: detail.lastSeenAt || pattern.lastSeenAt || new Date().toISOString(),
+        occurrencesList: detail.occurrencesList || [],
+        traceability: detail.traceability,
+        scoring: detail.scoring,
+        severityDisplay: detail.severityDisplay || pattern.severityDisplay || 'medium',
+        priorityScore: detail.priorityScore || pattern.priorityScore || 0,
+      } as IssuePatternDetail;
+      
+      console.log('Pattern detail after merge:', this.patternDetail);
+      console.log('Has occurrencesList:', !!this.patternDetail.occurrencesList);
+      console.log('OccurrencesList length:', this.patternDetail.occurrencesList?.length || 0);
     } catch (error: any) {
       console.error('Failed to load pattern detail:', error);
       const snackBarRef = this.snackBar.open('Failed to load pattern detail: ' + (error.error?.error || error.message), 'Close', {
         duration: 5000
       });
       snackBarRef.onAction().subscribe(() => snackBarRef.dismiss());
+      this.patternDetail = null;
     } finally {
       this.loadingDetail = false;
     }

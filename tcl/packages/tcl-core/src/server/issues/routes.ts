@@ -1271,6 +1271,12 @@ export function setupIssueWorkflowRoutes(app: express.Application) {
         })),
       } : undefined;
 
+      // Compute priority score (same formula as queue endpoint)
+      const occurrenceWeight = Math.min(patternIssues.length / 10, 1.0) * 0.3; // Cap at 10 occurrences
+      const riskWeight = avgRiskScore * 0.5;
+      const unresolvedWeight = (statusCounts.OPEN + statusCounts.ACKNOWLEDGED) / patternIssues.length * 0.2;
+      const priorityScore = Math.round((occurrenceWeight + riskWeight + unresolvedWeight) * 100);
+
       const title = representative.what?.issueSummary || 
                    representative.what?.claimSummary || 
                    `${representative.type} in ${representative.category}`;
@@ -1291,6 +1297,9 @@ export function setupIssueWorkflowRoutes(app: express.Application) {
         occurrencesList,
         traceability,
         scoring: representative.scoring,
+        // Add fields needed for drawer display
+        severityDisplay: representative.severityDisplay || representative.severity || 'medium',
+        priorityScore: priorityScore,
       });
     } catch (e: any) {
       console.error('Get pattern detail error:', e);
