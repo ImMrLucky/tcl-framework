@@ -90,7 +90,7 @@ const upload = multer({
 app.use((req, res, next) => {
     // Skip JSON parsing for routes that use multer (file uploads)
     // Multer will handle multipart/form-data
-    if (req.path === '/transcribe' || req.path.startsWith('/webhooks/')) {
+    if (req.path === '/api/transcribe' || req.path === '/transcribe' || req.path.startsWith('/webhooks/')) {
         return next();
     }
     // Apply JSON parsing for other routes
@@ -2671,7 +2671,7 @@ app.post("/auth/verify-password", async (req, res) => {
     }
 });
 // Audio transcription endpoint
-app.post("/transcribe", upload.single('audio'), async (req, res) => {
+app.post("/api/transcribe", upload.single('audio'), async (req, res) => {
     try {
         if (!req.file) {
             return res.status(400).json({ error: "No audio file provided" });
