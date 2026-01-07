@@ -21,7 +21,7 @@ import { FormsModule, FormGroup, FormControl, ReactiveFormsModule } from '@angul
 import { MatDialog, MatDialogModule } from '@angular/material/dialog';
 import { MatSnackBar, MatSnackBarModule } from '@angular/material/snack-bar';
 import { MatDividerModule } from '@angular/material/divider';
-import { MatSidenavModule } from '@angular/material/sidenav';
+import { MatSidenavModule, MatDrawer } from '@angular/material/sidenav';
 import { MatTabsModule } from '@angular/material/tabs';
 import { Subject, debounceTime, distinctUntilChanged, takeUntil } from 'rxjs';
 import { ActivatedRoute, Params } from '@angular/router';
@@ -67,7 +67,7 @@ import { AuthService } from '../auth.service';
 })
 export class IssuesListComponent implements OnInit, OnDestroy {
   @ViewChild(MatPaginator) paginator!: MatPaginator;
-  @ViewChild('drawer') drawer!: any; // MatDrawer from MatSidenavModule
+  @ViewChild('drawer') drawer!: MatDrawer;
   
   private destroy$ = new Subject<void>();
   
@@ -415,6 +415,8 @@ export class IssuesListComponent implements OnInit, OnDestroy {
   }
   
   async viewPattern(pattern: IssuePatternRow) {
+    console.log('viewPattern called with:', pattern);
+    
     // Set the selected pattern key first
     this.selectedPatternKey = pattern.patternKey;
     
@@ -422,9 +424,24 @@ export class IssuesListComponent implements OnInit, OnDestroy {
     this.drawerOpen = true;
     this.loadingDetail = true;
     
+    // Use ChangeDetectorRef to ensure Angular detects the change
+    // Force drawer to open using ViewChild reference after change detection
+    setTimeout(() => {
+      if (this.drawer) {
+        console.log('Opening drawer via ViewChild, current state:', this.drawer.opened);
+        if (!this.drawer.opened) {
+          this.drawer.open();
+        }
+      } else {
+        console.warn('Drawer ViewChild not found');
+      }
+    }, 100);
+    
     try {
       // Load pattern detail from API
+      console.log('Loading pattern detail for:', pattern.patternKey);
       this.patternDetail = await this.auditService.getPatternDetail(pattern.patternKey).toPromise() || null;
+      console.log('Pattern detail loaded:', this.patternDetail);
     } catch (error: any) {
       console.error('Failed to load pattern detail:', error);
       const snackBarRef = this.snackBar.open('Failed to load pattern detail: ' + (error.error?.error || error.message), 'Close', {

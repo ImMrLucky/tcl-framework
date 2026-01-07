@@ -311,8 +311,8 @@
       </mat-drawer-content>
 
       <!-- Pattern Detail Drawer -->
-      <mat-drawer #drawer mode="side" position="end" [(opened)]="drawerOpen" class="pattern-drawer">
-        <div class="drawer-header" *ngIf="patternDetail">
+      <mat-drawer #drawer mode="side" position="end" [opened]="drawerOpen" class="pattern-drawer">
+        <div class="drawer-header" *ngIf="patternDetail || loadingDetail">
           <div class="header-top">
             <div class="header-chips">
               <mat-chip [class]="'severity-chip ' + getSeverityColor(patternDetail.severityDisplay || 'medium')">

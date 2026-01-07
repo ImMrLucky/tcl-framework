@@ -420,6 +420,8 @@ table {
 
 .drawer-container {
   min-height: 600px;
+  position: relative;
+  height: auto;
   
   .pattern-drawer {
     width: 560px;
