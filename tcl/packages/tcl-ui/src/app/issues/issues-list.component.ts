@@ -21,7 +21,6 @@ import { FormsModule, FormGroup, FormControl, ReactiveFormsModule } from '@angul
 import { MatDialog, MatDialogModule } from '@angular/material/dialog';
 import { MatSnackBar, MatSnackBarModule } from '@angular/material/snack-bar';
 import { MatDividerModule } from '@angular/material/divider';
-import { MatSidenavModule, MatDrawer } from '@angular/material/sidenav';
 import { MatTabsModule } from '@angular/material/tabs';
 import { Subject, debounceTime, distinctUntilChanged, takeUntil } from 'rxjs';
 import { ActivatedRoute, Params } from '@angular/router';
@@ -29,6 +28,7 @@ import { AppHeaderComponent } from '../shared/app-header.component';
 import { IssuesService, IssuePatternRow, IssuePatternDetail, QueueFilters } from '../issues.service';
 import { IssuePatternOccurrence } from './issue.model';
 import { AuthService } from '../auth.service';
+import { PatternDetailModalComponent, PatternDetailModalData } from './pattern-detail-modal.component';
 
 @Component({
   selector: 'app-issues-list',
@@ -57,7 +57,6 @@ import { AuthService } from '../auth.service';
     MatDialogModule,
     MatSnackBarModule,
     MatDividerModule,
-    MatSidenavModule,
     MatTabsModule,
     AppHeaderComponent
   ],
@@ -66,7 +65,6 @@ import { AuthService } from '../auth.service';
 })
 export class IssuesListComponent implements OnInit, OnDestroy {
   @ViewChild(MatPaginator) paginator!: MatPaginator;
-  @ViewChild('drawer') drawer!: MatDrawer;
   
   private destroy$ = new Subject<void>();
   
@@ -90,10 +88,6 @@ export class IssuesListComponent implements OnInit, OnDestroy {
   categoryOptions: string[] = [];
   typeOptions: string[] = [];
   
-  // Drawer state
-  selectedPatternKey: string | null = null;
-  patternDetail: IssuePatternDetail | null = null;
-  drawerOpen = false;
   loadingDetail = false;
   
   displayedColumns = [
@@ -413,178 +407,66 @@ export class IssuesListComponent implements OnInit, OnDestroy {
   }
   
   async viewPattern(pattern: IssuePatternRow) {
-    console.log('viewPattern called with:', pattern);
-    
-    // Set the selected pattern key first
-    this.selectedPatternKey = pattern.patternKey;
-    
-    // Open drawer immediately (two-way binding will handle it)
-    this.drawerOpen = true;
+    // Load pattern detail first
     this.loadingDetail = true;
-    
-    // Use ChangeDetectorRef to ensure Angular detects the change
-    // Force drawer to open using ViewChild reference after change detection
-    setTimeout(() => {
-      if (this.drawer) {
-        console.log('Opening drawer via ViewChild, current state:', this.drawer.opened);
-        if (!this.drawer.opened) {
-          this.drawer.open();
-        }
-      } else {
-        console.warn('Drawer ViewChild not found');
-      }
-    }, 100);
+    let patternDetail: IssuePatternDetail | null = null;
     
     try {
-      // Load pattern detail from API
-      console.log('Loading pattern detail for:', pattern.patternKey);
       const detail = await this.issuesService.getPatternDetail(pattern.patternKey).toPromise();
-      console.log('Pattern detail loaded:', detail);
-      console.log('Detail type:', typeof detail);
-      console.log('Detail keys:', detail ? Object.keys(detail) : 'null');
       
-      if (!detail) {
-        console.error('Pattern detail is null or undefined');
-        const snackBarRef = this.snackBar.open('Failed to load pattern detail: No data returned', 'Close', {
-          duration: 5000
-        });
-        snackBarRef.onAction().subscribe(() => snackBarRef.dismiss());
-        this.loadingDetail = false;
-        return;
+      if (detail) {
+        // Ensure required fields are present (fallback to pattern row data if missing)
+        patternDetail = {
+          patternKey: detail.patternKey || pattern.patternKey,
+          title: detail.title || pattern.title || 'Untitled Pattern',
+          summary: detail.summary || pattern.summary || '',
+          occurrences: detail.occurrences || pattern.occurrences || 0,
+          verificationCounts: detail.verificationCounts || pattern.verificationCounts || {
+            EXTERNAL_VERIFIED: 0,
+            TRANSCRIPT_ONLY: 0,
+            NONE: 0,
+          },
+          status: detail.status || pattern.status || 'OPEN',
+          assignee: detail.assignee || pattern.assignee || null,
+          firstSeenAt: detail.firstSeenAt || pattern.firstSeenAt || new Date().toISOString(),
+          lastSeenAt: detail.lastSeenAt || pattern.lastSeenAt || new Date().toISOString(),
+          occurrencesList: detail.occurrencesList || [],
+          traceability: detail.traceability,
+          scoring: detail.scoring,
+          severityDisplay: detail.severityDisplay || pattern.severityDisplay || 'medium',
+          priorityScore: detail.priorityScore || pattern.priorityScore || 0,
+        } as IssuePatternDetail;
       }
-      
-      // Ensure required fields are present (fallback to pattern row data if missing)
-      this.patternDetail = {
-        patternKey: detail.patternKey || pattern.patternKey,
-        title: detail.title || pattern.title || 'Untitled Pattern',
-        summary: detail.summary || pattern.summary || '',
-        occurrences: detail.occurrences || pattern.occurrences || 0,
-        verificationCounts: detail.verificationCounts || pattern.verificationCounts || {
-          EXTERNAL_VERIFIED: 0,
-          TRANSCRIPT_ONLY: 0,
-          NONE: 0,
-        },
-        status: detail.status || pattern.status || 'OPEN',
-        assignee: detail.assignee || pattern.assignee || null,
-        firstSeenAt: detail.firstSeenAt || pattern.firstSeenAt || new Date().toISOString(),
-        lastSeenAt: detail.lastSeenAt || pattern.lastSeenAt || new Date().toISOString(),
-        occurrencesList: detail.occurrencesList || [],
-        traceability: detail.traceability,
-        scoring: detail.scoring,
-        severityDisplay: detail.severityDisplay || pattern.severityDisplay || 'medium',
-        priorityScore: detail.priorityScore || pattern.priorityScore || 0,
-      } as IssuePatternDetail;
-      
-      console.log('Pattern detail after merge:', this.patternDetail);
-      console.log('Has occurrencesList:', !!this.patternDetail.occurrencesList);
-      console.log('OccurrencesList length:', this.patternDetail.occurrencesList?.length || 0);
-      this.loadingDetail = false; // Set loading to false immediately after data is loaded
-      console.log('loadingDetail set to false, patternDetail exists:', !!this.patternDetail);
     } catch (error: any) {
       console.error('Failed to load pattern detail:', error);
       const snackBarRef = this.snackBar.open('Failed to load pattern detail: ' + (error.error?.error || error.message), 'Close', {
         duration: 5000
       });
       snackBarRef.onAction().subscribe(() => snackBarRef.dismiss());
-      this.patternDetail = null;
+    } finally {
       this.loadingDetail = false;
     }
-  }
-  
-  closeDrawer() {
-    this.drawerOpen = false;
-    if (this.drawer) {
-      this.drawer.close();
-    }
-    this.selectedPatternKey = null;
-    this.patternDetail = null;
-  }
-  
-  async updatePatternStatus(status: string) {
-    if (!this.selectedPatternKey) return;
     
-    try {
-      // Use IssuesService to update pattern
-      await this.issuesService.updatePattern(this.selectedPatternKey, { status }).toPromise();
-      const snackBarRef = this.snackBar.open('Pattern status updated', 'Close', { duration: 3000 });
-      snackBarRef.onAction().subscribe(() => snackBarRef.dismiss());
-      this.loadQueue();
-      if (this.patternDetail) {
-        this.patternDetail.status = status as any;
-      }
-    } catch (error: any) {
-      console.error('Failed to update pattern status:', error);
-      const snackBarRef = this.snackBar.open('Failed to update status: ' + (error.error?.error || error.message), 'Close', {
-        duration: 5000
-      });
-      snackBarRef.onAction().subscribe(() => snackBarRef.dismiss());
-    }
-  }
-  
-  async updatePatternAssignee(assignee: string | null) {
-    if (!this.selectedPatternKey) return;
+    // Open modal with pattern detail
+    const dialogRef = this.dialog.open(PatternDetailModalComponent, {
+      width: '900px',
+      maxWidth: '95vw',
+      maxHeight: '90vh',
+      data: {
+        patternKey: pattern.patternKey,
+        patternDetail: patternDetail,
+        loading: false,
+      } as PatternDetailModalData
+    });
     
-    try {
-      await this.issuesService.updatePattern(this.selectedPatternKey, { assignee }).toPromise();
-      const snackBarRef = this.snackBar.open('Pattern assignee updated', 'Close', { duration: 3000 });
-      snackBarRef.onAction().subscribe(() => snackBarRef.dismiss());
+    // Refresh queue when modal closes (in case status/assignee was updated)
+    dialogRef.afterClosed().subscribe(() => {
       this.loadQueue();
-      if (this.patternDetail) {
-        this.patternDetail.assignee = assignee;
-      }
-    } catch (error: any) {
-      console.error('Failed to update pattern assignee:', error);
-      const snackBarRef = this.snackBar.open('Failed to update assignee: ' + (error.error?.error || error.message), 'Close', {
-        duration: 5000
-      });
-      snackBarRef.onAction().subscribe(() => snackBarRef.dismiss());
-    }
+    });
   }
   
   viewEvaluation(evaluationId: string) {
     this.router.navigate(['/evaluations', evaluationId]);
-  }
-  
-  copyPatternKey() {
-    if (this.patternDetail?.patternKey) {
-      navigator.clipboard.writeText(this.patternDetail.patternKey).then(() => {
-        const snackBarRef = this.snackBar.open('Pattern key copied to clipboard', 'Close', { duration: 2000 });
-        snackBarRef.onAction().subscribe(() => snackBarRef.dismiss());
-      });
-    }
-  }
-  
-  updatePatternAssigneeFromInput(event: Event) {
-    const target = event.target as HTMLInputElement;
-    const value = target.value?.trim() || null;
-    if (value === 'Unassigned' || value === '') {
-      this.updatePatternAssignee(null);
-    } else {
-      this.updatePatternAssignee(value);
-    }
-  }
-  
-  hasConflicts(): boolean {
-    if (!this.patternDetail?.occurrencesList) return false;
-    return this.patternDetail.occurrencesList.some(occ => 
-      occ.tracePreview?.contradictionPairs && occ.tracePreview.contradictionPairs.length > 0
-    );
-  }
-  
-  getConflictsForOccurrence(occ: IssuePatternOccurrence): Array<{ claimA: string; claimB: string; weight: number }> {
-    if (!occ.tracePreview?.contradictionPairs) return [];
-    return occ.tracePreview.contradictionPairs.slice(0, 3);
-  }
-  
-  hasEvidence(): boolean {
-    if (!this.patternDetail?.occurrencesList) return false;
-    return this.patternDetail.occurrencesList.some(occ => 
-      occ.evidencePreview && occ.evidencePreview.length > 0
-    );
-  }
-  
-  getEvidenceForOccurrence(occ: IssuePatternOccurrence): Array<{ sourceType: string; quote: string; turnIndex?: number }> {
-    return occ.evidencePreview || [];
   }
   
   getSeverityColor(severity: string | undefined): string {

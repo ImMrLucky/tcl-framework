@@ -1,0 +1,221 @@
+<h2 mat-dialog-title>
+  <div class="dialog-title-content">
+    <div class="title-left">
+      <mat-chip [class]="'severity-chip ' + getSeverityColor(patternDetail?.severityDisplay || 'medium')">
+        {{ patternDetail?.severityDisplay || 'medium' | titlecase }}
+      </mat-chip>
+      <mat-chip [class]="'status-chip ' + getStatusColor(patternDetail?.status || 'OPEN')">
+        {{ patternDetail?.status }}
+      </mat-chip>
+      <span class="priority-score">Priority: {{ patternDetail?.priorityScore || 0 }}</span>
+    </div>
+    <button mat-icon-button (click)="close()">
+      <mat-icon>close</mat-icon>
+    </button>
+  </div>
+  <div class="pattern-key-section" *ngIf="patternDetail">
+    <span class="pattern-key-label">Pattern Key:</span>
+    <code class="pattern-key-value">{{ patternDetail.patternKey }}</code>
+    <button mat-icon-button (click)="copyPatternKey()" [matTooltip]="'Copy pattern key'">
+      <mat-icon>content_copy</mat-icon>
+    </button>
+  </div>
+</h2>
+
+<mat-dialog-content>
+  <div *ngIf="loading" class="loading-container">
+    <mat-spinner diameter="40"></mat-spinner>
+    <p>Loading pattern details...</p>
+  </div>
+
+  <div *ngIf="!loading && patternDetail" class="pattern-content">
+    <mat-tab-group>
+      <!-- Summary Tab -->
+      <mat-tab label="Summary">
+        <div class="tab-content">
+          <div class="pattern-header">
+            <h3>{{ patternDetail.title }}</h3>
+            <p class="pattern-summary">{{ patternDetail.summary }}</p>
+          </div>
+
+          <div class="pattern-metrics">
+            <div class="metric-card">
+              <div class="metric-label">Occurrences</div>
+              <div class="metric-value">{{ patternDetail.occurrences }}</div>
+            </div>
+            <div class="metric-card">
+              <div class="metric-label">First Seen</div>
+              <div class="metric-value">{{ formatRelativeTime(patternDetail.firstSeenAt) }}</div>
+            </div>
+            <div class="metric-card">
+              <div class="metric-label">Last Seen</div>
+              <div class="metric-value">{{ formatRelativeTime(patternDetail.lastSeenAt) }}</div>
+            </div>
+          </div>
+
+          <mat-divider></mat-divider>
+
+          <div class="pattern-actions">
+          <div class="action-group">
+            <label>Status</label>
+            <mat-select [value]="patternDetail?.status || 'OPEN'" (selectionChange)="updateStatus($event.value)">
+              <mat-option *ngFor="let status of statusOptions" [value]="status">{{ status }}</mat-option>
+            </mat-select>
+          </div>
+            <div class="action-group">
+              <label>Assignee</label>
+              <input matInput 
+                     [value]="patternDetail?.assignee || ''" 
+                     placeholder="Unassigned"
+                     (blur)="updateAssigneeFromInput($event)">
+            </div>
+          </div>
+
+          <mat-divider></mat-divider>
+
+          <div class="verification-breakdown">
+            <h4>Verification Breakdown</h4>
+            <div class="verification-stats">
+              <div class="verification-stat">
+                <span class="stat-label">External Verified:</span>
+                <span class="stat-value">{{ patternDetail?.verificationCounts?.EXTERNAL_VERIFIED || 0 }}</span>
+              </div>
+              <div class="verification-stat">
+                <span class="stat-label">Transcript Only:</span>
+                <span class="stat-value">{{ patternDetail?.verificationCounts?.TRANSCRIPT_ONLY || 0 }}</span>
+              </div>
+              <div class="verification-stat">
+                <span class="stat-label">No Verification:</span>
+                <span class="stat-value">{{ patternDetail?.verificationCounts?.NONE || 0 }}</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </mat-tab>
+
+      <!-- Occurrences Tab -->
+      <mat-tab label="Occurrences">
+        <div class="tab-content">
+          <table mat-table [dataSource]="patternDetail?.occurrencesList || []" class="occurrences-table">
+            <ng-container matColumnDef="occurredAt">
+              <th mat-header-cell *matHeaderCellDef>Occurred</th>
+              <td mat-cell *matCellDef="let occ">{{ formatDate(occ.occurredAt) }}</td>
+            </ng-container>
+
+            <ng-container matColumnDef="riskScore">
+              <th mat-header-cell *matHeaderCellDef>Risk Score</th>
+              <td mat-cell *matCellDef="let occ">{{ getScore(occ) }}</td>
+            </ng-container>
+
+            <ng-container matColumnDef="verificationLevel">
+              <th mat-header-cell *matHeaderCellDef>Verification</th>
+              <td mat-cell *matCellDef="let occ">
+                <mat-chip [class]="'verification-chip ' + (occ.verificationLevel === 'EXTERNAL_VERIFIED' ? 'verified' : 'unverified')">
+                  {{ getVerificationLabel(occ.verificationLevel) }}
+                </mat-chip>
+              </td>
+            </ng-container>
+
+            <ng-container matColumnDef="excerpt">
+              <th mat-header-cell *matHeaderCellDef>Excerpt</th>
+              <td mat-cell *matCellDef="let occ">
+                <span class="excerpt-text">{{ occ.what?.issueSummary || occ.what?.claimText || 'N/A' }}</span>
+              </td>
+            </ng-container>
+
+            <ng-container matColumnDef="actions">
+              <th mat-header-cell *matHeaderCellDef>Actions</th>
+              <td mat-cell *matCellDef="let occ">
+                <button mat-button color="primary" (click)="viewEvaluation(occ.evaluationId)">
+                  View Evaluation
+                </button>
+              </td>
+            </ng-container>
+
+            <tr mat-header-row *matHeaderRowDef="displayedColumns"></tr>
+            <tr mat-row *matRowDef="let row; columns: displayedColumns"></tr>
+          </table>
+        </div>
+      </mat-tab>
+
+      <!-- Traceability Tab -->
+      <mat-tab label="Traceability">
+        <div class="tab-content">
+          <div *ngIf="patternDetail.occurrencesList && patternDetail.occurrencesList.length > 0">
+            <h4>Claim Details</h4>
+            <div *ngFor="let occ of patternDetail.occurrencesList.slice(0, 5)" class="trace-item">
+              <div class="trace-claim">
+                <strong>Claim ID:</strong> {{ occ.what?.primaryClaimId }}
+                <br>
+                <strong>Summary:</strong> {{ occ.what?.issueSummary || occ.what?.claimText }}
+              </div>
+              
+              <div *ngIf="hasConflicts(occ)" class="conflicts-list">
+                <h5>Conflicts</h5>
+                <div *ngFor="let conflict of getConflictsForOccurrence(occ)" class="conflict-item">
+                  <span class="conflict-label">Contradicts:</span>
+                  <span class="conflict-text">{{ conflict.claimA }} ↔ {{ conflict.claimB }}</span>
+                  <span class="conflict-weight">(weight: {{ conflict.weight | number:'1.2-2' }})</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div *ngIf="patternDetail?.traceability?.topEdges && patternDetail.traceability.topEdges.length > 0">
+            <h4>Top Edges</h4>
+            <div *ngFor="let edge of patternDetail.traceability.topEdges" class="edge-item">
+              <span class="edge-kind">{{ edge.kind }}</span>
+              <span class="edge-claim">{{ edge.claimA }}</span>
+              <span *ngIf="edge.claimB" class="edge-claim">↔ {{ edge.claimB }}</span>
+              <span class="edge-weight">({{ edge.weight | number:'1.2-2' }})</span>
+            </div>
+          </div>
+        </div>
+      </mat-tab>
+
+      <!-- Evidence Tab -->
+      <mat-tab label="Evidence">
+        <div class="tab-content">
+          <div *ngIf="patternDetail?.occurrencesList && patternDetail.occurrencesList.length > 0">
+            <div *ngFor="let occ of patternDetail.occurrencesList.slice(0, 5)" class="evidence-item">
+              <h5>Occurrence {{ formatDate(occ.occurredAt) }}</h5>
+              <div *ngIf="hasEvidence(occ)">
+                <div *ngFor="let evidence of getEvidenceForOccurrence(occ)" class="evidence-ref">
+                  <span class="evidence-source">{{ evidence.sourceType }}</span>
+                  <span class="evidence-quote">"{{ evidence.quote }}"</span>
+                  <span *ngIf="evidence.turnIndex !== undefined" class="evidence-turn">Turn {{ evidence.turnIndex }}</span>
+                </div>
+              </div>
+              <div *ngIf="!hasEvidence(occ)" class="no-evidence">
+                No evidence references available
+              </div>
+            </div>
+          </div>
+        </div>
+      </mat-tab>
+
+      <!-- Audit Tab -->
+      <mat-tab label="Audit">
+        <div class="tab-content">
+          <div *ngIf="patternDetail?.occurrencesList && patternDetail.occurrencesList.length > 0">
+            <h4>Evaluation References</h4>
+            <div *ngFor="let occ of patternDetail.occurrencesList" class="audit-item">
+              <div class="audit-evaluation">
+                <strong>Evaluation ID:</strong>
+                <a (click)="viewEvaluation(occ.evaluationId)" class="evaluation-link">{{ occ.evaluationId }}</a>
+              </div>
+              <div class="audit-date">
+                <strong>Occurred:</strong> {{ formatDate(occ.occurredAt) }}
+              </div>
+            </div>
+          </div>
+        </div>
+      </mat-tab>
+    </mat-tab-group>
+  </div>
+</mat-dialog-content>
+
+<mat-dialog-actions align="end">
+  <button mat-button (click)="close()">Close</button>
+</mat-dialog-actions>
+
