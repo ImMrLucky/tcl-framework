@@ -1,6 +1,7 @@
 import { Injectable } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
 import { Observable } from 'rxjs';
+import { map } from 'rxjs/operators';
 
 export interface Org {
   id: string;
@@ -35,14 +36,18 @@ export class AdminService {
    * Get list of organizations user can access
    */
   getOrgs(): Observable<Org[]> {
-    return this.http.get<Org[]>(`${this.apiUrl}/api/orgs`);
+    return this.http.get<{ orgs: Org[] }>(`${this.apiUrl}/api/orgs`).pipe(
+      map(response => response.orgs || [])
+    );
   }
 
   /**
    * Get list of all organizations (superuser only)
    */
   getAllOrgs(): Observable<Org[]> {
-    return this.http.get<Org[]>(`${this.apiUrl}/api/admin/orgs`);
+    return this.http.get<{ orgs: Org[] }>(`${this.apiUrl}/api/admin/orgs`).pipe(
+      map(response => response.orgs || [])
+    );
   }
 
   /**
@@ -59,9 +64,11 @@ export class AdminService {
    * Enable emulation for a plan tier
    */
   enableEmulation(planTier: 'SANDBOX' | 'TEAM' | 'ENTERPRISE'): Observable<EmulationState> {
-    return this.http.post<EmulationState>(
+    return this.http.post<{ emulation: EmulationState }>(
       `${this.apiUrl}/api/admin/emulation`,
-      { planTier }
+      { enabled: true, planTier }
+    ).pipe(
+      map(response => response.emulation)
     );
   }
 
@@ -69,7 +76,9 @@ export class AdminService {
    * Disable emulation
    */
   disableEmulation(): Observable<{ success: boolean }> {
-    return this.http.delete<{ success: boolean }>(`${this.apiUrl}/api/admin/emulation`);
+    return this.http.delete<{ emulation: { enabled: boolean; planTier: null } }>(`${this.apiUrl}/api/admin/emulation`).pipe(
+      map(() => ({ success: true }))
+    );
   }
 
   /**
