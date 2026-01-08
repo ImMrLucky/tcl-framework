@@ -51,10 +51,21 @@ export async function runWhisperCpp(audioPath) {
         process.stderr.on('data', (data) => {
             stderr += data.toString();
         });
-        process.on('close', async (code) => {
+        process.on('close', async (code, signal) => {
             try {
-                if (code !== 0) {
-                    reject(new Error(`whisper.cpp failed with code ${code}: ${stderr}`));
+                // Check if output files were created even if process was killed
+                // Sometimes whisper.cpp creates the output before being terminated
+                const hasOutput = await fsExists(outputJson) || await fsExists(outputTxt);
+                // If process was killed but we have output, try to use it
+                if (code === null && hasOutput) {
+                    console.warn(`whisper.cpp process was terminated (signal: ${signal}), but output files exist. Attempting to read...`);
+                    // Continue to try reading the output files below
+                }
+                else if (code === null || (code !== 0 && !hasOutput)) {
+                    const errorMsg = code === null
+                        ? `whisper.cpp process was terminated (signal: ${signal || 'unknown'}). This may indicate a timeout or resource limit. Try reducing audio length or using a smaller model. Output: ${stderr.substring(0, 500)}`
+                        : `whisper.cpp failed with code ${code}: ${stderr.substring(0, 500)}`;
+                    reject(new Error(errorMsg));
                     return;
                 }
                 // Try to read JSON output first
