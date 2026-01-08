@@ -51,6 +51,7 @@ If you're running transcription through Netlify Functions (not recommended due t
 Create a `.env` file in `packages/tcl-core/`:
 
 ```bash
+TRANSFORMERS_BACKEND=wasm
 USE_WASM=1
 ONNXRUNTIME_DISABLE_NATIVE=1
 TRANSFORMERS_USE_WASM=1
@@ -61,7 +62,9 @@ ONNXRUNTIME_USE_WASM=1
 ONNXRUNTIME_USE_WEB=1
 ```
 
-**Note**: `ONNXRUNTIME_EXECUTION_PROVIDERS` should be set to an **empty string** (no value after the `=`). This disables all native execution providers and forces WASM-only mode.
+**Notes**: 
+- `TRANSFORMERS_BACKEND=wasm` is the most critical variable - set this first
+- `ONNXRUNTIME_EXECUTION_PROVIDERS` should be set to an **empty string** (no value after the `=`). This disables all native execution providers and forces WASM-only mode.
 
 Or set them when running:
 

@@ -10,6 +10,8 @@
 // Required for Docker/container environments without native libraries
 if (typeof process !== 'undefined' && process.env) {
     // Force WASM mode - must be set before any imports
+    // TRANSFORMERS_BACKEND is the most critical variable
+    process.env.TRANSFORMERS_BACKEND = 'wasm';
     process.env.USE_WASM = '1';
     process.env.ONNXRUNTIME_EXECUTION_PROVIDERS = '';
     process.env.ONNXRUNTIME_DISABLE_NATIVE = '1';
@@ -82,6 +84,30 @@ export async function transcribeAudio(audioBuffer, filename) {
         const tempFile = join(tmpdir(), `transcribe-${Date.now()}-${filename}`);
         fs.writeFileSync(tempFile, audioBuffer);
         try {
+            // CRITICAL: Set TRANSFORMERS_BACKEND before import (this is the key variable)
+            process.env.TRANSFORMERS_BACKEND = 'wasm';
+            // Double-check all critical variables are set
+            const criticalVars = {
+                USE_WASM: '1',
+                ONNXRUNTIME_DISABLE_NATIVE: '1',
+                TRANSFORMERS_USE_WASM: '1',
+                TRANSFORMERS_BACKEND: 'wasm',
+                USE_BROWSER: '0',
+                USE_WASM_ONLY: '1',
+                ONNXRUNTIME_EXECUTION_PROVIDERS: '',
+                ONNXRUNTIME_USE_WASM: '1',
+                ONNXRUNTIME_USE_WEB: '1',
+            };
+            for (const [key, value] of Object.entries(criticalVars)) {
+                process.env[key] = value;
+            }
+            // Log current state for debugging
+            console.log('Environment check before import:', {
+                USE_WASM: process.env.USE_WASM,
+                ONNXRUNTIME_DISABLE_NATIVE: process.env.ONNXRUNTIME_DISABLE_NATIVE,
+                TRANSFORMERS_USE_WASM: process.env.TRANSFORMERS_USE_WASM,
+                TRANSFORMERS_BACKEND: process.env.TRANSFORMERS_BACKEND,
+            });
             // Dynamic import - env vars are already set at module level
             // @xenova/transformers should respect USE_WASM=1 and use WASM backend
             const { pipeline, env } = await import('@xenova/transformers');
@@ -138,9 +164,23 @@ export async function transcribeAudio(audioBuffer, filename) {
             if (error.message && (error.message.includes('ld-linux-x86-64.so.2') ||
                 error.message.includes('onnxruntime-node') ||
                 error.message.includes('shared library'))) {
+                // Check if environment variables are actually set
+                const missingVars = [];
+                if (process.env.USE_WASM !== '1')
+                    missingVars.push('USE_WASM=1');
+                if (process.env.ONNXRUNTIME_DISABLE_NATIVE !== '1')
+                    missingVars.push('ONNXRUNTIME_DISABLE_NATIVE=1');
+                if (process.env.TRANSFORMERS_USE_WASM !== '1')
+                    missingVars.push('TRANSFORMERS_USE_WASM=1');
+                if (process.env.TRANSFORMERS_BACKEND !== 'wasm')
+                    missingVars.push('TRANSFORMERS_BACKEND=wasm');
+                const envNote = missingVars.length > 0
+                    ? `\n\nMissing environment variables: ${missingVars.join(', ')}\nPlease set these in your Railway dashboard (Variables tab) and redeploy.`
+                    : '\n\nEnvironment variables appear to be set, but the library is still trying to load native modules. This may require a service restart or redeploy.';
                 throw new Error('Audio transcription requires WASM mode but native libraries are being loaded. ' +
                     'This typically happens in serverless environments. ' +
-                    'Please ensure environment variables are set: USE_WASM=1, ONNXRUNTIME_DISABLE_NATIVE=1, TRANSFORMERS_USE_WASM=1');
+                    'Please ensure these environment variables are set in Railway: USE_WASM=1, ONNXRUNTIME_DISABLE_NATIVE=1, TRANSFORMERS_USE_WASM=1, TRANSFORMERS_BACKEND=wasm' +
+                    envNote);
             }
             throw error;
         }
@@ -151,9 +191,17 @@ export async function transcribeAudio(audioBuffer, filename) {
         if (error.message && (error.message.includes('ld-linux-x86-64.so.2') ||
             error.message.includes('onnxruntime-node') ||
             error.message.includes('shared library'))) {
+            const currentVars = {
+                USE_WASM: process.env.USE_WASM,
+                ONNXRUNTIME_DISABLE_NATIVE: process.env.ONNXRUNTIME_DISABLE_NATIVE,
+                TRANSFORMERS_USE_WASM: process.env.TRANSFORMERS_USE_WASM,
+                TRANSFORMERS_BACKEND: process.env.TRANSFORMERS_BACKEND,
+            };
             throw new Error('Audio transcription failed: Native library loading error. ' +
                 'The transcription service requires WASM-only mode. ' +
-                'Please set these environment variables: USE_WASM=1, ONNXRUNTIME_DISABLE_NATIVE=1, TRANSFORMERS_USE_WASM=1');
+                'Please set these environment variables in Railway: USE_WASM=1, ONNXRUNTIME_DISABLE_NATIVE=1, TRANSFORMERS_USE_WASM=1, TRANSFORMERS_BACKEND=wasm. ' +
+                `Current values: ${JSON.stringify(currentVars)}. ` +
+                'After setting variables, redeploy your Railway service.');
         }
         throw new Error(`Failed to transcribe audio locally: ${error.message}`);
     }
