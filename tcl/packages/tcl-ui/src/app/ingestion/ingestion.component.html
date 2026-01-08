@@ -224,6 +224,19 @@
             <span>Transcribing audio file...</span>
           </div>
 
+          <!-- Job Progress Section -->
+          <div *ngIf="jobStatus && jobStatus !== 'COMPLETE' && jobStatus !== 'FAILED'" class="job-progress-section">
+            <h4>
+              <mat-icon>{{ getJobStatusIcon() }}</mat-icon>
+              {{ getJobStatusLabel() }}
+            </h4>
+            <mat-progress-bar mode="determinate" [value]="jobProgress"></mat-progress-bar>
+            <div class="progress-text">
+              <span>{{ jobProgress }}%</span>
+              <span *ngIf="jobStage" class="stage-text">{{ jobStage }}</span>
+            </div>
+          </div>
+
           <div class="submit-section">
             <button
               mat-raised-button

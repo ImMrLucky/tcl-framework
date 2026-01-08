@@ -1,4 +1,4 @@
-import { Component, OnInit } from '@angular/core';
+import { Component, OnInit, OnDestroy } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { Router } from '@angular/router';
@@ -8,6 +8,7 @@ import { MatInputModule } from '@angular/material/input';
 import { MatButtonModule } from '@angular/material/button';
 import { MatIconModule } from '@angular/material/icon';
 import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
+import { MatProgressBarModule } from '@angular/material/progress-bar';
 import { MatSelectModule } from '@angular/material/select';
 import { MatSnackBar, MatSnackBarModule } from '@angular/material/snack-bar';
 import { MatTabsModule } from '@angular/material/tabs';
@@ -62,6 +63,7 @@ interface IngestPreview {
     MatButtonModule,
     MatIconModule,
     MatProgressSpinnerModule,
+    MatProgressBarModule,
     MatSelectModule,
     MatSnackBarModule,
     MatTabsModule,
@@ -72,7 +74,7 @@ interface IngestPreview {
   templateUrl: './ingestion.component.html',
   styleUrls: ['./ingestion.component.scss']
 })
-export class IngestionComponent implements OnInit {
+export class IngestionComponent implements OnInit, OnDestroy {
   transcript = '';
   title = '';
   channel: 'call' | 'chat' | 'email' | 'other' = 'call';
@@ -96,6 +98,13 @@ export class IngestionComponent implements OnInit {
   transcriptFileName = '';
   linkingMode = false;
 
+  // Job-based ingestion state
+  currentJobId: string | null = null;
+  jobStatus: 'UPLOADED' | 'TRANSCRIBING' | 'ANALYZING' | 'VERIFYING' | 'COMPLETE' | 'FAILED' | null = null;
+  jobProgress = 0;
+  jobStage: string | null = null;
+  pollingInterval: any = null;
+
   // Supported formats
   readonly audioExtensions = ['.wav', '.mp3', '.flac', '.m4a', '.ogg', '.opus', '.aac'];
   readonly subtitleExtensions = ['.vtt', '.srt'];
@@ -112,6 +121,11 @@ export class IngestionComponent implements OnInit {
 
   ngOnInit() {
     // Component initialization
+  }
+
+  ngOnDestroy() {
+    // Clean up polling interval
+    this.stopJobPolling();
   }
 
   /**
@@ -263,117 +277,144 @@ export class IngestionComponent implements OnInit {
   }
 
   async onSubmit() {
-    // Handle linking mode separately
-    if (this.linkingMode) {
-      await this.submitLinkedFiles();
-      return;
-    }
+    // Determine ingestion mode
+    let mode: 'TRANSCRIPT_ONLY' | 'AUDIO_ONLY' | 'AUDIO_PLUS_TRANSCRIPT';
     
-    // If audio file is selected, transcribe it first
-    if (this.isAudioFile && this.selectedFile) {
-      await this.transcribeAudio();
-      if (!this.transcript || this.transcript.trim().length === 0) {
+    if (this.linkingMode) {
+      // Audio + Transcript mode
+      if (!this.audioFile || !this.transcriptFile) {
+        this.errorMessage = 'Please select both an audio file and a transcript file';
+        this.snackBar.open(this.errorMessage, 'Close', { duration: 3000 });
         return;
       }
-    }
-
-    if (!this.transcript || this.transcript.trim().length === 0) {
-      this.errorMessage = 'Please enter or upload a transcript, or select an audio file';
-      const snackBarRef = this.snackBar.open(this.errorMessage, 'Close', { duration: 3000 });
-      snackBarRef.onAction().subscribe(() => snackBarRef.dismiss());
-      return;
+      mode = 'AUDIO_PLUS_TRANSCRIPT';
+    } else if (this.isAudioFile && this.selectedFile) {
+      // Audio only mode
+      mode = 'AUDIO_ONLY';
+    } else {
+      // Transcript only mode
+      if (!this.transcript || this.transcript.trim().length === 0) {
+        this.errorMessage = 'Please enter or upload a transcript, or select an audio file';
+        this.snackBar.open(this.errorMessage, 'Close', { duration: 3000 });
+        return;
+      }
+      mode = 'TRANSCRIPT_ONLY';
     }
 
     this.loading = true;
     this.errorMessage = '';
+    this.jobStatus = null;
+    this.jobProgress = 0;
+    this.jobStage = null;
 
     try {
-      const apiUrl = this.auditService.getApiBaseUrl();
-      const filename = this.selectedFileName || 'transcript.txt';
-      
-      // Step 1: Use new /api/ingest endpoint for normalization
-      const base64Content = btoa(unescape(encodeURIComponent(this.transcript)));
-      
-      const ingestResponse = await firstValueFrom(
-        this.http.post<{
-          success: boolean;
-          conversationId?: string;
-          artifactId?: string;
-          normalized?: any;
-          warnings?: string[];
-          error?: string;
-        }>(`${apiUrl}/ingest`, {
-          content: base64Content,
-          filename,
-          title: this.title || filename,
-          runEvaluation: false // We'll run evaluation separately
-        })
+      // Step 1: Create ingestion job
+      const jobResponse = await firstValueFrom(
+        this.auditService.createIngestionJob({ mode, options: { analyzeImmediately: true } })
       );
 
-      if (!ingestResponse.success || !ingestResponse.conversationId) {
-        throw new Error(ingestResponse.error || 'Failed to ingest file');
+      this.currentJobId = jobResponse.jobId;
+
+      // Step 2: Upload files
+      let transcriptFile: File | null = null;
+      let audioFile: File | null = null;
+
+      if (mode === 'TRANSCRIPT_ONLY') {
+        // Create a text file from the transcript
+        const blob = new Blob([this.transcript], { type: 'text/plain' });
+        transcriptFile = new File([blob], this.selectedFileName || 'transcript.txt', { type: 'text/plain' });
+      } else if (mode === 'AUDIO_ONLY') {
+        audioFile = this.selectedFile!;
+      } else if (mode === 'AUDIO_PLUS_TRANSCRIPT') {
+        audioFile = this.audioFile!;
+        transcriptFile = this.transcriptFile!;
       }
 
-      const conversationId = ingestResponse.conversationId;
-      const artifactId = ingestResponse.artifactId;
-
-      // Show normalization warnings if any
-      if (ingestResponse.warnings && ingestResponse.warnings.length > 0) {
-        console.warn('Normalization warnings:', ingestResponse.warnings);
-      }
-
-      // Step 2: Run evaluation with /validate endpoint
-      // Use evaluation URL (Railway direct) to bypass Netlify timeout
-      const evalUrl = this.auditService.getEvaluationBaseUrl();
-      const evaluationData = await firstValueFrom(
-        this.http.post<any>(`${evalUrl}/validate`, {
-          question: this.transcript,
-          answer: '',
-          sources: [],
-          options: {
-            spectral: true,
-            spectralMode: 'analyze',
-            includeConfidenceMetrics: true,
-            includeSuggestions: true,
-            artifactId // Pass artifact ID for evidence linking
-          },
-          conversation_id: conversationId
-        })
+      await firstValueFrom(
+        this.auditService.uploadJobFiles(jobResponse.jobId, audioFile || undefined, transcriptFile || undefined)
       );
-      
-      // Step 3: Navigate to evaluation results
-      // Use evaluation ID from response if available, otherwise fetch it
-      if (evaluationData?.evaluationId) {
-        // Evaluation ID is in the response - no need for extra API call
-        this.router.navigate(['/evaluations', evaluationData.evaluationId]);
-      } else {
-        // Fallback: fetch latest evaluation for this conversation
-        await new Promise(resolve => setTimeout(resolve, 500));
-        
-        const evaluationsResponse = await firstValueFrom(
-          this.auditService.getConversationEvaluations(conversationId, { limit: 1 })
-        );
-        
-        if (evaluationsResponse?.evaluations?.length > 0) {
-          this.router.navigate(['/evaluations', evaluationsResponse.evaluations[0].id]);
-        } else {
-          this.router.navigate(['/conversations', conversationId]);
-        }
-      }
+
+      // Step 3: Start polling for job status
+      this.startJobPolling(jobResponse.jobId);
+
     } catch (error: any) {
       console.error('Ingestion error:', error);
       this.errorMessage = error.error?.error || error.message || 'An unexpected error occurred';
-      const snackBarRef = this.snackBar.open(this.errorMessage, 'Close', { duration: 5000 });
-      snackBarRef.onAction().subscribe(() => snackBarRef.dismiss());
-    } finally {
+      this.snackBar.open(this.errorMessage, 'Close', { duration: 5000 });
       this.loading = false;
+      this.stopJobPolling();
+    }
+  }
+
+  /**
+   * Start polling for job status
+   */
+  startJobPolling(jobId: string) {
+    // Poll immediately
+    this.pollJobStatus(jobId);
+
+    // Then poll every 2 seconds
+    this.pollingInterval = setInterval(() => {
+      this.pollJobStatus(jobId);
+    }, 2000);
+  }
+
+  /**
+   * Stop polling for job status
+   */
+  stopJobPolling() {
+    if (this.pollingInterval) {
+      clearInterval(this.pollingInterval);
+      this.pollingInterval = null;
+    }
+  }
+
+  /**
+   * Poll job status
+   */
+  async pollJobStatus(jobId: string) {
+    try {
+      const status = await firstValueFrom(this.auditService.getJobStatus(jobId));
+      
+      this.jobStatus = status.status;
+      this.jobProgress = status.progress.pct;
+      this.jobStage = status.progress.stage;
+
+      if (status.status === 'COMPLETE') {
+        this.stopJobPolling();
+        this.loading = false;
+
+        // Navigate to evaluation results
+        if (status.result.analysisRunId) {
+          this.router.navigate(['/evaluations', status.result.analysisRunId]);
+        } else {
+          this.snackBar.open('Analysis complete, but no evaluation ID found', 'Close', { duration: 3000 });
+        }
+      } else if (status.status === 'FAILED') {
+        this.stopJobPolling();
+        this.loading = false;
+        this.errorMessage = status.error?.message || 'Job failed';
+        this.snackBar.open(this.errorMessage, 'Close', { duration: 5000 });
+      }
+    } catch (error: any) {
+      console.error('Error polling job status:', error);
+      // Don't stop polling on transient errors
     }
   }
 
   /**
    * Submit linked audio + transcript files
+   * (Now handled by onSubmit with mode detection)
    */
   async submitLinkedFiles() {
+    // This method is now handled by onSubmit() which detects linkingMode
+    await this.onSubmit();
+  }
+
+  /**
+   * Legacy submit linked files (kept for reference)
+   */
+  async submitLinkedFilesLegacy() {
     if (!this.audioFile || !this.transcriptFile) {
       this.errorMessage = 'Please select both an audio file and a transcript file';
       const snackBarRef = this.snackBar.open(this.errorMessage, 'Close', { duration: 3000 });
@@ -532,6 +573,55 @@ export class IngestionComponent implements OnInit {
       snackBarRef.onAction().subscribe(() => snackBarRef.dismiss());
     } finally {
       this.transcriptionInProgress = false;
+    }
+  }
+
+  /**
+   * Get icon for job status
+   */
+  getJobStatusIcon(): string {
+    switch (this.jobStatus) {
+      case 'UPLOADED':
+        return 'upload';
+      case 'TRANSCRIBING':
+        return 'mic';
+      case 'ANALYZING':
+        return 'analytics';
+      case 'VERIFYING':
+        return 'verified';
+      default:
+        return 'hourglass_empty';
+    }
+  }
+
+  /**
+   * Get label for job status
+   */
+  getJobStatusLabel(): string {
+    switch (this.jobStatus) {
+      case 'UPLOADED':
+        return 'Uploading files...';
+      case 'TRANSCRIBING':
+        return 'Transcribing audio...';
+      case 'ANALYZING':
+        return 'Analyzing transcript...';
+      case 'VERIFYING':
+        return 'Verifying audio against transcript...';
+      default:
+        return 'Processing...';
+    }
+  }
+
+  /**
+   * Get submit button label based on mode
+   */
+  getSubmitButtonLabel(): string {
+    if (this.linkingMode) {
+      return 'Analyze now + Verify with audio';
+    } else if (this.isAudioFile && this.selectedFile) {
+      return 'Generate transcript + Analyze';
+    } else {
+      return 'Run Analysis';
     }
   }
 }

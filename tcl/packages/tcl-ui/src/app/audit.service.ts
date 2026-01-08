@@ -41,6 +41,35 @@ export interface ConversationCreateResponse {
   };
 }
 
+// Ingestion Job Types
+export interface CreateIngestionJobRequest {
+  mode: 'TRANSCRIPT_ONLY' | 'AUDIO_ONLY' | 'AUDIO_PLUS_TRANSCRIPT';
+  options?: {
+    analyzeImmediately?: boolean;
+  };
+}
+
+export interface CreateIngestionJobResponse {
+  jobId: string;
+}
+
+export interface JobStatusResponse {
+  jobId: string;
+  status: 'UPLOADED' | 'TRANSCRIBING' | 'ANALYZING' | 'VERIFYING' | 'COMPLETE' | 'FAILED';
+  progress: {
+    stage: string | null;
+    pct: number;
+  };
+  result: {
+    analysisRunId: string | null;
+    verificationReportId: string | null;
+  };
+  error?: {
+    code: string;
+    message: string;
+  };
+}
+
 export interface EvaluationRunRequest {
   conversationId: string;
   claims: Array<{
@@ -214,6 +243,36 @@ export class AuditService {
    */
   getEvaluationBaseUrl(): string {
     return this.evaluationBase;
+  }
+
+  /**
+   * Create an ingestion job
+   */
+  createIngestionJob(request: CreateIngestionJobRequest): Observable<CreateIngestionJobResponse> {
+    return this.http.post<CreateIngestionJobResponse>(`${this.apiBase}/ingest/jobs`, request);
+  }
+
+  /**
+   * Upload files for an ingestion job
+   */
+  uploadJobFiles(jobId: string, audioFile?: File, transcriptFile?: File): Observable<{ success: boolean }> {
+    const formData = new FormData();
+    
+    if (audioFile) {
+      formData.append('audio', audioFile);
+    }
+    if (transcriptFile) {
+      formData.append('transcript', transcriptFile);
+    }
+
+    return this.http.post<{ success: boolean }>(`${this.apiBase}/ingest/jobs/${jobId}/upload`, formData);
+  }
+
+  /**
+   * Get ingestion job status
+   */
+  getJobStatus(jobId: string): Observable<JobStatusResponse> {
+    return this.http.get<JobStatusResponse>(`${this.apiBase}/ingest/jobs/${jobId}`);
   }
 
   constructor(private http: HttpClient) {}
