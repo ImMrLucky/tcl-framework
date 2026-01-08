@@ -38,10 +38,16 @@ const STORAGE_BASE = process.env.ASSET_STORAGE_BASE || join(tmpdir(), 'tcl-asset
  * Ensure storage directory exists
  */
 async function ensureStorageDir(): Promise<string> {
-  if (!(await fsExists(STORAGE_BASE))) {
-    await fsMkdir(STORAGE_BASE, { recursive: true });
+  try {
+    if (!(await fsExists(STORAGE_BASE))) {
+      await fsMkdir(STORAGE_BASE, { recursive: true });
+      console.log(`[Storage] Created storage directory: ${STORAGE_BASE}`);
+    }
+    return STORAGE_BASE;
+  } catch (error: any) {
+    console.error(`[Storage] Failed to create storage directory ${STORAGE_BASE}:`, error);
+    throw new Error(`Failed to create storage directory: ${error.message}`);
   }
-  return STORAGE_BASE;
 }
 
 /**
@@ -86,36 +92,58 @@ export async function storeAsset(
   filename: string,
   metadata: AssetMetadata = {}
 ): Promise<StoredAsset> {
-  const baseDir = await ensureStorageDir();
-  const contentHash = computeHash(content);
-  
-  // Create org/job directory structure
-  const orgDir = join(baseDir, orgId);
-  const jobDir = join(orgDir, jobId);
-  
-  if (!(await fsExists(orgDir))) {
-    await fsMkdir(orgDir, { recursive: true });
+  try {
+    console.log(`[Storage] Storing asset: type=${assetType}, org=${orgId}, job=${jobId}, filename=${filename}, size=${content.length}`);
+    
+    const baseDir = await ensureStorageDir();
+    const contentHash = computeHash(content);
+    
+    // Create org/job directory structure
+    const orgDir = join(baseDir, orgId);
+    const jobDir = join(orgDir, jobId);
+    
+    try {
+      if (!(await fsExists(orgDir))) {
+        await fsMkdir(orgDir, { recursive: true });
+        console.log(`[Storage] Created org directory: ${orgDir}`);
+      }
+      if (!(await fsExists(jobDir))) {
+        await fsMkdir(jobDir, { recursive: true });
+        console.log(`[Storage] Created job directory: ${jobDir}`);
+      }
+    } catch (dirError: any) {
+      console.error(`[Storage] Failed to create directories:`, dirError);
+      throw new Error(`Failed to create storage directories: ${dirError.message}`);
+    }
+    
+    // Generate storage path
+    const ext = filename.split('.').pop() || 'bin';
+    const storageFilename = `${assetType.toLowerCase()}_${Date.now()}.${ext}`;
+    const storagePath = join(jobDir, storageFilename);
+    const storageUrl = storagePath; // For now, local path. Can be S3 URL later
+    
+    console.log(`[Storage] Writing file to: ${storagePath}`);
+    
+    // Write file
+    try {
+      await fsWriteFile(storagePath, content);
+      console.log(`[Storage] File written successfully: ${storagePath}`);
+    } catch (writeError: any) {
+      console.error(`[Storage] Failed to write file:`, writeError);
+      throw new Error(`Failed to write asset file: ${writeError.message}`);
+    }
+    
+    return {
+      id: crypto.randomUUID(),
+      storageUrl,
+      contentHash,
+      mimeType: getMimeType(filename),
+      metadata,
+    };
+  } catch (error: any) {
+    console.error(`[Storage] Error storing asset:`, error);
+    throw error;
   }
-  if (!(await fsExists(jobDir))) {
-    await fsMkdir(jobDir, { recursive: true });
-  }
-  
-  // Generate storage path
-  const ext = filename.split('.').pop() || 'bin';
-  const storageFilename = `${assetType.toLowerCase()}_${Date.now()}.${ext}`;
-  const storagePath = join(jobDir, storageFilename);
-  const storageUrl = storagePath; // For now, local path. Can be S3 URL later
-  
-  // Write file
-  await fsWriteFile(storagePath, content);
-  
-  return {
-    id: crypto.randomUUID(),
-    storageUrl,
-    contentHash,
-    mimeType: getMimeType(filename),
-    metadata,
-  };
 }
 
 /**

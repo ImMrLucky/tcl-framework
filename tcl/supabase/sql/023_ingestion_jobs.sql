@@ -27,6 +27,7 @@ create index if not exists idx_ingestion_jobs_status on public.ingestion_jobs(st
 create index if not exists idx_ingestion_jobs_created_by on public.ingestion_jobs(created_by_user_id);
 create index if not exists idx_ingestion_jobs_created_at on public.ingestion_jobs(created_at desc);
 
+drop trigger if exists trg_ingestion_jobs_updated_at on public.ingestion_jobs;
 create trigger trg_ingestion_jobs_updated_at
 before update on public.ingestion_jobs
 for each row execute function public.set_updated_at();
@@ -93,6 +94,7 @@ alter table public.assets enable row level security;
 alter table public.verification_reports enable row level security;
 
 -- Ingestion jobs: users can view/create jobs for their org
+drop policy if exists "Users can view ingestion jobs in their org" on public.ingestion_jobs;
 create policy "Users can view ingestion jobs in their org"
   on public.ingestion_jobs for select
   using (
@@ -102,6 +104,7 @@ create policy "Users can view ingestion jobs in their org"
     )
   );
 
+drop policy if exists "Users can create ingestion jobs in their org" on public.ingestion_jobs;
 create policy "Users can create ingestion jobs in their org"
   on public.ingestion_jobs for insert
   with check (
@@ -112,6 +115,7 @@ create policy "Users can create ingestion jobs in their org"
     and created_by_user_id = auth_uid()
   );
 
+drop policy if exists "Users can update ingestion jobs in their org" on public.ingestion_jobs;
 create policy "Users can update ingestion jobs in their org"
   on public.ingestion_jobs for update
   using (
@@ -122,6 +126,7 @@ create policy "Users can update ingestion jobs in their org"
   );
 
 -- Assets: users can view/create assets for their org
+drop policy if exists "Users can view assets in their org" on public.assets;
 create policy "Users can view assets in their org"
   on public.assets for select
   using (
@@ -131,6 +136,7 @@ create policy "Users can view assets in their org"
     )
   );
 
+drop policy if exists "Users can create assets in their org" on public.assets;
 create policy "Users can create assets in their org"
   on public.assets for insert
   with check (
@@ -141,6 +147,7 @@ create policy "Users can create assets in their org"
   );
 
 -- Verification reports: users can view reports for their org
+drop policy if exists "Users can view verification reports in their org" on public.verification_reports;
 create policy "Users can view verification reports in their org"
   on public.verification_reports for select
   using (
@@ -150,6 +157,7 @@ create policy "Users can view verification reports in their org"
     )
   );
 
+drop policy if exists "Users can create verification reports in their org" on public.verification_reports;
 create policy "Users can create verification reports in their org"
   on public.verification_reports for insert
   with check (

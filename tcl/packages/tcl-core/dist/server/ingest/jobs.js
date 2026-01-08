@@ -27,12 +27,13 @@ export async function createIngestionJob(orgId, projectId, env, userId, mode) {
     if (!supabaseAdmin) {
         throw new Error('Database not configured');
     }
+    console.log('[CreateJob] Creating job:', { orgId, projectId, env, userId, mode });
     const { data, error } = await supabaseAdmin
         .from('ingestion_jobs')
         .insert({
         org_id: orgId,
         project_id: projectId,
-        env,
+        env: env || 'sandbox',
         created_by_user_id: userId,
         mode,
         status: 'UPLOADED',
@@ -42,8 +43,29 @@ export async function createIngestionJob(orgId, projectId, env, userId, mode) {
         .select('id')
         .single();
     if (error) {
-        throw new Error(`Failed to create job: ${error.message}`);
+        console.error('[CreateJob] Database error:', {
+            code: error.code,
+            message: error.message,
+            details: error.details,
+            hint: error.hint,
+        });
+        // Check for common database errors
+        if (error.code === '23503') {
+            throw new Error(`Foreign key constraint violation: ${error.message}. Check if org_id, project_id, or user_id exists.`);
+        }
+        if (error.code === '23505') {
+            throw new Error(`Unique constraint violation: ${error.message}`);
+        }
+        if (error.code === '42P01' || error.message?.includes('does not exist')) {
+            throw new Error(`Table 'ingestion_jobs' does not exist. Please run database migration 023_ingestion_jobs.sql`);
+        }
+        throw new Error(`Failed to create job: ${error.message} (code: ${error.code || 'unknown'})`);
     }
+    if (!data || !data.id) {
+        console.error('[CreateJob] No data returned from insert:', { data, error });
+        throw new Error('Job created but no ID returned from database');
+    }
+    console.log('[CreateJob] Job created with ID:', data.id);
     return data.id;
 }
 /**
@@ -135,8 +157,9 @@ export async function uploadJobFiles(jobId, orgId, audioFile, transcriptFile) {
         try {
             console.log(`[Upload] Storing asset: type=${asset.type}, filename=${asset.filename}, size=${asset.buffer.length}`);
             const stored = await storeAsset(asset.buffer, asset.type, orgId, jobId, asset.filename, asset.metadata);
-            console.log(`[Upload] Asset stored at: ${stored.storageUrl}`);
+            console.log(`[Upload] Asset stored at: ${stored.storageUrl}, hash: ${stored.contentHash}`);
             // Save to database
+            console.log(`[Upload] Saving asset to database...`);
             const { data: dbAsset, error: assetError } = await supabaseAdmin
                 .from('assets')
                 .insert({
@@ -151,14 +174,30 @@ export async function uploadJobFiles(jobId, orgId, audioFile, transcriptFile) {
                 .select('id')
                 .single();
             if (assetError) {
-                console.error(`[Upload] Database error storing asset:`, assetError);
-                throw new Error(`Failed to store asset in database: ${assetError.message} (code: ${assetError.code})`);
+                console.error(`[Upload] Database error storing asset:`, {
+                    code: assetError.code,
+                    message: assetError.message,
+                    details: assetError.details,
+                    hint: assetError.hint,
+                });
+                // Check for common database errors
+                if (assetError.code === '42P01') {
+                    throw new Error('Table "assets" does not exist. Please run database migration 023_ingestion_jobs.sql');
+                }
+                if (assetError.code === '23503') {
+                    throw new Error(`Foreign key constraint violation: ${assetError.message}. Check that job_id exists.`);
+                }
+                throw new Error(`Failed to store asset in database: ${assetError.message} (code: ${assetError.code || 'unknown'})`);
+            }
+            if (!dbAsset || !dbAsset.id) {
+                throw new Error('Asset inserted but no ID returned from database');
             }
             console.log(`[Upload] Asset saved to database with ID: ${dbAsset.id}`);
             assetIds.push(dbAsset.id);
         }
         catch (error) {
             console.error(`[Upload] Error processing asset ${asset.type}:`, error);
+            console.error(`[Upload] Error stack:`, error.stack);
             throw new Error(`Failed to process ${asset.type} asset: ${error.message}`);
         }
     }
@@ -219,20 +258,54 @@ export function registerIngestionJobRoutes(app) {
     // Create job
     app.post('/api/ingest/jobs', requireCapability(Capability.ANALYZE_MANUAL_UPLOAD), async (req, res) => {
         try {
+            console.log('[CreateJob] Received request');
+            console.log('[CreateJob] Body:', JSON.stringify(req.body));
             const context = await getOrgContext(req);
-            if (!context || context.error || !context.userId) {
+            if (!context || context.error) {
+                console.error('[CreateJob] Auth error:', context?.error);
                 return res.status(401).json({ error: context?.error || 'Authorization required' });
             }
+            if (!context.userId) {
+                console.error('[CreateJob] Missing userId in context');
+                return res.status(401).json({ error: 'User ID not found in context' });
+            }
+            if (!context.projectId) {
+                console.error('[CreateJob] Missing projectId in context');
+                return res.status(400).json({ error: 'Project ID not found in context' });
+            }
+            console.log('[CreateJob] Context:', {
+                orgId: context.orgId,
+                projectId: context.projectId,
+                env: context.env,
+                userId: context.userId,
+            });
             const body = req.body;
             if (!body.mode || !['TRANSCRIPT_ONLY', 'AUDIO_ONLY', 'AUDIO_PLUS_TRANSCRIPT'].includes(body.mode)) {
-                return res.status(400).json({ error: 'Invalid mode' });
+                console.error('[CreateJob] Invalid mode:', body.mode);
+                return res.status(400).json({ error: `Invalid mode: ${body.mode}. Must be one of: TRANSCRIPT_ONLY, AUDIO_ONLY, AUDIO_PLUS_TRANSCRIPT` });
             }
-            const jobId = await createIngestionJob(context.orgId, context.projectId, context.env, context.userId, body.mode);
+            console.log('[CreateJob] Creating job with mode:', body.mode);
+            const jobId = await createIngestionJob(context.orgId, context.projectId, context.env || 'sandbox', context.userId, body.mode);
+            console.log('[CreateJob] Job created successfully:', jobId);
             res.json({ jobId });
         }
         catch (e) {
-            console.error('Create job error:', e);
-            res.status(500).json({ error: e.message || 'Failed to create job' });
+            console.error('[CreateJob] Error:', e);
+            console.error('[CreateJob] Error stack:', e.stack);
+            console.error('[CreateJob] Request body:', req.body);
+            console.error('[CreateJob] Request params:', req.params);
+            console.error('[CreateJob] Request query:', req.query);
+            // Check for specific error types
+            if (e.message?.includes('does not exist')) {
+                return res.status(500).json({
+                    error: e.message,
+                    hint: 'Please ensure database migration 023_ingestion_jobs.sql has been run'
+                });
+            }
+            res.status(500).json({
+                error: e.message || 'Failed to create job',
+                details: process.env.NODE_ENV === 'development' ? e.stack : undefined
+            });
         }
     });
     // Upload files
