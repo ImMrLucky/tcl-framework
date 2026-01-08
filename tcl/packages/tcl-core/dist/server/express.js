@@ -31,6 +31,7 @@ import { buildIssueNarratives } from "../analysis/issue-narratives.js";
 import { exportNarrativesAsCSV, exportNarrativesAsJSON, exportNarrativesAsHTML } from "../analysis/exports.js";
 import { getOrgContext } from "./auth-context.js";
 import { registerIngestEndpoints } from "./ingestion/ingest-endpoint.js";
+import { registerIngestionJobRoutes } from "./ingest/jobs.js";
 import { planService } from "./plans/plan-service.js";
 import { requireCapability } from "./plans/capability-middleware.js";
 import { Capability } from "./plans/capabilities.js";
@@ -2953,6 +2954,10 @@ console.log("Downgrade job route registered");
 // Setup ingestion routes (normalization pipeline)
 console.log("Registering ingestion routes...");
 registerIngestEndpoints(app);
+// Register new ingestion job routes (async transcription workflow)
+console.log("Registering ingestion job routes...");
+registerIngestionJobRoutes(app);
+console.log("Ingestion job routes registered successfully");
 console.log("Ingestion routes registered successfully");
 // Load and validate plan configuration at startup
 console.log("Loading plan configuration...");
