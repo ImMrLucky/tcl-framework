@@ -24,23 +24,39 @@ ENV ASR_MAX_CONCURRENCY=1
 # Create directories for whisper.cpp and models
 RUN mkdir -p /app/vendor/whispercpp /app/models
 
-# Build whisper.cpp from source
-RUN cd /tmp && \
-    echo "Cloning whisper.cpp..." && \
-    git clone --depth 1 --branch master https://github.com/ggerganov/whisper.cpp.git && \
-    cd whisper.cpp && \
-    echo "Building whisper.cpp (this may take a few minutes)..." && \
-    make || (echo "Build failed, trying single-threaded..." && make -j1) && \
+# Build whisper.cpp from source using a stable release
+# Using a specific release tag for stability
+RUN set -x && \
+    cd /tmp && \
+    echo "Cloning whisper.cpp (latest release)..." && \
+    git clone --depth 1 --branch v1.6.1 https://github.com/ggerganov/whisper.cpp.git whisper_build && \
+    cd whisper_build && \
+    echo "Verifying repository..." && \
+    ls -la && \
+    echo "Checking compiler..." && \
+    g++ --version && \
+    make --version && \
+    echo "Building whisper.cpp..." && \
+    make 2>&1 && \
+    echo "Build completed, verifying binary..." && \
     if [ ! -f main ]; then \
-        echo "ERROR: main binary not found" && \
+        echo "ERROR: main binary not found after build" && \
+        echo "Directory contents:" && \
         ls -la && \
+        echo "Object files:" && \
+        ls -la *.o 2>/dev/null || echo "No object files" && \
         exit 1; \
     fi && \
+    echo "Binary created successfully:" && \
+    ls -lh main && \
+    file main && \
     cp main /app/vendor/whispercpp/main && \
     chmod +x /app/vendor/whispercpp/main && \
-    echo "whisper.cpp built successfully" && \
+    echo "Testing binary..." && \
+    /app/vendor/whispercpp/main --help 2>&1 | head -5 && \
+    echo "whisper.cpp installed successfully" && \
     cd / && \
-    rm -rf /tmp/whisper.cpp
+    rm -rf /tmp/whisper_build
 
 # Download Whisper model (ggml-small.en.bin - ~466MB)
 # You can change this to other models: tiny, base, small, medium, large
