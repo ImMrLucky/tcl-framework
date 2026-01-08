@@ -10,6 +10,7 @@ RUN apt-get update && \
     cmake \
     git \
     wget \
+    pkg-config \
     && rm -rf /var/lib/apt/lists/*
 
 # Set environment variables for whisper.cpp
@@ -24,13 +25,20 @@ ENV ASR_MAX_CONCURRENCY=1
 RUN mkdir -p /app/vendor/whispercpp /app/models
 
 # Build whisper.cpp from source
-# This downloads and compiles whisper.cpp
 RUN cd /tmp && \
-    git clone https://github.com/ggerganov/whisper.cpp.git && \
+    echo "Cloning whisper.cpp..." && \
+    git clone --depth 1 --branch master https://github.com/ggerganov/whisper.cpp.git && \
     cd whisper.cpp && \
-    make && \
+    echo "Building whisper.cpp (this may take a few minutes)..." && \
+    make || (echo "Build failed, trying single-threaded..." && make -j1) && \
+    if [ ! -f main ]; then \
+        echo "ERROR: main binary not found" && \
+        ls -la && \
+        exit 1; \
+    fi && \
     cp main /app/vendor/whispercpp/main && \
     chmod +x /app/vendor/whispercpp/main && \
+    echo "whisper.cpp built successfully" && \
     cd / && \
     rm -rf /tmp/whisper.cpp
 
