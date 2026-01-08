@@ -15,7 +15,14 @@ import { enqueueJob } from './worker.js';
 
 const upload = multer({ 
   storage: multer.memoryStorage(),
-  limits: { fileSize: 500 * 1024 * 1024 }, // 500MB max
+  limits: { 
+    fileSize: 500 * 1024 * 1024, // 500MB max
+    files: 2, // Max 2 files (audio + transcript)
+  },
+  fileFilter: (req, file, cb) => {
+    // Accept all files - validation happens in uploadJobFiles
+    cb(null, true);
+  },
 });
 
 export type IngestionMode = 'TRANSCRIPT_ONLY' | 'AUDIO_ONLY' | 'AUDIO_PLUS_TRANSCRIPT';
@@ -106,10 +113,25 @@ export async function uploadJobFiles(
     .eq('org_id', orgId)
     .single();
 
-  if (jobError || !job) {
-    console.error('Job lookup error:', jobError);
-    throw new Error(`Job not found: ${jobError?.message || 'Job does not exist or does not belong to this organization'}`);
+  if (jobError) {
+    console.error('[Upload] Job lookup error:', {
+      code: jobError.code,
+      message: jobError.message,
+      details: jobError.details,
+      hint: jobError.hint,
+    });
+    
+    if (jobError.code === 'PGRST116') {
+      throw new Error(`Job not found: ${jobId}`);
+    }
+    throw new Error(`Database error looking up job: ${jobError.message}`);
   }
+  
+  if (!job) {
+    throw new Error(`Job not found: ${jobId} (does not exist or does not belong to this organization)`);
+  }
+  
+  console.log(`[Upload] Job found: mode=${job.mode}, status=${job.status}`);
 
   if (job.status !== 'UPLOADED') {
     throw new Error('Job already has files uploaded');
@@ -306,28 +328,86 @@ export function registerIngestionJobRoutes(app: express.Express) {
   app.post(
     '/api/ingest/jobs/:jobId/upload',
     requireCapability(Capability.ANALYZE_MANUAL_UPLOAD),
-    upload.fields([
-      { name: 'audio', maxCount: 1 },
-      { name: 'transcript', maxCount: 1 },
-    ]),
+    (req, res, next) => {
+      // Wrap multer in error handler
+      upload.fields([
+        { name: 'audio', maxCount: 1 },
+        { name: 'transcript', maxCount: 1 },
+      ])(req, res, (err: any) => {
+        if (err) {
+          console.error('[Upload] Multer error:', err);
+          if (err.code === 'LIMIT_FILE_SIZE') {
+            return res.status(400).json({ error: 'File too large. Maximum size is 500MB' });
+          }
+          if (err.code === 'LIMIT_UNEXPECTED_FILE') {
+            return res.status(400).json({ error: 'Unexpected file field. Only "audio" and "transcript" are allowed' });
+          }
+          return res.status(400).json({ error: `File upload error: ${err.message}` });
+        }
+        next();
+      });
+    },
     async (req, res) => {
+      let context: any = null;
+      let files: any = null;
+      
       try {
-        const context = await getOrgContext(req);
+        console.log('[Upload] Received upload request for job:', req.params.jobId);
+        
+        // Get context first
+        context = await getOrgContext(req);
         if (!context || context.error) {
+          console.error('[Upload] Auth error:', context?.error);
           return res.status(401).json({ error: context?.error || 'Authorization required' });
         }
 
+        console.log('[Upload] Context:', { orgId: context.orgId, projectId: context.projectId });
+
         const { jobId } = req.params;
-        const files = req.files as { [fieldname: string]: Express.Multer.File[] };
+        files = req.files as { [fieldname: string]: Express.Multer.File[] } | undefined;
+        
+        if (!files) {
+          console.error('[Upload] No files object in request');
+          return res.status(400).json({ error: 'No files received. Make sure Content-Type is multipart/form-data' });
+        }
+
         const audioFile = files.audio?.[0];
         const transcriptFile = files.transcript?.[0];
 
+        console.log('[Upload] Files parsed:', {
+          hasAudio: !!audioFile,
+          hasTranscript: !!transcriptFile,
+          audioSize: audioFile?.size,
+          transcriptSize: transcriptFile?.size,
+        });
+
         await uploadJobFiles(jobId, context.orgId, audioFile, transcriptFile);
 
+        console.log('[Upload] Upload successful');
         res.json({ success: true });
       } catch (e: any) {
-        console.error('Upload error:', e);
-        res.status(500).json({ error: e.message || 'Failed to upload files' });
+        console.error('[Upload] Error:', e);
+        console.error('[Upload] Error stack:', e.stack);
+        console.error('[Upload] Job ID:', req.params.jobId);
+        console.error('[Upload] Org ID:', context?.orgId);
+        console.error('[Upload] Files received:', {
+          hasFiles: !!files,
+          audio: !!files?.audio?.[0],
+          transcript: !!files?.transcript?.[0],
+        });
+        
+        // Check if it's a multer error
+        if (e.code === 'LIMIT_FILE_SIZE') {
+          return res.status(400).json({ error: 'File too large. Maximum size is 500MB' });
+        }
+        if (e.code === 'LIMIT_UNEXPECTED_FILE') {
+          return res.status(400).json({ error: 'Unexpected file field' });
+        }
+        
+        res.status(500).json({ 
+          error: e.message || 'Failed to upload files',
+          details: process.env.NODE_ENV === 'development' ? e.stack : undefined
+        });
       }
     }
   );
