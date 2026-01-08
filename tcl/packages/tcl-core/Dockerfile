@@ -16,7 +16,7 @@ RUN apt-get update && \
 
 # Set environment variables for whisper.cpp
 ENV WHISPERCPP_BIN=/app/vendor/whispercpp/main
-ENV WHISPERCPP_MODEL=/app/models/ggml-small.en.bin
+ENV WHISPERCPP_MODEL=/app/models/ggml-base.en.bin
 ENV WHISPERCPP_THREADS=2
 ENV WHISPERCPP_LANGUAGE=en
 ENV FFMPEG_BIN=ffmpeg
@@ -42,10 +42,11 @@ RUN cd /tmp/whisper_build && \
 
 RUN rm -rf /tmp/whisper_build
 
-# Download Whisper model (ggml-small.en.bin - ~466MB)
-# You can change this to other models: tiny, base, small, medium, large
+# Download Whisper model (ggml-base.en.bin - ~142MB)
+# Base model is a good balance: faster than small, more accurate than tiny
+# Other options: tiny (~75MB, fastest), small (~466MB, better accuracy), medium (~1.5GB), large (~3GB)
 RUN cd /app/models && \
-    wget -q https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small.en.bin && \
+    wget -q https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.en.bin && \
     ls -lh /app/models/
 
 # Copy package files

@@ -33,9 +33,9 @@ The transcription service uses:
 
 Whisper models are available in different sizes:
 
-- **tiny**: ~75MB, fastest, lowest accuracy
-- **base**: ~142MB, good balance
-- **small**: ~466MB (default), better accuracy
+- **tiny**: ~75MB, fastest, lowest accuracy (good for testing/quick demos)
+- **base**: ~142MB (default), good balance of speed and accuracy
+- **small**: ~466MB, better accuracy but slower
 - **medium**: ~1.5GB, high accuracy
 - **large**: ~3GB, best accuracy
 

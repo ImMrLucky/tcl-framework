@@ -26,7 +26,7 @@ export interface WhisperResult {
 }
 
 const WHISPERCPP_BIN = process.env.WHISPERCPP_BIN || './vendor/whispercpp/main';
-const WHISPERCPP_MODEL = process.env.WHISPERCPP_MODEL || './models/ggml-small.en.bin';
+const WHISPERCPP_MODEL = process.env.WHISPERCPP_MODEL || './models/ggml-base.en.bin';
 const WHISPERCPP_THREADS = parseInt(process.env.WHISPERCPP_THREADS || '2', 10);
 const WHISPERCPP_LANGUAGE = process.env.WHISPERCPP_LANGUAGE || 'en';
 const WHISPERCPP_ARGS = process.env.WHISPERCPP_ARGS || '';
