@@ -46,14 +46,16 @@ export async function uploadJobFiles(jobId, orgId, audioFile, transcriptFile) {
     if (!supabaseAdmin) {
         throw new Error('Database not configured');
     }
-    // Get job to validate mode
+    // Get job to validate mode (also verify org_id for security)
     const { data: job, error: jobError } = await supabaseAdmin
         .from('ingestion_jobs')
-        .select('mode, status')
+        .select('mode, status, org_id')
         .eq('id', jobId)
+        .eq('org_id', orgId)
         .single();
     if (jobError || !job) {
-        throw new Error('Job not found');
+        console.error('Job lookup error:', jobError);
+        throw new Error(`Job not found: ${jobError?.message || 'Job does not exist or does not belong to this organization'}`);
     }
     if (job.status !== 'UPLOADED') {
         throw new Error('Job already has files uploaded');
@@ -111,25 +113,35 @@ export async function uploadJobFiles(jobId, orgId, audioFile, transcriptFile) {
     // Store assets
     const assetIds = [];
     for (const asset of assets) {
-        const stored = await storeAsset(asset.buffer, asset.type, orgId, jobId, asset.filename, asset.metadata);
-        // Save to database
-        const { data: dbAsset, error: assetError } = await supabaseAdmin
-            .from('assets')
-            .insert({
-            org_id: orgId,
-            job_id: jobId,
-            type: asset.type,
-            storage_url: stored.storageUrl,
-            content_hash: stored.contentHash,
-            mime_type: stored.mimeType,
-            metadata_json: stored.metadata,
-        })
-            .select('id')
-            .single();
-        if (assetError) {
-            throw new Error(`Failed to store asset: ${assetError.message}`);
+        try {
+            console.log(`[Upload] Storing asset: type=${asset.type}, filename=${asset.filename}, size=${asset.buffer.length}`);
+            const stored = await storeAsset(asset.buffer, asset.type, orgId, jobId, asset.filename, asset.metadata);
+            console.log(`[Upload] Asset stored at: ${stored.storageUrl}`);
+            // Save to database
+            const { data: dbAsset, error: assetError } = await supabaseAdmin
+                .from('assets')
+                .insert({
+                org_id: orgId,
+                job_id: jobId,
+                type: asset.type,
+                storage_url: stored.storageUrl,
+                content_hash: stored.contentHash,
+                mime_type: stored.mimeType,
+                metadata_json: stored.metadata,
+            })
+                .select('id')
+                .single();
+            if (assetError) {
+                console.error(`[Upload] Database error storing asset:`, assetError);
+                throw new Error(`Failed to store asset in database: ${assetError.message} (code: ${assetError.code})`);
+            }
+            console.log(`[Upload] Asset saved to database with ID: ${dbAsset.id}`);
+            assetIds.push(dbAsset.id);
         }
-        assetIds.push(dbAsset.id);
+        catch (error) {
+            console.error(`[Upload] Error processing asset ${asset.type}:`, error);
+            throw new Error(`Failed to process ${asset.type} asset: ${error.message}`);
+        }
     }
     // Update job status and enqueue processing
     let newStatus = 'UPLOADED';
