@@ -25,33 +25,22 @@ ENV ASR_MAX_CONCURRENCY=1
 # Create directories for whisper.cpp and models
 RUN mkdir -p /app/vendor/whispercpp /app/models
 
-# Download pre-built whisper.cpp binary from GitHub releases
-# This avoids build issues and is faster
+# Build whisper.cpp from source
+# Split into steps for better error visibility
 RUN cd /tmp && \
-    echo "Downloading whisper.cpp binary..." && \
-    wget -q https://github.com/ggerganov/whisper.cpp/releases/download/v1.6.1/whisper.cpp-v1.6.1-linux-x64.tar.gz -O whisper.tar.gz && \
-    tar -xzf whisper.tar.gz && \
-    if [ -f whisper.cpp-v1.6.1-linux-x64/main ]; then \
-        cp whisper.cpp-v1.6.1-linux-x64/main /app/vendor/whispercpp/main && \
-        chmod +x /app/vendor/whispercpp/main && \
-        echo "whisper.cpp binary installed successfully"; \
-    elif [ -f whisper.cpp-v1.6.1-linux-x64/whisper ]; then \
-        cp whisper.cpp-v1.6.1-linux-x64/whisper /app/vendor/whispercpp/main && \
-        chmod +x /app/vendor/whispercpp/main && \
-        echo "whisper.cpp binary installed successfully"; \
-    else \
-        echo "ERROR: Could not find binary in release archive" && \
-        ls -la whisper.cpp-v1.6.1-linux-x64/ 2>/dev/null || ls -la && \
-        echo "Falling back to building from source..." && \
-        git clone --depth 1 --branch v1.6.1 https://github.com/ggerganov/whisper.cpp.git whisper_build && \
-        cd whisper_build && \
-        make && \
-        cp main /app/vendor/whispercpp/main && \
-        chmod +x /app/vendor/whispercpp/main && \
-        cd /tmp && \
-        rm -rf whisper_build; \
-    fi && \
-    rm -rf /tmp/whisper.tar.gz /tmp/whisper.cpp-v1.6.1-linux-x64
+    git clone --depth 1 --branch v1.6.1 https://github.com/ggerganov/whisper.cpp.git whisper_build
+
+RUN cd /tmp/whisper_build && \
+    echo "Building whisper.cpp..." && \
+    make 2>&1
+
+RUN cd /tmp/whisper_build && \
+    [ -f main ] || (echo "ERROR: main binary not found" && ls -la && exit 1) && \
+    cp main /app/vendor/whispercpp/main && \
+    chmod +x /app/vendor/whispercpp/main && \
+    echo "whisper.cpp built successfully"
+
+RUN rm -rf /tmp/whisper_build
 
 # Download Whisper model (ggml-small.en.bin - ~466MB)
 # You can change this to other models: tiny, base, small, medium, large
