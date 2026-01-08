@@ -1,27 +1,5 @@
-// CRITICAL: Set WASM-only environment variables BEFORE any imports
-// This must happen before @xenova/transformers or any module that uses it is imported
-// to prevent onnxruntime-node from trying to load native bindings
-if (typeof process !== 'undefined' && process.env) {
-    // TRANSFORMERS_BACKEND is the most critical - set it first
-    if (!process.env.TRANSFORMERS_BACKEND)
-        process.env.TRANSFORMERS_BACKEND = 'wasm';
-    if (!process.env.USE_WASM)
-        process.env.USE_WASM = '1';
-    if (!process.env.ONNXRUNTIME_EXECUTION_PROVIDERS)
-        process.env.ONNXRUNTIME_EXECUTION_PROVIDERS = '';
-    if (!process.env.ONNXRUNTIME_DISABLE_NATIVE)
-        process.env.ONNXRUNTIME_DISABLE_NATIVE = '1';
-    if (!process.env.TRANSFORMERS_USE_WASM)
-        process.env.TRANSFORMERS_USE_WASM = '1';
-    if (!process.env.USE_BROWSER)
-        process.env.USE_BROWSER = '0';
-    if (!process.env.USE_WASM_ONLY)
-        process.env.USE_WASM_ONLY = '1';
-    if (!process.env.ONNXRUNTIME_USE_WASM)
-        process.env.ONNXRUNTIME_USE_WASM = '1';
-    if (!process.env.ONNXRUNTIME_USE_WEB)
-        process.env.ONNXRUNTIME_USE_WEB = '1';
-}
+// Note: Audio transcription now uses whisper.cpp + VAD (no longer uses @xenova/transformers)
+// Environment variables for whisper.cpp are set in asr/whispercpp.ts and asr/vad.ts
 import express from "express";
 import multer from "multer";
 import { transcribeAudio, isValidAudioFormat } from "./transcription.js";
@@ -2867,10 +2845,11 @@ app.post("/api/transcribe", upload.single('audio'), async (req, res) => {
             return res.status(401).json({ error: context?.error || "Authorization required" });
         }
         // Transcribe audio (does not store the file)
+        // Concurrency limiting is handled inside transcribeAudio()
         const result = await transcribeAudio(req.file.buffer, req.file.originalname);
         // Track usage
         await trackUsage(context.orgId, context.projectId, context.env, 'transcription');
-        // Log audit
+        // Log audit (do not log transcript text for privacy)
         await logAudit({
             orgId: context.orgId,
             action: 'transcription.create',
@@ -2879,16 +2858,30 @@ app.post("/api/transcribe", upload.single('audio'), async (req, res) => {
                 filename: req.file.originalname,
                 size: req.file.size,
                 language: result.language,
+                durationMs: result.durationMs,
+                vadMode: result.vadStats?.mode,
             },
         });
+        // Return result (backward compatible format + new optional fields)
         res.json({
             transcript: result.transcript,
-            text: result.transcript, // Alias for compatibility
-            language: result.language,
+            text: result.text || result.transcript, // Alias for backward compatibility
+            language: result.language || 'unknown',
+            // New optional fields (non-breaking)
+            ...(result.segments && { segments: result.segments }),
+            ...(result.durationMs !== undefined && { durationMs: result.durationMs }),
+            ...(result.vadStats && { vadStats: result.vadStats }),
         });
     }
     catch (e) {
-        console.error("Transcription error:", e);
+        // Handle concurrency limit (429)
+        if (e.code === 'ASR_BUSY' || e.statusCode === 429) {
+            return res.status(429).json({
+                error: 'ASR_BUSY',
+                message: e.message || 'Transcription worker is busy. Try again.',
+            });
+        }
+        console.error("Transcription error:", e.message);
         res.status(500).json({
             error: e?.message ?? "Transcription failed",
         });
