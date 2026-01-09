@@ -803,7 +803,7 @@ export function registerIngestionJobRoutes(app: express.Express) {
 
         // Generate object path
         // Note: conversation_id is not in ingestion_jobs, so we use jobId as the conversation identifier
-        const assetId = require('crypto').randomUUID();
+        const assetId = crypto.randomUUID();
         const ext = filename.split('.').pop() || 'bin';
         const conversationOrJob = jobId; // Use jobId as conversation identifier
         const bucket = kind === 'audio' ? 'protectqa-audio' : 'protectqa-transcripts';
