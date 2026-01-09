@@ -762,44 +762,31 @@ export function registerIngestionJobRoutes(app: express.Express) {
           return res.status(400).json({ error: 'Filename is required' });
         }
 
-        // Get job to verify ownership
-        // First check if job exists (without org filter)
-        const { data: jobExists, error: existsError } = await supabaseAdmin!
+        // Get job to verify ownership and get details in a single query
+        const { data: job, error: jobError } = await supabaseAdmin!
           .from('ingestion_jobs')
-          .select('id, org_id')
+          .select('id, org_id, project_id, conversation_id')
           .eq('id', jobId)
           .maybeSingle();
 
-        if (existsError) {
-          console.error('[UploadMetadata] Error checking job existence:', existsError);
-          return res.status(500).json({ error: 'DATABASE_ERROR', message: 'Failed to verify job' });
+        if (jobError) {
+          console.error('[UploadMetadata] Database error:', jobError);
+          return res.status(500).json({ error: 'DATABASE_ERROR', message: 'Failed to fetch job' });
         }
 
-        if (!jobExists) {
+        if (!job) {
           console.warn('[UploadMetadata] Job not found:', jobId);
           return res.status(404).json({ error: 'Job not found' });
         }
 
         // Verify org ownership
-        if (jobExists.org_id !== context.orgId) {
+        if (job.org_id !== context.orgId) {
           console.warn('[UploadMetadata] Job belongs to different org:', {
             jobId,
-            jobOrgId: jobExists.org_id,
+            jobOrgId: job.org_id,
             userOrgId: context.orgId,
           });
           return res.status(403).json({ error: 'Access denied. Job belongs to a different organization.' });
-        }
-
-        // Get full job details
-        const { data: job, error: jobError } = await supabaseAdmin!
-          .from('ingestion_jobs')
-          .select('org_id, project_id, conversation_id')
-          .eq('id', jobId)
-          .single();
-
-        if (jobError || !job) {
-          console.error('[UploadMetadata] Error fetching job details:', jobError);
-          return res.status(500).json({ error: 'DATABASE_ERROR', message: 'Failed to fetch job details' });
         }
 
         // Generate object path
@@ -867,44 +854,31 @@ export function registerIngestionJobRoutes(app: express.Express) {
           return res.status(400).json({ error: 'Invalid kind. Must be "audio" or "transcript"' });
         }
 
-        // Get job to verify ownership
-        // First check if job exists (without org filter)
-        const { data: jobExists, error: existsError } = await supabaseAdmin!
+        // Get job to verify ownership and get details in a single query
+        const { data: job, error: jobError } = await supabaseAdmin!
           .from('ingestion_jobs')
-          .select('id, org_id')
+          .select('id, org_id, project_id, conversation_id')
           .eq('id', jobId)
           .maybeSingle();
 
-        if (existsError) {
-          console.error('[FinalizeUpload] Error checking job existence:', existsError);
-          return res.status(500).json({ error: 'DATABASE_ERROR', message: 'Failed to verify job' });
+        if (jobError) {
+          console.error('[FinalizeUpload] Database error:', jobError);
+          return res.status(500).json({ error: 'DATABASE_ERROR', message: 'Failed to fetch job' });
         }
 
-        if (!jobExists) {
+        if (!job) {
           console.warn('[FinalizeUpload] Job not found:', jobId);
           return res.status(404).json({ error: 'Job not found' });
         }
 
         // Verify org ownership
-        if (jobExists.org_id !== context.orgId) {
+        if (job.org_id !== context.orgId) {
           console.warn('[FinalizeUpload] Job belongs to different org:', {
             jobId,
-            jobOrgId: jobExists.org_id,
+            jobOrgId: job.org_id,
             userOrgId: context.orgId,
           });
           return res.status(403).json({ error: 'Access denied. Job belongs to a different organization.' });
-        }
-
-        // Get full job details
-        const { data: job, error: jobError } = await supabaseAdmin!
-          .from('ingestion_jobs')
-          .select('org_id, project_id, conversation_id')
-          .eq('id', jobId)
-          .single();
-
-        if (jobError || !job) {
-          console.error('[FinalizeUpload] Error fetching job details:', jobError);
-          return res.status(500).json({ error: 'DATABASE_ERROR', message: 'Failed to fetch job details' });
         }
 
         // Verify file exists in storage
