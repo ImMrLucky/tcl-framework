@@ -13,7 +13,7 @@ import { getOrgContext } from '../auth-context.js';
 import { requireCapability } from '../plans/capability-middleware.js';
 import { Capability } from '../plans/capabilities.js';
 import { supabaseAdmin } from '../supabase.js';
-import { storeUploadedAsset } from './storage-supabase.js';
+import { storeUploadedAsset, createSignedUrl } from './storage-supabase.js';
 import { enqueueJob } from './worker.js';
 import crypto from 'crypto';
 
@@ -638,7 +638,10 @@ export function registerIngestionJobRoutes(app: express.Express) {
         context = await getOrgContext(req);
         if (!context || context.error) {
           console.error('[Upload] Auth error:', context?.error);
-          return res.status(401).json({ error: context?.error || 'Authorization required' });
+          if (!res.headersSent) {
+            return res.status(401).json({ error: context?.error || 'Authorization required' });
+          }
+          return;
         }
 
         console.log('[Upload] Context:', { orgId: context.orgId, projectId: context.projectId });
@@ -648,7 +651,10 @@ export function registerIngestionJobRoutes(app: express.Express) {
         
         if (!files) {
           console.error('[Upload] No files object in request');
-          return res.status(400).json({ error: 'No files received. Make sure Content-Type is multipart/form-data' });
+          if (!res.headersSent) {
+            return res.status(400).json({ error: 'No files received. Make sure Content-Type is multipart/form-data' });
+          }
+          return;
         }
 
         const audioFile = files.audio?.[0];
@@ -664,7 +670,9 @@ export function registerIngestionJobRoutes(app: express.Express) {
         try {
           await uploadJobFiles(jobId, context.orgId, context.userId || null, audioFile, transcriptFile);
           console.log('[Upload] Upload successful');
-          res.json({ success: true });
+          if (!res.headersSent) {
+            res.json({ success: true });
+          }
         } catch (uploadError: any) {
           // Re-throw to be caught by outer catch block
           throw uploadError;
@@ -688,43 +696,56 @@ export function registerIngestionJobRoutes(app: express.Express) {
         });
         console.error('[Upload] ===================================');
         
-        // Check if it's a multer error
-        if (e.code === 'LIMIT_FILE_SIZE') {
-          return res.status(400).json({ 
-            error: 'LIMIT_FILE_SIZE',
-            message: 'File too large. Maximum size is 500MB' 
-          });
-        }
-        if (e.code === 'LIMIT_UNEXPECTED_FILE') {
-          return res.status(400).json({ 
-            error: 'LIMIT_UNEXPECTED_FILE',
-            message: 'Unexpected file field' 
-          });
-        }
-        
-        // Extract error code and message
-        const errorMessage = e.message || 'Failed to upload files';
-        const errorCode = errorMessage.split(':')[0];
-        const errorDetail = errorMessage.includes(':') ? errorMessage.split(':').slice(1).join(':').trim() : errorMessage;
-        
-        // Map error codes to HTTP status codes
-        let statusCode = 500;
-        if (errorCode.startsWith('JOB_NOT_FOUND') || errorCode.startsWith('MISSING_FILE') || errorCode.startsWith('INVALID_MODE')) {
-          statusCode = 400;
-        } else if (errorCode.startsWith('STORAGE_') || errorCode.startsWith('DATABASE_')) {
-          statusCode = 500;
-        }
-        
         // Ensure we always send a response
-        if (!res.headersSent) {
+        if (res.headersSent) {
+          console.error('[Upload] Response already sent, cannot send error response');
+          return;
+        }
+        
+        try {
+          // Check if it's a multer error
+          if (e.code === 'LIMIT_FILE_SIZE') {
+            return res.status(400).json({ 
+              error: 'LIMIT_FILE_SIZE',
+              message: 'File too large. Maximum size is 500MB' 
+            });
+          }
+          if (e.code === 'LIMIT_UNEXPECTED_FILE') {
+            return res.status(400).json({ 
+              error: 'LIMIT_UNEXPECTED_FILE',
+              message: 'Unexpected file field' 
+            });
+          }
+          
+          // Extract error code and message
+          const errorMessage = e.message || 'Failed to upload files';
+          const errorCode = errorMessage.split(':')[0];
+          const errorDetail = errorMessage.includes(':') ? errorMessage.split(':').slice(1).join(':').trim() : errorMessage;
+          
+          // Map error codes to HTTP status codes
+          let statusCode = 500;
+          if (errorCode.startsWith('JOB_NOT_FOUND') || errorCode.startsWith('MISSING_FILE') || errorCode.startsWith('INVALID_MODE')) {
+            statusCode = 400;
+          } else if (errorCode.startsWith('STORAGE_') || errorCode.startsWith('DATABASE_')) {
+            statusCode = 500;
+          }
+          
           console.error('[Upload] Sending error response:', { statusCode, errorCode, errorDetail });
           res.status(statusCode).json({ 
-            error: errorCode,
-            message: errorDetail,
+            error: errorCode || 'INTERNAL_ERROR',
+            message: errorDetail || errorMessage,
             details: process.env.NODE_ENV === 'development' ? e.stack : undefined
           });
-        } else {
-          console.error('[Upload] Response already sent, cannot send error response');
+        } catch (responseError: any) {
+          // If JSON response fails, try plain text
+          console.error('[Upload] Failed to send JSON error response:', responseError);
+          if (!res.headersSent) {
+            try {
+              res.status(500).send(`Internal Server Error: ${e.message || 'Unknown error'}`);
+            } catch (finalError) {
+              console.error('[Upload] Failed to send any response:', finalError);
+            }
+          }
         }
       }
     }
@@ -1083,5 +1104,62 @@ export function registerIngestionJobRoutes(app: express.Express) {
       res.status(500).json({ error: e.message || 'Failed to get job status' });
     }
   });
+
+  // Get signed URL for asset download (bypasses RLS)
+  app.get(
+    '/api/ingest/assets/:assetId/signed-url',
+    requireCapability(Capability.ANALYZE_MANUAL_UPLOAD),
+    async (req, res) => {
+      try {
+        const context = await getOrgContext(req);
+        if (!context || context.error) {
+          return res.status(401).json({ error: context?.error || 'Authorization required' });
+        }
+
+        const { assetId } = req.params;
+        const expiresIn = parseInt(req.query.expiresIn as string) || 3600; // Default 1 hour
+
+        // Get asset to verify ownership
+        const { data: asset, error: assetError } = await supabaseAdmin!
+          .from('assets')
+          .select('id, org_id, bucket, object_path')
+          .eq('id', assetId)
+          .maybeSingle();
+
+        if (assetError) {
+          console.error('[SignedUrl] Database error:', assetError);
+          return res.status(500).json({ 
+            error: 'DATABASE_ERROR', 
+            message: `Failed to fetch asset: ${assetError.message || 'Unknown database error'}` 
+          });
+        }
+
+        if (!asset) {
+          return res.status(404).json({ error: 'Asset not found' });
+        }
+
+        // Verify org ownership
+        if (asset.org_id !== context.orgId) {
+          return res.status(403).json({ error: 'Access denied. Asset belongs to a different organization.' });
+        }
+
+        // Check if asset has Supabase Storage location
+        if (!asset.bucket || !asset.object_path) {
+          return res.status(400).json({ error: 'Asset does not have a Supabase Storage location' });
+        }
+
+        // Create signed URL
+        const signedUrl = await createSignedUrl(asset.bucket, asset.object_path, expiresIn);
+
+        res.json({ signedUrl, expiresIn });
+      } catch (e: any) {
+        console.error('[SignedUrl] Error:', e);
+        res.status(500).json({ 
+          error: 'INTERNAL_ERROR',
+          message: e.message || 'Failed to create signed URL' 
+        });
+      }
+    }
+  );
 }
 
