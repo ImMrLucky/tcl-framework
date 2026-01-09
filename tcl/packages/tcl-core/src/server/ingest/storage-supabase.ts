@@ -216,6 +216,7 @@ async function uploadFileStreaming(
   const webStream = Readable.toWeb(fileStream);
 
   try {
+    // Type assertion: ReadableStream is a valid fetch body in Node 18+
     const response = await fetch(uploadUrl, {
       method: 'POST',
       headers: {
@@ -224,7 +225,7 @@ async function uploadFileStreaming(
         'Content-Length': fileSize.toString(),
         'x-upsert': 'false', // Don't overwrite existing files
       },
-      body: webStream, // Web ReadableStream is compatible with fetch body in Node 18+
+      body: webStream as any, // Web ReadableStream is compatible with fetch body in Node 18+
     });
 
     if (!response.ok) {
