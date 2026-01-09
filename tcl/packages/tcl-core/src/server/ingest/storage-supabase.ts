@@ -123,7 +123,14 @@ export async function uploadFileToSupabase({
   contentType: string;
 }): Promise<void> {
   if (!supabaseAdmin) {
-    throw new Error('Supabase not configured');
+    throw new Error('STORAGE_NOT_CONFIGURED: Supabase not configured. Check SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY environment variables.');
+  }
+
+  // Verify file exists
+  try {
+    await fs.promises.access(filePath);
+  } catch (accessError: any) {
+    throw new Error(`STORAGE_FILE_NOT_FOUND: Temp file not found at ${filePath}: ${accessError.message}`);
   }
 
   // Read file into buffer for upload
@@ -131,9 +138,17 @@ export async function uploadFileToSupabase({
   // 1. File is already on disk (from multer diskStorage)
   // 2. We're not buffering from network stream
   // 3. For very large files, Supabase Storage has its own limits
-  const fileBuffer = await fs.promises.readFile(filePath);
+  let fileBuffer: Buffer;
+  try {
+    fileBuffer = await fs.promises.readFile(filePath);
+    console.log(`[Storage] Read file: ${filePath}, size: ${fileBuffer.length} bytes`);
+  } catch (readError: any) {
+    throw new Error(`STORAGE_READ_FAILED: Failed to read file ${filePath}: ${readError.message}`);
+  }
   
-  const { error } = await supabaseAdmin.storage
+  console.log(`[Storage] Uploading to Supabase: bucket=${bucket}, path=${objectPath}, contentType=${contentType}`);
+  
+  const { data, error } = await supabaseAdmin.storage
     .from(bucket)
     .upload(objectPath, fileBuffer, {
       contentType,
@@ -141,15 +156,28 @@ export async function uploadFileToSupabase({
     });
 
   if (error) {
+    console.error(`[Storage] Upload error:`, {
+      message: error.message,
+      statusCode: error.statusCode,
+      error: error.error,
+      bucket,
+      objectPath,
+    });
+    
     // Provide actionable error information
-    if (error.message.includes('already exists')) {
+    if (error.message?.includes('already exists') || error.message?.includes('duplicate')) {
       throw new Error(`STORAGE_FILE_EXISTS: File already exists at ${bucket}/${objectPath}`);
     }
-    if (error.message.includes('not found') || error.message.includes('bucket')) {
-      throw new Error(`STORAGE_BUCKET_NOT_FOUND: Bucket "${bucket}" does not exist. Please create it in Supabase Storage.`);
+    if (error.message?.includes('not found') || error.message?.includes('bucket') || error.statusCode === 404) {
+      throw new Error(`STORAGE_BUCKET_NOT_FOUND: Bucket "${bucket}" does not exist. Please create it in Supabase Storage dashboard.`);
     }
-    throw new Error(`STORAGE_UPLOAD_FAILED: ${error.message} (bucket: ${bucket}, path: ${objectPath})`);
+    if (error.statusCode === 401 || error.statusCode === 403) {
+      throw new Error(`STORAGE_AUTH_FAILED: Authentication failed. Check SUPABASE_SERVICE_ROLE_KEY is correct and has storage access.`);
+    }
+    throw new Error(`STORAGE_UPLOAD_FAILED: ${error.message || error.error || 'Unknown error'} (bucket: ${bucket}, path: ${objectPath}, statusCode: ${error.statusCode || 'unknown'})`);
   }
+
+  console.log(`[Storage] Upload successful: ${bucket}/${objectPath}`);
 }
 
 /**

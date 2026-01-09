@@ -22,26 +22,36 @@ const fsMkdir = promisify(fs.mkdir);
 // Temp directory for uploads (will be cleaned up after upload to Supabase)
 const UPLOAD_TEMP_DIR = join(tmpdir(), 'protectqa-uploads');
 
-// Ensure temp directory exists
-async function ensureUploadTempDir(): Promise<string> {
+// Ensure temp directory exists (synchronous for multer)
+function ensureUploadTempDirSync(): string {
   try {
     if (!fs.existsSync(UPLOAD_TEMP_DIR)) {
-      await fsMkdir(UPLOAD_TEMP_DIR, { recursive: true });
+      fs.mkdirSync(UPLOAD_TEMP_DIR, { recursive: true });
+      console.log(`[Upload] Created temp directory: ${UPLOAD_TEMP_DIR}`);
     }
     return UPLOAD_TEMP_DIR;
   } catch (error: any) {
+    console.error(`[Upload] Failed to create temp directory:`, error);
     throw new Error(`Failed to create upload temp directory: ${error.message}`);
   }
+}
+
+// Ensure directory exists on startup
+try {
+  ensureUploadTempDirSync();
+} catch (error: any) {
+  console.error(`[Upload] Warning: Could not create temp directory on startup:`, error);
 }
 
 // Configure multer to use disk storage (not memory)
 const upload = multer({ 
   storage: multer.diskStorage({
-    destination: async (req, file, cb) => {
+    destination: (req, file, cb) => {
       try {
-        const dir = await ensureUploadTempDir();
+        const dir = ensureUploadTempDirSync();
         cb(null, dir);
       } catch (error: any) {
+        console.error(`[Upload] Multer destination error:`, error);
         cb(error, '');
       }
     },
@@ -255,23 +265,32 @@ export async function uploadJobFiles(
         console.log(`[Upload] Audio stored: bucket=${stored.bucket}, path=${stored.objectPath}, hash=${stored.sha256}`);
 
         // Save to database
+        const insertData: any = {
+          org_id: orgId,
+          job_id: jobId,
+          conversation_id: job.conversation_id,
+          uploader_user_id: uploaderUserId,
+          type: 'AUDIO',
+          kind: 'audio',
+          bucket: stored.bucket,
+          object_path: stored.objectPath,
+          storage_url: `${stored.bucket}/${stored.objectPath}`, // Keep for backward compatibility
+          content_hash: stored.sha256,
+          size_bytes: stored.sizeBytes,
+          mime_type: stored.mimeType,
+          metadata_json: {},
+        };
+
+        console.log(`[Upload] Inserting audio asset to database:`, {
+          org_id: insertData.org_id,
+          job_id: insertData.job_id,
+          bucket: insertData.bucket,
+          object_path: insertData.object_path,
+        });
+
         const { data: dbAsset, error: assetError } = await supabaseAdmin
           .from('assets')
-          .insert({
-            org_id: orgId,
-            job_id: jobId,
-            conversation_id: job.conversation_id,
-            uploader_user_id: uploaderUserId,
-            type: 'AUDIO',
-            kind: 'audio',
-            bucket: stored.bucket,
-            object_path: stored.objectPath,
-            storage_url: `${stored.bucket}/${stored.objectPath}`, // Keep for backward compatibility
-            content_hash: stored.sha256,
-            size_bytes: stored.sizeBytes,
-            mime_type: stored.mimeType,
-            metadata_json: {},
-          })
+          .insert(insertData)
           .select('id')
           .single();
 
@@ -281,10 +300,14 @@ export async function uploadJobFiles(
             message: assetError.message,
             details: assetError.details,
             hint: assetError.hint,
+            insertData,
           });
           
           if (assetError.code === '42P01') {
             throw new Error('DATABASE_MIGRATION_REQUIRED: Table "assets" does not exist. Please run database migration 024_assets_supabase_storage.sql');
+          }
+          if (assetError.code === '42703') {
+            throw new Error('DATABASE_MIGRATION_REQUIRED: Column "bucket" or "object_path" does not exist in assets table. Please run database migration 024_assets_supabase_storage.sql');
           }
           if (assetError.code === '23503') {
             throw new Error(`DATABASE_FK_VIOLATION: Foreign key constraint violation: ${assetError.message}. Check that job_id exists.`);
@@ -328,23 +351,32 @@ export async function uploadJobFiles(
         console.log(`[Upload] Transcript stored: bucket=${stored.bucket}, path=${stored.objectPath}, hash=${stored.sha256}`);
 
         // Save to database
+        const insertData: any = {
+          org_id: orgId,
+          job_id: jobId,
+          conversation_id: job.conversation_id,
+          uploader_user_id: uploaderUserId,
+          type: 'TRANSCRIPT_UPLOADED',
+          kind: 'transcript',
+          bucket: stored.bucket,
+          object_path: stored.objectPath,
+          storage_url: `${stored.bucket}/${stored.objectPath}`, // Keep for backward compatibility
+          content_hash: stored.sha256,
+          size_bytes: stored.sizeBytes,
+          mime_type: stored.mimeType,
+          metadata_json: {},
+        };
+
+        console.log(`[Upload] Inserting transcript asset to database:`, {
+          org_id: insertData.org_id,
+          job_id: insertData.job_id,
+          bucket: insertData.bucket,
+          object_path: insertData.object_path,
+        });
+
         const { data: dbAsset, error: assetError } = await supabaseAdmin
           .from('assets')
-          .insert({
-            org_id: orgId,
-            job_id: jobId,
-            conversation_id: job.conversation_id,
-            uploader_user_id: uploaderUserId,
-            type: 'TRANSCRIPT_UPLOADED',
-            kind: 'transcript',
-            bucket: stored.bucket,
-            object_path: stored.objectPath,
-            storage_url: `${stored.bucket}/${stored.objectPath}`, // Keep for backward compatibility
-            content_hash: stored.sha256,
-            size_bytes: stored.sizeBytes,
-            mime_type: stored.mimeType,
-            metadata_json: {},
-          })
+          .insert(insertData)
           .select('id')
           .single();
 
@@ -354,10 +386,14 @@ export async function uploadJobFiles(
             message: assetError.message,
             details: assetError.details,
             hint: assetError.hint,
+            insertData,
           });
           
           if (assetError.code === '42P01') {
             throw new Error('DATABASE_MIGRATION_REQUIRED: Table "assets" does not exist. Please run database migration 024_assets_supabase_storage.sql');
+          }
+          if (assetError.code === '42703') {
+            throw new Error('DATABASE_MIGRATION_REQUIRED: Column "bucket" or "object_path" does not exist in assets table. Please run database migration 024_assets_supabase_storage.sql');
           }
           if (assetError.code === '23503') {
             throw new Error(`DATABASE_FK_VIOLATION: Foreign key constraint violation: ${assetError.message}. Check that job_id exists.`);
@@ -560,7 +596,7 @@ export function registerIngestionJobRoutes(app: express.Express) {
         next();
       });
     },
-    async (req, res) => {
+    async (req, res, next) => {
       let context: any = null;
       let files: any = null;
       
@@ -594,27 +630,45 @@ export function registerIngestionJobRoutes(app: express.Express) {
           transcriptSize: transcriptFile?.size,
         });
 
-        await uploadJobFiles(jobId, context.orgId, context.userId || null, audioFile, transcriptFile);
-
-        console.log('[Upload] Upload successful');
-        res.json({ success: true });
+        try {
+          await uploadJobFiles(jobId, context.orgId, context.userId || null, audioFile, transcriptFile);
+          console.log('[Upload] Upload successful');
+          res.json({ success: true });
+        } catch (uploadError: any) {
+          // Re-throw to be caught by outer catch block
+          throw uploadError;
+        }
       } catch (e: any) {
-        console.error('[Upload] Error:', e);
+        console.error('[Upload] ========== UPLOAD ERROR ==========');
+        console.error('[Upload] Error message:', e.message);
+        console.error('[Upload] Error code:', e.code);
         console.error('[Upload] Error stack:', e.stack);
         console.error('[Upload] Job ID:', req.params.jobId);
         console.error('[Upload] Org ID:', context?.orgId);
+        console.error('[Upload] User ID:', context?.userId);
         console.error('[Upload] Files received:', {
           hasFiles: !!files,
           audio: !!files?.audio?.[0],
           transcript: !!files?.transcript?.[0],
+          audioPath: files?.audio?.[0]?.path,
+          transcriptPath: files?.transcript?.[0]?.path,
+          audioSize: files?.audio?.[0]?.size,
+          transcriptSize: files?.transcript?.[0]?.size,
         });
+        console.error('[Upload] ===================================');
         
         // Check if it's a multer error
         if (e.code === 'LIMIT_FILE_SIZE') {
-          return res.status(400).json({ error: 'File too large. Maximum size is 500MB' });
+          return res.status(400).json({ 
+            error: 'LIMIT_FILE_SIZE',
+            message: 'File too large. Maximum size is 500MB' 
+          });
         }
         if (e.code === 'LIMIT_UNEXPECTED_FILE') {
-          return res.status(400).json({ error: 'Unexpected file field' });
+          return res.status(400).json({ 
+            error: 'LIMIT_UNEXPECTED_FILE',
+            message: 'Unexpected file field' 
+          });
         }
         
         // Extract error code and message
@@ -630,11 +684,16 @@ export function registerIngestionJobRoutes(app: express.Express) {
           statusCode = 500;
         }
         
-        res.status(statusCode).json({ 
-          error: errorCode,
-          message: errorDetail,
-          details: process.env.NODE_ENV === 'development' ? e.stack : undefined
-        });
+        // Ensure we always send a response
+        if (!res.headersSent) {
+          res.status(statusCode).json({ 
+            error: errorCode,
+            message: errorDetail,
+            details: process.env.NODE_ENV === 'development' ? e.stack : undefined
+          });
+        } else {
+          console.error('[Upload] Response already sent, cannot send error response');
+        }
       }
     }
   );
