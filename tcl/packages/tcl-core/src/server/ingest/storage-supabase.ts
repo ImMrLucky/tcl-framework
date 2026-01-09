@@ -156,25 +156,25 @@ export async function uploadFileToSupabase({
     });
 
   if (error) {
+    const errorMessage = error.message || 'Unknown error';
     console.error(`[Storage] Upload error:`, {
-      message: error.message,
-      statusCode: error.statusCode,
-      error: error.error,
+      message: errorMessage,
+      name: (error as any).name,
       bucket,
       objectPath,
     });
     
     // Provide actionable error information
-    if (error.message?.includes('already exists') || error.message?.includes('duplicate')) {
+    if (errorMessage.includes('already exists') || errorMessage.includes('duplicate')) {
       throw new Error(`STORAGE_FILE_EXISTS: File already exists at ${bucket}/${objectPath}`);
     }
-    if (error.message?.includes('not found') || error.message?.includes('bucket') || error.statusCode === 404) {
+    if (errorMessage.includes('not found') || errorMessage.includes('bucket') || errorMessage.includes('404')) {
       throw new Error(`STORAGE_BUCKET_NOT_FOUND: Bucket "${bucket}" does not exist. Please create it in Supabase Storage dashboard.`);
     }
-    if (error.statusCode === 401 || error.statusCode === 403) {
+    if (errorMessage.includes('401') || errorMessage.includes('403') || errorMessage.includes('unauthorized') || errorMessage.includes('forbidden')) {
       throw new Error(`STORAGE_AUTH_FAILED: Authentication failed. Check SUPABASE_SERVICE_ROLE_KEY is correct and has storage access.`);
     }
-    throw new Error(`STORAGE_UPLOAD_FAILED: ${error.message || error.error || 'Unknown error'} (bucket: ${bucket}, path: ${objectPath}, statusCode: ${error.statusCode || 'unknown'})`);
+    throw new Error(`STORAGE_UPLOAD_FAILED: ${errorMessage} (bucket: ${bucket}, path: ${objectPath})`);
   }
 
   console.log(`[Storage] Upload successful: ${bucket}/${objectPath}`);
