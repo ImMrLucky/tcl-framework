@@ -36,6 +36,7 @@ import {
   setTemplateConfig,
   type GraphBuilderOutput 
 } from "./graph/graph-builder.js";
+import { getTemplateConfig } from "./graph/template-config.js";
 
 // Cache for scorer to avoid re-initialization on every request
 let cachedScorer: { scorer: any; url: string; timestamp: number } | null = null;
@@ -274,10 +275,24 @@ async function runUnifiedGraphPath(
     
     // Build evidenceRefs from grounding edges
     const evidenceRefs = claimGrounding.map(g => {
-      // Find the evidence node to get the quote
+      // Find the evidence node to get the quote and anchor
       const evidenceNode = graphResult.graph.nodes.evidence.find(e => e.id === g.sourceId);
-      const turnMatch = g.sourceId.match(/turn-(\d+)/);
-      const turnIndex = turnMatch ? parseInt(turnMatch[1], 10) : undefined;
+      
+      // Extract turn index from evidence node anchor (not from sourceId)
+      // Anchor ref format: "turn-12" (correct)
+      // SourceId format: "e-transcript-12" (for lookup only)
+      let turnIndex: number | undefined;
+      if (evidenceNode?.anchors && evidenceNode.anchors.length > 0) {
+        const anchorRef = evidenceNode.anchors[0].ref;
+        const turnMatch = anchorRef?.match(/turn-(\d+)/);
+        turnIndex = turnMatch ? parseInt(turnMatch[1], 10) : undefined;
+      }
+      
+      // Fallback: try to extract from sourceId if anchor not available
+      if (turnIndex === undefined && g.sourceId) {
+        const fallbackMatch = g.sourceId.match(/e-transcript-(\d+)/);
+        turnIndex = fallbackMatch ? parseInt(fallbackMatch[1], 10) : undefined;
+      }
       
       return {
         sourceId: g.sourceId,
@@ -433,6 +448,8 @@ async function runUnifiedGraphPath(
       consistency: consistencyScore,
       coherence: coherenceScore,
       overall,
+      // Mode-aware scores (separated for clarity)
+      modeAware: graphResult.truthScores.modeAware,
     },
     summaryStats: {
       totalClaims: claims.length,
@@ -474,9 +491,9 @@ async function runUnifiedGraphPath(
           graphBuilderMode: 'unified',
           graphStatus: graphResult.graph.diagnostics.status,
           graphReasons: graphResult.graph.diagnostics.reasons,
-          supportThreshold: 0.65, // From template config
-          contradictionThreshold: 0.70, // From template config
-          groundingThreshold: 0.60, // From template config
+          supportThreshold: getTemplateConfig().thresholds.support,
+          contradictionThreshold: getTemplateConfig().thresholds.contradiction,
+          groundingThreshold: getTemplateConfig().thresholds.grounding,
           // Candidate generation stats
           pairsGenerated: graphResult.metrics.candidateGeneration?.totalCandidatesGenerated ?? 0,
           claimsWithZeroCandidates: graphResult.metrics.candidateGeneration?.claimsWithZeroCandidates ?? 0,

@@ -21,7 +21,7 @@ import {
 } from './types.js';
 import { getTemplateConfig } from './template-config.js';
 import { ClaimPairCandidate, ClaimEvidenceCandidate } from './candidate-generation.js';
-import { slotsMatch, valuesContradict } from './subject-slot.js';
+import { slotsMatch, valuesContradict, hasExplicitContradictionPattern } from './subject-slot.js';
 
 // =============================================================================
 // EDGE CLASSIFICATION RESULTS
@@ -384,10 +384,10 @@ function hasOpposingPolarity(a: ClaimNode, b: ClaimNode): boolean {
     return true;
   }
   
-  // Check for value contradiction
+  // Check for value contradiction (now includes tolerance and explicit patterns)
   if (valuesContradict(a.slot, b.slot)) return true;
   
-  // Check for opposing value words
+  // Check for opposing value words (enhanced list)
   const opposingPairs = [
     ['increase', 'decrease'],
     ['higher', 'lower'],
@@ -408,9 +408,14 @@ function hasOpposingPolarity(a: ClaimNode, b: ClaimNode): boolean {
     ['always', 'never'],
     ['every', 'no'],
     ['before', 'after'], // Date contradictions
-    ['increase', 'decrease'],
     ['up', 'down'],
     ['started', 'ended'],
+    ['waived', 'charged'], // Fee contradictions
+    ['waived', 'fee'],
+    ['no fee', 'fee'],
+    ['free', 'charge'],
+    ['zero', 'non-zero'],
+    ['$0', '$'], // Money contradictions
   ];
   
   for (const [word1, word2] of opposingPairs) {
@@ -475,9 +480,15 @@ function computeContradictionScore(
   const polarityConfidence = hasOpposingPolarity(a, b) ? 1.0 : 0.3;
   score += polarityConfidence * weights.polarityMatch;
   
-  // Value contradiction boost
+  // Value contradiction boost (now includes tolerance and explicit patterns)
   if (valuesContradict(a.slot, b.slot)) {
-    score += 0.3; // Strong signal
+    // Strong boost for value contradictions - these are high-confidence signals
+    score += 0.4; // Increased from 0.3 for better detection
+    
+    // Extra boost for explicit patterns (increase/decrease, waived/fee)
+    if (hasExplicitContradictionPattern(a.slot, b.slot)) {
+      score += 0.2; // Additional boost for clear semantic contradictions
+    }
   }
   
   // Normalize to 0-1
@@ -542,6 +553,22 @@ function classifyClaimSupport(
     return { rejected: true, reason: 'threshold' };
   }
   
+  // GATE 1: Require slot/entity match OR shared entity key
+  // Support edges should represent real reinforcement, not just "similar sentences"
+  const hasSlotMatch = signals.slotMatch > 0.3; // Same slot type
+  const hasEntityOverlap = signals.entityOverlap > 0.2; // Shared entities
+  const hasSharedEntityKey = claimA.slot.entityKey === claimB.slot.entityKey && 
+                             claimA.slot.entityKey !== 'unknown';
+  
+  if (!hasSlotMatch && !hasEntityOverlap && !hasSharedEntityKey) {
+    return { rejected: true, reason: 'threshold' }; // No meaningful connection
+  }
+  
+  // GATE 2: Modality compatibility - questions shouldn't support assertions
+  if (!areModalitiesCompatible(claimA.modality, claimB.modality)) {
+    return { rejected: true, reason: 'threshold' };
+  }
+  
   // Compute support score
   const supportScore = computeSupportScore(claimA, claimB, signals);
   
@@ -563,6 +590,23 @@ function classifyEvidenceSupport(
   config: ReturnType<typeof getTemplateConfig>
 ): ClassificationResult {
   const { claim, evidence, signals } = candidate;
+  
+  // GATE 1: Require entity overlap OR definition/policy evidence
+  // Support edges should represent real reinforcement from evidence
+  const hasEntityOverlap = signals.entityOverlap > 0.2;
+  const isDefinitionOrPolicy = evidence.evidenceKind === 'policy' || 
+                                evidence.evidenceKind === 'kb' ||
+                                evidence.evidenceKind === 'document';
+  
+  if (!hasEntityOverlap && !isDefinitionOrPolicy) {
+    return { rejected: true, reason: 'threshold' }; // No meaningful connection
+  }
+  
+  // GATE 2: Modality compatibility - questions shouldn't be supported by evidence
+  // (Evidence supports assertions, not questions)
+  if (claim.modality === 'question') {
+    return { rejected: true, reason: 'threshold' };
+  }
   
   // Compute support score with evidence strength multiplier
   const evidenceStrength = config.weights.evidenceStrength[evidence.evidenceKind] || 0.5;
@@ -594,10 +638,29 @@ function classifyGrounding(
   
   // Compute grounding score using text match AND temporal proximity
   // Temporal proximity is key: claims should ground to their source turn
-  const groundingScore = (signals.semanticSimilarity * 0.6) + (signals.temporalProximity * 0.4);
+  // For high recall, boost score when temporal proximity is high (same/adjacent turn)
+  let groundingScore = (signals.semanticSimilarity * 0.5) + (signals.temporalProximity * 0.5);
   
-  // Lower threshold for grounding - we want most claims to be grounded
-  const effectiveThreshold = Math.min(config.thresholds.grounding, 0.4);
+  // Boost for same turn (perfect temporal match) - should almost always ground
+  if (signals.temporalProximity >= 1.0) {
+    // Same turn: very permissive - ground unless text is completely unrelated
+    // Minimum score of 0.5 for same turn (will pass 0.25 threshold)
+    groundingScore = Math.max(groundingScore, 0.5);
+    // If there's any text similarity, boost further
+    if (signals.semanticSimilarity > 0.1) {
+      groundingScore = Math.max(groundingScore, 0.6 + (signals.semanticSimilarity * 0.3));
+    }
+  } else if (signals.temporalProximity >= 0.8) {
+    // Adjacent turn: moderate boost
+    groundingScore = Math.max(groundingScore, 0.4 + (signals.semanticSimilarity * 0.3));
+  } else if (signals.temporalProximity >= 0.5) {
+    // Within 3 turns: light boost
+    groundingScore = Math.max(groundingScore, 0.3 + (signals.semanticSimilarity * 0.4));
+  }
+  
+  // Use grounding threshold from config (no hard-coded clamp)
+  // Lower threshold for high recall - want >80% of claims grounded
+  const effectiveThreshold = config.thresholds.grounding;
   
   if (groundingScore < effectiveThreshold) {
     return { rejected: true, reason: 'threshold' };
@@ -606,6 +669,34 @@ function classifyGrounding(
   const edge = createGroundingEdge(claim, evidence, groundingScore, signals);
   
   return { edge, rejected: false };
+}
+
+// =============================================================================
+// MODALITY COMPATIBILITY
+// =============================================================================
+
+/**
+ * Check if claim modalities are compatible for support relationships
+ * Questions shouldn't support assertions, etc.
+ */
+function areModalitiesCompatible(
+  modalityA: string | undefined,
+  modalityB: string | undefined
+): boolean {
+  // If either is undefined, allow (conservative)
+  if (!modalityA || !modalityB) return true;
+  
+  // Questions shouldn't support anything (they're asking, not asserting)
+  if (modalityA === 'question' || modalityB === 'question') {
+    return false;
+  }
+  
+  // Hedges can support assertions (weak support)
+  // Denials can support other denials (consistent denial)
+  // Promises can support assertions (commitment supports claim)
+  // Asserts can support anything (except questions)
+  
+  return true;
 }
 
 // =============================================================================

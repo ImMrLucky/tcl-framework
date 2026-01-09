@@ -173,10 +173,13 @@ export async function uploadJobFiles(
     if (!transcriptFile) {
       throw new Error('TRANSCRIPT_ONLY mode requires a transcript file');
     }
+    if (!transcriptFile.buffer || transcriptFile.buffer.length === 0) {
+      throw new Error('Transcript file buffer is empty or invalid');
+    }
     assets.push({
       type: 'TRANSCRIPT_UPLOADED',
       buffer: transcriptFile.buffer,
-      filename: transcriptFile.originalname,
+      filename: transcriptFile.originalname || 'transcript.txt',
       metadata: {},
     });
   } else if (job.mode === 'AUDIO_ONLY') {
@@ -186,10 +189,13 @@ export async function uploadJobFiles(
     if (transcriptFile) {
       throw new Error('AUDIO_ONLY mode does not accept transcript files (use AUDIO_PLUS_TRANSCRIPT)');
     }
+    if (!audioFile.buffer || audioFile.buffer.length === 0) {
+      throw new Error('Audio file buffer is empty or invalid');
+    }
     assets.push({
       type: 'AUDIO',
       buffer: audioFile.buffer,
-      filename: audioFile.originalname,
+      filename: audioFile.originalname || 'audio.wav',
       metadata: {},
     });
   } else if (job.mode === 'AUDIO_PLUS_TRANSCRIPT') {
@@ -199,16 +205,22 @@ export async function uploadJobFiles(
     if (!transcriptFile) {
       throw new Error('AUDIO_PLUS_TRANSCRIPT mode requires a transcript file');
     }
+    if (!audioFile.buffer || audioFile.buffer.length === 0) {
+      throw new Error('Audio file buffer is empty or invalid');
+    }
+    if (!transcriptFile.buffer || transcriptFile.buffer.length === 0) {
+      throw new Error('Transcript file buffer is empty or invalid');
+    }
     assets.push({
       type: 'AUDIO',
       buffer: audioFile.buffer,
-      filename: audioFile.originalname,
+      filename: audioFile.originalname || 'audio.wav',
       metadata: {},
     });
     assets.push({
       type: 'TRANSCRIPT_UPLOADED',
       buffer: transcriptFile.buffer,
-      filename: transcriptFile.originalname,
+      filename: transcriptFile.originalname || 'transcript.txt',
       metadata: {},
     });
   }
@@ -301,7 +313,14 @@ export async function uploadJobFiles(
   }
 
   // Enqueue job for background processing
-  await enqueueJob(jobId);
+  try {
+    await enqueueJob(jobId);
+    console.log(`[Upload] Job ${jobId} enqueued for processing`);
+  } catch (enqueueError: any) {
+    console.error(`[Upload] Failed to enqueue job ${jobId}:`, enqueueError);
+    // Don't fail the upload if enqueue fails - job can be processed later
+    // But log it for debugging
+  }
 }
 
 /**

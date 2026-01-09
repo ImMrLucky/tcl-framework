@@ -308,6 +308,8 @@ function computeClaimEvidenceSignals(claim: ClaimNode, evidence: EvidenceNode): 
   
   // For transcript evidence, compute temporal proximity using turn matching
   let temporalProximity = 0;
+  let spanOverlap = 0;
+  
   if (evidence.evidenceKind === 'transcript' && evidence.anchors?.length) {
     // Extract turn index from evidence anchor
     const evidenceAnchor = evidence.anchors[0];
@@ -323,6 +325,28 @@ function computeClaimEvidenceSignals(claim: ClaimNode, evidence: EvidenceNode): 
       // Exact match (same turn) = 1.0, adjacent turns = 0.9, etc.
       if (turnDistance === 0) {
         temporalProximity = 1.0; // Same turn - perfect grounding
+        
+        // Compute span overlap when same turn (best case for grounding)
+        if (claim.span && evidenceAnchor.text) {
+          // Check if claim text appears in evidence text (exact or substring match)
+          const claimTextLower = claim.text.toLowerCase().trim();
+          const evidenceTextLower = evidenceAnchor.text.toLowerCase().trim();
+          
+          if (evidenceTextLower.includes(claimTextLower) || claimTextLower.includes(evidenceTextLower)) {
+            // Exact or substring match = perfect span overlap
+            spanOverlap = 1.0;
+          } else {
+            // Compute character overlap
+            const claimChars = new Set(claimTextLower.replace(/\s+/g, ''));
+            const evidenceChars = new Set(evidenceTextLower.replace(/\s+/g, ''));
+            let intersection = 0;
+            for (const char of claimChars) {
+              if (evidenceChars.has(char)) intersection++;
+            }
+            const union = claimChars.size + evidenceChars.size - intersection;
+            spanOverlap = union > 0 ? intersection / union : 0;
+          }
+        }
       } else if (turnDistance === 1) {
         temporalProximity = 0.8; // Adjacent turn - likely response
       } else if (turnDistance <= 3) {
@@ -333,10 +357,17 @@ function computeClaimEvidenceSignals(claim: ClaimNode, evidence: EvidenceNode): 
     }
   }
   
+  // Use span overlap if available, otherwise fall back to semantic similarity
+  let textSimilarity = computeTextSimilarity(claim.text, evidenceText);
+  if (spanOverlap > 0) {
+    // Prefer span overlap when available (more reliable for grounding)
+    textSimilarity = Math.max(textSimilarity, spanOverlap);
+  }
+  
   return {
     slotMatch: 0, // N/A for evidence
     entityOverlap: computeEntityOverlapWithEvidence(claim.entities, evidence),
-    semanticSimilarity: computeTextSimilarity(claim.text, evidenceText),
+    semanticSimilarity: textSimilarity,
     temporalProximity,
     speakerRole: 0, // N/A
   };
@@ -387,8 +418,100 @@ function computeEntityOverlapWithEvidence(entities: ExtractedEntity[], evidence:
   return 0;
 }
 
-function computeTextSimilarity(textA: string, textB: string): number {
-  // Tokenize and compute Jaccard similarity
+/**
+ * Text Similarity Interface
+ * Allows swapping implementations (current: 3-gram cosine, future: embeddings)
+ */
+interface TextSimilarityProvider {
+  computeSimilarity(textA: string, textB: string): number;
+}
+
+/**
+ * 3-gram Cosine Similarity Provider
+ * Better baseline than token Jaccard - handles paraphrases better
+ */
+class TrigramCosineProvider implements TextSimilarityProvider {
+  computeSimilarity(textA: string, textB: string): number {
+    // Normalize text (lowercase, remove punctuation, normalize whitespace)
+    const normalizedA = normalizeText(textA);
+    const normalizedB = normalizeText(textB);
+    
+    if (normalizedA.length === 0 || normalizedB.length === 0) return 0;
+    
+    // Generate character 3-grams
+    const gramsA = generateTrigrams(normalizedA);
+    const gramsB = generateTrigrams(normalizedB);
+    
+    if (gramsA.size === 0 || gramsB.size === 0) {
+      // Fallback to Jaccard if no trigrams
+      return computeJaccardFallback(textA, textB);
+    }
+    
+    // Compute cosine similarity using 3-gram frequencies
+    return computeCosineSimilarity(gramsA, gramsB);
+  }
+}
+
+/**
+ * Normalize text for similarity computation
+ */
+function normalizeText(text: string): string {
+  return text
+    .toLowerCase()
+    .replace(/[^\w\s]/g, ' ')  // Remove punctuation
+    .replace(/\s+/g, ' ')      // Normalize whitespace
+    .trim();
+}
+
+/**
+ * Generate character 3-grams from text
+ */
+function generateTrigrams(text: string): Map<string, number> {
+  const grams = new Map<string, number>();
+  const padded = `  ${text}  `; // Pad with spaces for edge grams
+  
+  for (let i = 0; i < padded.length - 2; i++) {
+    const gram = padded.substring(i, i + 3);
+    grams.set(gram, (grams.get(gram) || 0) + 1);
+  }
+  
+  return grams;
+}
+
+/**
+ * Compute cosine similarity between two 3-gram frequency maps
+ */
+function computeCosineSimilarity(
+  gramsA: Map<string, number>,
+  gramsB: Map<string, number>
+): number {
+  // Build union of all grams
+  const allGrams = new Set([...gramsA.keys(), ...gramsB.keys()]);
+  
+  if (allGrams.size === 0) return 0;
+  
+  // Compute dot product and magnitudes
+  let dotProduct = 0;
+  let magnitudeA = 0;
+  let magnitudeB = 0;
+  
+  for (const gram of allGrams) {
+    const freqA = gramsA.get(gram) || 0;
+    const freqB = gramsB.get(gram) || 0;
+    
+    dotProduct += freqA * freqB;
+    magnitudeA += freqA * freqA;
+    magnitudeB += freqB * freqB;
+  }
+  
+  const magnitude = Math.sqrt(magnitudeA) * Math.sqrt(magnitudeB);
+  return magnitude > 0 ? dotProduct / magnitude : 0;
+}
+
+/**
+ * Fallback to Jaccard similarity if trigrams fail
+ */
+function computeJaccardFallback(textA: string, textB: string): number {
   const tokensA = tokenize(textA);
   const tokensB = tokenize(textB);
   
@@ -401,6 +524,147 @@ function computeTextSimilarity(textA: string, textB: string): number {
   
   const union = tokensA.size + tokensB.size - intersection;
   return union > 0 ? intersection / union : 0;
+}
+
+// Global similarity provider (can be swapped for embeddings later)
+// To use embeddings: set similarityProvider = new EmbeddingProvider(embeddingModel)
+let similarityProvider: TextSimilarityProvider = new TrigramCosineProvider();
+
+/**
+ * Set the text similarity provider (for future embedding support)
+ */
+export function setTextSimilarityProvider(provider: TextSimilarityProvider): void {
+  similarityProvider = provider;
+}
+
+/**
+ * Compute text similarity using the configured provider
+ * Supports value-aware matching for MONEY, DATE, PERCENT entities
+ */
+function computeTextSimilarity(textA: string, textB: string): number {
+  // First, try value-aware matching for numeric entities
+  const valueMatch = computeValueAwareSimilarity(textA, textB);
+  if (valueMatch > 0) {
+    // If value match found, boost the base similarity
+    const baseSimilarity = similarityProvider.computeSimilarity(textA, textB);
+    return Math.max(baseSimilarity, valueMatch * 0.8 + baseSimilarity * 0.2);
+  }
+  
+  // Use base similarity provider (3-gram cosine)
+  return similarityProvider.computeSimilarity(textA, textB);
+}
+
+/**
+ * Value-aware matching for MONEY, DATE, PERCENT
+ * Detects and matches numeric values even if phrasing differs
+ */
+function computeValueAwareSimilarity(textA: string, textB: string): number {
+  // Extract money values
+  const moneyA = extractMoneyValues(textA);
+  const moneyB = extractMoneyValues(textB);
+  if (moneyA.length > 0 && moneyB.length > 0) {
+    for (const valA of moneyA) {
+      for (const valB of moneyB) {
+        // Match if values are within 1% (handles rounding)
+        if (Math.abs(valA - valB) / Math.max(valA, valB) < 0.01) {
+          return 0.9; // High match for same money value
+        }
+      }
+    }
+  }
+  
+  // Extract percentages
+  const percentA = extractPercentValues(textA);
+  const percentB = extractPercentValues(textB);
+  if (percentA.length > 0 && percentB.length > 0) {
+    for (const valA of percentA) {
+      for (const valB of percentB) {
+        if (Math.abs(valA - valB) < 0.1) { // Within 0.1%
+          return 0.9;
+        }
+      }
+    }
+  }
+  
+  // Extract dates (normalize to ISO format for comparison)
+  const dateA = extractDates(textA);
+  const dateB = extractDates(textB);
+  if (dateA.length > 0 && dateB.length > 0) {
+    for (const dA of dateA) {
+      for (const dB of dateB) {
+        if (dA === dB) {
+          return 0.9; // Exact date match
+        }
+      }
+    }
+  }
+  
+  return 0;
+}
+
+/**
+ * Extract money values from text (returns cents)
+ */
+function extractMoneyValues(text: string): number[] {
+  const values: number[] = [];
+  const moneyPattern = /\$[\d,]+(?:\.\d{2})?|\d+(?:\.\d{2})?\s*(?:dollars?|cents?|USD)/gi;
+  let match;
+  
+  while ((match = moneyPattern.exec(text)) !== null) {
+    const cleaned = match[0].replace(/[$,]/g, '');
+    const num = parseFloat(cleaned);
+    if (!isNaN(num)) {
+      // Convert to cents if it looks like dollars
+      if (match[0].toLowerCase().includes('cent')) {
+        values.push(Math.round(num));
+      } else {
+        values.push(Math.round(num * 100));
+      }
+    }
+  }
+  
+  return values;
+}
+
+/**
+ * Extract percentage values from text
+ */
+function extractPercentValues(text: string): number[] {
+  const values: number[] = [];
+  const percentPattern = /\d+(?:\.\d+)?%|\d+(?:\.\d+)?\s*percent/gi;
+  let match;
+  
+  while ((match = percentPattern.exec(text)) !== null) {
+    const cleaned = match[0].replace(/%|percent/gi, '').trim();
+    const num = parseFloat(cleaned);
+    if (!isNaN(num)) {
+      values.push(num);
+    }
+  }
+  
+  return values;
+}
+
+/**
+ * Extract and normalize dates from text
+ */
+function extractDates(text: string): string[] {
+  const dates: string[] = [];
+  const datePattern = /(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:tember)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\s+\d{1,2}(?:,?\s*\d{4})?|\d{1,2}\/\d{1,2}(?:\/\d{2,4})?|\d{4}-\d{2}-\d{2}/gi;
+  let match;
+  
+  while ((match = datePattern.exec(text)) !== null) {
+    try {
+      const date = new Date(match[0]);
+      if (!isNaN(date.getTime())) {
+        dates.push(date.toISOString().split('T')[0]); // ISO format
+      }
+    } catch {
+      // Skip invalid dates
+    }
+  }
+  
+  return dates;
 }
 
 function tokenize(text: string): Set<string> {

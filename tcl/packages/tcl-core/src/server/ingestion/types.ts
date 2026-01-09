@@ -211,6 +211,7 @@ export type IssueType =
   | "contradiction"
   | "ungrounded"
   | "unverified"  // NEW: Has transcript evidence but no external verification
+  | "risky_commitment_unverified"  // NEW: Agent promise/commitment that is unverified
   | "inconsistent_support"
   | "inconsistent_contradiction"
   | "needs_review";

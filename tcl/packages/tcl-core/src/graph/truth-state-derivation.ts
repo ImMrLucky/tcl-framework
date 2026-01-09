@@ -262,9 +262,19 @@ export interface TruthScores {
   
   /** Overall audit-ready truth score */
   auditTruth: number;
+  
+  /** Mode-aware scores (separated for clarity) */
+  modeAware?: {
+    consistencyScore: number;
+    groundingScore: number;
+    evidenceScore: number;
+  };
 }
 
-export function computeTruthScores(derivation: TruthDerivationResult): TruthScores {
+export function computeTruthScores(
+  derivation: TruthDerivationResult,
+  hasExternalEvidence: boolean = false
+): TruthScores {
   const { summary } = derivation;
   const total = summary.total;
   
@@ -274,6 +284,11 @@ export function computeTruthScores(derivation: TruthDerivationResult): TruthScor
       externalVerification: 0,
       consistency: 100,
       auditTruth: 0,
+      modeAware: {
+        consistencyScore: 100,
+        groundingScore: 0,
+        evidenceScore: 0,
+      },
     };
   }
   
@@ -288,21 +303,70 @@ export function computeTruthScores(derivation: TruthDerivationResult): TruthScor
   const contradictionRate = summary.contradicted / total;
   const consistency = Math.round((1 - contradictionRate) * 100);
   
-  // Audit truth: weighted combination
-  // - External verification is most important for audit
-  // - Consistency affects credibility
-  // - Grounding is baseline
-  const auditTruth = Math.round(
-    externalVerification * 0.5 +
-    consistency * 0.3 +
-    transcriptGrounding * 0.2
-  );
+  // Mode-aware scoring: separate scores for clarity
+  const consistencyScore = consistency;
+  const groundingScore = Math.round(transcriptGrounding);
+  const evidenceScore = hasExternalEvidence ? Math.round(externalVerification) : 0;
+  
+  // Mode-aware truth score blending
+  // Transcript-only: weight grounding+consistency higher, evidence lower/0
+  // Evidence-backed: include evidence score
+  let auditTruth: number;
+  
+  if (hasExternalEvidence) {
+    // Evidence-backed mode: include evidence score
+    // Weight: evidence 40%, consistency 35%, grounding 25%
+    auditTruth = Math.round(
+      evidenceScore * 0.4 +
+      consistencyScore * 0.35 +
+      groundingScore * 0.25
+    );
+  } else {
+    // Transcript-only mode: weight grounding+consistency higher, evidence lower/0
+    // Weight: consistency 50%, grounding 50% (no evidence penalty)
+    // Transcript-only doesn't produce harsh truth penalties for "no external evidence"
+    auditTruth = Math.round(
+      consistencyScore * 0.5 +
+      groundingScore * 0.5
+    );
+  }
+  
+  // Enforce saturation rule: truth=100 only when truly perfect
+  // Truth score should reflect: contradictions (high impact), ungrounded claims (medium), risky commitments (high)
+  // Truth=100 requires: no contradictions, high grounding, decent support signals
+  if (auditTruth >= 100) {
+    // Check if all conditions for perfect score are met
+    const hasNoContradictions = summary.contradicted === 0;
+    const hasHighGrounding = transcriptGrounding >= 80; // At least 80% of claims grounded
+    const hasDecentSupport = hasExternalEvidence 
+      ? externalVerification > 0  // In evidence mode, need external verification
+      : transcriptGrounding >= 90; // In transcript-only, need very high grounding
+    const hasLowUngrounded = summary.ungrounded / total <= 0.1; // Less than 10% ungrounded
+    
+    if (!hasNoContradictions || !hasHighGrounding || !hasDecentSupport || !hasLowUngrounded) {
+      // Cap at 99 if conditions not met (prevents false perfect scores)
+      // This ensures truth score cannot saturate unless truly perfect
+      auditTruth = 99;
+    }
+  }
+  
+  // Also ensure truth cannot be 0 unless truly no grounding and contradictions
+  // (Prevents false negatives)
+  if (auditTruth <= 0 && (transcriptGrounding > 0 || summary.contradicted === 0)) {
+    // If there's any grounding or no contradictions, truth should be > 0
+    auditTruth = Math.max(1, Math.round(transcriptGrounding * 0.3 + consistency * 0.2));
+  }
   
   return {
     transcriptGrounding: Math.round(transcriptGrounding),
     externalVerification: Math.round(externalVerification),
     consistency,
     auditTruth,
+    modeAware: {
+      consistencyScore,
+      groundingScore,
+      evidenceScore,
+    },
   };
 }
 

@@ -132,7 +132,7 @@ export const DEFAULT_TEMPLATE_CONFIG: TemplateConfig = {
   thresholds: {
     support: 0.5,
     contradiction: 0.55,
-    grounding: 0.4,
+    grounding: 0.25, // Lower threshold for high recall - want >80% of claims grounded
     slotMatch: 0.8,
     semanticSimilarity: 0.6,
   },
@@ -189,6 +189,10 @@ export const TELCO_TEMPLATE_CONFIG: TemplateConfig = {
   ...DEFAULT_TEMPLATE_CONFIG,
   templateId: 'telco',
   entityPacks: ['money', 'dates', 'actions', 'telco_plans', 'telco_fees'],
+  thresholds: {
+    ...DEFAULT_TEMPLATE_CONFIG.thresholds,
+    grounding: 0.2, // Even lower for call-center transcripts - high recall critical
+  },
   
   slotLexicon: {
     // Fees

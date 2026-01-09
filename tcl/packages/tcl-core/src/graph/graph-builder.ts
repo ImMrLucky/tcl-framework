@@ -273,9 +273,14 @@ export function buildGraph(input: GraphBuilderInput): GraphBuilderOutput {
   // Step 8: Truth State Derivation
   const step8Start = Date.now();
   const truthDerivation = deriveTruthStatesFromGraph(graph);
-  const truthScores = computeTruthScores(truthDerivation);
+  
+  // Determine if external evidence exists (non-transcript evidence)
+  const hasExternalEvidence = evidenceNodes.some(e => e.evidenceKind !== 'transcript');
+  const truthScores = computeTruthScores(truthDerivation, hasExternalEvidence);
+  
   pipelineSteps['truthDerivation'] = Date.now() - step8Start;
   console.log(`✅ Graph Builder: Truth scores computed (${pipelineSteps['truthDerivation']}ms)`);
+  console.log(`   Mode: ${hasExternalEvidence ? 'evidence-backed' : 'transcript-only'}, Truth: ${truthScores.auditTruth}`);
   
   // Step 9: Run Diagnostics
   const diagnosticsInput: DiagnosticsInput = {
@@ -539,8 +544,19 @@ function detectModality(text: string): ClaimModality {
     return 'question';
   }
   
-  // Promises
-  if (/\b(i will|i'll|we will|we'll|i promise|i guarantee|i assure)\b/.test(lowerText)) {
+  // Promises/Commitments - Enhanced detection for risky commitments
+  // Patterns: "will", "guarantee", "promise", "you'll receive", "assure", "commit"
+  const commitmentPatterns = [
+    /\b(i will|i'll|we will|we'll|you will|you'll)\b/i,
+    /\b(i promise|we promise|i guarantee|we guarantee)\b/i,
+    /\b(i assure|we assure|i can assure)\b/i,
+    /\b(you'll receive|you will receive|you'll get|you will get)\b/i,
+    /\b(i commit|we commit|committed to)\b/i,
+    /\b(guaranteed|promised|assured)\b/i,
+    /\b(rest assured|be assured)\b/i,
+  ];
+  
+  if (commitmentPatterns.some(pattern => pattern.test(lowerText))) {
     return 'promise';
   }
   

@@ -365,6 +365,103 @@ export function valuesContradict(a: SubjectSlot, b: SubjectSlot): boolean {
   if (a.value === undefined || b.value === undefined) return false;
   if (a.valueNorm === undefined || b.valueNorm === undefined) return false;
   
+  // Check for explicit contradiction patterns first
+  if (hasExplicitContradictionPattern(a, b)) {
+    return true;
+  }
+  
+  // For numeric values, use tolerance-based comparison
+  if (typeof a.valueNorm === 'number' && typeof b.valueNorm === 'number') {
+    return valuesContradictNumeric(a.valueNorm, b.valueNorm, a.slot.slotType);
+  }
+  
+  // For string values, exact mismatch = contradiction
+  if (typeof a.valueNorm === 'string' && typeof b.valueNorm === 'string') {
+    return a.valueNorm !== b.valueNorm;
+  }
+  
   // Different normalized values = potential contradiction
   return a.valueNorm !== b.valueNorm;
+}
+
+/**
+ * Check for explicit contradiction patterns: increase/decrease, waived/not waived, no fee/fee
+ */
+export function hasExplicitContradictionPattern(a: SubjectSlot, b: SubjectSlot): boolean {
+  const aText = (a.valueNorm?.toString() || '').toLowerCase();
+  const bText = (b.valueNorm?.toString() || '').toLowerCase();
+  
+  // Increase vs Decrease patterns
+  const increaseWords = ['increase', 'increased', 'increasing', 'higher', 'more', 'up', 'raise', 'raised'];
+  const decreaseWords = ['decrease', 'decreased', 'decreasing', 'lower', 'less', 'down', 'reduce', 'reduced'];
+  
+  const aIsIncrease = increaseWords.some(w => aText.includes(w));
+  const bIsDecrease = decreaseWords.some(w => bText.includes(w));
+  const aIsDecrease = decreaseWords.some(w => aText.includes(w));
+  const bIsIncrease = increaseWords.some(w => bText.includes(w));
+  
+  if ((aIsIncrease && bIsDecrease) || (aIsDecrease && bIsIncrease)) {
+    return true;
+  }
+  
+  // Waived vs Not Waived patterns
+  const waivedWords = ['waived', 'waive', 'no fee', 'no charge', 'free', 'zero', '0', '$0'];
+  const notWaivedWords = ['fee', 'charge', 'cost', 'price'];
+  
+  const aIsWaived = waivedWords.some(w => aText.includes(w));
+  const bHasFee = notWaivedWords.some(w => bText.includes(w)) && !waivedWords.some(w => bText.includes(w));
+  const bIsWaived = waivedWords.some(w => bText.includes(w));
+  const aHasFee = notWaivedWords.some(w => aText.includes(w)) && !waivedWords.some(w => aText.includes(w));
+  
+  if ((aIsWaived && bHasFee) || (bIsWaived && aHasFee)) {
+    return true;
+  }
+  
+  // No fee vs Fee (numeric check)
+  if (typeof a.valueNorm === 'number' && typeof b.valueNorm === 'number') {
+    const aIsZero = Math.abs(a.valueNorm) < 0.01; // Within 1 cent
+    const bIsZero = Math.abs(b.valueNorm) < 0.01;
+    const aIsNonZero = Math.abs(a.valueNorm) >= 0.01;
+    const bIsNonZero = Math.abs(b.valueNorm) >= 0.01;
+    
+    if ((aIsZero && bIsNonZero) || (bIsZero && aIsNonZero)) {
+      return true;
+    }
+  }
+  
+  return false;
+}
+
+/**
+ * Check if two numeric values contradict with tolerance
+ */
+function valuesContradictNumeric(
+  valueA: number,
+  valueB: number,
+  slotType: string
+): boolean {
+  // For money (in cents), use 1% tolerance or $0.01 minimum
+  if (slotType.includes('fee') || slotType.includes('payment') || slotType.includes('money') || slotType.includes('amount')) {
+    const tolerance = Math.max(1, Math.abs(valueA) * 0.01); // 1% or 1 cent, whichever is larger
+    return Math.abs(valueA - valueB) > tolerance;
+  }
+  
+  // For percentages, use 0.1% tolerance
+  if (slotType.includes('percent') || slotType.includes('rate') || slotType.includes('apr')) {
+    return Math.abs(valueA - valueB) > 0.1;
+  }
+  
+  // For dates (as timestamps), exact match required
+  if (slotType.includes('date') || slotType.includes('time')) {
+    return valueA !== valueB;
+  }
+  
+  // For durations (months, days), exact match required
+  if (slotType.includes('duration') || slotType.includes('term') || slotType.includes('month')) {
+    return Math.abs(valueA - valueB) >= 1; // At least 1 unit difference
+  }
+  
+  // For other numeric values, use 1% relative tolerance
+  const tolerance = Math.max(0.01, Math.abs(valueA) * 0.01);
+  return Math.abs(valueA - valueB) > tolerance;
 }
