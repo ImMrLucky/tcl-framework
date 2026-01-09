@@ -4,11 +4,39 @@
  */
 
 import { supabaseAdmin } from '../supabase.js';
-import { readAsset } from './storage.js';
+import { downloadFileFromSupabase } from './storage-supabase.js';
+import { readAsset } from './storage.js'; // Keep for backward compatibility
 import { normalizeTranscriptBuffer } from '../transcripts/normalize.js';
 import { transcribeAudio } from '../transcription.js';
 import { computeVerificationDiff } from '../verify/diff.js';
 import { withTranscriptionSlot } from '../asr/limit.js';
+
+/**
+ * Read asset content (from Supabase Storage or local filesystem for backward compatibility)
+ */
+async function readAssetContent(asset: any): Promise<Buffer> {
+  // Prefer Supabase Storage if bucket/object_path are available
+  if (asset.bucket && asset.object_path) {
+    try {
+      return await downloadFileFromSupabase(asset.bucket, asset.object_path);
+    } catch (error: any) {
+      console.error(`[Worker] Failed to download from Supabase Storage (${asset.bucket}/${asset.object_path}):`, error);
+      throw error;
+    }
+  }
+  
+  // Fallback to local filesystem (backward compatibility)
+  if (asset.storage_url) {
+    try {
+      return await readAsset(asset.storage_url);
+    } catch (error: any) {
+      console.error(`[Worker] Failed to read from local storage (${asset.storage_url}):`, error);
+      throw error;
+    }
+  }
+  
+  throw new Error(`Asset ${asset.id} has no storage location (missing bucket/object_path and storage_url)`);
+}
 
 // In-memory job queue (simple implementation)
 const jobQueue: string[] = [];
@@ -104,7 +132,7 @@ async function processJob(jobId: string): Promise<void> {
  */
 async function processTranscriptOnly(job: any, transcriptAsset: any): Promise<void> {
   // Read and normalize transcript
-  const transcriptBuffer = await readAsset(transcriptAsset.storage_url);
+  const transcriptBuffer = await readAssetContent(transcriptAsset);
   const normalized = await normalizeTranscriptBuffer(transcriptBuffer, transcriptAsset.metadata_json?.filename || 'transcript.txt');
 
   // Update progress
@@ -165,7 +193,7 @@ async function processAudioOnly(job: any, audioAsset: any): Promise<void> {
   await updateJobProgress(job.id, 'TRANSCRIBING', 20);
 
   // Transcribe audio (with concurrency limit)
-  const audioBuffer = await readAsset(audioAsset.storage_url);
+  const audioBuffer = await readAssetContent(audioAsset);
   const transcriptionResult = await withTranscriptionSlot(async () => {
     return await transcribeAudio(audioBuffer, audioAsset.metadata_json?.filename || 'audio.wav');
   });
@@ -235,7 +263,7 @@ async function processAudioPlusTranscript(job: any, audioAsset: any, transcriptA
   // Step 1: Analyze uploaded transcript immediately
   await updateJobProgress(job.id, 'ANALYZING', 20);
 
-  const transcriptBuffer = await readAsset(transcriptAsset.storage_url);
+  const transcriptBuffer = await readAssetContent(transcriptAsset);
   const normalized = await normalizeTranscriptBuffer(transcriptBuffer, transcriptAsset.metadata_json?.filename || 'transcript.txt');
 
   // Create conversation
@@ -263,7 +291,7 @@ async function processAudioPlusTranscript(job: any, audioAsset: any, transcriptA
   // Step 2: Transcribe audio in background
   await updateJobProgress(job.id, 'VERIFYING', 50);
 
-  const audioBuffer = await readAsset(audioAsset.storage_url);
+  const audioBuffer = await readAssetContent(audioAsset);
   const transcriptionResult = await withTranscriptionSlot(async () => {
     return await transcribeAudio(audioBuffer, audioAsset.metadata_json?.filename || 'audio.wav');
   });
