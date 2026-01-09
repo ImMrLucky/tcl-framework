@@ -372,7 +372,7 @@ export function valuesContradict(a: SubjectSlot, b: SubjectSlot): boolean {
   
   // For numeric values, use tolerance-based comparison
   if (typeof a.valueNorm === 'number' && typeof b.valueNorm === 'number') {
-    return valuesContradictNumeric(a.valueNorm, b.valueNorm, a.slot.slotType);
+    return valuesContradictNumeric(a.valueNorm, b.valueNorm, a.slotType);
   }
   
   // For string values, exact mismatch = contradiction
