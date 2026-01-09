@@ -16,6 +16,7 @@ from .spectral import (
 from .spectral_config_loader import build_spectral_config
 import logging
 import time
+import os
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -43,12 +44,18 @@ async def lifespan(app: FastAPI):
     logger.info("🚀 Starting up - preloading NLI model...")
     start = time.time()
     
+    # Check if ONNX should be disabled
+    use_onnx = os.getenv("USE_ONNX", "true").lower() == "true"
+    if not use_onnx:
+        logger.info("   USE_ONNX=false, will use PyTorch only (more memory-efficient)")
+    
     nli_module, error = get_nli()
     if nli_module and not error:
         try:
             # Warm up with a test inference
             # Note: If ONNX conversion is needed, it will happen here (lazy loading)
             # This may use significant memory. If it fails, we'll fall back to PyTorch.
+            # For memory-constrained environments, consider skipping warmup or setting USE_ONNX=false
             result = nli_module.score_pair("The sky is blue.", "The sky has color.")
             elapsed = time.time() - start
             status = nli_module.get_status()

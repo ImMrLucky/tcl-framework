@@ -205,7 +205,7 @@ export async function uploadJobFiles(
     // Get job to validate mode (also verify org_id for security)
     const { data: job, error: jobError } = await supabaseAdmin
       .from('ingestion_jobs')
-      .select('mode, status, org_id, project_id, conversation_id')
+      .select('mode, status, org_id, project_id')
       .eq('id', jobId)
       .eq('org_id', orgId)
       .single();
@@ -271,7 +271,7 @@ export async function uploadJobFiles(
           kind: 'audio',
           orgId,
           projectId: job.project_id,
-          conversationId: job.conversation_id,
+          conversationId: null, // conversation_id is not in ingestion_jobs table
           jobId,
           uploaderUserId,
           filePath: audioFile.path,
@@ -284,7 +284,7 @@ export async function uploadJobFiles(
         const insertData: any = {
           org_id: orgId,
           job_id: jobId,
-          conversation_id: job.conversation_id,
+          conversation_id: null, // conversation_id is not in ingestion_jobs table
           uploader_user_id: uploaderUserId,
           type: 'AUDIO',
           kind: 'audio',
@@ -357,7 +357,7 @@ export async function uploadJobFiles(
           kind: 'transcript',
           orgId,
           projectId: job.project_id,
-          conversationId: job.conversation_id,
+          conversationId: null, // conversation_id is not in ingestion_jobs table
           jobId,
           uploaderUserId,
           filePath: transcriptFile.path,
@@ -370,7 +370,7 @@ export async function uploadJobFiles(
         const insertData: any = {
           org_id: orgId,
           job_id: jobId,
-          conversation_id: job.conversation_id,
+          conversation_id: null, // conversation_id is not in ingestion_jobs table
           uploader_user_id: uploaderUserId,
           type: 'TRANSCRIPT_UPLOADED',
           kind: 'transcript',
@@ -763,15 +763,27 @@ export function registerIngestionJobRoutes(app: express.Express) {
         }
 
         // Get job to verify ownership and get details in a single query
+        console.log('[UploadMetadata] Fetching job:', { jobId, orgId: context.orgId });
         const { data: job, error: jobError } = await supabaseAdmin!
           .from('ingestion_jobs')
-          .select('id, org_id, project_id, conversation_id')
+          .select('id, org_id, project_id')
           .eq('id', jobId)
           .maybeSingle();
 
         if (jobError) {
-          console.error('[UploadMetadata] Database error:', jobError);
-          return res.status(500).json({ error: 'DATABASE_ERROR', message: 'Failed to fetch job' });
+          console.error('[UploadMetadata] Database error:', {
+            error: jobError,
+            message: jobError.message,
+            code: jobError.code,
+            details: jobError.details,
+            hint: jobError.hint,
+            jobId,
+            orgId: context.orgId,
+          });
+          return res.status(500).json({ 
+            error: 'DATABASE_ERROR', 
+            message: `Failed to fetch job: ${jobError.message || 'Unknown database error'}` 
+          });
         }
 
         if (!job) {
@@ -790,9 +802,10 @@ export function registerIngestionJobRoutes(app: express.Express) {
         }
 
         // Generate object path
+        // Note: conversation_id is not in ingestion_jobs, so we use jobId as the conversation identifier
         const assetId = require('crypto').randomUUID();
         const ext = filename.split('.').pop() || 'bin';
-        const conversationOrJob = job.conversation_id || jobId;
+        const conversationOrJob = jobId; // Use jobId as conversation identifier
         const bucket = kind === 'audio' ? 'protectqa-audio' : 'protectqa-transcripts';
         const objectPath = `org/${context.orgId}/conv/${conversationOrJob}/${kind}/${assetId}.${ext}`;
 
@@ -855,15 +868,27 @@ export function registerIngestionJobRoutes(app: express.Express) {
         }
 
         // Get job to verify ownership and get details in a single query
+        console.log('[FinalizeUpload] Fetching job:', { jobId, orgId: context.orgId });
         const { data: job, error: jobError } = await supabaseAdmin!
           .from('ingestion_jobs')
-          .select('id, org_id, project_id, conversation_id')
+          .select('id, org_id, project_id')
           .eq('id', jobId)
           .maybeSingle();
 
         if (jobError) {
-          console.error('[FinalizeUpload] Database error:', jobError);
-          return res.status(500).json({ error: 'DATABASE_ERROR', message: 'Failed to fetch job' });
+          console.error('[FinalizeUpload] Database error:', {
+            error: jobError,
+            message: jobError.message,
+            code: jobError.code,
+            details: jobError.details,
+            hint: jobError.hint,
+            jobId,
+            orgId: context.orgId,
+          });
+          return res.status(500).json({ 
+            error: 'DATABASE_ERROR', 
+            message: `Failed to fetch job: ${jobError.message || 'Unknown database error'}` 
+          });
         }
 
         if (!job) {
@@ -903,7 +928,7 @@ export function registerIngestionJobRoutes(app: express.Express) {
         const insertData: any = {
           org_id: context.orgId,
           job_id: jobId,
-          conversation_id: job.conversation_id,
+          conversation_id: null, // conversation_id is not in ingestion_jobs table
           uploader_user_id: context.userId || null,
           type: assetType,
           kind: kind,

@@ -90,17 +90,26 @@ def get_onnx_session():
             # Convert PyTorch model to ONNX
             # This is memory-intensive, so we do it lazily (only when first needed)
             logger.info("Converting model to ONNX (one-time operation, may take 1-2 minutes and use significant memory)...")
+            logger.warning("⚠️ ONNX conversion uses 2-4GB memory. If OOM occurs, set USE_ONNX=false to skip.")
             
             try:
+                # Force garbage collection before conversion to free up memory
+                import gc
+                gc.collect()
+                
                 # Suppress warnings during conversion
                 with warnings.catch_warnings():
                     warnings.simplefilter("ignore")
                     # Convert model to ONNX
                     # Note: This is memory-intensive. If OOM occurs, it will fall back to PyTorch
+                    # Use low_memory mode if available
                     _session = ORTModelForSequenceClassification.from_pretrained(
                         _model_name,
                         export=True,
                     )
+                
+                # Force garbage collection after conversion to free PyTorch model memory
+                gc.collect()
                 
                 # Save for next time
                 logger.info(f"Saving ONNX model to cache: {cache_dir}")
@@ -155,14 +164,21 @@ def get_pytorch_model():
     
     import torch
     from transformers import AutoModelForSequenceClassification
+    import gc
     
     logger.info(f"Loading PyTorch NLI model: {_model_name}...")
+    
+    # Force garbage collection before loading
+    gc.collect()
     
     device = torch.device("cpu")  # Force CPU
     _tokenizer = AutoTokenizer.from_pretrained(_model_name)
     _session = AutoModelForSequenceClassification.from_pretrained(_model_name)
     _session.to(device)
     _session.eval()
+    
+    # Force garbage collection after loading
+    gc.collect()
     
     logger.info("⚠️ PyTorch NLI model loaded (slower than ONNX)")
     _model_loaded = True
