@@ -49,28 +49,44 @@ def get_onnx_session():
         
         logger.info(f"Loading NLI model with ONNX Runtime: {_model_name}...")
         
-        # Try to load from cached ONNX model first
-        cache_dir = "/tmp/nli_onnx_cache"
+        # Use a more persistent cache location
+        # Prefer /app/.cache (inside container, persists if volume mounted) or fallback to /tmp
+        cache_base = os.getenv("ONNX_CACHE_DIR", "/app/.cache")
+        cache_dir = os.path.join(cache_base, "nli_onnx")
         os.makedirs(cache_dir, exist_ok=True)
         
-        try:
-            # Try loading from cache
-            _session = ORTModelForSequenceClassification.from_pretrained(
-                cache_dir,
-                file_name="model.onnx"
-            )
-            logger.info("Loaded ONNX model from cache")
-        except Exception as cache_err:
-            logger.info(f"Cache miss: {cache_err}")
+        # Check if ONNX model files actually exist in cache
+        model_onnx_path = os.path.join(cache_dir, "model.onnx")
+        config_path = os.path.join(cache_dir, "config.json")
+        cache_exists = os.path.exists(model_onnx_path) and os.path.exists(config_path)
+        
+        if cache_exists:
+            try:
+                logger.info(f"Loading ONNX model from cache: {cache_dir}")
+                _session = ORTModelForSequenceClassification.from_pretrained(
+                    cache_dir,
+                    file_name="model.onnx"
+                )
+                logger.info("✅ Loaded ONNX model from cache")
+            except Exception as cache_err:
+                logger.warning(f"Cache load failed (will re-export): {cache_err}")
+                cache_exists = False  # Force re-export
+        
+        if not cache_exists:
             # Convert PyTorch model to ONNX
-            logger.info("Converting model to ONNX (one-time operation)...")
+            logger.info("Converting model to ONNX (one-time operation, may take 1-2 minutes)...")
             _session = ORTModelForSequenceClassification.from_pretrained(
                 _model_name,
                 export=True
             )
             # Save for next time
+            logger.info(f"Saving ONNX model to cache: {cache_dir}")
             _session.save_pretrained(cache_dir)
-            logger.info("ONNX model saved to cache")
+            # Verify save succeeded
+            if os.path.exists(model_onnx_path):
+                logger.info(f"✅ ONNX model saved to cache ({os.path.getsize(model_onnx_path) / 1024 / 1024:.1f} MB)")
+            else:
+                logger.warning("⚠️ ONNX model save may have failed - cache file not found after save")
         
         _tokenizer = AutoTokenizer.from_pretrained(_model_name)
         
