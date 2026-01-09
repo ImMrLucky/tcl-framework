@@ -501,6 +501,10 @@ export async function getJobStatus(jobId: string, orgId: string): Promise<JobSta
     throw new Error('Job not found');
   }
 
+  // Get asset IDs if they exist
+  const audioAssetId = (job as any).audio_asset_id;
+  const transcriptAssetId = (job as any).transcript_asset_id;
+
   return {
     jobId: job.id,
     status: job.status as JobStatus,
@@ -509,6 +513,8 @@ export async function getJobStatus(jobId: string, orgId: string): Promise<JobSta
     error: job.error_code && job.error_message
       ? { code: job.error_code, message: job.error_message }
       : undefined,
+    audioAssetId: audioAssetId || undefined,
+    transcriptAssetId: transcriptAssetId || undefined,
   };
 }
 
