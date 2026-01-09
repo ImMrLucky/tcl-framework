@@ -11,6 +11,7 @@
 
 import fs from 'fs';
 import { createReadStream } from 'fs';
+import { Readable } from 'stream';
 import { join } from 'path';
 import { tmpdir } from 'os';
 import crypto from 'crypto';
@@ -105,11 +106,10 @@ function getMimeType(filename: string): string {
 }
 
 /**
- * Upload file to Supabase Storage
+ * Upload file to Supabase Storage using streaming to avoid OOM errors
  * 
- * Note: Supabase JS SDK upload() accepts File, Blob, or ArrayBuffer.
- * For streaming, we read the file into a Buffer, but only for the upload operation.
- * The file is already on disk (from multer diskStorage), so we're not buffering from network.
+ * Uses Supabase REST API with streaming uploads to avoid loading entire file into memory.
+ * This is critical for large audio files on memory-constrained platforms like Railway.
  */
 export async function uploadFileToSupabase({
   bucket,
@@ -126,22 +126,29 @@ export async function uploadFileToSupabase({
     throw new Error('STORAGE_NOT_CONFIGURED: Supabase not configured. Check SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY environment variables.');
   }
 
-  // Verify file exists
+  // Verify file exists and get size
+  let fileSize: number;
   try {
-    await fs.promises.access(filePath);
+    const stats = await fs.promises.stat(filePath);
+    fileSize = stats.size;
+    console.log(`[Storage] Uploading file: ${filePath}, size: ${(fileSize / 1024 / 1024).toFixed(2)} MB`);
   } catch (accessError: any) {
     throw new Error(`STORAGE_FILE_NOT_FOUND: Temp file not found at ${filePath}: ${accessError.message}`);
   }
 
-  // Read file into buffer for upload
-  // This is acceptable because:
-  // 1. File is already on disk (from multer diskStorage)
-  // 2. We're not buffering from network stream
-  // 3. For very large files, Supabase Storage has its own limits
+  // For files > 50MB, use streaming upload via REST API to avoid OOM
+  // For smaller files, use the SDK (simpler, but still loads into memory)
+  const LARGE_FILE_THRESHOLD = 50 * 1024 * 1024; // 50MB
+  
+  if (fileSize > LARGE_FILE_THRESHOLD) {
+    console.log(`[Storage] Large file detected (${(fileSize / 1024 / 1024).toFixed(2)} MB), using streaming upload`);
+    return await uploadFileStreaming(bucket, objectPath, filePath, contentType, fileSize);
+  }
+
+  // For smaller files, use SDK (simpler)
   let fileBuffer: Buffer;
   try {
     fileBuffer = await fs.promises.readFile(filePath);
-    console.log(`[Storage] Read file: ${filePath}, size: ${fileBuffer.length} bytes`);
   } catch (readError: any) {
     throw new Error(`STORAGE_READ_FAILED: Failed to read file ${filePath}: ${readError.message}`);
   }
@@ -178,6 +185,74 @@ export async function uploadFileToSupabase({
   }
 
   console.log(`[Storage] Upload successful: ${bucket}/${objectPath}`);
+}
+
+/**
+ * Upload large file using Supabase REST API with streaming (avoids OOM)
+ */
+async function uploadFileStreaming(
+  bucket: string,
+  objectPath: string,
+  filePath: string,
+  contentType: string,
+  fileSize: number
+): Promise<void> {
+  const supabaseUrl = process.env.SUPABASE_URL;
+  const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+
+  if (!supabaseUrl || !supabaseKey) {
+    throw new Error('STORAGE_NOT_CONFIGURED: SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY must be set');
+  }
+
+  // Encode object path for URL
+  const encodedPath = encodeURIComponent(objectPath);
+  const uploadUrl = `${supabaseUrl}/storage/v1/object/${bucket}/${encodedPath}`;
+
+  // Create readable stream from file and convert to Web Stream for fetch
+  const fileStream = createReadStream(filePath);
+  
+  // Convert Node.js Readable stream to Web ReadableStream (Node 18+)
+  // This allows streaming uploads without loading entire file into memory
+  const webStream = Readable.toWeb(fileStream);
+
+  try {
+    const response = await fetch(uploadUrl, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${supabaseKey}`,
+        'Content-Type': contentType,
+        'Content-Length': fileSize.toString(),
+        'x-upsert': 'false', // Don't overwrite existing files
+      },
+      body: webStream, // Web ReadableStream is compatible with fetch body in Node 18+
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      let errorMessage = `HTTP ${response.status}: ${errorText}`;
+      
+      if (response.status === 409 || errorText.includes('already exists')) {
+        throw new Error(`STORAGE_FILE_EXISTS: File already exists at ${bucket}/${objectPath}`);
+      }
+      if (response.status === 404 || errorText.includes('bucket')) {
+        throw new Error(`STORAGE_BUCKET_NOT_FOUND: Bucket "${bucket}" does not exist. Please create it in Supabase Storage dashboard.`);
+      }
+      if (response.status === 401 || response.status === 403) {
+        throw new Error(`STORAGE_AUTH_FAILED: Authentication failed. Check SUPABASE_SERVICE_ROLE_KEY is correct and has storage access.`);
+      }
+      throw new Error(`STORAGE_UPLOAD_FAILED: ${errorMessage} (bucket: ${bucket}, path: ${objectPath})`);
+    }
+
+    console.log(`[Storage] Streaming upload successful: ${bucket}/${objectPath}`);
+  } catch (error: any) {
+    // Clean up stream on error
+    fileStream.destroy();
+    
+    if (error.message.startsWith('STORAGE_')) {
+      throw error; // Re-throw our formatted errors
+    }
+    throw new Error(`STORAGE_UPLOAD_FAILED: ${error.message} (bucket: ${bucket}, path: ${objectPath})`);
+  }
 }
 
 /**

@@ -12,8 +12,16 @@ from typing import List, Tuple, Dict, Optional
 import logging
 import os
 import traceback
+import warnings
 
 logger = logging.getLogger(__name__)
+
+# Suppress noisy warnings from transformers/optimum during ONNX conversion
+# These warnings are harmless - they're just the library being verbose about internal operations
+warnings.filterwarnings("ignore", message=".*torch_dtype.*")
+warnings.filterwarnings("ignore", message=".*already converted to ONNX.*")
+warnings.filterwarnings("ignore", message=".*TracerWarning.*")
+warnings.filterwarnings("ignore", message=".*file_name.*will be ignored.*")
 
 # Global instances (lazy loaded)
 _session = None
@@ -81,10 +89,13 @@ def get_onnx_session():
         if not cache_exists:
             # Convert PyTorch model to ONNX
             logger.info("Converting model to ONNX (one-time operation, may take 1-2 minutes)...")
-            _session = ORTModelForSequenceClassification.from_pretrained(
-                _model_name,
-                export=True
-            )
+            # Suppress warnings during conversion
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore")
+                _session = ORTModelForSequenceClassification.from_pretrained(
+                    _model_name,
+                    export=True
+                )
             # Save for next time
             logger.info(f"Saving ONNX model to cache: {cache_dir}")
             _session.save_pretrained(cache_dir)
