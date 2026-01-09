@@ -55,10 +55,16 @@ def get_onnx_session():
         cache_dir = os.path.join(cache_base, "nli_onnx")
         os.makedirs(cache_dir, exist_ok=True)
         
+        logger.info(f"Using ONNX cache directory: {cache_dir}")
+        
         # Check if ONNX model files actually exist in cache
         model_onnx_path = os.path.join(cache_dir, "model.onnx")
         config_path = os.path.join(cache_dir, "config.json")
         cache_exists = os.path.exists(model_onnx_path) and os.path.exists(config_path)
+        
+        logger.info(f"Cache check: model_onnx_path={model_onnx_path}, exists={os.path.exists(model_onnx_path)}")
+        logger.info(f"Cache check: config_path={config_path}, exists={os.path.exists(config_path)}")
+        logger.info(f"Cache exists: {cache_exists}")
         
         if cache_exists:
             try:
