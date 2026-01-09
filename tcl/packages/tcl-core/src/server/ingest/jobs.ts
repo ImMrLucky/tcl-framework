@@ -15,6 +15,22 @@ import { Capability } from '../plans/capabilities.js';
 import { supabaseAdmin } from '../supabase.js';
 import { storeUploadedAsset } from './storage-supabase.js';
 import { enqueueJob } from './worker.js';
+import crypto from 'crypto';
+
+// Helper to get MIME type
+function getMimeType(filename: string): string {
+  const ext = filename.toLowerCase().split('.').pop() || '';
+  const mimeTypes: Record<string, string> = {
+    wav: 'audio/wav',
+    mp3: 'audio/mpeg',
+    m4a: 'audio/mp4',
+    flac: 'audio/flac',
+    txt: 'text/plain',
+    csv: 'text/csv',
+    json: 'application/json',
+  };
+  return mimeTypes[ext] || 'application/octet-stream';
+}
 
 const fsUnlink = promisify(fs.unlink);
 const fsMkdir = promisify(fs.mkdir);
@@ -576,8 +592,18 @@ export function registerIngestionJobRoutes(app: express.Express) {
   // Upload files
   app.post(
     '/api/ingest/jobs/:jobId/upload',
+    (req, res, next) => {
+      console.log('[Upload] ========== UPLOAD REQUEST START ==========');
+      console.log('[Upload] Method:', req.method);
+      console.log('[Upload] Path:', req.path);
+      console.log('[Upload] Job ID:', req.params.jobId);
+      console.log('[Upload] Content-Type:', req.headers['content-type']);
+      console.log('[Upload] Content-Length:', req.headers['content-length']);
+      next();
+    },
     requireCapability(Capability.ANALYZE_MANUAL_UPLOAD),
     (req, res, next) => {
+      console.log('[Upload] Capability check passed, setting up multer...');
       // Wrap multer in error handler
       upload.fields([
         { name: 'audio', maxCount: 1 },
@@ -585,6 +611,9 @@ export function registerIngestionJobRoutes(app: express.Express) {
       ])(req, res, (err: any) => {
         if (err) {
           console.error('[Upload] Multer error:', err);
+          console.error('[Upload] Multer error code:', err.code);
+          console.error('[Upload] Multer error message:', err.message);
+          console.error('[Upload] Multer error stack:', err.stack);
           if (err.code === 'LIMIT_FILE_SIZE') {
             return res.status(400).json({ error: 'File too large. Maximum size is 500MB' });
           }
@@ -593,6 +622,7 @@ export function registerIngestionJobRoutes(app: express.Express) {
           }
           return res.status(400).json({ error: `File upload error: ${err.message}` });
         }
+        console.log('[Upload] Multer parsing completed successfully');
         next();
       });
     },
@@ -601,6 +631,7 @@ export function registerIngestionJobRoutes(app: express.Express) {
       let files: any = null;
       
       try {
+        console.log('[Upload] Handler function started');
         console.log('[Upload] Received upload request for job:', req.params.jobId);
         
         // Get context first
@@ -686,6 +717,7 @@ export function registerIngestionJobRoutes(app: express.Express) {
         
         // Ensure we always send a response
         if (!res.headersSent) {
+          console.error('[Upload] Sending error response:', { statusCode, errorCode, errorDetail });
           res.status(statusCode).json({ 
             error: errorCode,
             message: errorDetail,
@@ -694,6 +726,278 @@ export function registerIngestionJobRoutes(app: express.Express) {
         } else {
           console.error('[Upload] Response already sent, cannot send error response');
         }
+      }
+    }
+  );
+
+  // Get upload metadata for direct Supabase upload (bypasses Netlify 6MB limit)
+  // Frontend will upload directly to Supabase Storage using this metadata
+  app.post(
+    '/api/ingest/jobs/:jobId/upload-metadata',
+    requireCapability(Capability.ANALYZE_MANUAL_UPLOAD),
+    async (req, res) => {
+      try {
+        const context = await getOrgContext(req);
+        if (!context || context.error) {
+          return res.status(401).json({ error: context?.error || 'Authorization required' });
+        }
+
+        const { jobId } = req.params;
+        const { kind, filename } = req.body as { kind: 'audio' | 'transcript'; filename: string };
+
+        if (!kind || !['audio', 'transcript'].includes(kind)) {
+          return res.status(400).json({ error: 'Invalid kind. Must be "audio" or "transcript"' });
+        }
+
+        if (!filename) {
+          return res.status(400).json({ error: 'Filename is required' });
+        }
+
+        // Get job to verify ownership
+        const { data: job, error: jobError } = await supabaseAdmin!
+          .from('ingestion_jobs')
+          .select('org_id, project_id, conversation_id')
+          .eq('id', jobId)
+          .eq('org_id', context.orgId)
+          .single();
+
+        if (jobError || !job) {
+          return res.status(404).json({ error: 'Job not found' });
+        }
+
+        // Generate object path
+        const assetId = require('crypto').randomUUID();
+        const ext = filename.split('.').pop() || 'bin';
+        const conversationOrJob = job.conversation_id || jobId;
+        const bucket = kind === 'audio' ? 'protectqa-audio' : 'protectqa-transcripts';
+        const objectPath = `org/${context.orgId}/conv/${conversationOrJob}/${kind}/${assetId}.${ext}`;
+
+        // Return upload metadata - frontend will use authenticated Supabase client to upload directly
+        // Note: Frontend should use AuthService's Supabase client (with user's session token)
+        res.json({
+          bucket,
+          objectPath,
+          assetId,
+          supabaseUrl: process.env.SUPABASE_URL, // Frontend already has this, but include for convenience
+        });
+      } catch (e: any) {
+        console.error('[Upload] Error creating upload metadata:', e);
+        res.status(500).json({ 
+          error: 'INTERNAL_ERROR',
+          message: e.message || 'Failed to create upload metadata' 
+        });
+      }
+    }
+  );
+
+  // Finalize upload after direct Supabase upload completes
+  // Frontend calls this after successfully uploading to Supabase Storage
+  app.post(
+    '/api/ingest/jobs/:jobId/finalize-upload',
+    requireCapability(Capability.ANALYZE_MANUAL_UPLOAD),
+    async (req, res) => {
+      try {
+        const context = await getOrgContext(req);
+        if (!context || context.error) {
+          return res.status(401).json({ error: context?.error || 'Authorization required' });
+        }
+
+        const { jobId } = req.params;
+        const { 
+          assetId, 
+          bucket, 
+          objectPath, 
+          filename, 
+          sizeBytes, 
+          sha256,
+          kind 
+        } = req.body as {
+          assetId: string;
+          bucket: string;
+          objectPath: string;
+          filename: string;
+          sizeBytes: number;
+          sha256: string;
+          kind: 'audio' | 'transcript';
+        };
+
+        // Validate inputs
+        if (!assetId || !bucket || !objectPath || !filename || !kind) {
+          return res.status(400).json({ error: 'Missing required fields: assetId, bucket, objectPath, filename, kind' });
+        }
+
+        if (!['audio', 'transcript'].includes(kind)) {
+          return res.status(400).json({ error: 'Invalid kind. Must be "audio" or "transcript"' });
+        }
+
+        // Get job to verify ownership
+        const { data: job, error: jobError } = await supabaseAdmin!
+          .from('ingestion_jobs')
+          .select('org_id, project_id, conversation_id')
+          .eq('id', jobId)
+          .eq('org_id', context.orgId)
+          .single();
+
+        if (jobError || !job) {
+          return res.status(404).json({ error: 'Job not found' });
+        }
+
+        // Verify file exists in storage
+        const { data: fileData, error: fileError } = await supabaseAdmin!
+          .storage
+          .from(bucket)
+          .list(objectPath.split('/').slice(0, -1).join('/'), {
+            limit: 1,
+            search: objectPath.split('/').pop(),
+          });
+
+        if (fileError) {
+          console.error('[Upload] Error verifying file in storage:', fileError);
+          return res.status(500).json({ 
+            error: 'STORAGE_VERIFY_FAILED',
+            message: `Failed to verify file in storage: ${fileError.message}` 
+          });
+        }
+
+        // Create asset record
+        const assetType = kind === 'audio' ? 'AUDIO' : 'TRANSCRIPT_UPLOADED';
+        const insertData: any = {
+          org_id: context.orgId,
+          job_id: jobId,
+          conversation_id: job.conversation_id,
+          uploader_user_id: context.userId || null,
+          type: assetType,
+          kind: kind,
+          bucket: bucket,
+          object_path: objectPath,
+          storage_url: `${bucket}/${objectPath}`, // Keep for backward compatibility
+          content_hash: sha256 || null,
+          size_bytes: sizeBytes || null,
+          mime_type: getMimeType(filename),
+          metadata_json: {},
+        };
+
+        const { data: dbAsset, error: assetError } = await supabaseAdmin!
+          .from('assets')
+          .insert(insertData)
+          .select('id')
+          .single();
+
+        if (assetError) {
+          console.error('[Upload] Database error storing asset:', {
+            code: assetError.code,
+            message: assetError.message,
+            details: assetError.details,
+            hint: assetError.hint,
+          });
+          
+          if (assetError.code === '42P01') {
+            return res.status(500).json({ 
+              error: 'DATABASE_MIGRATION_REQUIRED',
+              message: 'Table "assets" does not exist. Please run database migration 024_assets_supabase_storage.sql' 
+            });
+          }
+          if (assetError.code === '42703') {
+            return res.status(500).json({ 
+              error: 'DATABASE_MIGRATION_REQUIRED',
+              message: 'Column "bucket" or "object_path" does not exist in assets table. Please run database migration 024_assets_supabase_storage.sql' 
+            });
+          }
+          
+          return res.status(500).json({ 
+            error: 'DATABASE_ERROR',
+            message: `Failed to store asset in database: ${assetError.message} (code: ${assetError.code || 'unknown'})` 
+          });
+        }
+
+        if (!dbAsset || !dbAsset.id) {
+          return res.status(500).json({ 
+            error: 'DATABASE_ERROR',
+            message: 'Asset inserted but no ID returned from database' 
+          });
+        }
+
+        // Update job with asset ID
+        const updateData: any = {};
+        if (kind === 'audio') {
+          updateData.audio_asset_id = dbAsset.id;
+        } else {
+          updateData.transcript_asset_id = dbAsset.id;
+        }
+
+        // Check if both files are uploaded to determine job status
+        const { data: updatedJob, error: fetchError } = await supabaseAdmin!
+          .from('ingestion_jobs')
+          .select('mode, status, audio_asset_id, transcript_asset_id')
+          .eq('id', jobId)
+          .single();
+
+        if (!fetchError && updatedJob) {
+          // Update asset IDs
+          const { error: updateError } = await supabaseAdmin!
+            .from('ingestion_jobs')
+            .update(updateData)
+            .eq('id', jobId);
+
+          if (updateError) {
+            console.error('[Upload] Error updating job with asset ID:', updateError);
+          }
+
+          // Check if all required files are uploaded
+          const hasAudio = updatedJob.audio_asset_id || (kind === 'audio' && dbAsset.id);
+          const hasTranscript = updatedJob.transcript_asset_id || (kind === 'transcript' && dbAsset.id);
+
+          // Determine if job is ready for processing
+          let shouldUpdateStatus = false;
+          let newStatus: JobStatus = updatedJob.status as JobStatus;
+          
+          if (updatedJob.mode === 'TRANSCRIPT_ONLY' && hasTranscript) {
+            shouldUpdateStatus = true;
+            newStatus = 'ANALYZING';
+          } else if (updatedJob.mode === 'AUDIO_ONLY' && hasAudio) {
+            shouldUpdateStatus = true;
+            newStatus = 'TRANSCRIBING';
+          } else if (updatedJob.mode === 'AUDIO_PLUS_TRANSCRIPT' && hasAudio && hasTranscript) {
+            shouldUpdateStatus = true;
+            newStatus = 'VERIFYING';
+          }
+
+          // Update status and enqueue if ready
+          if (shouldUpdateStatus && updatedJob.status === 'UPLOADED') {
+            const { error: statusError } = await supabaseAdmin!
+              .from('ingestion_jobs')
+              .update({
+                status: newStatus,
+                progress_json: { stage: newStatus, pct: 10 },
+              })
+              .eq('id', jobId);
+
+            if (statusError) {
+              console.error('[Upload] Error updating job status:', statusError);
+            } else {
+              // Enqueue job for background processing
+              try {
+                await enqueueJob(jobId);
+                console.log(`[Upload] Job ${jobId} enqueued for processing`);
+              } catch (enqueueError: any) {
+                console.error(`[Upload] Failed to enqueue job ${jobId}:`, enqueueError);
+              }
+            }
+          }
+        }
+
+        res.json({
+          success: true,
+          assetId: dbAsset.id,
+          bucket,
+          objectPath,
+        });
+      } catch (e: any) {
+        console.error('[Upload] Error finalizing upload:', e);
+        res.status(500).json({ 
+          error: 'INTERNAL_ERROR',
+          message: e.message || 'Failed to finalize upload' 
+        });
       }
     }
   );

@@ -253,7 +253,44 @@ export class AuditService {
   }
 
   /**
-   * Upload files for an ingestion job
+   * Get upload metadata for direct Supabase upload
+   */
+  getUploadMetadata(jobId: string, kind: 'audio' | 'transcript', filename: string): Observable<{
+    bucket: string;
+    objectPath: string;
+    assetId: string;
+    supabaseUrl: string;
+  }> {
+    return this.http.post<{
+      bucket: string;
+      objectPath: string;
+      assetId: string;
+      supabaseUrl: string;
+    }>(`${this.apiBase}/ingest/jobs/${jobId}/upload-metadata`, { kind, filename });
+  }
+
+  /**
+   * Finalize upload after direct Supabase upload completes
+   */
+  finalizeUpload(
+    jobId: string,
+    assetId: string,
+    bucket: string,
+    objectPath: string,
+    filename: string,
+    sizeBytes: number,
+    sha256: string,
+    kind: 'audio' | 'transcript'
+  ): Observable<{ success: boolean; assetId: string }> {
+    return this.http.post<{ success: boolean; assetId: string }>(
+      `${this.apiBase}/ingest/jobs/${jobId}/finalize-upload`,
+      { assetId, bucket, objectPath, filename, sizeBytes, sha256, kind }
+    );
+  }
+
+  /**
+   * Upload files for an ingestion job (legacy - uses proxy, may fail for large files)
+   * @deprecated Use direct Supabase upload instead (getUploadMetadata + upload to Supabase + finalizeUpload)
    */
   uploadJobFiles(jobId: string, audioFile?: File, transcriptFile?: File): Observable<{ success: boolean }> {
     const formData = new FormData();

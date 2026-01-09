@@ -3449,5 +3449,31 @@ process.on('uncaughtException', (error) => {
 });
 
 process.on('unhandledRejection', (reason, promise) => {
-  console.error('Unhandled Rejection at:', promise, 'reason:', reason);
+  console.error('========== UNHANDLED REJECTION ==========');
+  console.error('Promise:', promise);
+  console.error('Reason:', reason);
+  if (reason instanceof Error) {
+    console.error('Error message:', reason.message);
+    console.error('Error stack:', reason.stack);
+  }
+  console.error('==========================================');
+});
+
+// Global error handler middleware (must be last)
+app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
+  console.error('========== GLOBAL ERROR HANDLER ==========');
+  console.error('Path:', req.path);
+  console.error('Method:', req.method);
+  console.error('Error:', err);
+  console.error('Error message:', err?.message);
+  console.error('Error stack:', err?.stack);
+  console.error('==========================================');
+  
+  if (!res.headersSent) {
+    res.status(500).json({
+      error: 'INTERNAL_ERROR',
+      message: err?.message || 'An unexpected error occurred',
+      details: process.env.NODE_ENV === 'development' ? err?.stack : undefined
+    });
+  }
 });

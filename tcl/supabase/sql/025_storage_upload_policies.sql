@@ -1,0 +1,58 @@
+-- Storage Upload Policies for Direct Client Uploads
+-- 
+-- This migration documents the Storage bucket policies needed for direct client uploads.
+-- These policies must be configured in the Supabase Dashboard under Storage > Policies.
+--
+-- IMPORTANT: Supabase Storage policies are configured via the Dashboard UI, not SQL.
+-- This file documents what policies need to be created.
+--
+-- ============================================================================
+-- STORAGE BUCKET POLICIES (Configure in Supabase Dashboard)
+-- ============================================================================
+--
+-- For each bucket (protectqa-audio, protectqa-transcripts, protectqa-evidence, protectqa-exports):
+--
+-- Policy Name: "Allow authenticated users to upload to their org"
+-- Policy Type: INSERT
+-- Target Roles: authenticated
+-- USING Expression:
+--   bucket_id = 'protectqa-audio' -- or appropriate bucket name
+--   AND (storage.foldername(name))[1] = 'org'
+--   AND (storage.foldername(name))[2] IN (
+--     SELECT org_id::text FROM public.org_members WHERE user_id = auth.uid()
+--   )
+--
+-- Policy Name: "Allow authenticated users to read their org files"
+-- Policy Type: SELECT
+-- Target Roles: authenticated
+-- USING Expression:
+--   bucket_id = 'protectqa-audio' -- or appropriate bucket name
+--   AND (storage.foldername(name))[1] = 'org'
+--   AND (storage.foldername(name))[2] IN (
+--     SELECT org_id::text FROM public.org_members WHERE user_id = auth.uid()
+--   )
+--
+-- ============================================================================
+-- ALTERNATIVE: Use Service Role for Uploads (Less Secure)
+-- ============================================================================
+--
+-- If Storage RLS policies are too complex, you can:
+-- 1. Keep buckets private
+-- 2. Use backend proxy for uploads (current fallback)
+-- 3. Frontend uploads directly only if RLS allows, otherwise falls back to proxy
+--
+-- The current implementation tries direct upload first, then falls back to proxy
+-- if RLS blocks it. This provides the best of both worlds:
+-- - Large files bypass Netlify when RLS allows
+-- - Small files or when RLS blocks, use proxy (which has 6MB limit)
+--
+-- ============================================================================
+-- NOTES
+-- ============================================================================
+--
+-- 1. Storage policies are configured in Supabase Dashboard, not via SQL
+-- 2. Go to: Storage > [Bucket Name] > Policies > New Policy
+-- 3. Use the expressions above as templates
+-- 4. Test with a small file first to verify policies work
+-- 5. If policies are too restrictive, the frontend will automatically fall back to proxy
+

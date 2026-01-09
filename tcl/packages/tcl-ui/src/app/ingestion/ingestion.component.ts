@@ -20,6 +20,7 @@ import { TclService } from '../tcl.service';
 import { AuthService } from '../auth.service';
 import { HttpClient } from '@angular/common/http';
 import { firstValueFrom } from 'rxjs';
+import { createClient, SupabaseClient } from '@supabase/supabase-js';
 
 // Normalized turn from backend
 interface NormalizedTurn {
@@ -315,7 +316,7 @@ export class IngestionComponent implements OnInit, OnDestroy {
 
       this.currentJobId = jobResponse.jobId;
 
-      // Step 2: Upload files
+      // Step 2: Upload files directly to Supabase Storage (bypasses Netlify 6MB limit)
       let transcriptFile: File | null = null;
       let audioFile: File | null = null;
 
@@ -330,9 +331,14 @@ export class IngestionComponent implements OnInit, OnDestroy {
         transcriptFile = this.transcriptFile!;
       }
 
-      await firstValueFrom(
-        this.auditService.uploadJobFiles(jobResponse.jobId, audioFile || undefined, transcriptFile || undefined)
-      );
+      // Upload files directly to Supabase Storage (bypasses Netlify 6MB limit)
+      // If direct upload fails (e.g., RLS policy), it will fall back to proxy method
+      if (audioFile) {
+        await this.uploadFileDirectly(jobResponse.jobId, audioFile, 'audio');
+      }
+      if (transcriptFile) {
+        await this.uploadFileDirectly(jobResponse.jobId, transcriptFile, 'transcript');
+      }
 
       // Step 3: Start polling for job status
       this.startJobPolling(jobResponse.jobId);
@@ -344,6 +350,103 @@ export class IngestionComponent implements OnInit, OnDestroy {
       this.loading = false;
       this.stopJobPolling();
     }
+  }
+
+  /**
+   * Upload file directly to Supabase Storage (bypasses Netlify 6MB limit)
+   */
+  async uploadFileDirectly(jobId: string, file: File | null, kind: 'audio' | 'transcript'): Promise<void> {
+    if (!file) {
+      return; // Skip if no file
+    }
+
+    try {
+      console.log(`[Upload] Starting direct upload for ${kind}:`, file.name, file.size);
+
+      // Step 1: Get upload metadata from backend
+      const metadata = await firstValueFrom(
+        this.auditService.getUploadMetadata(jobId, kind, file.name)
+      );
+
+      console.log(`[Upload] Got upload metadata:`, { bucket: metadata.bucket, objectPath: metadata.objectPath });
+
+      // Step 2: Use authenticated Supabase client from AuthService
+      // This uses the user's session token
+      // Note: For private buckets, we need Storage RLS policies that allow uploads
+      // If RLS blocks the upload, we'll fall back to the proxy method
+      const supabaseClient = (this.authService as any).supabase as SupabaseClient | undefined;
+      if (!supabaseClient) {
+        console.warn(`[Upload] Supabase client not available, falling back to proxy method`);
+        // Fallback to proxy upload
+        const formData = new FormData();
+        formData.append(kind, file);
+        await firstValueFrom(
+          this.auditService.uploadJobFiles(jobId, kind === 'audio' ? file : undefined, kind === 'transcript' ? file : undefined)
+        );
+        return;
+      }
+
+      // Step 3: Upload file directly to Supabase Storage
+      console.log(`[Upload] Uploading to Supabase Storage...`);
+      const { data: uploadData, error: uploadError } = await supabaseClient.storage
+        .from(metadata.bucket)
+        .upload(metadata.objectPath, file, {
+          contentType: file.type || 'application/octet-stream',
+          upsert: false,
+        });
+
+      if (uploadError) {
+        console.error(`[Upload] Supabase upload error:`, uploadError);
+        // If RLS blocks the upload, fall back to proxy method
+        if (uploadError.message?.includes('new row violates') || uploadError.message?.includes('permission') || uploadError.message?.includes('policy')) {
+          console.warn(`[Upload] RLS policy blocked direct upload, falling back to proxy method`);
+          // Fallback to proxy upload
+          const formData = new FormData();
+          formData.append(kind, file);
+          await firstValueFrom(
+            this.auditService.uploadJobFiles(jobId, kind === 'audio' ? file : undefined, kind === 'transcript' ? file : undefined)
+          );
+          return;
+        }
+        throw new Error(`Failed to upload to Supabase Storage: ${uploadError.message}`);
+      }
+
+      console.log(`[Upload] File uploaded to Supabase Storage successfully`);
+
+      // Step 4: Compute SHA-256 hash
+      const sha256 = await this.computeFileHash(file);
+      console.log(`[Upload] Computed SHA-256:`, sha256);
+
+      // Step 5: Finalize upload with backend
+      await firstValueFrom(
+        this.auditService.finalizeUpload(
+          jobId,
+          metadata.assetId,
+          metadata.bucket,
+          metadata.objectPath,
+          file.name,
+          file.size,
+          sha256,
+          kind
+        )
+      );
+
+      console.log(`[Upload] Upload finalized for ${kind}`);
+    } catch (error: any) {
+      console.error(`[Upload] Error uploading ${kind}:`, error);
+      throw new Error(`Failed to upload ${kind} file: ${error.message || error.error?.message || 'Unknown error'}`);
+    }
+  }
+
+  /**
+   * Compute SHA-256 hash of a file (browser)
+   */
+  async computeFileHash(file: File): Promise<string> {
+    const arrayBuffer = await file.arrayBuffer();
+    const hashBuffer = await crypto.subtle.digest('SHA-256', arrayBuffer);
+    const hashArray = Array.from(new Uint8Array(hashBuffer));
+    const hashHex = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+    return hashHex;
   }
 
   /**

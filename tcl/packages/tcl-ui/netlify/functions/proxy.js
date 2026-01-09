@@ -123,6 +123,28 @@ exports.handler = async (event, context) => {
   
   console.log(`Proxying ${event.httpMethod} ${fullPath}${queryString} to ${url}`);
   
+  // Check for file upload routes - these might hit Netlify's 6MB limit
+  const isFileUpload = fullPath.includes('/upload') || fullPath.includes('/ingest/jobs');
+  if (isFileUpload) {
+    const contentLength = parseInt(event.headers['content-length'] || event.headers['Content-Length'] || '0', 10);
+    const maxSize = 6 * 1024 * 1024; // 6MB Netlify limit
+    if (contentLength > maxSize) {
+      console.error(`File upload too large: ${contentLength} bytes (max: ${maxSize} bytes)`);
+      return {
+        statusCode: 413,
+        headers: {
+          'Content-Type': 'application/json',
+          'Access-Control-Allow-Origin': '*',
+        },
+        body: JSON.stringify({ 
+          error: 'FILE_TOO_LARGE',
+          message: `File upload exceeds Netlify's 6MB limit. File size: ${(contentLength / 1024 / 1024).toFixed(2)}MB`
+        }),
+      };
+    }
+    console.log(`File upload detected: ${(contentLength / 1024 / 1024).toFixed(2)}MB`);
+  }
+  
   try {
     // Forward the request to TCL Core
     const headers = {};
@@ -153,6 +175,7 @@ exports.handler = async (event, context) => {
     
     // Handle body based on content type
     let body = event.body;
+    let bodyBuffer = null;
     
     if (body) {
       if (isMultipart) {
@@ -165,9 +188,27 @@ exports.handler = async (event, context) => {
         // Netlify provides multipart body as base64-encoded string or raw string
         // Convert to Buffer for fetch
         if (event.isBase64Encoded) {
-          body = Buffer.from(body, 'base64');
+          bodyBuffer = Buffer.from(body, 'base64');
         } else if (typeof body === 'string') {
-          body = Buffer.from(body, 'utf8');
+          // Try to detect if it's already base64 or needs encoding
+          try {
+            bodyBuffer = Buffer.from(body, 'base64');
+            // If decoding produces valid data, use it; otherwise treat as raw
+            if (bodyBuffer.length === 0 && body.length > 0) {
+              bodyBuffer = Buffer.from(body, 'utf8');
+            }
+          } catch (e) {
+            bodyBuffer = Buffer.from(body, 'utf8');
+          }
+        } else if (Buffer.isBuffer(body)) {
+          bodyBuffer = body;
+        } else {
+          bodyBuffer = Buffer.from(JSON.stringify(body), 'utf8');
+        }
+        
+        // Set Content-Length header for multipart
+        if (bodyBuffer) {
+          headers['Content-Length'] = bodyBuffer.length.toString();
         }
       } else {
         // For JSON, set Content-Type and ensure body is a string
@@ -180,10 +221,12 @@ exports.handler = async (event, context) => {
       }
     }
     
+    console.log(`Proxying request: method=${event.httpMethod}, contentType=${contentType}, bodySize=${bodyBuffer ? bodyBuffer.length : (body ? body.length : 0)}, isMultipart=${isMultipart}`);
+    
     const response = await fetch(url, {
       method: event.httpMethod,
       headers: headers,
-      body: body || undefined,
+      body: bodyBuffer || body || undefined,
     });
     
     const data = await response.text();
@@ -199,14 +242,27 @@ exports.handler = async (event, context) => {
       body: data,
     };
   } catch (error) {
+    console.error('========== PROXY ERROR ==========');
     console.error('Proxy error:', error);
+    console.error('Error message:', error.message);
+    console.error('Error stack:', error.stack);
+    console.error('Request URL:', url);
+    console.error('Request method:', event.httpMethod);
+    console.error('Content-Type:', contentType);
+    console.error('Is multipart:', isMultipart);
+    console.error('Body size:', bodyBuffer ? bodyBuffer.length : (body ? body.length : 0));
+    console.error('================================');
     return {
       statusCode: 500,
       headers: {
         'Content-Type': 'application/json',
         'Access-Control-Allow-Origin': '*',
       },
-      body: JSON.stringify({ error: error.message || 'Proxy error' }),
+      body: JSON.stringify({ 
+        error: 'PROXY_ERROR',
+        message: error.message || 'Proxy error',
+        details: process.env.NODE_ENV === 'development' ? error.stack : undefined
+      }),
     };
   }
 };
