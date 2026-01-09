@@ -26,7 +26,7 @@ warnings.filterwarnings("ignore", message=".*file_name.*will be ignored.*")
 # Global instances (lazy loaded)
 _session = None
 _tokenizer = None
-_use_onnx = True  # Default to ONNX for speed, fallback to PyTorch if needed
+_use_onnx = os.getenv("USE_ONNX", "true").lower() == "true"  # Can be disabled via env var
 _onnx_error = None  # Store error for diagnostics
 _model_loaded = False
 
@@ -88,22 +88,41 @@ def get_onnx_session():
         
         if not cache_exists:
             # Convert PyTorch model to ONNX
-            logger.info("Converting model to ONNX (one-time operation, may take 1-2 minutes)...")
-            # Suppress warnings during conversion
-            with warnings.catch_warnings():
-                warnings.simplefilter("ignore")
-                _session = ORTModelForSequenceClassification.from_pretrained(
-                    _model_name,
-                    export=True
-                )
-            # Save for next time
-            logger.info(f"Saving ONNX model to cache: {cache_dir}")
-            _session.save_pretrained(cache_dir)
-            # Verify save succeeded
-            if os.path.exists(model_onnx_path):
-                logger.info(f"✅ ONNX model saved to cache ({os.path.getsize(model_onnx_path) / 1024 / 1024:.1f} MB)")
-            else:
-                logger.warning("⚠️ ONNX model save may have failed - cache file not found after save")
+            # This is memory-intensive, so we do it lazily (only when first needed)
+            logger.info("Converting model to ONNX (one-time operation, may take 1-2 minutes and use significant memory)...")
+            
+            try:
+                # Suppress warnings during conversion
+                with warnings.catch_warnings():
+                    warnings.simplefilter("ignore")
+                    # Convert model to ONNX
+                    # Note: This is memory-intensive. If OOM occurs, it will fall back to PyTorch
+                    _session = ORTModelForSequenceClassification.from_pretrained(
+                        _model_name,
+                        export=True,
+                    )
+                
+                # Save for next time
+                logger.info(f"Saving ONNX model to cache: {cache_dir}")
+                _session.save_pretrained(cache_dir)
+                
+                # Verify save succeeded
+                if os.path.exists(model_onnx_path):
+                    logger.info(f"✅ ONNX model saved to cache ({os.path.getsize(model_onnx_path) / 1024 / 1024:.1f} MB)")
+                else:
+                    logger.warning("⚠️ ONNX model save may have failed - cache file not found after save")
+            except MemoryError as mem_err:
+                logger.error(f"❌ Out of memory during ONNX conversion: {mem_err}")
+                logger.warning("⚠️ Falling back to PyTorch (slower but uses less memory)")
+                _use_onnx = False
+                _onnx_error = f"MemoryError during conversion: {mem_err}"
+                return get_pytorch_model()
+            except Exception as conv_err:
+                logger.error(f"❌ ONNX conversion failed: {conv_err}")
+                logger.warning("⚠️ Falling back to PyTorch")
+                _use_onnx = False
+                _onnx_error = f"{type(conv_err).__name__}: {conv_err}"
+                return get_pytorch_model()
         
         _tokenizer = AutoTokenizer.from_pretrained(_model_name)
         

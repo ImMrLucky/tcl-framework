@@ -47,6 +47,8 @@ async def lifespan(app: FastAPI):
     if nli_module and not error:
         try:
             # Warm up with a test inference
+            # Note: If ONNX conversion is needed, it will happen here (lazy loading)
+            # This may use significant memory. If it fails, we'll fall back to PyTorch.
             result = nli_module.score_pair("The sky is blue.", "The sky has color.")
             elapsed = time.time() - start
             status = nli_module.get_status()
@@ -54,8 +56,14 @@ async def lifespan(app: FastAPI):
             logger.info(f"   Mode: {'ONNX' if status.get('using_onnx') else 'PyTorch'}")
             if status.get('onnx_error'):
                 logger.warning(f"   ONNX error: {status['onnx_error'][:200]}")
+                logger.info("   Using PyTorch fallback (slower but more memory-efficient)")
+        except MemoryError as mem_err:
+            logger.error(f"❌ Out of memory during model loading: {mem_err}")
+            logger.warning("⚠️ Service will use PyTorch mode (if available) or may need more memory")
+            logger.warning("💡 Tip: Set USE_ONNX=false to skip ONNX conversion, or increase Railway memory limit")
         except Exception as e:
             logger.error(f"❌ NLI warmup failed: {e}")
+            logger.warning("⚠️ Service may still work, but first request will be slower")
     else:
         logger.error(f"❌ NLI module failed to load: {error}")
     
