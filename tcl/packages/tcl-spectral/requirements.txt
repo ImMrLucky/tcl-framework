@@ -6,4 +6,4 @@ transformers>=4.36.0
 accelerate>=0.25.0
 # ONNX Runtime for 2-4x faster CPU inference
 onnxruntime>=1.16.0
-optimum>=1.14.0
+optimum[onnxruntime]>=1.14.0
