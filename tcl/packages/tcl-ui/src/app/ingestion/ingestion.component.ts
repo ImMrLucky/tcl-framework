@@ -281,6 +281,14 @@ export class IngestionComponent implements OnInit, OnDestroy {
     // Determine ingestion mode
     let mode: 'TRANSCRIPT_ONLY' | 'AUDIO_ONLY' | 'AUDIO_PLUS_TRANSCRIPT';
     
+    console.log('[Ingestion] Mode detection:', {
+      linkingMode: this.linkingMode,
+      isAudioFile: this.isAudioFile,
+      hasSelectedFile: !!this.selectedFile,
+      hasTranscript: !!this.transcript && this.transcript.trim().length > 0,
+      transcriptLength: this.transcript?.length || 0,
+    });
+    
     if (this.linkingMode) {
       // Audio + Transcript mode
       if (!this.audioFile || !this.transcriptFile) {
@@ -301,6 +309,8 @@ export class IngestionComponent implements OnInit, OnDestroy {
       }
       mode = 'TRANSCRIPT_ONLY';
     }
+    
+    console.log('[Ingestion] Determined mode:', mode);
 
     this.loading = true;
     this.errorMessage = '';
@@ -316,39 +326,52 @@ export class IngestionComponent implements OnInit, OnDestroy {
 
       this.currentJobId = jobResponse.jobId;
 
-      // Step 2: Upload files directly to Supabase Storage (bypasses Netlify 6MB limit)
+      // Step 2: Upload files
+      // For TRANSCRIPT_ONLY: Use proxy upload (small files, no need for direct Supabase)
+      // For AUDIO_ONLY or AUDIO_PLUS_TRANSCRIPT: Use direct Supabase upload (large files, bypasses Netlify 6MB limit)
       let transcriptFile: File | null = null;
       let audioFile: File | null = null;
 
       if (mode === 'TRANSCRIPT_ONLY') {
-        // Create a text file from the transcript
+        // For transcript-only, use proxy upload (small files, works fine)
+        // This is the OLD flow that was working before - no upload-metadata call
+        console.log('[Ingestion] ✅ TRANSCRIPT_ONLY mode detected - using proxy upload (old flow)');
+        console.log('[Ingestion] Transcript length:', this.transcript.length, 'characters');
         const blob = new Blob([this.transcript], { type: 'text/plain' });
         transcriptFile = new File([blob], this.selectedFileName || 'transcript.txt', { type: 'text/plain' });
-      } else if (mode === 'AUDIO_ONLY') {
-        audioFile = this.selectedFile!;
-      } else if (mode === 'AUDIO_PLUS_TRANSCRIPT') {
-        audioFile = this.audioFile!;
-        transcriptFile = this.transcriptFile!;
-      }
+        
+        // Use proxy upload for transcript-only (calls /api/ingest/jobs/:jobId/upload, NOT upload-metadata)
+        console.log('[Ingestion] Calling uploadJobFiles (proxy method)...');
+        await firstValueFrom(
+          this.auditService.uploadJobFiles(jobResponse.jobId, undefined, transcriptFile)
+        );
+        console.log('[Ingestion] ✅ Transcript uploaded via proxy - no upload-metadata call');
+      } else {
+        // For audio modes, use direct Supabase upload
+        if (mode === 'AUDIO_ONLY') {
+          audioFile = this.selectedFile!;
+        } else if (mode === 'AUDIO_PLUS_TRANSCRIPT') {
+          audioFile = this.audioFile!;
+          transcriptFile = this.transcriptFile!;
+        }
 
-      // Step 2: Upload files directly to Supabase Storage (bypasses Netlify 6MB limit)
-      // If direct upload fails (e.g., RLS policy), it will fall back to proxy method
-      console.log('[Ingestion] Starting file uploads...');
-      try {
-        if (audioFile) {
-          console.log('[Ingestion] Uploading audio file...');
-          await this.uploadFileDirectly(jobResponse.jobId, audioFile, 'audio');
-          console.log('[Ingestion] Audio file uploaded successfully');
+        console.log('[Ingestion] Starting direct Supabase uploads...');
+        try {
+          if (audioFile) {
+            console.log('[Ingestion] Uploading audio file...');
+            await this.uploadFileDirectly(jobResponse.jobId, audioFile, 'audio');
+            console.log('[Ingestion] Audio file uploaded successfully');
+          }
+          if (transcriptFile) {
+            console.log('[Ingestion] Uploading transcript file...');
+            await this.uploadFileDirectly(jobResponse.jobId, transcriptFile, 'transcript');
+            console.log('[Ingestion] Transcript file uploaded successfully');
+          }
+          console.log('[Ingestion] All files uploaded successfully');
+        } catch (uploadError: any) {
+          console.error('[Ingestion] File upload failed:', uploadError);
+          throw new Error(`File upload failed: ${uploadError.message || 'Unknown error'}`);
         }
-        if (transcriptFile) {
-          console.log('[Ingestion] Uploading transcript file...');
-          await this.uploadFileDirectly(jobResponse.jobId, transcriptFile, 'transcript');
-          console.log('[Ingestion] Transcript file uploaded successfully');
-        }
-        console.log('[Ingestion] All files uploaded successfully');
-      } catch (uploadError: any) {
-        console.error('[Ingestion] File upload failed:', uploadError);
-        throw new Error(`File upload failed: ${uploadError.message || 'Unknown error'}`);
       }
 
       // Step 3: Start polling for job status
