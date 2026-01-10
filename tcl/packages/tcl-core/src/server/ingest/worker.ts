@@ -191,12 +191,29 @@ async function processTranscriptOnly(job: any, transcriptAsset: any): Promise<vo
 async function processAudioOnly(job: any, audioAsset: any): Promise<void> {
   // Update progress
   await updateJobProgress(job.id, 'TRANSCRIBING', 20);
+  console.log(`[Worker] Starting transcription for job ${job.id}, audio size: ${audioAsset.size_bytes} bytes`);
 
-  // Transcribe audio (with concurrency limit)
+  // Transcribe audio (with concurrency limit and timeout)
   const audioBuffer = await readAssetContent(audioAsset);
-  const transcriptionResult = await withTranscriptionSlot(async () => {
+  
+  // Add timeout to transcription (30 minutes for large files)
+  const transcriptionTimeout = 30 * 60 * 1000; // 30 minutes
+  const transcriptionPromise = withTranscriptionSlot(async () => {
     return await transcribeAudio(audioBuffer, audioAsset.metadata_json?.filename || 'audio.wav');
   });
+  
+  const timeoutPromise = new Promise((_, reject) => 
+    setTimeout(() => reject(new Error(`Transcription timeout after ${transcriptionTimeout/1000/60} minutes`)), transcriptionTimeout)
+  );
+  
+  let transcriptionResult;
+  try {
+    transcriptionResult = await Promise.race([transcriptionPromise, timeoutPromise]);
+    console.log(`[Worker] Transcription completed for job ${job.id}`);
+  } catch (error: any) {
+    console.error(`[Worker] Transcription failed for job ${job.id}:`, error.message);
+    throw error;
+  }
 
   // Store ASR transcript asset
   const transcriptText = transcriptionResult.transcript || transcriptionResult.text || '';

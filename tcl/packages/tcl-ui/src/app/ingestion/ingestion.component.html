@@ -225,15 +225,21 @@
           </div>
 
           <!-- Job Progress Section -->
-          <div *ngIf="jobStatus && jobStatus !== 'COMPLETE' && jobStatus !== 'FAILED'" class="job-progress-section">
+          <div *ngIf="jobStatus" class="job-progress-section">
             <h4>
               <mat-icon>{{ getJobStatusIcon() }}</mat-icon>
               {{ getJobStatusLabel() }}
             </h4>
-            <mat-progress-bar mode="determinate" [value]="jobProgress"></mat-progress-bar>
+            <mat-progress-bar 
+              mode="determinate" 
+              [value]="jobProgress"
+              [color]="jobStatus === 'COMPLETE' ? 'primary' : (jobStatus === 'FAILED' ? 'warn' : 'primary')">
+            </mat-progress-bar>
             <div class="progress-text">
               <span>{{ jobProgress }}%</span>
               <span *ngIf="jobStage" class="stage-text">{{ jobStage }}</span>
+              <span *ngIf="jobStatus === 'COMPLETE'" class="complete-text">✓ Complete</span>
+              <span *ngIf="jobStatus === 'FAILED'" class="error-text">✗ Failed</span>
             </div>
           </div>
 

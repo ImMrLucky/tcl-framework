@@ -353,9 +353,11 @@ export class IngestionComponent implements OnInit, OnDestroy {
 
       // Step 3: Start polling for job status
       console.log('[Ingestion] Starting job status polling...');
+      console.log('[Ingestion] Job ID:', jobResponse.jobId);
       this.startJobPolling(jobResponse.jobId);
       
       // Keep loading state true while polling (will be cleared when job completes or fails)
+      // Note: loading state controls button text, jobStatus controls progress display
 
     } catch (error: any) {
       console.error('Ingestion error:', error);
@@ -798,29 +800,51 @@ export class IngestionComponent implements OnInit, OnDestroy {
     try {
       const status = await firstValueFrom(this.auditService.getJobStatus(jobId));
       
+      console.log(`[Poll] Job status update:`, {
+        status: status.status,
+        progress: status.progress.pct,
+        stage: status.progress.stage,
+        hasResult: !!status.result,
+        analysisRunId: status.result?.analysisRunId,
+      });
+      
+      // Update UI state
+      const previousStatus = this.jobStatus;
+      const previousProgress = this.jobProgress;
+      
       this.jobStatus = status.status;
       this.jobProgress = status.progress.pct;
       this.jobStage = status.progress.stage;
+      
+      // Log if status/progress changed
+      if (previousStatus !== this.jobStatus || previousProgress !== this.jobProgress) {
+        console.log(`[Poll] UI updated: ${previousStatus}(${previousProgress}%) → ${this.jobStatus}(${this.jobProgress}%)`);
+      }
 
       if (status.status === 'COMPLETE') {
+        console.log(`[Poll] ✅ Job complete! Analysis Run ID: ${status.result?.analysisRunId}`);
         this.stopJobPolling();
         this.loading = false;
+        this.jobProgress = 100; // Ensure progress shows 100%
 
         // Navigate to evaluation results
-        if (status.result.analysisRunId) {
+        if (status.result?.analysisRunId) {
+          console.log(`[Poll] Navigating to evaluation: ${status.result.analysisRunId}`);
           this.router.navigate(['/evaluations', status.result.analysisRunId]);
         } else {
+          console.warn(`[Poll] Job complete but no analysisRunId found`);
           this.snackBar.open('Analysis complete, but no evaluation ID found', 'Close', { duration: 3000 });
         }
       } else if (status.status === 'FAILED') {
+        console.error(`[Poll] ❌ Job failed:`, status.error);
         this.stopJobPolling();
         this.loading = false;
         this.errorMessage = status.error?.message || 'Job failed';
         this.snackBar.open(this.errorMessage, 'Close', { duration: 5000 });
       }
     } catch (error: any) {
-      console.error('Error polling job status:', error);
-      // Don't stop polling on transient errors
+      console.error('[Poll] Error polling job status:', error);
+      // Don't stop polling on transient errors - might be network issue
     }
   }
 
