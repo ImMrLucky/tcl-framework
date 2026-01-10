@@ -614,7 +614,7 @@ export class IngestionComponent implements OnInit, OnDestroy {
       sessionError = result?.error;
       console.log('[Upload] Session retrieved:', { hasSession: !!session, hasError: !!sessionError });
     } catch (err: any) {
-      console.error('[Upload] Session check failed:', err);
+      console.warn('[Upload] Session check timed out or failed, trying localStorage fallback:', err?.message);
       sessionError = err;
       // Try to get session from storage directly as fallback
       try {
@@ -622,21 +622,30 @@ export class IngestionComponent implements OnInit, OnDestroy {
         if (storedSession) {
           const parsed = JSON.parse(storedSession);
           session = parsed?.session;
-          console.log('[Upload] Retrieved session from localStorage fallback');
+          if (session?.access_token) {
+            console.log('[Upload] ✅ Retrieved session from localStorage fallback');
+            // Clear error since we got session from fallback
+            sessionError = null;
+          } else {
+            console.warn('[Upload] Session from localStorage missing access_token');
+          }
+        } else {
+          console.warn('[Upload] No session found in localStorage');
         }
       } catch (storageErr) {
         console.error('[Upload] Failed to get session from storage:', storageErr);
       }
     }
     
-    if (sessionError && !session) {
-      console.error('[Upload] Session error:', sessionError);
-      throw new Error(`Session error: ${sessionError.message}`);
-    }
-    
+    // Only throw if we don't have a session after all attempts
     if (!session?.access_token) {
-      console.error('[Upload] No access token in session');
-      throw new Error('No authentication token available');
+      if (sessionError) {
+        console.error('[Upload] Session error and no fallback session:', sessionError);
+        throw new Error(`Session error: ${sessionError.message}`);
+      } else {
+        console.error('[Upload] No access token in session');
+        throw new Error('No authentication token available');
+      }
     }
     
     console.log('[Upload] ✅ Session token available, proceeding with upload');
