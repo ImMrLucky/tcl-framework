@@ -440,18 +440,29 @@ export class IngestionComponent implements OnInit, OnDestroy {
       
       try {
         // Try direct REST API upload first (faster, bypasses Netlify)
-        console.log(`[Upload] Uploading ${(file.size / 1024 / 1024).toFixed(2)} MB file via direct REST API`);
-        uploadData = await this.uploadFileDirectStorage(
+        console.log(`[Upload] ⚡ Starting direct REST API upload for ${(file.size / 1024 / 1024).toFixed(2)} MB file`);
+        console.log(`[Upload] Calling uploadFileDirectStorage()...`);
+        const uploadPromise = this.uploadFileDirectStorage(
           supabaseClient,
           metadata.bucket,
           metadata.objectPath,
           file
         );
+        console.log(`[Upload] Upload promise created, awaiting...`);
+        uploadData = await uploadPromise;
+        console.log(`[Upload] ✅ Direct REST upload completed successfully:`, uploadData);
       } catch (restError: any) {
-        console.warn(`[Upload] Direct REST upload failed, trying supabase-js SDK fallback:`, restError.message);
+        console.error(`[Upload] ❌ Direct REST upload failed:`, {
+          error: restError,
+          message: restError?.message,
+          stack: restError?.stack,
+          name: restError?.name,
+        });
+        console.warn(`[Upload] Trying supabase-js SDK fallback...`);
         
         // Fallback to supabase-js SDK upload (still browser → Supabase directly, no Netlify)
         try {
+          console.log(`[Upload] Attempting SDK upload to bucket: ${metadata.bucket}, path: ${metadata.objectPath}`);
           const result = await supabaseClient.storage
             .from(metadata.bucket)
             .upload(metadata.objectPath, file, {
@@ -459,28 +470,40 @@ export class IngestionComponent implements OnInit, OnDestroy {
               contentType: file.type || 'application/octet-stream',
             });
           
+          console.log(`[Upload] SDK upload result:`, { data: result.data, error: result.error });
+          
           if (result.error) {
+            console.error(`[Upload] SDK upload returned error:`, result.error);
             uploadError = result.error;
             uploadData = null;
           } else {
+            console.log(`[Upload] ✅ SDK upload succeeded`);
             uploadData = { ok: true, path: result.data.path || metadata.objectPath };
             uploadError = null;
           }
         } catch (sdkError: any) {
-          console.error(`[Upload] Supabase SDK upload also failed:`, sdkError);
+          console.error(`[Upload] ❌ SDK upload exception:`, {
+            error: sdkError,
+            message: sdkError?.message,
+            stack: sdkError?.stack,
+            name: sdkError?.name,
+          });
           uploadError = sdkError;
           uploadData = null;
         }
       }
 
       const uploadDuration = Date.now() - uploadStartTime;
-      console.log(`[Upload] Upload attempt completed in ${uploadDuration}ms`, {
+      console.log(`[Upload] 📊 Upload attempt summary (${uploadDuration}ms):`, {
         hasData: !!uploadData,
         hasError: !!uploadError,
         errorMessage: uploadError?.message,
+        uploadData: uploadData,
+        uploadError: uploadError,
       });
 
       if (uploadError) {
+        console.error(`[Upload] 🚨 Upload failed - will not proceed to finalize`);
         console.error(`[Upload] All upload methods failed:`, {
           error: uploadError,
           message: uploadError.message,
@@ -508,10 +531,11 @@ export class IngestionComponent implements OnInit, OnDestroy {
         throw new Error(`Failed to upload to Supabase Storage: ${uploadError.message}`);
       }
 
-      console.log(`[Upload] File uploaded to Supabase Storage successfully:`, uploadData);
+      console.log(`[Upload] ✅ File uploaded to Supabase Storage successfully:`, uploadData);
+      console.log(`[Upload] Proceeding to compute hash and finalize...`);
 
       // Step 4: Compute SHA-256 hash
-      console.log(`[Upload] Computing SHA-256 hash for file (${file.size} bytes)...`);
+      console.log(`[Upload] 🔐 Computing SHA-256 hash for file (${file.size} bytes)...`);
       const hashStartTime = Date.now();
       const sha256 = await this.computeFileHash(file);
       const hashDuration = Date.now() - hashStartTime;
@@ -605,7 +629,15 @@ export class IngestionComponent implements OnInit, OnDestroy {
     }, uploadTimeout);
 
     try {
-      console.log('[Upload] Starting fetch request...');
+      console.log('[Upload] 🚀 Starting fetch request to:', uploadUrl);
+      console.log('[Upload] Request headers:', {
+        apikey: supabaseAnonKey ? '***set***' : 'MISSING',
+        Authorization: session.access_token ? '***set***' : 'MISSING',
+        'Content-Type': file.type || 'application/octet-stream',
+        'x-upsert': 'false',
+      });
+      
+      const fetchStartTime = Date.now();
       const res = await fetch(uploadUrl, {
         method: 'PUT',
         headers: {
@@ -617,8 +649,10 @@ export class IngestionComponent implements OnInit, OnDestroy {
         body: file,
         signal: controller.signal,
       });
-
-      console.log('[Upload] Fetch response status:', res.status, res.statusText);
+      
+      const fetchDuration = Date.now() - fetchStartTime;
+      console.log(`[Upload] 📡 Fetch completed in ${fetchDuration}ms`);
+      console.log('[Upload] Response status:', res.status, res.statusText);
       // Log response headers (safe way that works with TypeScript)
       const headersObj: Record<string, string> = {};
       res.headers.forEach((value, key) => {
