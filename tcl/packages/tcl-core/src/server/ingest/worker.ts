@@ -7,7 +7,7 @@ import { supabaseAdmin } from '../supabase.js';
 import { downloadFileFromSupabase } from './storage-supabase.js';
 import { readAsset } from './storage.js'; // Keep for backward compatibility
 import { normalizeTranscriptBuffer } from '../transcripts/normalize.js';
-import { transcribeAudio } from '../transcription.js';
+import { transcribeAudio, type TranscriptionResult } from '../transcription.js';
 import { computeVerificationDiff } from '../verify/diff.js';
 import { withTranscriptionSlot } from '../asr/limit.js';
 
@@ -202,13 +202,13 @@ async function processAudioOnly(job: any, audioAsset: any): Promise<void> {
     return await transcribeAudio(audioBuffer, audioAsset.metadata_json?.filename || 'audio.wav');
   });
   
-  const timeoutPromise = new Promise((_, reject) => 
+  const timeoutPromise = new Promise<never>((_, reject) => 
     setTimeout(() => reject(new Error(`Transcription timeout after ${transcriptionTimeout/1000/60} minutes`)), transcriptionTimeout)
   );
   
-  let transcriptionResult;
+  let transcriptionResult: TranscriptionResult;
   try {
-    transcriptionResult = await Promise.race([transcriptionPromise, timeoutPromise]);
+    transcriptionResult = await Promise.race([transcriptionPromise, timeoutPromise]) as TranscriptionResult;
     console.log(`[Worker] Transcription completed for job ${job.id}`);
   } catch (error: any) {
     console.error(`[Worker] Transcription failed for job ${job.id}:`, error.message);
