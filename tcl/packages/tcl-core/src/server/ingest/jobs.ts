@@ -117,6 +117,8 @@ export interface JobStatusResponse {
     code: string;
     message: string;
   };
+  audioAssetId?: string;
+  transcriptAssetId?: string;
 }
 
 /**
