@@ -559,22 +559,43 @@ export class IngestionComponent implements OnInit, OnDestroy {
   ): Promise<any> {
     const supabaseUrl = (supabaseClient as any).supabaseUrl;
 
+    if (!supabaseUrl) {
+      console.error('[Upload] Supabase URL not found in client');
+      throw new Error('Supabase URL not available in client');
+    }
+
     // Get anon key for apikey header
     const supabaseAnonKey =
       (supabaseClient as any).supabaseKey ||
       (typeof window !== 'undefined' && (window as any).__SUPABASE_ANON_KEY);
 
-    const { data: { session } } = await supabaseClient.auth.getSession();
+    const { data: { session }, error: sessionError } = await supabaseClient.auth.getSession();
+    
+    if (sessionError) {
+      console.error('[Upload] Session error:', sessionError);
+      throw new Error(`Session error: ${sessionError.message}`);
+    }
+    
     if (!session?.access_token) {
+      console.error('[Upload] No access token in session');
       throw new Error('No authentication token available');
     }
+    
     if (!supabaseAnonKey) {
+      console.error('[Upload] Missing anon key. Client key:', (supabaseClient as any).supabaseKey, 'Window key:', typeof window !== 'undefined' ? (window as any).__SUPABASE_ANON_KEY : 'N/A');
       throw new Error('Missing Supabase anon key for apikey header');
     }
 
     // Encode per segment so slashes remain slashes
     const encodedPath = objectPath.split('/').map(encodeURIComponent).join('/');
     const uploadUrl = `${supabaseUrl}/storage/v1/object/${bucket}/${encodedPath}`;
+    
+    console.log('[Upload] Upload URL:', uploadUrl);
+    console.log('[Upload] Original path:', objectPath);
+    console.log('[Upload] Encoded path:', encodedPath);
+    console.log('[Upload] Bucket:', bucket);
+    console.log('[Upload] File size:', file.size, 'bytes');
+    console.log('[Upload] File type:', file.type);
 
     const uploadTimeout = 10 * 60 * 1000; // 10 minutes
     const controller = new AbortController();
@@ -584,6 +605,7 @@ export class IngestionComponent implements OnInit, OnDestroy {
     }, uploadTimeout);
 
     try {
+      console.log('[Upload] Starting fetch request...');
       const res = await fetch(uploadUrl, {
         method: 'PUT',
         headers: {
@@ -596,18 +618,34 @@ export class IngestionComponent implements OnInit, OnDestroy {
         signal: controller.signal,
       });
 
+      console.log('[Upload] Fetch response status:', res.status, res.statusText);
+      console.log('[Upload] Response headers:', Object.fromEntries(res.headers.entries()));
+
       if (!res.ok) {
         const errorText = await res.text();
+        console.error('[Upload] Upload failed with response:', {
+          status: res.status,
+          statusText: res.statusText,
+          errorText,
+          url: uploadUrl,
+        });
         throw new Error(`Storage upload failed (${res.status}): ${errorText}`);
       }
 
       // Some storage responses are JSON, some aren't; don't assume JSON.
       const text = await res.text();
+      console.log('[Upload] Upload successful, response text:', text.substring(0, 200));
       return { ok: true, responseText: text, path: objectPath };
     } catch (error: any) {
       if (error.name === 'AbortError') {
+        console.error('[Upload] Upload aborted due to timeout');
         throw new Error(`Upload timeout after ${uploadTimeout/1000} seconds. File may be too large or network connection is slow.`);
       }
+      console.error('[Upload] Upload error:', {
+        name: error.name,
+        message: error.message,
+        stack: error.stack,
+      });
       throw error;
     } finally {
       clearTimeout(timeoutId);
