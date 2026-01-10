@@ -434,59 +434,52 @@ export class IngestionComponent implements OnInit, OnDestroy {
       let uploadData: any = null;
       let uploadError: any = null;
       
+      // Use Supabase SDK upload directly (handles auth automatically, no session check needed)
+      // This is simpler and more reliable than REST API + manual session handling
       try {
-        // Try direct REST API upload first (faster, bypasses Netlify)
-        console.log(`[Upload] ⚡ Starting direct REST API upload for ${(file.size / 1024 / 1024).toFixed(2)} MB file`);
-        console.log(`[Upload] Calling uploadFileDirectStorage()...`);
-        const uploadPromise = this.uploadFileDirectStorage(
-          supabaseClient,
-          metadata.bucket,
-          metadata.objectPath,
-          file
-        );
-        console.log(`[Upload] Upload promise created, awaiting...`);
-        uploadData = await uploadPromise;
-        console.log(`[Upload] ✅ Direct REST upload completed successfully:`, uploadData);
-      } catch (restError: any) {
-        console.error(`[Upload] ❌ Direct REST upload failed:`, {
-          error: restError,
-          message: restError?.message,
-          stack: restError?.stack,
-          name: restError?.name,
-        });
-        console.warn(`[Upload] Trying supabase-js SDK fallback...`);
+        console.log(`[Upload] 🚀 Starting Supabase SDK upload for ${(file.size / 1024 / 1024).toFixed(2)} MB file`);
+        console.log(`[Upload] Bucket: ${metadata.bucket}, Path: ${metadata.objectPath}`);
+        console.log(`[Upload] File: ${file.name}, Size: ${file.size}, Type: ${file.type || 'application/octet-stream'}`);
         
-        // Fallback to supabase-js SDK upload (still browser → Supabase directly, no Netlify)
-        try {
-          console.log(`[Upload] Attempting SDK upload to bucket: ${metadata.bucket}, path: ${metadata.objectPath}`);
-          const result = await supabaseClient.storage
-            .from(metadata.bucket)
-            .upload(metadata.objectPath, file, {
-              upsert: false,
-              contentType: file.type || 'application/octet-stream',
-            });
-          
-          console.log(`[Upload] SDK upload result:`, { data: result.data, error: result.error });
-          
-          if (result.error) {
-            console.error(`[Upload] SDK upload returned error:`, result.error);
-            uploadError = result.error;
-            uploadData = null;
-          } else {
-            console.log(`[Upload] ✅ SDK upload succeeded`);
-            uploadData = { ok: true, path: result.data.path || metadata.objectPath };
-            uploadError = null;
-          }
-        } catch (sdkError: any) {
-          console.error(`[Upload] ❌ SDK upload exception:`, {
-            error: sdkError,
-            message: sdkError?.message,
-            stack: sdkError?.stack,
-            name: sdkError?.name,
+        const sdkUploadStartTime = Date.now();
+        const result = await supabaseClient.storage
+          .from(metadata.bucket)
+          .upload(metadata.objectPath, file, {
+            upsert: false,
+            contentType: file.type || 'application/octet-stream',
           });
-          uploadError = sdkError;
+        
+        const sdkUploadDuration = Date.now() - sdkUploadStartTime;
+        console.log(`[Upload] SDK upload completed in ${sdkUploadDuration}ms`);
+        console.log(`[Upload] SDK upload result:`, { 
+          data: result.data, 
+          error: result.error,
+          hasData: !!result.data,
+          hasError: !!result.error,
+        });
+        
+        if (result.error) {
+          console.error(`[Upload] ❌ SDK upload returned error:`, {
+            error: result.error,
+            message: result.error.message,
+            statusCode: (result.error as any).statusCode,
+          });
+          uploadError = result.error;
           uploadData = null;
+        } else {
+          console.log(`[Upload] ✅ SDK upload succeeded! Path: ${result.data.path}`);
+          uploadData = { ok: true, path: result.data.path || metadata.objectPath };
+          uploadError = null;
         }
+      } catch (sdkError: any) {
+        console.error(`[Upload] ❌ SDK upload exception:`, {
+          error: sdkError,
+          message: sdkError?.message,
+          stack: sdkError?.stack,
+          name: sdkError?.name,
+        });
+        uploadError = sdkError;
+        uploadData = null;
       }
 
       const uploadDuration = Date.now() - uploadStartTime;
@@ -618,19 +611,47 @@ export class IngestionComponent implements OnInit, OnDestroy {
       sessionError = err;
       // Try to get session from storage directly as fallback
       try {
-        const storedSession = localStorage.getItem('sb-uqwcmkyaskyduxuluqrm-auth-token');
+        // Try multiple possible storage keys
+        const storageKeys = [
+          'sb-uqwcmkyaskyduxuluqrm-auth-token',
+          'supabase.auth.token',
+        ];
+        
+        let storedSession: any = null;
+        for (const key of storageKeys) {
+          const stored = localStorage.getItem(key);
+          if (stored) {
+            try {
+              storedSession = JSON.parse(stored);
+              console.log(`[Upload] Found session in localStorage with key: ${key}`);
+              break;
+            } catch (e) {
+              // Try next key
+            }
+          }
+        }
+        
         if (storedSession) {
-          const parsed = JSON.parse(storedSession);
-          session = parsed?.session;
+          // Supabase stores session in different structures:
+          // 1. Direct: { session: { access_token: ... } }
+          // 2. Nested: { currentSession: { access_token: ... } }
+          // 3. Flat: { access_token: ... }
+          session = storedSession?.session || storedSession?.currentSession || storedSession;
+          
           if (session?.access_token) {
             console.log('[Upload] ✅ Retrieved session from localStorage fallback');
             // Clear error since we got session from fallback
             sessionError = null;
           } else {
-            console.warn('[Upload] Session from localStorage missing access_token');
+            console.warn('[Upload] Session from localStorage missing access_token. Structure:', {
+              hasSession: !!storedSession?.session,
+              hasCurrentSession: !!storedSession?.currentSession,
+              hasAccessToken: !!storedSession?.access_token,
+              keys: Object.keys(storedSession || {}),
+            });
           }
         } else {
-          console.warn('[Upload] No session found in localStorage');
+          console.warn('[Upload] No session found in localStorage with any known key');
         }
       } catch (storageErr) {
         console.error('[Upload] Failed to get session from storage:', storageErr);
