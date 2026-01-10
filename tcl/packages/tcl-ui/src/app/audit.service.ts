@@ -44,6 +44,8 @@ export interface ConversationCreateResponse {
 // Ingestion Job Types
 export interface CreateIngestionJobRequest {
   mode: 'TRANSCRIPT_ONLY' | 'AUDIO_ONLY' | 'AUDIO_PLUS_TRANSCRIPT';
+  title?: string;
+  channel?: string;
   options?: {
     analyzeImmediately?: boolean;
   };
@@ -55,7 +57,7 @@ export interface CreateIngestionJobResponse {
 
 export interface JobStatusResponse {
   jobId: string;
-  status: 'UPLOADED' | 'TRANSCRIBING' | 'ANALYZING' | 'VERIFYING' | 'COMPLETE' | 'FAILED';
+  status: 'UPLOADED' | 'READY' | 'TRANSCRIBING' | 'ANALYZING' | 'VERIFYING' | 'COMPLETE' | 'FAILED';
   progress: {
     stage: string | null;
     pct: number;
@@ -285,6 +287,16 @@ export class AuditService {
     return this.http.post<{ success: boolean; assetId: string }>(
       `${this.apiBase}/ingest/jobs/${jobId}/finalize-upload`,
       { assetId, bucket, objectPath, filename, sizeBytes, sha256, kind }
+    );
+  }
+
+  /**
+   * Start processing a READY job (for Audio Only mode)
+   */
+  startJob(jobId: string): Observable<{ ok: boolean; alreadyProcessing?: boolean; alreadyComplete?: boolean }> {
+    return this.http.post<{ ok: boolean; alreadyProcessing?: boolean; alreadyComplete?: boolean }>(
+      `${this.apiBase}/ingest/jobs/${jobId}/start`,
+      {}
     );
   }
 

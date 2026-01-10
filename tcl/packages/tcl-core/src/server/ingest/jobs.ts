@@ -90,10 +90,12 @@ const upload = multer({
 });
 
 export type IngestionMode = 'TRANSCRIPT_ONLY' | 'AUDIO_ONLY' | 'AUDIO_PLUS_TRANSCRIPT';
-export type JobStatus = 'UPLOADED' | 'TRANSCRIBING' | 'ANALYZING' | 'VERIFYING' | 'COMPLETE' | 'FAILED';
+export type JobStatus = 'UPLOADED' | 'READY' | 'TRANSCRIBING' | 'ANALYZING' | 'VERIFYING' | 'COMPLETE' | 'FAILED';
 
 export interface CreateJobRequest {
   mode: IngestionMode;
+  title?: string;
+  channel?: string;
   options?: {
     analyzeImmediately?: boolean;
   };
@@ -130,13 +132,15 @@ export async function createIngestionJob(
   projectId: string,
   env: string,
   userId: string,
-  mode: IngestionMode
+  mode: IngestionMode,
+  title?: string,
+  channel?: string
 ): Promise<string> {
   if (!supabaseAdmin) {
     throw new Error('Database not configured');
   }
 
-        logUpload('debug', 'Creating job', { orgId, projectId, env, userId, mode });
+  logUpload('debug', 'Creating job', { orgId, projectId, env, userId, mode, title, channel });
 
   const { data, error } = await supabaseAdmin
     .from('ingestion_jobs')
@@ -146,6 +150,8 @@ export async function createIngestionJob(
       env: env || 'sandbox',
       created_by_user_id: userId,
       mode,
+      title: title || null,
+      channel: channel || null,
       status: 'UPLOADED',
       progress_json: { stage: null, pct: 0 },
       result_json: { analysisRunId: null, verificationReportId: null },
@@ -570,7 +576,9 @@ export function registerIngestionJobRoutes(app: express.Express) {
           context.projectId,
           context.env || 'sandbox',
           context.userId,
-          body.mode
+          body.mode,
+          body.title,
+          body.channel
         );
 
         console.log('[CreateJob] Job created successfully:', jobId);
@@ -1059,19 +1067,26 @@ export function registerIngestionJobRoutes(app: express.Express) {
           const hasAudio = updatedJob.audio_asset_id || (kind === 'audio' && dbAsset.id);
           const hasTranscript = updatedJob.transcript_asset_id || (kind === 'transcript' && dbAsset.id);
 
-          // Determine if job is ready for processing
+          // Determine if job is ready for processing based on mode rules
           let shouldUpdateStatus = false;
           let newStatus: JobStatus = updatedJob.status as JobStatus;
+          let shouldEnqueue = false;
           
           if (updatedJob.mode === 'TRANSCRIPT_ONLY' && hasTranscript) {
+            // Transcript only: auto-start analysis
             shouldUpdateStatus = true;
             newStatus = 'ANALYZING';
+            shouldEnqueue = true;
           } else if (updatedJob.mode === 'AUDIO_ONLY' && hasAudio) {
+            // Audio only: set to READY, wait for user to click "Transcribe & Analyze"
             shouldUpdateStatus = true;
-            newStatus = 'TRANSCRIBING';
-          } else if (updatedJob.mode === 'AUDIO_PLUS_TRANSCRIPT' && hasAudio && hasTranscript) {
+            newStatus = 'READY';
+            shouldEnqueue = false;
+          } else if (updatedJob.mode === 'AUDIO_PLUS_TRANSCRIPT' && hasTranscript) {
+            // Audio + Transcript: analyze transcript immediately (audio optional)
             shouldUpdateStatus = true;
-            newStatus = 'VERIFYING';
+            newStatus = 'ANALYZING';
+            shouldEnqueue = true;
           }
 
           // Update status and enqueue if ready
@@ -1086,13 +1101,13 @@ export function registerIngestionJobRoutes(app: express.Express) {
 
             if (statusError) {
               console.error('[Upload] Error updating job status:', statusError);
-            } else {
+            } else if (shouldEnqueue) {
               // Enqueue job for background processing
               try {
                 await enqueueJob(jobId);
                 logUpload('info', `Job ${jobId} enqueued for processing`);
               } catch (enqueueError: any) {
-                logError('Upload', `Failed to enqueue job ${jobId}`, enqueueError);
+                logUpload('error', `Failed to enqueue job ${jobId}`, enqueueError);
               }
             }
           }
@@ -1113,6 +1128,187 @@ export function registerIngestionJobRoutes(app: express.Express) {
       }
     }
   );
+
+  // Start processing a READY job (B2)
+  app.post(
+    '/api/ingest/jobs/:jobId/start',
+    requireCapability(Capability.ANALYZE_MANUAL_UPLOAD),
+    async (req, res) => {
+      try {
+        const context = await getOrgContext(req);
+        if (!context || context.error) {
+          return res.status(401).json({ error: context?.error || 'Authorization required' });
+        }
+
+        const { jobId } = req.params;
+
+        // Fetch job and verify ownership
+        const { data: job, error: jobError } = await supabaseAdmin!
+          .from('ingestion_jobs')
+          .select('id, org_id, mode, status, audio_asset_id, transcript_asset_id')
+          .eq('id', jobId)
+          .eq('org_id', context.orgId)
+          .maybeSingle();
+
+        if (jobError) {
+          logUpload('error', 'Error fetching job for start', jobError);
+          return res.status(500).json({
+            error: 'DATABASE_ERROR',
+            message: 'Failed to fetch job',
+          });
+        }
+
+        if (!job) {
+          return res.status(404).json({
+            error: 'JOB_NOT_FOUND',
+            message: 'Job not found or you do not have access',
+          });
+        }
+
+        // Idempotency: if already processing or complete, return ok
+        if (job.status === 'TRANSCRIBING' || job.status === 'ANALYZING') {
+          return res.json({ ok: true, alreadyProcessing: true });
+        }
+
+        if (job.status === 'COMPLETE') {
+          return res.json({ ok: true, alreadyComplete: true });
+        }
+
+        // Validate job has required assets for its mode
+        if (job.mode === 'AUDIO_ONLY' && !job.audio_asset_id) {
+          return res.status(400).json({
+            error: 'MISSING_ASSET',
+            message: 'Audio asset is required for AUDIO_ONLY mode',
+          });
+        }
+
+        if (job.mode === 'TRANSCRIPT_ONLY' && !job.transcript_asset_id) {
+          return res.status(400).json({
+            error: 'MISSING_ASSET',
+            message: 'Transcript asset is required for TRANSCRIPT_ONLY mode',
+          });
+        }
+
+        if (job.mode === 'AUDIO_PLUS_TRANSCRIPT' && !job.transcript_asset_id) {
+          return res.status(400).json({
+            error: 'MISSING_ASSET',
+            message: 'Transcript asset is required for AUDIO_PLUS_TRANSCRIPT mode',
+          });
+        }
+
+        // Set status based on mode
+        let newStatus: JobStatus;
+        if (job.mode === 'AUDIO_ONLY') {
+          newStatus = 'TRANSCRIBING';
+        } else if (job.mode === 'TRANSCRIPT_ONLY' || job.mode === 'AUDIO_PLUS_TRANSCRIPT') {
+          newStatus = 'ANALYZING';
+        } else {
+          return res.status(400).json({
+            error: 'INVALID_MODE',
+            message: `Unknown mode: ${job.mode}`,
+          });
+        }
+
+        // Update status
+        const { error: updateError } = await supabaseAdmin!
+          .from('ingestion_jobs')
+          .update({
+            status: newStatus,
+            progress_json: { stage: newStatus, pct: 10 },
+          })
+          .eq('id', jobId);
+
+        if (updateError) {
+          logUpload('error', 'Error updating job status for start', updateError);
+          return res.status(500).json({
+            error: 'DATABASE_ERROR',
+            message: 'Failed to update job status',
+          });
+        }
+
+        // Enqueue job for background processing
+        try {
+          await enqueueJob(jobId);
+          logUpload('info', `Job ${jobId} started and enqueued for processing`);
+        } catch (enqueueError: any) {
+          logUpload('error', `Failed to enqueue job ${jobId}`, enqueueError);
+          return res.status(500).json({
+            error: 'ENQUEUE_FAILED',
+            message: 'Failed to enqueue job for processing',
+          });
+        }
+
+        res.json({ ok: true });
+      } catch (e: any) {
+        logUpload('error', 'Error starting job', e);
+        res.status(500).json({
+          error: 'INTERNAL_ERROR',
+          message: e.message || 'Failed to start job',
+        });
+      }
+    }
+  );
+
+  // List jobs for org (D1)
+  app.get('/api/ingest/jobs', async (req, res) => {
+    try {
+      const context = await getOrgContext(req);
+      if (!context || context.error) {
+        return res.status(401).json({ error: context?.error || 'Authorization required' });
+      }
+
+      const limit = parseInt(req.query.limit as string) || 50;
+      const offset = parseInt(req.query.offset as string) || 0;
+
+      const { data: jobs, error: jobsError } = await supabaseAdmin!
+        .from('ingestion_jobs')
+        .select(`
+          id,
+          created_at,
+          title,
+          channel,
+          mode,
+          status,
+          progress_json,
+          audio_asset_id,
+          transcript_asset_id,
+          result_json
+        `)
+        .eq('org_id', context.orgId)
+        .order('created_at', { ascending: false })
+        .range(offset, offset + limit - 1);
+
+      if (jobsError) {
+        console.error('[ListJobs] Database error:', jobsError);
+        return res.status(500).json({
+          error: 'DATABASE_ERROR',
+          message: 'Failed to fetch jobs',
+        });
+      }
+
+      // Format response
+      const formattedJobs = (jobs || []).map((job: any) => ({
+        id: job.id,
+        createdAt: job.created_at,
+        title: job.title,
+        channel: job.channel,
+        mode: job.mode,
+        status: job.status,
+        progress: job.progress_json || { stage: null, pct: 0 },
+        audioAssetId: job.audio_asset_id,
+        transcriptAssetId: job.transcript_asset_id,
+        evaluationId: job.result_json?.analysisRunId || null,
+      }));
+
+      res.json({ jobs: formattedJobs, total: formattedJobs.length });
+    } catch (e: any) {
+      console.error('[ListJobs] Error:', e);
+      res.status(500).json({
+        error: 'INTERNAL_ERROR',
+        message: e.message || 'Failed to list jobs',
+      });
+    }
+  });
 
   // Get job status
   app.get('/api/ingest/jobs/:jobId', async (req, res) => {

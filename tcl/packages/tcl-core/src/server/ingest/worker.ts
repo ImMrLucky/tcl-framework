@@ -103,27 +103,80 @@ async function processJob(jobId: string): Promise<void> {
     throw new Error('Job not found');
   }
 
-  // Get assets for this job
-  const { data: assets, error: assetsError } = await supabaseAdmin
-    .from('assets')
-    .select('*')
-    .eq('job_id', jobId)
-    .order('created_at', { ascending: true });
-
-  if (assetsError) {
-    throw new Error(`Failed to fetch assets: ${assetsError.message}`);
+  // Skip if job is not in a processing state (READY jobs must be started via /start endpoint)
+  if (job.status === 'READY' || job.status === 'UPLOADED') {
+    console.log(`[Worker] Skipping job ${jobId} - status is ${job.status}, waiting for /start`);
+    return;
   }
 
-  const audioAsset = assets.find(a => a.type === 'AUDIO');
-  const transcriptAsset = assets.find(a => a.type === 'TRANSCRIPT_UPLOADED');
+  // Get assets for this job (use asset_id fields from ingestion_jobs)
+  let audioAsset: any = null;
+  let transcriptAsset: any = null;
 
-  // Process based on mode
+  if (job.audio_asset_id) {
+    const { data: audio, error: audioError } = await supabaseAdmin
+      .from('assets')
+      .select('*')
+      .eq('id', job.audio_asset_id)
+      .single();
+    if (audioError) {
+      console.error(`[Worker] Failed to fetch audio asset ${job.audio_asset_id}:`, audioError);
+    } else {
+      audioAsset = audio;
+    }
+  }
+
+  if (job.transcript_asset_id) {
+    const { data: transcript, error: transcriptError } = await supabaseAdmin
+      .from('assets')
+      .select('*')
+      .eq('id', job.transcript_asset_id)
+      .single();
+    if (transcriptError) {
+      console.error(`[Worker] Failed to fetch transcript asset ${job.transcript_asset_id}:`, transcriptError);
+    } else {
+      transcriptAsset = transcript;
+    }
+  }
+
+  // Fallback: also check legacy job_id-based assets for backward compatibility
+  if (!audioAsset || !transcriptAsset) {
+    const { data: assets, error: assetsError } = await supabaseAdmin
+      .from('assets')
+      .select('*')
+      .eq('job_id', jobId)
+      .order('created_at', { ascending: true });
+
+    if (!assetsError && assets) {
+      if (!audioAsset) {
+        audioAsset = assets.find((a: any) => a.kind === 'audio' || a.type === 'AUDIO');
+      }
+      if (!transcriptAsset) {
+        transcriptAsset = assets.find((a: any) => a.kind === 'transcript' || a.type === 'TRANSCRIPT_UPLOADED');
+      }
+    }
+  }
+
+  // Process based on mode and status
   if (job.mode === 'TRANSCRIPT_ONLY') {
-    await processTranscriptOnly(job, transcriptAsset!);
+    if (!transcriptAsset) {
+      throw new Error('Transcript asset required for TRANSCRIPT_ONLY mode');
+    }
+    await processTranscriptOnly(job, transcriptAsset);
   } else if (job.mode === 'AUDIO_ONLY') {
-    await processAudioOnly(job, audioAsset!);
+    if (!audioAsset) {
+      throw new Error('Audio asset required for AUDIO_ONLY mode');
+    }
+    if (job.status === 'TRANSCRIBING') {
+      await processAudioOnly(job, audioAsset);
+    } else {
+      throw new Error(`Invalid status ${job.status} for AUDIO_ONLY mode`);
+    }
   } else if (job.mode === 'AUDIO_PLUS_TRANSCRIPT') {
-    await processAudioPlusTranscript(job, audioAsset!, transcriptAsset!);
+    if (!transcriptAsset) {
+      throw new Error('Transcript asset required for AUDIO_PLUS_TRANSCRIPT mode');
+    }
+    await processAudioPlusTranscript(job, audioAsset, transcriptAsset);
   }
 }
 
@@ -305,70 +358,79 @@ async function processAudioPlusTranscript(job: any, audioAsset: any, transcriptA
     jobId: job.id,
   });
 
-  // Step 2: Transcribe audio in background
-  await updateJobProgress(job.id, 'VERIFYING', 50);
+  // Step 2: Transcribe audio in background (optional - don't block on failure)
+  // Evaluation is already complete, so audio transcription/verification is optional
+  let verificationReportId: string | null = null;
 
-  const audioBuffer = await readAssetContent(audioAsset);
-  const transcriptionResult = await withTranscriptionSlot(async () => {
-    return await transcribeAudio(audioBuffer, audioAsset.metadata_json?.filename || 'audio.wav');
-  });
+  if (audioAsset) {
+    try {
+      await updateJobProgress(job.id, 'VERIFYING', 50);
+      const audioBuffer = await readAssetContent(audioAsset);
+      const transcriptionResult = await withTranscriptionSlot(async () => {
+        return await transcribeAudio(audioBuffer, audioAsset.metadata_json?.filename || 'audio.wav');
+      });
 
-  // Store ASR transcript
-  const asrText = transcriptionResult.transcript || transcriptionResult.text || '';
-  const asrBuffer = Buffer.from(asrText, 'utf-8');
-  
-  const { data: asrAsset, error: asrError } = await supabaseAdmin!
-    .from('assets')
-    .insert({
-      org_id: job.org_id,
-      job_id: job.id,
-      type: 'TRANSCRIPT_ASR',
-      storage_url: audioAsset.storage_url.replace(/\.(wav|mp3|m4a)$/, '.txt'),
-      content_hash: require('crypto').createHash('sha256').update(asrBuffer).digest('hex'),
-      mime_type: 'text/plain',
-      metadata_json: {
-        language: transcriptionResult.language,
-        durationMs: transcriptionResult.durationMs,
-        vadStats: transcriptionResult.vadStats,
-      },
-    })
-    .select('id')
-    .single();
+      // Store ASR transcript
+      const asrText = transcriptionResult.transcript || transcriptionResult.text || '';
+      const asrBuffer = Buffer.from(asrText, 'utf-8');
+      
+      const { data: asrAssetData, error: asrError } = await supabaseAdmin!
+        .from('assets')
+        .insert({
+          org_id: job.org_id,
+          job_id: job.id,
+          kind: 'transcript',
+          type: 'TRANSCRIPT_ASR',
+          storage_url: audioAsset.storage_url?.replace(/\.(wav|mp3|m4a)$/, '.txt') || null,
+          content_hash: require('crypto').createHash('sha256').update(asrBuffer).digest('hex'),
+          mime_type: 'text/plain',
+          metadata_json: {
+            language: transcriptionResult.language,
+            durationMs: transcriptionResult.durationMs,
+            vadStats: transcriptionResult.vadStats,
+          },
+        })
+        .select('id')
+        .single();
 
-  if (asrError) {
-    throw new Error(`Failed to store ASR transcript: ${asrError.message}`);
+      if (asrError) {
+        console.warn(`[Worker] Failed to store ASR transcript for job ${job.id}:`, asrError.message);
+      } else {
+        // Step 3: Compute verification diff
+        await updateJobProgress(job.id, 'VERIFYING', 80);
+
+        const verificationReport = await computeVerificationDiff(
+          job.org_id,
+          job.id,
+          transcriptAsset.id,
+          asrAssetData.id,
+          normalized.text,
+          asrText
+        );
+
+        verificationReportId = verificationReport.id;
+
+        // Check if mismatch is beyond threshold
+        const mismatchThreshold = parseFloat(process.env.VERIFY_MISMATCH_THRESHOLD || '0.20');
+        
+        if (verificationReport.summary_json.mismatchScore > mismatchThreshold) {
+          // Update evaluation with mismatch flag
+          await supabaseAdmin!
+            .from('evaluations')
+            .update({ verification_level: 'MISMATCH_FLAGGED' })
+            .eq('id', evaluationId);
+        }
+      }
+    } catch (audioError: any) {
+      // Audio transcription/verification failed, but evaluation is already complete
+      console.warn(`[Worker] Audio transcription/verification failed for job ${job.id}, but evaluation is complete:`, audioError.message);
+    }
   }
 
-  // Step 3: Compute verification diff
-  await updateJobProgress(job.id, 'VERIFYING', 80);
-
-  const verificationReport = await computeVerificationDiff(
-    job.org_id,
-    job.id,
-    transcriptAsset.id,
-    asrAsset.id,
-    normalized.text,
-    asrText
-  );
-
-  // Check if mismatch is beyond threshold
-  const mismatchThreshold = parseFloat(process.env.VERIFY_MISMATCH_THRESHOLD || '0.20');
-  let finalVerificationLevel = 'TRANSCRIPT_PROVIDED';
-  
-  if (verificationReport.summary_json.mismatchScore > mismatchThreshold) {
-    finalVerificationLevel = 'MISMATCH_FLAGGED';
-    
-    // Update evaluation with mismatch flag
-    await supabaseAdmin!
-      .from('evaluations')
-      .update({ verification_level: 'MISMATCH_FLAGGED' })
-      .eq('id', evaluationId);
-  }
-
-  // Update job as complete
+  // Update job as complete (evaluation is already done, audio verification is optional)
   await updateJobStatus(job.id, 'COMPLETE', null, {
     analysisRunId: evaluationId,
-    verificationReportId: verificationReport.id,
+    verificationReportId: verificationReportId,
   });
 }
 

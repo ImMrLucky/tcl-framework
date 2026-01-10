@@ -244,7 +244,23 @@
           </div>
 
           <div class="submit-section">
+            <!-- Show "Transcribe & Analyze" button when job is READY (Audio Only mode) -->
             <button
+              *ngIf="jobStatus === 'READY'"
+              mat-raised-button
+              color="primary"
+              type="button"
+              (click)="startProcessing()"
+              [disabled]="loading"
+            >
+              <mat-spinner *ngIf="loading" diameter="20" class="inline-spinner"></mat-spinner>
+              <mat-icon *ngIf="!loading">play_arrow</mat-icon>
+              <span>{{ loading ? 'Starting...' : 'Transcribe & Analyze' }}</span>
+            </button>
+
+            <!-- Regular submit button for initial upload -->
+            <button
+              *ngIf="jobStatus !== 'READY'"
               mat-raised-button
               color="primary"
               type="submit"
@@ -254,7 +270,7 @@
               <mat-icon *ngIf="!loading && !transcriptionInProgress">play_arrow</mat-icon>
               <span *ngIf="transcriptionInProgress">Transcribing...</span>
               <span *ngIf="!transcriptionInProgress">
-                {{ loading ? 'Processing...' : (isAudioFile && !transcript ? 'Transcribe & Analyze' : 'Run Analysis') }}
+                {{ loading ? 'Processing...' : (isAudioFile && !transcript ? 'Upload Audio' : 'Run Analysis') }}
               </span>
             </button>
           </div>

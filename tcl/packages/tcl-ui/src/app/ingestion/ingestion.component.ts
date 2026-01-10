@@ -101,7 +101,7 @@ export class IngestionComponent implements OnInit, OnDestroy {
 
   // Job-based ingestion state
   currentJobId: string | null = null;
-  jobStatus: 'UPLOADED' | 'TRANSCRIBING' | 'ANALYZING' | 'VERIFYING' | 'COMPLETE' | 'FAILED' | null = null;
+  jobStatus: 'UPLOADED' | 'READY' | 'TRANSCRIBING' | 'ANALYZING' | 'VERIFYING' | 'COMPLETE' | 'FAILED' | null = null;
   jobProgress = 0;
   jobStage: string | null = null;
   pollingInterval: any = null;
@@ -321,7 +321,12 @@ export class IngestionComponent implements OnInit, OnDestroy {
     try {
       // Step 1: Create ingestion job
       const jobResponse = await firstValueFrom(
-        this.auditService.createIngestionJob({ mode, options: { analyzeImmediately: true } })
+        this.auditService.createIngestionJob({ 
+          mode, 
+          title: this.title || undefined,
+          channel: this.channel || undefined,
+          options: { analyzeImmediately: mode !== 'AUDIO_ONLY' } // Don't auto-start for Audio Only
+        })
       );
 
       this.currentJobId = jobResponse.jobId;
@@ -374,10 +379,19 @@ export class IngestionComponent implements OnInit, OnDestroy {
         }
       }
 
-      // Step 3: Start polling for job status
-      console.log('[Ingestion] Starting job status polling...');
-      console.log('[Ingestion] Job ID:', jobResponse.jobId);
-      this.startJobPolling(jobResponse.jobId);
+      // Step 3: Handle post-upload behavior based on mode
+      if (mode === 'AUDIO_ONLY') {
+        // For Audio Only: Upload is complete, show "Transcribe & Analyze" button
+        // Don't start polling yet - wait for user to click "Transcribe & Analyze"
+        this.loading = false;
+        this.jobStatus = 'READY';
+        console.log('[Ingestion] Audio uploaded successfully. Ready for transcription.');
+      } else {
+        // For other modes: Start polling immediately (processing starts automatically)
+        console.log('[Ingestion] Starting job status polling...');
+        console.log('[Ingestion] Job ID:', jobResponse.jobId);
+        this.startJobPolling(jobResponse.jobId);
+      }
       
       // Keep loading state true while polling (will be cleared when job completes or fails)
       // Note: loading state controls button text, jobStatus controls progress display
@@ -701,13 +715,14 @@ export class IngestionComponent implements OnInit, OnDestroy {
       throw new Error('Missing Supabase anon key for apikey header');
     }
 
-    // Encode per segment so slashes remain slashes
+    // Encode per segment so slashes remain slashes (canonical encoding)
     const encodedPath = objectPath.split('/').map(encodeURIComponent).join('/');
+    // Use canonical Supabase URL (no .storage. rewriting)
     const uploadUrl = `${supabaseUrl}/storage/v1/object/${bucket}/${encodedPath}`;
     
     console.log('[Upload] Upload URL:', uploadUrl);
     console.log('[Upload] Original path:', objectPath);
-    console.log('[Upload] Encoded path:', encodedPath);
+    console.log('[Upload] Encoded path (per segment):', encodedPath);
     console.log('[Upload] Bucket:', bucket);
     console.log('[Upload] File size:', file.size, 'bytes');
     console.log('[Upload] File type:', file.type);
@@ -729,6 +744,7 @@ export class IngestionComponent implements OnInit, OnDestroy {
       });
       
       const fetchStartTime = Date.now();
+      // Use canonical Supabase URL, segment-encoded path, apikey header, no Content-Length
       const res = await fetch(uploadUrl, {
         method: 'PUT',
         headers: {
@@ -736,6 +752,7 @@ export class IngestionComponent implements OnInit, OnDestroy {
           Authorization: `Bearer ${session.access_token}`,
           'Content-Type': file.type || 'application/octet-stream',
           'x-upsert': 'false',
+          // Note: Do NOT include Content-Length - let browser set it automatically
         },
         body: file,
         signal: controller.signal,
@@ -813,6 +830,55 @@ export class IngestionComponent implements OnInit, OnDestroy {
     if (this.pollingInterval) {
       clearInterval(this.pollingInterval);
       this.pollingInterval = null;
+    }
+  }
+
+  /**
+   * Start processing for Audio Only mode (calls /start endpoint)
+   */
+  async startProcessing() {
+    if (!this.currentJobId) {
+      this.errorMessage = 'No job ID available';
+      this.snackBar.open(this.errorMessage, 'Close', { duration: 3000 });
+      return;
+    }
+
+    if (this.jobStatus !== 'READY') {
+      this.errorMessage = 'Job is not ready for processing';
+      this.snackBar.open(this.errorMessage, 'Close', { duration: 3000 });
+      return;
+    }
+
+    this.loading = true;
+    this.errorMessage = '';
+
+    try {
+      console.log('[Ingestion] Starting job processing...');
+      const result = await firstValueFrom(this.auditService.startJob(this.currentJobId));
+      
+      if (result.alreadyComplete) {
+        this.snackBar.open('Job is already complete', 'Close', { duration: 3000 });
+        this.loading = false;
+        // Refresh status
+        await this.pollJobStatus(this.currentJobId);
+        return;
+      }
+
+      if (result.alreadyProcessing) {
+        this.snackBar.open('Job is already processing', 'Close', { duration: 3000 });
+        // Start polling to track progress
+        this.startJobPolling(this.currentJobId);
+        return;
+      }
+
+      console.log('[Ingestion] Job processing started successfully');
+      // Start polling to track progress
+      this.startJobPolling(this.currentJobId);
+    } catch (error: any) {
+      console.error('[Ingestion] Error starting job:', error);
+      this.errorMessage = error.error?.error || error.message || 'Failed to start job processing';
+      this.snackBar.open(this.errorMessage, 'Close', { duration: 5000 });
+      this.loading = false;
     }
   }
 
@@ -1049,6 +1115,7 @@ export class IngestionComponent implements OnInit, OnDestroy {
    * Get icon for job status
    */
   getJobStatusIcon(): string {
+    if (this.jobStatus === 'READY') return 'check_circle';
     switch (this.jobStatus) {
       case 'UPLOADED':
         return 'upload';
@@ -1070,6 +1137,8 @@ export class IngestionComponent implements OnInit, OnDestroy {
     switch (this.jobStatus) {
       case 'UPLOADED':
         return 'Uploading files...';
+      case 'READY':
+        return 'Ready to transcribe';
       case 'TRANSCRIBING':
         return 'Transcribing audio...';
       case 'ANALYZING':
