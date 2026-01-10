@@ -404,27 +404,10 @@ export class IngestionComponent implements OnInit, OnDestroy {
         return;
       }
 
-      // Check if user is authenticated
-      console.log(`[Upload] Checking user session...`);
-      const { data: { session }, error: sessionError } = await supabaseClient.auth.getSession();
-      console.log(`[Upload] Session check result:`, { 
-        hasSession: !!session, 
-        hasError: !!sessionError,
-        error: sessionError?.message 
-      });
-      
-      if (sessionError || !session) {
-        console.warn(`[Upload] ⚠️ User not authenticated, falling back to proxy method:`, sessionError);
-        // Fallback to proxy upload
-        const formData = new FormData();
-        formData.append(kind, file);
-        await firstValueFrom(
-          this.auditService.uploadJobFiles(jobId, kind === 'audio' ? file : undefined, kind === 'transcript' ? file : undefined)
-        );
-        return;
-      }
-      
-      console.log(`[Upload] ✅ User authenticated, proceeding with direct upload`);
+      // Skip session check - let the upload fail if not authenticated
+      // This avoids hanging on getSession() calls
+      console.log(`[Upload] Skipping session check, proceeding directly to upload`);
+      console.log(`[Upload] If upload fails due to auth, we'll fall back to proxy method`);
 
       console.log(`[Upload] User authenticated, uploading to Supabase Storage...`);
       console.log(`[Upload] Upload details:`, {
@@ -615,9 +598,38 @@ export class IngestionComponent implements OnInit, OnDestroy {
       (supabaseClient as any).supabaseKey ||
       (typeof window !== 'undefined' && (window as any).__SUPABASE_ANON_KEY);
 
-    const { data: { session }, error: sessionError } = await supabaseClient.auth.getSession();
+    // Get session with timeout to avoid hanging
+    console.log('[Upload] Getting session for upload...');
+    let session: any = null;
+    let sessionError: any = null;
     
-    if (sessionError) {
+    try {
+      const sessionPromise = supabaseClient.auth.getSession();
+      const timeoutPromise = new Promise((_, reject) => 
+        setTimeout(() => reject(new Error('Session check timeout')), 3000)
+      );
+      
+      const result = await Promise.race([sessionPromise, timeoutPromise]) as any;
+      session = result?.data?.session;
+      sessionError = result?.error;
+      console.log('[Upload] Session retrieved:', { hasSession: !!session, hasError: !!sessionError });
+    } catch (err: any) {
+      console.error('[Upload] Session check failed:', err);
+      sessionError = err;
+      // Try to get session from storage directly as fallback
+      try {
+        const storedSession = localStorage.getItem('sb-uqwcmkyaskyduxuluqrm-auth-token');
+        if (storedSession) {
+          const parsed = JSON.parse(storedSession);
+          session = parsed?.session;
+          console.log('[Upload] Retrieved session from localStorage fallback');
+        }
+      } catch (storageErr) {
+        console.error('[Upload] Failed to get session from storage:', storageErr);
+      }
+    }
+    
+    if (sessionError && !session) {
       console.error('[Upload] Session error:', sessionError);
       throw new Error(`Session error: ${sessionError.message}`);
     }
@@ -626,6 +638,8 @@ export class IngestionComponent implements OnInit, OnDestroy {
       console.error('[Upload] No access token in session');
       throw new Error('No authentication token available');
     }
+    
+    console.log('[Upload] ✅ Session token available, proceeding with upload');
     
     if (!supabaseAnonKey) {
       console.error('[Upload] Missing anon key. Client key:', (supabaseClient as any).supabaseKey, 'Window key:', typeof window !== 'undefined' ? (window as any).__SUPABASE_ANON_KEY : 'N/A');
