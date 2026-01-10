@@ -423,11 +423,11 @@ export class IngestionComponent implements OnInit, OnDestroy {
       });
 
       // Step 3: Upload file directly to Supabase Storage
-      // Add timeout to prevent hanging (5 minutes for large files)
+      // Use direct storage hostname for all uploads (faster and just as secure)
+      // The direct storage hostname uses the same authentication and RLS policies
       const uploadStartTime = Date.now();
-      const uploadTimeout = 5 * 60 * 1000; // 5 minutes
       
-      console.log(`[Upload] Starting Supabase Storage upload with ${uploadTimeout/1000}s timeout...`);
+      console.log(`[Upload] Starting Supabase Storage upload via direct hostname...`);
       console.log(`[Upload] Upload parameters:`, {
         bucket: metadata.bucket,
         path: metadata.objectPath,
@@ -439,34 +439,14 @@ export class IngestionComponent implements OnInit, OnDestroy {
       let uploadError: any = null;
       
       try {
-        // Wrap upload in a timeout
-        const uploadPromise = supabaseClient.storage
-          .from(metadata.bucket)
-          .upload(metadata.objectPath, file, {
-            contentType: file.type || 'application/octet-stream',
-            upsert: false,
-          });
-        
-        // Create a timeout that rejects
-        const timeoutPromise = new Promise<never>((_, reject) => {
-          setTimeout(() => {
-            console.error(`[Upload] ⏱️ Upload timeout after ${uploadTimeout/1000}s - upload may be hanging`);
-            reject(new Error(`Upload timeout after ${uploadTimeout/1000} seconds. File may be too large or network connection is slow.`));
-          }, uploadTimeout);
-        });
-        
-        // Race between upload and timeout
-        const result = await Promise.race([
-          uploadPromise.then(result => ({ type: 'success', result })),
-          timeoutPromise.catch(error => ({ type: 'timeout', error }))
-        ]) as any;
-        
-        if (result.type === 'success') {
-          uploadData = result.result.data;
-          uploadError = result.result.error;
-        } else {
-          uploadError = result.error;
-        }
+        // Use direct storage hostname for all uploads (faster, same security)
+        console.log(`[Upload] Uploading ${(file.size / 1024 / 1024).toFixed(2)} MB file via direct storage hostname`);
+        uploadData = await this.uploadFileDirectStorage(
+          supabaseClient,
+          metadata.bucket,
+          metadata.objectPath,
+          file
+        );
       } catch (error: any) {
         console.error(`[Upload] Upload exception:`, error);
         uploadError = error;
@@ -540,6 +520,90 @@ export class IngestionComponent implements OnInit, OnDestroy {
     } catch (error: any) {
       console.error(`[Upload] Error uploading ${kind}:`, error);
       throw new Error(`Failed to upload ${kind} file: ${error.message || error.error?.message || 'Unknown error'}`);
+    }
+  }
+
+  /**
+   * Upload file via direct storage hostname (faster and just as secure)
+   * Uses Supabase REST API directly with the storage hostname for better performance
+   * Security: Uses same authentication (Bearer token) and RLS policies apply
+   */
+  async uploadFileDirectStorage(
+    supabaseClient: SupabaseClient,
+    bucket: string,
+    objectPath: string,
+    file: File
+  ): Promise<any> {
+    // Get Supabase URL and access token
+    const supabaseUrl = (supabaseClient as any).supabaseUrl;
+    const { data: { session } } = await supabaseClient.auth.getSession();
+    
+    if (!session?.access_token) {
+      throw new Error('No authentication token available');
+    }
+
+    // Use direct storage hostname for better performance (recommended by Supabase)
+    // Convert https://project.supabase.co to https://project.storage.supabase.co
+    const storageUrl = supabaseUrl.replace('.supabase.co', '.storage.supabase.co');
+    const encodedPath = encodeURIComponent(objectPath);
+    const uploadUrl = `${storageUrl}/storage/v1/object/${bucket}/${encodedPath}`;
+
+    console.log(`[Upload] Using direct storage hostname: ${storageUrl}`);
+    console.log(`[Upload] Uploading ${(file.size / 1024 / 1024).toFixed(2)} MB file`);
+    console.log(`[Upload] Security: Using authenticated session token, RLS policies apply`);
+
+    // Upload the file directly using fetch with the direct storage hostname
+    // This is faster than the standard API endpoint because it bypasses API gateway overhead
+    // Security: Uses same Bearer token authentication, RLS policies still apply
+    // Add timeout to prevent hanging (10 minutes for very large files)
+    const uploadTimeout = 10 * 60 * 1000; // 10 minutes
+    
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => {
+      console.error(`[Upload] Upload timeout after ${uploadTimeout/1000}s`);
+      controller.abort();
+    }, uploadTimeout);
+
+    try {
+      const response = await fetch(uploadUrl, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${session.access_token}`,
+          'Content-Type': file.type || 'application/octet-stream',
+          'Content-Length': file.size.toString(),
+          'x-upsert': 'false',
+        },
+        body: file, // Supabase handles large files efficiently
+        signal: controller.signal,
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error(`[Upload] Upload failed:`, {
+          status: response.status,
+          statusText: response.statusText,
+          error: errorText,
+        });
+        
+        if (response.status === 403) {
+          throw new Error(`STORAGE_AUTH_FAILED: ${errorText}`);
+        }
+        if (response.status === 409) {
+          throw new Error(`STORAGE_FILE_EXISTS: File already exists`);
+        }
+        throw new Error(`Upload failed: ${response.status} ${errorText}`);
+      }
+
+      const result = await response.json();
+      console.log(`[Upload] Upload successful:`, result);
+      return { path: result.Key || objectPath || result.path || objectPath };
+    } catch (error: any) {
+      if (error.name === 'AbortError') {
+        throw new Error(`Upload timeout after ${uploadTimeout/1000} seconds. File may be too large or network connection is slow.`);
+      }
+      throw error;
+    } finally {
+      clearTimeout(timeoutId);
     }
   }
 
