@@ -127,7 +127,17 @@ export class AuthService {
     // Load initial session - set user immediately if session exists
     // Use a small delay to ensure localStorage is checked after any signOut operations
     setTimeout(() => {
-      this.supabase.auth.getSession().then(async ({ data: { session }, error: sessionError }) => {
+      // Clear expired session first to prevent hanging
+      this.clearExpiredSession();
+      
+      // Add timeout to getSession to prevent hanging
+      const sessionPromise = this.supabase.auth.getSession();
+      const timeoutPromise = new Promise((_, reject) => 
+        setTimeout(() => reject(new Error('Session check timeout')), 3000)
+      );
+      
+      Promise.race([sessionPromise, timeoutPromise]).then(async (result: any) => {
+        const { data: { session }, error: sessionError } = result || { data: { session: null }, error: null };
         if (sessionError) {
           this.currentUserSubject.next(null);
           return;
@@ -161,7 +171,10 @@ export class AuthService {
         } else {
           this.currentUserSubject.next(null);
         }
-      }).catch(() => {
+      }).catch((err) => {
+        console.warn('[Auth] Session check failed or timed out:', err?.message);
+        // Clear expired session on timeout
+        this.clearExpiredSession();
         this.currentUserSubject.next(null);
       });
     }, 100);
@@ -339,6 +352,10 @@ export class AuthService {
   }
 
   async signIn(email: string, password: string): Promise<{ error: AuthError | null; duplicateAccount?: boolean }> {
+    // Clear any expired sessions before attempting login
+    // This prevents hanging on getSession() calls with expired tokens
+    this.clearExpiredSession();
+    
     const { data, error } = await this.supabase.auth.signInWithPassword({
       email,
       password
@@ -853,16 +870,61 @@ export class AuthService {
     }
 
     // Fallback to Supabase getSession - handles token refresh
+    // Add timeout to prevent hanging
     try {
-      const { data: { session } } = await this.supabase.auth.getSession();
+      const sessionPromise = this.supabase.auth.getSession();
+      const timeoutPromise = new Promise((_, reject) => 
+        setTimeout(() => reject(new Error('Session check timeout')), 3000)
+      );
+      
+      const result = await Promise.race([sessionPromise, timeoutPromise]) as any;
+      const { data: { session } } = result || { data: { session: null } };
+      
       if (session?.access_token) {
         return session.access_token;
       }
-    } catch {
-      // Error getting session
+    } catch (err) {
+      // Error getting session or timeout - clear expired session
+      console.warn('[Auth] getSession failed or timed out in getAccessToken:', err?.message);
+      this.clearExpiredSession();
     }
     
     return null;
+  }
+
+  /**
+   * Clear expired session from localStorage
+   * Call this before login attempts to prevent hanging on expired tokens
+   */
+  private clearExpiredSession(): void {
+    if (typeof window === 'undefined' || !window.localStorage) {
+      return;
+    }
+    
+    const storageKey = 'sb-uqwcmkyaskyduxuluqrm-auth-token';
+    const storedSession = localStorage.getItem(storageKey);
+    
+    if (storedSession) {
+      try {
+        const parsed = JSON.parse(storedSession);
+        const expiresAt = parsed?.expires_at || parsed?.session?.expires_at;
+        
+        // Check if token is expired
+        if (expiresAt) {
+          const expiryTime = typeof expiresAt === 'string' ? parseInt(expiresAt, 10) : expiresAt;
+          if (expiryTime * 1000 < Date.now()) {
+            console.log('[Auth] Clearing expired session from localStorage');
+            localStorage.removeItem(storageKey);
+            // Also clear user state
+            this.currentUserSubject.next(null);
+          }
+        }
+      } catch (e) {
+        // Invalid JSON - clear it
+        console.log('[Auth] Clearing invalid session from localStorage');
+        localStorage.removeItem(storageKey);
+      }
+    }
   }
 
   /**
