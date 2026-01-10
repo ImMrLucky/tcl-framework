@@ -331,17 +331,31 @@ export class IngestionComponent implements OnInit, OnDestroy {
         transcriptFile = this.transcriptFile!;
       }
 
-      // Upload files directly to Supabase Storage (bypasses Netlify 6MB limit)
+      // Step 2: Upload files directly to Supabase Storage (bypasses Netlify 6MB limit)
       // If direct upload fails (e.g., RLS policy), it will fall back to proxy method
-      if (audioFile) {
-        await this.uploadFileDirectly(jobResponse.jobId, audioFile, 'audio');
-      }
-      if (transcriptFile) {
-        await this.uploadFileDirectly(jobResponse.jobId, transcriptFile, 'transcript');
+      console.log('[Ingestion] Starting file uploads...');
+      try {
+        if (audioFile) {
+          console.log('[Ingestion] Uploading audio file...');
+          await this.uploadFileDirectly(jobResponse.jobId, audioFile, 'audio');
+          console.log('[Ingestion] Audio file uploaded successfully');
+        }
+        if (transcriptFile) {
+          console.log('[Ingestion] Uploading transcript file...');
+          await this.uploadFileDirectly(jobResponse.jobId, transcriptFile, 'transcript');
+          console.log('[Ingestion] Transcript file uploaded successfully');
+        }
+        console.log('[Ingestion] All files uploaded successfully');
+      } catch (uploadError: any) {
+        console.error('[Ingestion] File upload failed:', uploadError);
+        throw new Error(`File upload failed: ${uploadError.message || 'Unknown error'}`);
       }
 
       // Step 3: Start polling for job status
+      console.log('[Ingestion] Starting job status polling...');
       this.startJobPolling(jobResponse.jobId);
+      
+      // Keep loading state true while polling (will be cleared when job completes or fails)
 
     } catch (error: any) {
       console.error('Ingestion error:', error);
@@ -386,19 +400,99 @@ export class IngestionComponent implements OnInit, OnDestroy {
         return;
       }
 
+      // Check if user is authenticated
+      const { data: { session }, error: sessionError } = await supabaseClient.auth.getSession();
+      if (sessionError || !session) {
+        console.warn(`[Upload] User not authenticated, falling back to proxy method:`, sessionError);
+        // Fallback to proxy upload
+        const formData = new FormData();
+        formData.append(kind, file);
+        await firstValueFrom(
+          this.auditService.uploadJobFiles(jobId, kind === 'audio' ? file : undefined, kind === 'transcript' ? file : undefined)
+        );
+        return;
+      }
+
+      console.log(`[Upload] User authenticated, uploading to Supabase Storage...`);
+      console.log(`[Upload] Upload details:`, {
+        bucket: metadata.bucket,
+        objectPath: metadata.objectPath,
+        fileSize: file.size,
+        fileName: file.name,
+        contentType: file.type || 'application/octet-stream',
+      });
+
       // Step 3: Upload file directly to Supabase Storage
-      console.log(`[Upload] Uploading to Supabase Storage...`);
-      const { data: uploadData, error: uploadError } = await supabaseClient.storage
-        .from(metadata.bucket)
-        .upload(metadata.objectPath, file, {
-          contentType: file.type || 'application/octet-stream',
-          upsert: false,
+      // Add timeout to prevent hanging (5 minutes for large files)
+      const uploadStartTime = Date.now();
+      const uploadTimeout = 5 * 60 * 1000; // 5 minutes
+      
+      console.log(`[Upload] Starting Supabase Storage upload with ${uploadTimeout/1000}s timeout...`);
+      console.log(`[Upload] Upload parameters:`, {
+        bucket: metadata.bucket,
+        path: metadata.objectPath,
+        fileSize: file.size,
+        fileName: file.name,
+      });
+      
+      let uploadData: any = null;
+      let uploadError: any = null;
+      
+      try {
+        // Wrap upload in a timeout
+        const uploadPromise = supabaseClient.storage
+          .from(metadata.bucket)
+          .upload(metadata.objectPath, file, {
+            contentType: file.type || 'application/octet-stream',
+            upsert: false,
+          });
+        
+        // Create a timeout that rejects
+        const timeoutPromise = new Promise<never>((_, reject) => {
+          setTimeout(() => {
+            console.error(`[Upload] ⏱️ Upload timeout after ${uploadTimeout/1000}s - upload may be hanging`);
+            reject(new Error(`Upload timeout after ${uploadTimeout/1000} seconds. File may be too large or network connection is slow.`));
+          }, uploadTimeout);
         });
+        
+        // Race between upload and timeout
+        const result = await Promise.race([
+          uploadPromise.then(result => ({ type: 'success', result })),
+          timeoutPromise.catch(error => ({ type: 'timeout', error }))
+        ]) as any;
+        
+        if (result.type === 'success') {
+          uploadData = result.result.data;
+          uploadError = result.result.error;
+        } else {
+          uploadError = result.error;
+        }
+      } catch (error: any) {
+        console.error(`[Upload] Upload exception:`, error);
+        uploadError = error;
+        uploadData = null;
+      }
+
+      const uploadDuration = Date.now() - uploadStartTime;
+      console.log(`[Upload] Upload attempt completed in ${uploadDuration}ms`, {
+        hasData: !!uploadData,
+        hasError: !!uploadError,
+        errorMessage: uploadError?.message,
+      });
 
       if (uploadError) {
-        console.error(`[Upload] Supabase upload error:`, uploadError);
+        console.error(`[Upload] Supabase upload error:`, {
+          error: uploadError,
+          message: uploadError.message,
+          statusCode: (uploadError as any).statusCode,
+          name: (uploadError as any).name,
+        });
         // If RLS blocks the upload, fall back to proxy method
-        if (uploadError.message?.includes('new row violates') || uploadError.message?.includes('permission') || uploadError.message?.includes('policy')) {
+        if (uploadError.message?.includes('new row violates') || 
+            uploadError.message?.includes('permission') || 
+            uploadError.message?.includes('policy') ||
+            uploadError.message?.includes('Unauthorized') ||
+            uploadError.message?.includes('403')) {
           console.warn(`[Upload] RLS policy blocked direct upload, falling back to proxy method`);
           // Fallback to proxy upload
           const formData = new FormData();
@@ -411,27 +505,38 @@ export class IngestionComponent implements OnInit, OnDestroy {
         throw new Error(`Failed to upload to Supabase Storage: ${uploadError.message}`);
       }
 
-      console.log(`[Upload] File uploaded to Supabase Storage successfully`);
+      console.log(`[Upload] File uploaded to Supabase Storage successfully:`, uploadData);
 
       // Step 4: Compute SHA-256 hash
+      console.log(`[Upload] Computing SHA-256 hash for file (${file.size} bytes)...`);
+      const hashStartTime = Date.now();
       const sha256 = await this.computeFileHash(file);
-      console.log(`[Upload] Computed SHA-256:`, sha256);
+      const hashDuration = Date.now() - hashStartTime;
+      console.log(`[Upload] Computed SHA-256 in ${hashDuration}ms:`, sha256);
 
       // Step 5: Finalize upload with backend
-      await firstValueFrom(
-        this.auditService.finalizeUpload(
-          jobId,
-          metadata.assetId,
-          metadata.bucket,
-          metadata.objectPath,
-          file.name,
-          file.size,
-          sha256,
-          kind
-        )
-      );
-
-      console.log(`[Upload] Upload finalized for ${kind}`);
+      console.log(`[Upload] Calling finalize-upload endpoint...`);
+      const finalizeStartTime = Date.now();
+      try {
+        const finalizeResult = await firstValueFrom(
+          this.auditService.finalizeUpload(
+            jobId,
+            metadata.assetId,
+            metadata.bucket,
+            metadata.objectPath,
+            file.name,
+            file.size,
+            sha256,
+            kind
+          )
+        );
+        const finalizeDuration = Date.now() - finalizeStartTime;
+        console.log(`[Upload] Upload finalized in ${finalizeDuration}ms:`, finalizeResult);
+        console.log(`[Upload] ✅ Upload completed successfully for ${kind}`);
+      } catch (finalizeError: any) {
+        console.error(`[Upload] Finalize upload failed:`, finalizeError);
+        throw new Error(`Failed to finalize upload: ${finalizeError.message || finalizeError.error?.message || 'Unknown error'}`);
+      }
     } catch (error: any) {
       console.error(`[Upload] Error uploading ${kind}:`, error);
       throw new Error(`Failed to upload ${kind} file: ${error.message || error.error?.message || 'Unknown error'}`);
