@@ -16,6 +16,7 @@ import { supabaseAdmin } from '../supabase.js';
 import { storeUploadedAsset, createSignedUrl } from './storage-supabase.js';
 import { enqueueJob } from './worker.js';
 import crypto from 'crypto';
+import { logUpload, logError } from '../utils/logger.js';
 
 // Helper to get MIME type
 function getMimeType(filename: string): string {
@@ -43,11 +44,11 @@ function ensureUploadTempDirSync(): string {
   try {
     if (!fs.existsSync(UPLOAD_TEMP_DIR)) {
       fs.mkdirSync(UPLOAD_TEMP_DIR, { recursive: true });
-      console.log(`[Upload] Created temp directory: ${UPLOAD_TEMP_DIR}`);
+      logUpload('debug', `Created temp directory: ${UPLOAD_TEMP_DIR}`);
     }
     return UPLOAD_TEMP_DIR;
   } catch (error: any) {
-    console.error(`[Upload] Failed to create temp directory:`, error);
+    logError('Upload', 'Failed to create temp directory', error);
     throw new Error(`Failed to create upload temp directory: ${error.message}`);
   }
 }
@@ -56,7 +57,7 @@ function ensureUploadTempDirSync(): string {
 try {
   ensureUploadTempDirSync();
 } catch (error: any) {
-  console.error(`[Upload] Warning: Could not create temp directory on startup:`, error);
+  logError('Upload', 'Warning: Could not create temp directory on startup', error);
 }
 
 // Configure multer to use disk storage (not memory)
@@ -67,7 +68,7 @@ const upload = multer({
         const dir = ensureUploadTempDirSync();
         cb(null, dir);
       } catch (error: any) {
-        console.error(`[Upload] Multer destination error:`, error);
+        logError('Upload', 'Multer destination error', error);
         cb(error, '');
       }
     },
@@ -135,7 +136,7 @@ export async function createIngestionJob(
     throw new Error('Database not configured');
   }
 
-  console.log('[CreateJob] Creating job:', { orgId, projectId, env, userId, mode });
+        logUpload('debug', 'Creating job', { orgId, projectId, env, userId, mode });
 
   const { data, error } = await supabaseAdmin
     .from('ingestion_jobs')
@@ -153,7 +154,7 @@ export async function createIngestionJob(
     .single();
 
   if (error) {
-    console.error('[CreateJob] Database error:', {
+    logError('CreateJob', 'Database error', {
       code: error.code,
       message: error.message,
       details: error.details,
@@ -175,11 +176,11 @@ export async function createIngestionJob(
   }
 
   if (!data || !data.id) {
-    console.error('[CreateJob] No data returned from insert:', { data, error });
+    logError('CreateJob', 'No data returned from insert', { data, error });
     throw new Error('Job created but no ID returned from database');
   }
 
-  console.log('[CreateJob] Job created with ID:', data.id);
+  logUpload('info', `Job created with ID: ${data.id}`);
   return data.id;
 }
 
@@ -767,15 +768,15 @@ export function registerIngestionJobRoutes(app: express.Express) {
     async (req, res) => {
       try {
         const { jobId } = req.params;
-        console.log('[UploadMetadata] Request received:', { jobId, body: req.body });
+        logUpload('debug', 'Upload metadata request received', { jobId, body: req.body });
 
         const context = await getOrgContext(req);
         if (!context || context.error) {
-          console.error('[UploadMetadata] Auth error:', context?.error);
+          logError('UploadMetadata', 'Auth error', context?.error);
           return res.status(401).json({ error: context?.error || 'Authorization required' });
         }
 
-        console.log('[UploadMetadata] Context:', {
+        logUpload('debug', 'Upload metadata context', {
           orgId: context.orgId,
           projectId: context.projectId,
           userId: context.userId,
@@ -792,7 +793,7 @@ export function registerIngestionJobRoutes(app: express.Express) {
         }
 
         // Get job to verify ownership and get details in a single query
-        console.log('[UploadMetadata] Fetching job:', { jobId, orgId: context.orgId });
+        logUpload('debug', 'Fetching job for upload metadata', { jobId, orgId: context.orgId });
         const { data: job, error: jobError } = await supabaseAdmin!
           .from('ingestion_jobs')
           .select('id, org_id, project_id')
@@ -800,7 +801,7 @@ export function registerIngestionJobRoutes(app: express.Express) {
           .maybeSingle();
 
         if (jobError) {
-          console.error('[UploadMetadata] Database error:', {
+          logError('UploadMetadata', 'Database error', {
             error: jobError,
             message: jobError.message,
             code: jobError.code,
@@ -816,13 +817,13 @@ export function registerIngestionJobRoutes(app: express.Express) {
         }
 
         if (!job) {
-          console.warn('[UploadMetadata] Job not found:', jobId);
+          logUpload('warn', `Job not found: ${jobId}`);
           return res.status(404).json({ error: 'Job not found' });
         }
 
         // Verify org ownership
         if (job.org_id !== context.orgId) {
-          console.warn('[UploadMetadata] Job belongs to different org:', {
+          logUpload('warn', 'Job belongs to different org', {
             jobId,
             jobOrgId: job.org_id,
             userOrgId: context.orgId,
@@ -847,7 +848,7 @@ export function registerIngestionJobRoutes(app: express.Express) {
           supabaseUrl: process.env.SUPABASE_URL, // Frontend already has this, but include for convenience
         });
       } catch (e: any) {
-        console.error('[Upload] Error creating upload metadata:', e);
+        logError('Upload', 'Error creating upload metadata', e);
         res.status(500).json({ 
           error: 'INTERNAL_ERROR',
           message: e.message || 'Failed to create upload metadata' 
@@ -897,7 +898,7 @@ export function registerIngestionJobRoutes(app: express.Express) {
         }
 
         // Get job to verify ownership and get details in a single query
-        console.log('[FinalizeUpload] Fetching job:', { jobId, orgId: context.orgId });
+        logUpload('debug', 'Fetching job for finalize upload', { jobId, orgId: context.orgId });
         const { data: job, error: jobError } = await supabaseAdmin!
           .from('ingestion_jobs')
           .select('id, org_id, project_id')
@@ -905,7 +906,7 @@ export function registerIngestionJobRoutes(app: express.Express) {
           .maybeSingle();
 
         if (jobError) {
-          console.error('[FinalizeUpload] Database error:', {
+          logError('FinalizeUpload', 'Database error', {
             error: jobError,
             message: jobError.message,
             code: jobError.code,
@@ -921,13 +922,13 @@ export function registerIngestionJobRoutes(app: express.Express) {
         }
 
         if (!job) {
-          console.warn('[FinalizeUpload] Job not found:', jobId);
+          logUpload('warn', `Job not found: ${jobId}`);
           return res.status(404).json({ error: 'Job not found' });
         }
 
         // Verify org ownership
         if (job.org_id !== context.orgId) {
-          console.warn('[FinalizeUpload] Job belongs to different org:', {
+          logUpload('warn', 'Job belongs to different org', {
             jobId,
             jobOrgId: job.org_id,
             userOrgId: context.orgId,
@@ -935,22 +936,40 @@ export function registerIngestionJobRoutes(app: express.Express) {
           return res.status(403).json({ error: 'Access denied. Job belongs to a different organization.' });
         }
 
-        // Verify file exists in storage
-        const { data: fileData, error: fileError } = await supabaseAdmin!
+        // Verify file exists in storage using download (strongest verification)
+        // This ensures the file is actually accessible, not just listed
+        const { data: fileContent, error: dlError } = await supabaseAdmin!
           .storage
           .from(bucket)
-          .list(objectPath.split('/').slice(0, -1).join('/'), {
-            limit: 1,
-            search: objectPath.split('/').pop(),
-          });
+          .download(objectPath);
 
-        if (fileError) {
-          console.error('[Upload] Error verifying file in storage:', fileError);
-          return res.status(500).json({ 
+        if (dlError) {
+          logError('FinalizeUpload', 'File not downloadable in storage', {
+            bucket,
+            objectPath,
+            error: dlError.message,
+          });
+          return res.status(400).json({
             error: 'STORAGE_VERIFY_FAILED',
-            message: `Failed to verify file in storage: ${fileError.message}` 
+            message: `File not downloadable at ${bucket}/${objectPath}: ${dlError.message}. Upload likely failed or used wrong path encoding.`,
           });
         }
+
+        // Verify we got actual content (not empty)
+        if (!fileContent || (fileContent instanceof Blob && fileContent.size === 0)) {
+          logError('FinalizeUpload', 'File exists but is empty', { bucket, objectPath });
+          return res.status(400).json({
+            error: 'STORAGE_VERIFY_FAILED',
+            message: `File at ${bucket}/${objectPath} exists but is empty. Upload may have failed.`,
+          });
+        }
+
+        // File verified successfully
+        logUpload('debug', 'File verified in storage', {
+          bucket,
+          objectPath,
+          size: fileContent instanceof Blob ? fileContent.size : 'unknown',
+        });
 
         // Create asset record
         const assetType = kind === 'audio' ? 'AUDIO' : 'TRANSCRIPT_UPLOADED';
@@ -977,7 +996,7 @@ export function registerIngestionJobRoutes(app: express.Express) {
           .single();
 
         if (assetError) {
-          console.error('[Upload] Database error storing asset:', {
+          logError('Upload', 'Database error storing asset', {
             code: assetError.code,
             message: assetError.message,
             details: assetError.details,
@@ -1033,7 +1052,7 @@ export function registerIngestionJobRoutes(app: express.Express) {
             .eq('id', jobId);
 
           if (updateError) {
-            console.error('[Upload] Error updating job with asset ID:', updateError);
+            logError('Upload', 'Error updating job with asset ID', updateError);
           }
 
           // Check if all required files are uploaded
@@ -1071,9 +1090,9 @@ export function registerIngestionJobRoutes(app: express.Express) {
               // Enqueue job for background processing
               try {
                 await enqueueJob(jobId);
-                console.log(`[Upload] Job ${jobId} enqueued for processing`);
+                logUpload('info', `Job ${jobId} enqueued for processing`);
               } catch (enqueueError: any) {
-                console.error(`[Upload] Failed to enqueue job ${jobId}:`, enqueueError);
+                logError('Upload', `Failed to enqueue job ${jobId}`, enqueueError);
               }
             }
           }
@@ -1086,7 +1105,7 @@ export function registerIngestionJobRoutes(app: express.Express) {
           objectPath,
         });
       } catch (e: any) {
-        console.error('[Upload] Error finalizing upload:', e);
+        logError('Upload', 'Error finalizing upload', e);
         res.status(500).json({ 
           error: 'INTERNAL_ERROR',
           message: e.message || 'Failed to finalize upload' 

@@ -439,18 +439,38 @@ export class IngestionComponent implements OnInit, OnDestroy {
       let uploadError: any = null;
       
       try {
-        // Use direct storage hostname for all uploads (faster, same security)
-        console.log(`[Upload] Uploading ${(file.size / 1024 / 1024).toFixed(2)} MB file via direct storage hostname`);
+        // Try direct REST API upload first (faster, bypasses Netlify)
+        console.log(`[Upload] Uploading ${(file.size / 1024 / 1024).toFixed(2)} MB file via direct REST API`);
         uploadData = await this.uploadFileDirectStorage(
           supabaseClient,
           metadata.bucket,
           metadata.objectPath,
           file
         );
-      } catch (error: any) {
-        console.error(`[Upload] Upload exception:`, error);
-        uploadError = error;
-        uploadData = null;
+      } catch (restError: any) {
+        console.warn(`[Upload] Direct REST upload failed, trying supabase-js SDK fallback:`, restError.message);
+        
+        // Fallback to supabase-js SDK upload (still browser → Supabase directly, no Netlify)
+        try {
+          const result = await supabaseClient.storage
+            .from(metadata.bucket)
+            .upload(metadata.objectPath, file, {
+              upsert: false,
+              contentType: file.type || 'application/octet-stream',
+            });
+          
+          if (result.error) {
+            uploadError = result.error;
+            uploadData = null;
+          } else {
+            uploadData = { ok: true, path: result.data.path || metadata.objectPath };
+            uploadError = null;
+          }
+        } catch (sdkError: any) {
+          console.error(`[Upload] Supabase SDK upload also failed:`, sdkError);
+          uploadError = sdkError;
+          uploadData = null;
+        }
       }
 
       const uploadDuration = Date.now() - uploadStartTime;
@@ -461,19 +481,22 @@ export class IngestionComponent implements OnInit, OnDestroy {
       });
 
       if (uploadError) {
-        console.error(`[Upload] Supabase upload error:`, {
+        console.error(`[Upload] All upload methods failed:`, {
           error: uploadError,
           message: uploadError.message,
           statusCode: (uploadError as any).statusCode,
           name: (uploadError as any).name,
         });
-        // If RLS blocks the upload, fall back to proxy method
+        
+        // If both direct methods fail, fall back to proxy method (goes through Netlify, 6MB limit)
         if (uploadError.message?.includes('new row violates') || 
             uploadError.message?.includes('permission') || 
             uploadError.message?.includes('policy') ||
             uploadError.message?.includes('Unauthorized') ||
-            uploadError.message?.includes('403')) {
-          console.warn(`[Upload] RLS policy blocked direct upload, falling back to proxy method`);
+            uploadError.message?.includes('403') ||
+            uploadError.message?.includes('network') ||
+            uploadError.message?.includes('CORS')) {
+          console.warn(`[Upload] Direct uploads blocked, falling back to proxy method (6MB limit applies)`);
           // Fallback to proxy upload
           const formData = new FormData();
           formData.append(kind, file);
@@ -524,8 +547,8 @@ export class IngestionComponent implements OnInit, OnDestroy {
   }
 
   /**
-   * Upload file via direct storage hostname (faster and just as secure)
-   * Uses Supabase REST API directly with the storage hostname for better performance
+   * Upload file via direct Supabase Storage REST API (faster and just as secure)
+   * Uses PUT method with proper path encoding and apikey header
    * Security: Uses same authentication (Bearer token) and RLS policies apply
    */
   async uploadFileDirectStorage(
@@ -534,30 +557,26 @@ export class IngestionComponent implements OnInit, OnDestroy {
     objectPath: string,
     file: File
   ): Promise<any> {
-    // Get Supabase URL and access token
     const supabaseUrl = (supabaseClient as any).supabaseUrl;
+
+    // Get anon key for apikey header
+    const supabaseAnonKey =
+      (supabaseClient as any).supabaseKey ||
+      (typeof window !== 'undefined' && (window as any).__SUPABASE_ANON_KEY);
+
     const { data: { session } } = await supabaseClient.auth.getSession();
-    
     if (!session?.access_token) {
       throw new Error('No authentication token available');
     }
+    if (!supabaseAnonKey) {
+      throw new Error('Missing Supabase anon key for apikey header');
+    }
 
-    // Use direct storage hostname for better performance (recommended by Supabase)
-    // Convert https://project.supabase.co to https://project.storage.supabase.co
-    const storageUrl = supabaseUrl.replace('.supabase.co', '.storage.supabase.co');
-    const encodedPath = encodeURIComponent(objectPath);
-    const uploadUrl = `${storageUrl}/storage/v1/object/${bucket}/${encodedPath}`;
+    // Encode per segment so slashes remain slashes
+    const encodedPath = objectPath.split('/').map(encodeURIComponent).join('/');
+    const uploadUrl = `${supabaseUrl}/storage/v1/object/${bucket}/${encodedPath}`;
 
-    console.log(`[Upload] Using direct storage hostname: ${storageUrl}`);
-    console.log(`[Upload] Uploading ${(file.size / 1024 / 1024).toFixed(2)} MB file`);
-    console.log(`[Upload] Security: Using authenticated session token, RLS policies apply`);
-
-    // Upload the file directly using fetch with the direct storage hostname
-    // This is faster than the standard API endpoint because it bypasses API gateway overhead
-    // Security: Uses same Bearer token authentication, RLS policies still apply
-    // Add timeout to prevent hanging (10 minutes for very large files)
     const uploadTimeout = 10 * 60 * 1000; // 10 minutes
-    
     const controller = new AbortController();
     const timeoutId = setTimeout(() => {
       console.error(`[Upload] Upload timeout after ${uploadTimeout/1000}s`);
@@ -565,38 +584,26 @@ export class IngestionComponent implements OnInit, OnDestroy {
     }, uploadTimeout);
 
     try {
-      const response = await fetch(uploadUrl, {
-        method: 'POST',
+      const res = await fetch(uploadUrl, {
+        method: 'PUT',
         headers: {
-          'Authorization': `Bearer ${session.access_token}`,
+          apikey: supabaseAnonKey,
+          Authorization: `Bearer ${session.access_token}`,
           'Content-Type': file.type || 'application/octet-stream',
-          'Content-Length': file.size.toString(),
           'x-upsert': 'false',
         },
-        body: file, // Supabase handles large files efficiently
+        body: file,
         signal: controller.signal,
       });
 
-      if (!response.ok) {
-        const errorText = await response.text();
-        console.error(`[Upload] Upload failed:`, {
-          status: response.status,
-          statusText: response.statusText,
-          error: errorText,
-        });
-        
-        if (response.status === 403) {
-          throw new Error(`STORAGE_AUTH_FAILED: ${errorText}`);
-        }
-        if (response.status === 409) {
-          throw new Error(`STORAGE_FILE_EXISTS: File already exists`);
-        }
-        throw new Error(`Upload failed: ${response.status} ${errorText}`);
+      if (!res.ok) {
+        const errorText = await res.text();
+        throw new Error(`Storage upload failed (${res.status}): ${errorText}`);
       }
 
-      const result = await response.json();
-      console.log(`[Upload] Upload successful:`, result);
-      return { path: result.Key || objectPath || result.path || objectPath };
+      // Some storage responses are JSON, some aren't; don't assume JSON.
+      const text = await res.text();
+      return { ok: true, responseText: text, path: objectPath };
     } catch (error: any) {
       if (error.name === 'AbortError') {
         throw new Error(`Upload timeout after ${uploadTimeout/1000} seconds. File may be too large or network connection is slow.`);
