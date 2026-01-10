@@ -619,7 +619,12 @@ export class IngestionComponent implements OnInit, OnDestroy {
       });
 
       console.log('[Upload] Fetch response status:', res.status, res.statusText);
-      console.log('[Upload] Response headers:', Object.fromEntries(res.headers.entries()));
+      // Log response headers (safe way that works with TypeScript)
+      const headersObj: Record<string, string> = {};
+      res.headers.forEach((value, key) => {
+        headersObj[key] = value;
+      });
+      console.log('[Upload] Response headers:', headersObj);
 
       if (!res.ok) {
         const errorText = await res.text();
