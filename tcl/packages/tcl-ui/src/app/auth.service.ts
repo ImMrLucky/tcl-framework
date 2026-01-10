@@ -883,7 +883,7 @@ export class AuthService {
       if (session?.access_token) {
         return session.access_token;
       }
-    } catch (err) {
+    } catch (err: any) {
       // Error getting session or timeout - clear expired session
       console.warn('[Auth] getSession failed or timed out in getAccessToken:', err?.message);
       this.clearExpiredSession();
