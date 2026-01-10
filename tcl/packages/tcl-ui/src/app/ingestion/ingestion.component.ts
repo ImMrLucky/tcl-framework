@@ -967,7 +967,7 @@ export class IngestionComponent implements OnInit, OnDestroy {
    * (Now handled by onSubmit with mode detection)
    */
   async submitLinkedFiles() {
-    // This method is now handled by onSubmit() which detects linkingMode
+    // This method is now handled by onSubmit() which uses selectedMode
     await this.onSubmit();
   }
 
@@ -1193,12 +1193,12 @@ export class IngestionComponent implements OnInit, OnDestroy {
    * Get submit button label based on mode
    */
   getSubmitButtonLabel(): string {
-    if (this.linkingMode) {
-      return 'Analyze now + Verify with audio';
-    } else if (this.isAudioFile && this.selectedFile) {
-      return 'Generate transcript + Analyze';
+    if (this.selectedMode === 'AUDIO_PLUS_TRANSCRIPT') {
+      return 'Analyze Transcript (Upload Audio Optional)';
+    } else if (this.selectedMode === 'AUDIO_ONLY') {
+      return 'Upload Audio';
     } else {
-      return 'Run Analysis';
+      return 'Analyze Transcript';
     }
   }
 }
