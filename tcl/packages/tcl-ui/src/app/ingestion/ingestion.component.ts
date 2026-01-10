@@ -92,12 +92,14 @@ export class IngestionComponent implements OnInit, OnDestroy {
   previewData: IngestPreview | null = null;
   previewLoading = false;
   
-  // Audio + transcript linking
+  // Mode selection
+  selectedMode: 'TRANSCRIPT_ONLY' | 'AUDIO_ONLY' | 'AUDIO_PLUS_TRANSCRIPT' = 'TRANSCRIPT_ONLY';
+  
+  // Audio + transcript linking (for AUDIO_PLUS_TRANSCRIPT mode)
   audioFile: File | null = null;
   audioFileName = '';
   transcriptFile: File | null = null;
   transcriptFileName = '';
-  linkingMode = false;
 
   // Job-based ingestion state
   currentJobId: string | null = null;
@@ -265,15 +267,30 @@ export class IngestionComponent implements OnInit, OnDestroy {
   }
 
   /**
-   * Toggle linking mode
+   * Set ingestion mode
    */
-  toggleLinkingMode() {
-    this.linkingMode = !this.linkingMode;
-    if (!this.linkingMode) {
+  setMode(mode: 'TRANSCRIPT_ONLY' | 'AUDIO_ONLY' | 'AUDIO_PLUS_TRANSCRIPT') {
+    this.selectedMode = mode;
+    // Clear files when switching modes
+    if (mode !== 'AUDIO_PLUS_TRANSCRIPT') {
       this.audioFile = null;
       this.audioFileName = '';
       this.transcriptFile = null;
       this.transcriptFileName = '';
+    }
+    if (mode !== 'AUDIO_ONLY') {
+      // Clear audio file selection for non-audio modes
+      if (this.isAudioFile) {
+        this.selectedFile = null;
+        this.selectedFileName = '';
+        this.isAudioFile = false;
+      }
+    }
+    if (mode !== 'TRANSCRIPT_ONLY') {
+      // Clear transcript text for non-transcript-only modes
+      if (!this.transcriptFile) {
+        this.transcript = '';
+      }
     }
   }
 
@@ -281,36 +298,38 @@ export class IngestionComponent implements OnInit, OnDestroy {
     // Determine ingestion mode
     let mode: 'TRANSCRIPT_ONLY' | 'AUDIO_ONLY' | 'AUDIO_PLUS_TRANSCRIPT';
     
-    console.log('[Ingestion] Mode detection:', {
-      linkingMode: this.linkingMode,
-      isAudioFile: this.isAudioFile,
-      hasSelectedFile: !!this.selectedFile,
-      hasTranscript: !!this.transcript && this.transcript.trim().length > 0,
-      transcriptLength: this.transcript?.length || 0,
-    });
+    // Use the selected mode
+    mode = this.selectedMode;
     
-    if (this.linkingMode) {
-      // Audio + Transcript mode
-      if (!this.audioFile || !this.transcriptFile) {
-        this.errorMessage = 'Please select both an audio file and a transcript file';
-        this.snackBar.open(this.errorMessage, 'Close', { duration: 3000 });
-        return;
-      }
-      mode = 'AUDIO_PLUS_TRANSCRIPT';
-    } else if (this.isAudioFile && this.selectedFile) {
-      // Audio only mode
-      mode = 'AUDIO_ONLY';
-    } else {
-      // Transcript only mode
+    console.log('[Ingestion] Using selected mode:', mode);
+    
+    // Validate inputs based on mode
+    if (mode === 'TRANSCRIPT_ONLY') {
       if (!this.transcript || this.transcript.trim().length === 0) {
-        this.errorMessage = 'Please enter or upload a transcript, or select an audio file';
+        if (!this.selectedFile || (!this.isSubtitleFile && !this.selectedFileName.endsWith('.txt'))) {
+          this.errorMessage = 'Please enter or upload a transcript';
+          this.snackBar.open(this.errorMessage, 'Close', { duration: 3000 });
+          return;
+        }
+      }
+    } else if (mode === 'AUDIO_ONLY') {
+      if (!this.selectedFile || !this.isAudioFile) {
+        this.errorMessage = 'Please select an audio file';
         this.snackBar.open(this.errorMessage, 'Close', { duration: 3000 });
         return;
       }
-      mode = 'TRANSCRIPT_ONLY';
+    } else if (mode === 'AUDIO_PLUS_TRANSCRIPT') {
+      if (!this.audioFile) {
+        this.errorMessage = 'Please select an audio file';
+        this.snackBar.open(this.errorMessage, 'Close', { duration: 3000 });
+        return;
+      }
+      if (!this.transcriptFile && (!this.transcript || this.transcript.trim().length === 0)) {
+        this.errorMessage = 'Please provide a transcript (file or text)';
+        this.snackBar.open(this.errorMessage, 'Close', { duration: 3000 });
+        return;
+      }
     }
-    
-    console.log('[Ingestion] Determined mode:', mode);
 
     this.loading = true;
     this.errorMessage = '';
@@ -357,7 +376,13 @@ export class IngestionComponent implements OnInit, OnDestroy {
           audioFile = this.selectedFile!;
         } else if (mode === 'AUDIO_PLUS_TRANSCRIPT') {
           audioFile = this.audioFile!;
-          transcriptFile = this.transcriptFile!;
+          // Transcript can be file or text
+          if (this.transcriptFile) {
+            transcriptFile = this.transcriptFile;
+          } else if (this.transcript && this.transcript.trim().length > 0) {
+            const blob = new Blob([this.transcript], { type: 'text/plain' });
+            transcriptFile = new File([blob], 'transcript.txt', { type: 'text/plain' });
+          }
         }
 
         console.log('[Ingestion] Starting direct Supabase uploads...');
@@ -1148,6 +1173,20 @@ export class IngestionComponent implements OnInit, OnDestroy {
       default:
         return 'Processing...';
     }
+  }
+
+  /**
+   * Check if submit button should be disabled
+   */
+  getSubmitButtonDisabled(): boolean {
+    if (this.selectedMode === 'TRANSCRIPT_ONLY') {
+      return (!this.transcript || this.transcript.trim().length === 0) && !this.selectedFile;
+    } else if (this.selectedMode === 'AUDIO_ONLY') {
+      return !this.selectedFile || !this.isAudioFile;
+    } else if (this.selectedMode === 'AUDIO_PLUS_TRANSCRIPT') {
+      return !this.audioFile || (!this.transcriptFile && (!this.transcript || this.transcript.trim().length === 0));
+    }
+    return true;
   }
 
   /**
