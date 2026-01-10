@@ -383,14 +383,18 @@ export class IngestionComponent implements OnInit, OnDestroy {
       );
 
       console.log(`[Upload] Got upload metadata:`, { bucket: metadata.bucket, objectPath: metadata.objectPath });
+      console.log(`[Upload] ✅ Metadata received, proceeding to get Supabase client...`);
 
       // Step 2: Use authenticated Supabase client from AuthService
       // This uses the user's session token
       // Note: For private buckets, we need Storage RLS policies that allow uploads
       // If RLS blocks the upload, we'll fall back to the proxy method
+      console.log(`[Upload] Getting Supabase client from AuthService...`);
       const supabaseClient = (this.authService as any).supabase as SupabaseClient | undefined;
+      console.log(`[Upload] Supabase client:`, supabaseClient ? 'found' : 'NOT FOUND');
+      
       if (!supabaseClient) {
-        console.warn(`[Upload] Supabase client not available, falling back to proxy method`);
+        console.warn(`[Upload] ⚠️ Supabase client not available, falling back to proxy method`);
         // Fallback to proxy upload
         const formData = new FormData();
         formData.append(kind, file);
@@ -401,9 +405,16 @@ export class IngestionComponent implements OnInit, OnDestroy {
       }
 
       // Check if user is authenticated
+      console.log(`[Upload] Checking user session...`);
       const { data: { session }, error: sessionError } = await supabaseClient.auth.getSession();
+      console.log(`[Upload] Session check result:`, { 
+        hasSession: !!session, 
+        hasError: !!sessionError,
+        error: sessionError?.message 
+      });
+      
       if (sessionError || !session) {
-        console.warn(`[Upload] User not authenticated, falling back to proxy method:`, sessionError);
+        console.warn(`[Upload] ⚠️ User not authenticated, falling back to proxy method:`, sessionError);
         // Fallback to proxy upload
         const formData = new FormData();
         formData.append(kind, file);
@@ -412,6 +423,8 @@ export class IngestionComponent implements OnInit, OnDestroy {
         );
         return;
       }
+      
+      console.log(`[Upload] ✅ User authenticated, proceeding with direct upload`);
 
       console.log(`[Upload] User authenticated, uploading to Supabase Storage...`);
       console.log(`[Upload] Upload details:`, {
@@ -565,7 +578,16 @@ export class IngestionComponent implements OnInit, OnDestroy {
         throw new Error(`Failed to finalize upload: ${finalizeError.message || finalizeError.error?.message || 'Unknown error'}`);
       }
     } catch (error: any) {
-      console.error(`[Upload] Error uploading ${kind}:`, error);
+      console.error(`[Upload] ❌❌❌ CRITICAL ERROR uploading ${kind}:`, {
+        error: error,
+        message: error?.message,
+        stack: error?.stack,
+        name: error?.name,
+        toString: error?.toString(),
+        fullError: JSON.stringify(error, Object.getOwnPropertyNames(error)),
+      });
+      console.error(`[Upload] Error type:`, typeof error);
+      console.error(`[Upload] Error constructor:`, error?.constructor?.name);
       throw new Error(`Failed to upload ${kind} file: ${error.message || error.error?.message || 'Unknown error'}`);
     }
   }
