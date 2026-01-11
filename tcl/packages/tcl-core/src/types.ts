@@ -610,12 +610,12 @@ export type EnhancedScores = {
   coherence: number | null;
   overall: number | null;
   
-  // Mode-aware scores (separated for clarity)
-  modeAware?: {
-    consistencyScore: number;
-    groundingScore: number;
-    evidenceScore: number;
-  };
+      // Mode-aware scores (separated for clarity)
+      modeAware?: {
+        consistencyScore: number | null; // null if cannot be computed
+        groundingScore: number;
+        evidenceScore: number;
+      };
 };
 
 /** Summary stats for UI display */
