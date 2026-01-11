@@ -75,8 +75,13 @@
   display: flex;
   flex-direction: column;
   min-width: 0; /* Prevents flex item from overflowing */
-  margin-left: var(--sidebar-width, 240px);
+  margin-left: 240px;
   transition: margin-left 0.3s ease;
+}
+
+/* When sidebar is collapsed, reduce margin-left to match collapsed sidebar width */
+.header-content-wrapper.sidebar-collapsed {
+  margin-left: 64px;
 }
 
 /* Global styles for pages with sidebar - applied via body class */
