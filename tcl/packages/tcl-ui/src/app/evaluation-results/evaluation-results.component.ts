@@ -1064,7 +1064,7 @@ getMetricTooltip(metric: string): string {
                      this.evaluation?.report?.claims || [];
       // Use IssueV2 data if available, otherwise use report counts
       const contradictedCount = this.allIssuesV2.filter(i => i.type === 'CONTRADICTION').length;
-      const ungroundedCount = this.allIssuesV2.filter(i => i.verification.level === 'NONE').length;
+      const ungroundedCount = this.allIssuesV2.filter(i => i.verification?.level === 'NONE' || !i.verification).length;
       const reportCounts = this.evaluation?.report?.scores?.counts || {};
       const contradictedIssues = { length: contradictedCount || reportCounts.contradicted || 0 };
       const ungroundedIssues = { length: ungroundedCount || reportCounts.ungrounded || 0 };
@@ -1127,6 +1127,9 @@ getMetricTooltip(metric: string): string {
    * Get verification label for UI
    */
   getVerificationLabel(issue: IssueV2): string {
+    if (!issue.verification) {
+      return 'No Verification';
+    }
     if (issue.verification.level === 'TRANSCRIPT_ONLY') {
       return 'Unverified (Transcript-only)';
     }
