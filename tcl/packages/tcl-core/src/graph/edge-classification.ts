@@ -21,7 +21,7 @@ import {
 } from './types.js';
 import { getTemplateConfig } from './template-config.js';
 import { ClaimPairCandidate, ClaimEvidenceCandidate } from './candidate-generation.js';
-import { slotsMatch, valuesContradict, hasExplicitContradictionPattern, hasStrongAnchorMatch } from './subject-slot.js';
+import { slotsMatch, valuesContradict, hasExplicitContradictionPattern, hasStrongAnchorMatch, hasCustomerDenialVsAssertion } from './subject-slot.js';
 
 // =============================================================================
 // EDGE CLASSIFICATION RESULTS

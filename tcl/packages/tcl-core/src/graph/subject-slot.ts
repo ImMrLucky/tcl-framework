@@ -480,3 +480,227 @@ function valuesContradictNumeric(
   const tolerance = Math.max(0.01, Math.abs(valueA) * 0.01);
   return Math.abs(valueA - valueB) > tolerance;
 }
+
+// =============================================================================
+// ANCHOR-BASED MATCHING (Industry-Agnostic)
+// =============================================================================
+
+/**
+ * 3.1: Compute anchor overlap between two claim anchor sets
+ */
+export function anchorOverlap(a: ClaimAnchor[] = [], b: ClaimAnchor[] = []): number {
+  const setA = new Set(a.map(x => `${x.type}:${x.key}`));
+  let hits = 0;
+  for (const x of b) {
+    if (setA.has(`${x.type}:${x.key}`)) hits++;
+  }
+  return hits;
+}
+
+/**
+ * 3.1: Check if two claims have strong anchor matches
+ * Strong if share MONEY or DATE/TIMEFRAME or ADDRESS/EMAIL/PHONE/CARD/SSN_LAST4
+ */
+export function hasStrongAnchorMatch(aAnchors: ClaimAnchor[] = [], bAnchors: ClaimAnchor[] = []): boolean {
+  const strongTypes = new Set(['MONEY', 'DATE', 'TIMEFRAME', 'ADDRESS', 'EMAIL', 'PHONE', 'PAYMENT_CARD', 'SSN_LAST4']);
+  const setA = new Set(aAnchors.filter(x => strongTypes.has(x.type)).map(x => `${x.type}:${x.key}`));
+  return bAnchors.some(x => strongTypes.has(x.type) && setA.has(`${x.type}:${x.key}`));
+}
+
+// =============================================================================
+// ANCHOR EXTRACTION (Industry-Agnostic)
+// =============================================================================
+
+/**
+ * 1.2: Extract anchors from entities (generic, industry-agnostic)
+ * Converts extracted entities into normalized anchor keys
+ */
+export function extractAnchors(entities: ExtractedEntity[], text: string): ClaimAnchor[] {
+  const anchors: ClaimAnchor[] = [];
+  
+  // MONEY → normalized decimal string (2dp)
+  const moneyEntity = entities.find(e => e.type === 'MONEY');
+  if (moneyEntity && moneyEntity.normalized) {
+    const amount = typeof moneyEntity.normalized === 'number' ? moneyEntity.normalized / 100 : moneyEntity.normalized;
+    anchors.push({
+      type: 'MONEY',
+      key: typeof amount === 'number' ? amount.toFixed(2) : String(amount),
+      raw: moneyEntity.value,
+      span: moneyEntity.span,
+      confidence: moneyEntity.confidence,
+    });
+  }
+  
+  // DATE → normalized ISO or text normalized
+  const dateEntity = entities.find(e => e.type === 'DATE');
+  if (dateEntity && dateEntity.normalized) {
+    anchors.push({
+      type: 'DATE',
+      key: String(dateEntity.normalized),
+      raw: dateEntity.value,
+      span: dateEntity.span,
+      confidence: dateEntity.confidence,
+    });
+  }
+  
+  // TIMEFRAME → normalize "24 hours", "7–10 business days", "next cycle"
+  const timeframePatterns = [
+    { pattern: /\b(\d+)\s*hours?\b/i, normalize: (m: RegExpMatchArray) => `${m[1]}_h` },
+    { pattern: /\b(\d+)\s*days?\b/i, normalize: (m: RegExpMatchArray) => `${m[1]}_d` },
+    { pattern: /\b(\d+)\s*weeks?\b/i, normalize: (m: RegExpMatchArray) => `${m[1]}_w` },
+    { pattern: /\b(\d+)\s*months?\b/i, normalize: (m: RegExpMatchArray) => `${m[1]}_m` },
+    { pattern: /\b(\d+)[-–](\d+)\s*business\s*days?\b/i, normalize: (m: RegExpMatchArray) => `${m[1]}-${m[2]}_bd` },
+    { pattern: /\bnext\s*cycle\b/i, normalize: () => 'next_cycle' },
+    { pattern: /\bnext\s*billing\s*cycle\b/i, normalize: () => 'next_billing_cycle' },
+  ];
+  
+  for (const { pattern, normalize } of timeframePatterns) {
+    const match = text.match(pattern);
+    if (match) {
+      anchors.push({
+        type: 'TIMEFRAME',
+        key: normalize(match),
+        raw: match[0],
+        span: match.index !== undefined ? { start: match.index, end: match.index + match[0].length } : undefined,
+      });
+      break; // Only add first match
+    }
+  }
+  
+  // PERCENT
+  const percentEntity = entities.find(e => e.type === 'PERCENT');
+  if (percentEntity && percentEntity.normalized) {
+    anchors.push({
+      type: 'PERCENT',
+      key: String(percentEntity.normalized),
+      raw: percentEntity.value,
+      span: percentEntity.span,
+      confidence: percentEntity.confidence,
+    });
+  }
+  
+  // QUANTITY (from DURATION or other numeric entities)
+  const durationEntity = entities.find(e => e.type === 'DURATION');
+  if (durationEntity && durationEntity.normalized) {
+    anchors.push({
+      type: 'QUANTITY',
+      key: String(durationEntity.normalized),
+      raw: durationEntity.value,
+      span: durationEntity.span,
+      confidence: durationEntity.confidence,
+    });
+  }
+  
+  // EMAIL
+  const emailPattern = /\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b/g;
+  const emailMatch = text.match(emailPattern);
+  if (emailMatch) {
+    for (const email of emailMatch) {
+      anchors.push({
+        type: 'EMAIL',
+        key: email.toLowerCase(),
+        raw: email,
+        span: text.indexOf(email) !== -1 ? { start: text.indexOf(email), end: text.indexOf(email) + email.length } : undefined,
+      });
+    }
+  }
+  
+  // PHONE
+  const phonePattern = /\b(?:\+?1[-.\s]?)?\(?([0-9]{3})\)?[-.\s]?([0-9]{3})[-.\s]?([0-9]{4})\b/g;
+  const phoneMatch = text.match(phonePattern);
+  if (phoneMatch) {
+    for (const phone of phoneMatch) {
+      const normalized = phone.replace(/\D/g, '');
+      anchors.push({
+        type: 'PHONE',
+        key: normalized.length === 10 ? normalized : normalized.slice(-10), // Last 10 digits
+        raw: phone,
+        span: text.indexOf(phone) !== -1 ? { start: text.indexOf(phone), end: text.indexOf(phone) + phone.length } : undefined,
+      });
+    }
+  }
+  
+  // PAYMENT_CARD (masked - only last 4)
+  const cardPattern = /\b(?:\d[-\s]?){13,19}\b/g;
+  const cardMatch = text.match(cardPattern);
+  if (cardMatch) {
+    for (const card of cardMatch) {
+      const digits = card.replace(/\D/g, '');
+      if (digits.length >= 13 && digits.length <= 19) {
+        const last4 = digits.slice(-4);
+        anchors.push({
+          type: 'PAYMENT_CARD',
+          key: `card_last4:${last4}`,
+          raw: card,
+          span: text.indexOf(card) !== -1 ? { start: text.indexOf(card), end: text.indexOf(card) + card.length } : undefined,
+        });
+      }
+    }
+  }
+  
+  // CVV (presence only - never store digits)
+  const cvvPattern = /\b(?:CVV|CVC|security\s*code|card\s*code)\b.*?\b\d{3,4}\b/i;
+  if (cvvPattern.test(text)) {
+    anchors.push({
+      type: 'PAYMENT_CARD', // Use same type for CVV
+      key: 'cvv_present:true',
+      raw: 'CVV mentioned',
+    });
+  }
+  
+  // SSN_LAST4
+  const ssnPattern = /\b(?:SSN|social\s*security|last\s*four)\b.*?\b(\d{4})\b/i;
+  const ssnMatch = text.match(ssnPattern);
+  if (ssnMatch && ssnMatch[1]) {
+    anchors.push({
+      type: 'SSN_LAST4',
+      key: `ssn_last4:${ssnMatch[1]}`,
+      raw: `SSN last 4: ${ssnMatch[1]}`,
+    });
+  }
+  
+  // URL
+  const urlPattern = /https?:\/\/[^\s]+/gi;
+  const urlMatch = text.match(urlPattern);
+  if (urlMatch) {
+    for (const url of urlMatch) {
+      anchors.push({
+        type: 'URL',
+        key: url.toLowerCase(),
+        raw: url,
+        span: text.indexOf(url) !== -1 ? { start: text.indexOf(url), end: text.indexOf(url) + url.length } : undefined,
+      });
+    }
+  }
+  
+  return anchors;
+}
+
+/**
+ * Helper function for customer denial vs assertion pattern
+ */
+export function hasCustomerDenialVsAssertion(claimA: any, claimB: any): boolean {
+  // Check if one is a customer denial and the other is an agent assertion
+  const aText = (claimA.text || '').toLowerCase();
+  const bText = (claimB.text || '').toLowerCase();
+  const aSpeaker = claimA.speakerRole || claimA.meta?.speaker || '';
+  const bSpeaker = claimB.speakerRole || claimB.meta?.speaker || '';
+  
+  const denialWords = ['no', 'not', "don't", "didn't", "won't", "can't", "cannot", 'never', 'none', 'nothing'];
+  const assertionWords = ['yes', 'will', 'can', 'do', 'does', 'did', 'has', 'have', 'is', 'are'];
+  
+  const aIsDenial = denialWords.some(w => aText.includes(w));
+  const bIsAssertion = assertionWords.some(w => bText.includes(w));
+  const aIsAssertion = assertionWords.some(w => aText.includes(w));
+  const bIsDenial = denialWords.some(w => bText.includes(w));
+  
+  // Customer denial vs agent assertion (or vice versa)
+  const customerDenial = (aSpeaker === 'customer' || aSpeaker === 'CUSTOMER') && aIsDenial;
+  const agentAssertion = (bSpeaker === 'agent' || bSpeaker === 'AGENT') && bIsAssertion;
+  const agentDenial = (aSpeaker === 'agent' || aSpeaker === 'AGENT') && aIsDenial;
+  const customerAssertion = (bSpeaker === 'customer' || bSpeaker === 'CUSTOMER') && bIsAssertion;
+  
+  return (customerDenial && agentAssertion) || (agentDenial && customerAssertion) ||
+         ((aSpeaker === 'customer' || aSpeaker === 'CUSTOMER') && aIsDenial && (bSpeaker === 'agent' || bSpeaker === 'AGENT') && bIsAssertion) ||
+         ((aSpeaker === 'agent' || aSpeaker === 'AGENT') && aIsDenial && (bSpeaker === 'customer' || bSpeaker === 'CUSTOMER') && bIsAssertion);
+}
