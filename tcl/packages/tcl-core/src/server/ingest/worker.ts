@@ -493,72 +493,52 @@ async function runAnalysis(input: {
 
   const validateOutput = await validate(validateInput);
 
-  // Get the evaluation ID from the output
-  // The validate function creates an evaluation internally
-  // We need to find it by conversationId
-  // Use maybeSingle() to handle cases where evaluation might not exist yet
-  const { data: evaluation, error: evalError } = await supabaseAdmin!
+  // The validate function does NOT create evaluations - we need to create it ourselves
+  // Format scores for database (similar to /validate endpoint)
+  const scoresForDb = {
+    truth: validateOutput.scores.truth ?? null,
+    consistency: validateOutput.scores.consistency ?? null,
+    coherence: validateOutput.scores.coherence ?? null,
+    overall: validateOutput.scores.overall ?? null,
+  };
+
+  // Build report with issues (similar to /validate endpoint)
+  const reportWithIssues = {
+    ...validateOutput.report,
+    allIssuesV2: validateOutput.report.destructiveClaims || [],
+    topIssuesV2: (validateOutput.report.destructiveClaims || []).slice(0, 10),
+  };
+
+  // Create the evaluation in the database
+  const { data: insertedEvaluation, error: dbError } = await supabaseAdmin!
     .from('evaluations')
-    .select('id')
-    .eq('conversation_id', input.conversationId)
-    .eq('org_id', input.orgId)
-    .order('created_at', { ascending: false })
-    .limit(1)
-    .maybeSingle();
-
-  if (evalError) {
-    throw new Error(`Failed to find evaluation: ${evalError.message}`);
-  }
-
-  if (!evaluation) {
-    // If no evaluation found, wait a moment and retry (validate might still be creating it)
-    console.log(`[Worker] Evaluation not found immediately, waiting 2 seconds and retrying...`);
-    await new Promise(resolve => setTimeout(resolve, 2000));
-    
-    const { data: retryEvaluation, error: retryError } = await supabaseAdmin!
-      .from('evaluations')
-      .select('id')
-      .eq('conversation_id', input.conversationId)
-      .eq('org_id', input.orgId)
-      .order('created_at', { ascending: false })
-      .limit(1)
-      .maybeSingle();
-
-    if (retryError) {
-      throw new Error(`Failed to find evaluation after retry: ${retryError.message}`);
-    }
-
-    if (!retryEvaluation) {
-      throw new Error(`Failed to find evaluation: evaluation was not created by validate function`);
-    }
-
-    // Use the retry result
-    const finalEvaluation = retryEvaluation;
-    
-    // Update evaluation with job/asset links
-    await supabaseAdmin!
-      .from('evaluations')
-      .update({
-        job_id: input.jobId,
-        transcript_asset_id: input.transcriptAssetId,
-        verification_level: input.verificationLevel,
-      })
-      .eq('id', finalEvaluation.id);
-
-    return finalEvaluation.id;
-  }
-
-  // Update evaluation with job/asset links
-  await supabaseAdmin!
-    .from('evaluations')
-    .update({
+    .insert({
+      org_id: input.orgId,
+      project_id: input.projectId || null,
+      conversation_id: input.conversationId || null,
+      env: input.env,
+      scores: scoresForDb,
+      refusal: validateOutput.refusal || false,
+      scorer_id: validateOutput.scorerId || null,
+      engine_version: process.env.ENGINE_VERSION || '0.2.0',
+      latency_ms: validateOutput.latency || 0,
+      report: reportWithIssues,
       job_id: input.jobId,
       transcript_asset_id: input.transcriptAssetId,
       verification_level: input.verificationLevel,
     })
-    .eq('id', evaluation.id);
+    .select('id')
+    .single();
 
-  return evaluation.id;
+  if (dbError) {
+    throw new Error(`Failed to create evaluation: ${dbError.message}`);
+  }
+
+  if (!insertedEvaluation) {
+    throw new Error(`Failed to create evaluation: no ID returned`);
+  }
+
+  return insertedEvaluation.id;
 }
 
 /**
