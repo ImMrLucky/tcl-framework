@@ -1027,12 +1027,37 @@ app.post("/validate", requireCapability(Capability.ANALYZE_MANUAL_UPLOAD), async
                 templateId: (out.report?.manifest as any)?.templateId,
                 isRegulatedTemplate: false, // TODO: detect from template
               };
-              const rankedResult = rankIssuesV2(expansionResult.allIssues, rankingConfig, scoringContext);
+              const rankedResult = rankIssuesV2(allAtomicIssues, rankingConfig, scoringContext);
+              
+              // C2-C3: Aggregate issues into clusters
+              const { aggregateIssues } = await import('../analysis/issue-clustering.js');
+              const evalMode: any = {
+                verificationLevel: evidenceMode === 'TRANSCRIPT_ONLY' ? 'TRANSCRIPT_ONLY' : 
+                                    'DOC_BACKED' as const,
+                hasExternalEvidence: evidenceMode === 'TRANSCRIPT_PLUS_EXTERNAL',
+                evidenceCoverage01: 0, // TODO: compute from actual evidence coverage
+                transcriptOnlyReasonCodes: evidenceMode === 'TRANSCRIPT_ONLY' ? ['NO_EXTERNAL_EVIDENCE'] : [],
+              };
+              const clusteringResult = aggregateIssues(rankedResult.allIssues, evalMode);
+              
+              // E1-E3: Compute executive summary from aggregated issues
+              const { computeExecutiveSummary } = await import('../analysis/executive-summary.js');
+              const executiveSummary = computeExecutiveSummary({
+                aggregatedIssues: clusteringResult.aggregatedIssues,
+                truthScore: out.scores?.truth ?? null,
+                coherenceScore: out.scores?.coherence ?? null,
+                consistencyScore: out.scores?.consistency ?? null,
+                evalMode,
+              });
               
               // Store in report
               (out.report as any).allIssuesV2 = rankedResult.allIssues;
-              (out.report as any).topIssuesV2 = rankedResult.topIssues;
+              (out.report as any).topIssuesV2 = rankedResult.topIssues; // Keep for backwards compatibility
+              (out.report as any).topAggregatedIssues = clusteringResult.aggregatedIssues.slice(0, 10); // Top 10 clusters
+              (out.report as any).aggregatedIssues = clusteringResult.aggregatedIssues; // All aggregated issues
               (out.report as any).issueSummaryV2 = rankedResult.summary;
+              (out.report as any).executiveSummary = executiveSummary; // E1-E3: Root-cause driven executive summary
+              (out.report as any).evalMode = evalMode; // A1: Add EvalMode to report
               (out.report as any).issuesByClaim = expansionResult.issuesByClaim;
               
               console.log("9️⃣ ISSUE V2 EXPANSION:", {

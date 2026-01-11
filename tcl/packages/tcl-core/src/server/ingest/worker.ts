@@ -507,6 +507,8 @@ async function runAnalysis(input: {
   let allIssuesV2: any[] = [];
   let topIssuesV2: any[] = [];
   let issueSummaryV2: any = null;
+  let reportWithIssues: any = null;
+  let evalMode: any = null;
 
   try {
     const { expandIssueCandidates } = await import('../../analysis/issue-expansion.js');
@@ -557,6 +559,18 @@ async function runAnalysis(input: {
       },
     });
 
+    // D: Detect compliance issues (PCI, recording consent, PII)
+    const { detectComplianceIssues } = await import('../../analysis/compliance-detectors.js');
+    const complianceResult = detectComplianceIssues(
+      claimsForIssues,
+      'pending',
+      input.conversationId,
+      evidenceMode
+    );
+    
+    // Combine graph issues with compliance issues
+    const allAtomicIssues = [...expansionResult.allIssues, ...complianceResult.issues];
+
     // Rank issues (deterministic) with scoring context
     const scoringContext = {
       mode: (evidenceMode === 'TRANSCRIPT_ONLY' ? 'transcript_only' : 'with_evidence') as 'transcript_only' | 'with_evidence',
@@ -565,25 +579,62 @@ async function runAnalysis(input: {
       templateId: validateOutput.report?.manifest?.templateId,
       isRegulatedTemplate: false,
     };
-    const rankedResult = rankIssuesV2(expansionResult.allIssues, undefined, scoringContext);
+    const rankedResult = rankIssuesV2(allAtomicIssues, undefined, scoringContext);
+    
+    // C2-C3: Aggregate issues into clusters
+    const { aggregateIssues } = await import('../../analysis/issue-clustering.js');
+    const evalMode: any = {
+      verificationLevel: evidenceMode === 'TRANSCRIPT_ONLY' ? 'TRANSCRIPT_ONLY' : 
+                          'DOC_BACKED' as const,
+      hasExternalEvidence: evidenceMode === 'TRANSCRIPT_PLUS_EXTERNAL',
+      evidenceCoverage01: 0, // TODO: compute from actual evidence coverage
+      transcriptOnlyReasonCodes: evidenceMode === 'TRANSCRIPT_ONLY' ? ['NO_EXTERNAL_EVIDENCE'] : [],
+    };
+    const clusteringResult = aggregateIssues(rankedResult.allIssues, evalMode);
 
     allIssuesV2 = rankedResult.allIssues;
     topIssuesV2 = rankedResult.topIssues;
     issueSummaryV2 = rankedResult.summary;
+    
+    // C4: Add aggregated issues to report (topAggregatedIssues replaces topIssuesV2 for UI)
+    const topAggregatedIssues = clusteringResult.aggregatedIssues.slice(0, 10); // Top 10 clusters
+    
+    // E1-E3: Compute executive summary from aggregated issues
+    const { computeExecutiveSummary } = await import('../../analysis/executive-summary.js');
+    const executiveSummary = computeExecutiveSummary({
+      aggregatedIssues: clusteringResult.aggregatedIssues,
+      truthScore: validateOutput.scores.truth,
+      coherenceScore: validateOutput.scores.coherence,
+      consistencyScore: validateOutput.scores.consistency,
+      evalMode,
+    });
+    
+    // Build report with issues (similar to /validate endpoint)
+    reportWithIssues = {
+      ...validateOutput.report,
+      allIssuesV2,
+      topIssuesV2, // Keep for backwards compatibility / debugging
+      topAggregatedIssues, // C4: New aggregated issues for UI
+      aggregatedIssues: clusteringResult.aggregatedIssues, // All aggregated issues
+      issueSummaryV2,
+      executiveSummary, // E1-E3: Root-cause driven executive summary
+      // A1: Add EvalMode to report
+      evalMode,
+    };
   } catch (issueError: any) {
     console.error(`[Worker] Failed to expand/rank issues, using fallback:`, issueError);
     // Fallback: use destructiveClaims if expansion fails
     allIssuesV2 = validateOutput.report?.destructiveClaims || [];
     topIssuesV2 = (validateOutput.report?.destructiveClaims || []).slice(0, 10);
+    
+    // Build report with fallback issues
+    reportWithIssues = {
+      ...validateOutput.report,
+      allIssuesV2,
+      topIssuesV2,
+      issueSummaryV2: null,
+    };
   }
-
-  // Build report with issues (similar to /validate endpoint)
-  const reportWithIssues = {
-    ...validateOutput.report,
-    allIssuesV2,
-    topIssuesV2,
-    issueSummaryV2,
-  };
 
   // Create the evaluation in the database
   const { data: insertedEvaluation, error: dbError } = await supabaseAdmin!
@@ -598,7 +649,12 @@ async function runAnalysis(input: {
       scorer_id: validateOutput.scorerId || null,
       engine_version: process.env.ENGINE_VERSION || '0.2.0',
       latency_ms: validateOutput.latency || 0,
-      report: reportWithIssues,
+      report: reportWithIssues || {
+        ...validateOutput.report,
+        allIssuesV2: allIssuesV2 || [],
+        topIssuesV2: topIssuesV2 || [],
+        issueSummaryV2: issueSummaryV2 || null,
+      },
       job_id: input.jobId,
       transcript_asset_id: input.transcriptAssetId,
       verification_level: input.verificationLevel,
@@ -635,7 +691,7 @@ async function runAnalysis(input: {
 
     // Update the report in the database with the corrected runIds
     const updatedReport = {
-      ...reportWithIssues,
+      ...(reportWithIssues || {}),
       allIssuesV2,
       topIssuesV2,
     };

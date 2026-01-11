@@ -50,8 +50,9 @@ export function rankIssuesV2(
   const rankingConfig = config || getRiskRankingConfig();
   
   // Score all issues using new pipeline
+  // Pass allIssues to computeSignal01 for normalization
   const scoredIssues = issues.map(issue => {
-    return scoreIssue(issue, rankingConfig, scoringContext);
+    return scoreIssue(issue, rankingConfig, scoringContext, issues);
   });
   
   // Sort deterministically with stable ordering
@@ -129,12 +130,17 @@ export function rankIssuesV2(
 function scoreIssue(
   issue: IssueV2,
   config: RiskRankingConfig,
-  scoringContext?: ScoringContext
+  scoringContext?: ScoringContext,
+  allIssues?: IssueV2[]
 ): IssueV2 {
   // Step 1: Compute component scores (all 0..1, all from config)
   const impact01 = computeImpact01(issue, config);
-  const evidence01 = computeEvidence01(issue, config);
-  const signal01 = computeSignal01(issue, config);
+  const evalMode = scoringContext ? {
+    verificationLevel: scoringContext.mode === 'transcript_only' ? 'TRANSCRIPT_ONLY' as const : 
+                       scoringContext.numSources > 0 ? 'DOC_BACKED' as const : 'EXTERNALLY_VERIFIED' as const
+  } : undefined;
+  const evidence01 = computeEvidence01(issue, config, evalMode);
+  const signal01 = computeSignal01(issue, config, scoringContext, allIssues);
   const category01 = computeCategory01(issue, config);
   
   // Step 2: Get weights from config (validated on startup)
@@ -150,14 +156,47 @@ function scoreIssue(
     (wSignal * signal01) +
     (wCategory * category01);
   
+  // A2: Apply verification multiplier (separate impact from verification)
+  // Impact = how bad if true (customer harm, $ amounts, legal, compliance)
+  // Verification = how defensible/provable in audit
+  const verificationMultiplier = evalMode?.verificationLevel === 'TRANSCRIPT_ONLY' ? 0.85 :
+                                  evalMode?.verificationLevel === 'DOC_BACKED' ? 1.00 :
+                                  1.10; // EXTERNALLY_VERIFIED
+  
+  // Apply multiplier to riskScore (not impact - impact stays unchanged)
+  const adjustedRisk01 = risk01 * verificationMultiplier;
+  
+  // B2: Speaker gating - downgrade non-AGENT↔AGENT contradictions
+  // AGENT↔AGENT: normal contradiction scoring
+  // CUSTOMER↔AGENT: "dispute/allegation" (lower severity cap unless agent explicitly commits)
+  // CUSTOMER↔CUSTOMER: informational (do not score high)
+  let finalRisk01 = adjustedRisk01;
+  const speakerGating = (issue as any)._speakerGating;
+  if (speakerGating && !speakerGating.isAgentAgent) {
+    // Downgrade contradictions that aren't AGENT↔AGENT
+    const downgradedImpact01 = impact01 * 0.6;  // Reduce impact
+    const downgradedSignal01 = signal01 * 0.4;  // Reduce signal
+    // Recompute risk01 with downgraded components
+    finalRisk01 = (wImpact * downgradedImpact01) +
+                   (wEvidence * evidence01) +
+                   (wSignal * downgradedSignal01) +
+                   (wCategory * category01);
+    finalRisk01 = finalRisk01 * verificationMultiplier;
+  }
+  
   // Step 4: Clamp to 0..1
-  const riskScore = clamp01(risk01);
+  const riskScore = clamp01(finalRisk01);
   
   // Step 5: Convert to 0..100 score
   const score = Math.round(riskScore * 100);
   
   // Step 6: Derive severity from riskScore (canonical severity, independent of mode)
   let severity = deriveSeverity(riskScore, config);
+  
+  // B2: Apply severity cap for non-AGENT↔AGENT contradictions
+  if (speakerGating && !speakerGating.isAgentAgent && severity === 'high') {
+    severity = 'medium'; // Cap at medium for customer disputes
+  }
   
   // Apply category-based minimums (e.g., CONTRADICTION involving MONEY/FEES/REFUND => min "high")
   severity = applyCategoryMinimums(severity, issue, config);
@@ -237,6 +276,7 @@ function scoreIssue(
         evidence01: Math.round(evidence01 * 1000) / 1000,
         signal01: Math.round(signal01 * 1000) / 1000,
         category01: Math.round(category01 * 1000) / 1000,
+        verificationMultiplier: Math.round(verificationMultiplier * 1000) / 1000,
       },
       weights: {
         impact: wImpact,
@@ -260,40 +300,39 @@ function computeImpact01(issue: IssueV2, config: RiskRankingConfig): number {
 
 /**
  * Compute evidence01 from issue.verification.level (0..1)
- * For transcript-only mode, allows boost based on contradiction weight and supporting edges
- * This prevents transcript-only from being artificially capped at 0.45
+ * A3: Fix evidence scoring in transcript-only (currently too high)
+ * Transcript-only should be 0.15 (low audit defensibility), not boosted
  */
-function computeEvidence01(issue: IssueV2, config: RiskRankingConfig): number {
+function computeEvidence01(
+  issue: IssueV2, 
+  config: RiskRankingConfig,
+  evalMode?: { verificationLevel: 'TRANSCRIPT_ONLY' | 'DOC_BACKED' | 'EXTERNALLY_VERIFIED' }
+): number {
   const level = issue.verification.level;
-  let evidence01 = config.evidenceMap[level];
   
-  // For transcript-only mode, allow boost based on graph signals
-  // This allows obvious severe contradictions to escalate even without external evidence
-  if (level === 'TRANSCRIPT_ONLY') {
-    // Base: 0.45 from config
-    let boost = 0;
-    
-    // Boost 1: Strong contradiction weight (>= 0.60)
-    if (issue.evidence.edges && issue.evidence.edges.length > 0) {
-      const contradictionEdges = issue.evidence.edges.filter(e => e.kind === 'contradiction');
-      if (contradictionEdges.length > 0) {
-        const maxContradictionWeight = Math.max(...contradictionEdges.map(e => e.weight || 0));
-        if (maxContradictionWeight >= 0.60) {
-          boost += 0.10; // Strong contradiction signal
-        }
-      }
-      
-      // Boost 2: Multiple supporting edges corroborating same conflict cluster
-      // (This indicates the contradiction is part of a larger pattern)
-      const supportEdges = issue.evidence.edges.filter(e => e.kind === 'support');
-      if (supportEdges.length >= 2) {
-        boost += 0.10; // Multiple corroborating signals
-      }
+  // A3: Transcript-only gets low evidence score (low audit defensibility)
+  if (level === 'TRANSCRIPT_ONLY' || evalMode?.verificationLevel === 'TRANSCRIPT_ONLY') {
+    return 0.15; // Low audit defensibility - no external evidence
+  }
+  
+  // For other modes, compute from refs, edges, grounding, docMatches
+  // This will be enhanced in future to consider actual evidence coverage
+  let evidence01 = config.evidenceMap[level] || 0.2;
+  
+  // Boost based on actual evidence refs/edges if available
+  if (issue.evidence.refs && issue.evidence.refs.length > 0) {
+    const externalRefs = issue.evidence.refs.filter(r => r.sourceType !== 'TRANSCRIPT');
+    if (externalRefs.length > 0) {
+      evidence01 = Math.max(evidence01, 0.7); // Has external evidence
     }
-    
-    // Clamp to <= 0.75 unless external evidence exists
-    // (We never want to exceed external verification score without actual external evidence)
-    evidence01 = Math.min(0.75, evidence01 + boost);
+  }
+  
+  if (issue.evidence.edges && issue.evidence.edges.length > 0) {
+    const groundingEdges = issue.evidence.edges.filter(e => e.kind === 'grounding');
+    if (groundingEdges.length > 0) {
+      const maxGroundingWeight = Math.max(...groundingEdges.map(e => e.weight || 0));
+      evidence01 = Math.max(evidence01, 0.5 + (maxGroundingWeight * 0.3)); // Boost from grounding
+    }
   }
   
   return clamp01(evidence01);

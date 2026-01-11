@@ -266,13 +266,30 @@ function createContradictionIssue(
   }
   
   // Determine speaker (prioritize agent)
-  const speaker: SpeakerV2 = 
+  const speakerA: SpeakerV2 = 
     claimA.meta?.speaker === 'Agent' || claimA.meta?.speaker === 'AGENT' ? 'AGENT' :
-    claimB.meta?.speaker === 'Agent' || claimB.meta?.speaker === 'AGENT' ? 'AGENT' :
     claimA.meta?.speaker === 'Customer' || claimA.meta?.speaker === 'CUSTOMER' ? 'CUSTOMER' :
     'UNKNOWN';
+  const speakerB: SpeakerV2 = 
+    claimB.meta?.speaker === 'Agent' || claimB.meta?.speaker === 'AGENT' ? 'AGENT' :
+    claimB.meta?.speaker === 'Customer' || claimB.meta?.speaker === 'CUSTOMER' ? 'CUSTOMER' :
+    'UNKNOWN';
+  
+  const speaker: SpeakerV2 = speakerA === 'AGENT' ? 'AGENT' : speakerB === 'AGENT' ? 'AGENT' : speakerA;
+  
+  // B2: Speaker gating - determine if this is AGENT↔AGENT (normal) vs customer dispute
+  const isAgentAgent = speakerA === 'AGENT' && speakerB === 'AGENT';
+  const speakerType = isAgentAgent ? 'agent' : 'mixed';
   
   const turnIndex = claimA.meta?.turnIndex ?? claimB.meta?.turnIndex;
+  
+  // Extract topicId and slotKey for clustering (C1)
+  const topicId = claimA.topicId || claimB.topicId || 'unknown';
+  const slotKey = `${claimA.slot?.slotType || 'unknown'}:${claimA.slot?.entityKey || ''}`;
+  
+  // C1: Generate clusterKey for aggregation
+  const clusterKey = `${'consistency'}:${'CONTRADICTION'}:${topicId}:${slotKey}:${speakerType}`;
+  const clusterId = createHash('sha256').update(clusterKey).digest('hex').substring(0, 16);
   
   // Determine verification level based on evidence mode and actual grounding
   let verificationLevel: VerificationLevelV2 = 'NONE';
@@ -300,6 +317,10 @@ function createContradictionIssue(
   return {
     issueId,
     issueKey,
+    clusterKey,
+    clusterId,
+    topicId,
+    slotKey,
     runId: input.runId,
     conversationId: input.conversationId,
     type: 'CONTRADICTION',
@@ -311,6 +332,12 @@ function createContradictionIssue(
     score: 0, // Will be computed by scoring
     confidence: edge.weight || 0.7,
     reviewRequired: true,
+    // B2: Store speaker gating info for scoring
+    // @ts-ignore - temporary field for speaker gating
+    _speakerGating: {
+      isAgentAgent,
+      speakerType,
+    },
     verification: {
       level: verificationLevel,
       reasonCodes: input.evidenceMode === 'TRANSCRIPT_ONLY' ? ['NO_EXTERNAL_EVIDENCE'] : [],

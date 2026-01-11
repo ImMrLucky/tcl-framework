@@ -115,8 +115,8 @@ export type ContradictionPair = {
 /** Support basis for a claim - where is it supported from? */
 export type SupportBasis = 'TRANSCRIPT' | 'EXTERNAL' | 'NONE';
 
-/** Verification level based on available evidence */
-export type VerificationLevel = 'TRANSCRIPT_ONLY' | 'EXTERNALLY_VERIFIED';
+/** Verification level based on available evidence - for EvalMode */
+export type VerificationLevel = "TRANSCRIPT_ONLY" | "DOC_BACKED" | "EXTERNALLY_VERIFIED";
 
 /** Evidence mode for the evaluation run */
 export type EvidenceMode = 'TRANSCRIPT_ONLY' | 'TRANSCRIPT_PLUS_EXTERNAL';
@@ -207,6 +207,14 @@ export type SeverityDisplayV2 = "low" | "medium" | "high";
 export type SpeakerV2 = "AGENT" | "CUSTOMER" | "SYSTEM" | "UNKNOWN";
 
 export type VerificationLevelV2 = "EXTERNAL_VERIFIED" | "TRANSCRIPT_ONLY" | "NONE";
+// VerificationLevel is already defined elsewhere, using that definition
+
+export interface EvalMode {
+  verificationLevel: VerificationLevel;
+  hasExternalEvidence: boolean;         // true if any refs/evidence sources provided
+  evidenceCoverage01: number;           // 0..1 (% of high-impact claims that have evidence edges)
+  transcriptOnlyReasonCodes?: string[]; // e.g. ["NO_EXTERNAL_EVIDENCE"]
+}
 
 export type RecommendedActionType = 
   | "NEEDS_EXTERNAL_EVIDENCE" 
@@ -217,7 +225,11 @@ export type RecommendedActionType =
 
 export interface IssueV2 {
   issueId: string;                 // stable hash from (runId + issueKey)
-  issueKey: string;                // stable dedupe key
+  issueKey: string;                // stable dedupe key (atomic uniqueness)
+  clusterKey?: string;             // cluster key for aggregation: `${category}:${type}:${topicId}:${slotKey}:${speakerType}`
+  clusterId?: string;              // hash of clusterKey
+  topicId?: string;                // topic identifier for gating
+  slotKey?: string;                // slot identifier for gating
   runId: string;                   // evaluation.id
   conversationId: string;
 
@@ -328,6 +340,75 @@ export interface IssueSummaryV2 {
   byCategory: Record<IssueCategoryV2, number>;
   topIssuesCount: number;
   allIssuesCount: number;
+}
+
+export interface AggregatedIssue {
+  clusterId: string;
+  clusterKey: string;
+  
+  category: string;      // consistency, compliance, evidence, etc.
+  type: string;          // CONTRADICTION, PCI, RECORDING_CONSENT, ...
+  title: string;
+  summary: string;
+  
+  severity: SeverityV2;
+  riskScore: number;     // clustered risk score 0..1
+  occurrences: number;
+  
+  firstTurnIndex: number;
+  lastTurnIndex: number;
+  
+  verification: EvalMode;  // include mode + reason codes
+  reviewRequired: boolean;
+  
+  evidence: {
+    refs: any[];
+    edges: any[];
+    atomicIssueIds: string[];
+    claimIds: string[];
+  };
+  
+  scoring: {
+    components: {
+      impact01: number;
+      signal01: number;
+      evidence01: number;
+      category01: number;
+      clusterPenalty01: number;
+      verificationMultiplier: number;
+    };
+    reasons: string[];
+  };
+}
+
+export interface ExecutiveSummary {
+  overallRiskScore: number;      // 0..100
+  truthScore: number;            // existing
+  coherenceScore: number;        // existing
+  consistencyScore: number;      // existing
+  
+  verificationLevel: VerificationLevel;
+  auditDefensibility: "low" | "medium" | "high"; // derived from mode + evidenceCoverage01
+  
+  criticalFindings: number; // aggregated count by severity
+  highFindings: number;
+  mediumFindings: number;
+  lowFindings: number;
+  
+  topRootCauses: Array<{
+    title: string;
+    severity: string;
+    riskScore: number;
+    occurrences: number;
+  }>;
+  
+  recommendedActions: Array<{
+    action: string;
+    reason: string;
+    linkedClusterId?: string;
+  }>;
+  
+  disclaimers: string[]; // e.g., transcript-only not externally verified
 }
 
 export type Violation =

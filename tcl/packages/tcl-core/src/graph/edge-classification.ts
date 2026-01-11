@@ -251,18 +251,20 @@ function classifyContradiction(
     }
   }
   
-  // GATE 2: Topic match (STRICT) - must match topicId OR same slotType+entityKey
-  // This prevents false contradictions like "Device Protection" vs "Moving address"
+  // B1: Topic + slot hard-gate for contradiction edges
+  // Do not generate contradiction edges unless topicId AND slotKey match
+  // This prevents "topic drift contradictions" (e.g., device protection vs cancellation)
   if (config.gating.contradictionRequiresSameTopic) {
-    const topicMatch = claimA.topicId && claimB.topicId && claimA.topicId === claimB.topicId;
-    const slotEntityMatch = sameSlotType && 
-      claimA.slot.entityKey && 
-      claimB.slot.entityKey && 
-      claimA.slot.entityKey === claimB.slot.entityKey;
-    
-    // Must match topic OR have same slotType+entityKey
-    if (!topicMatch && !slotEntityMatch) {
+    // Hard gate: topicId must match
+    if (claimA.topicId && claimB.topicId && claimA.topicId !== claimB.topicId) {
       return { rejected: true, reason: 'topic' };
+    }
+    
+    // Hard gate: slotKey must match (slotType + entityKey)
+    const slotKeyA = claimA.slot.slotType + (claimA.slot.entityKey || '');
+    const slotKeyB = claimB.slot.slotType + (claimB.slot.entityKey || '');
+    if (slotKeyA !== slotKeyB) {
+      return { rejected: true, reason: 'slot' };
     }
   }
   
