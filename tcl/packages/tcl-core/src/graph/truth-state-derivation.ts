@@ -43,6 +43,7 @@ export interface TruthDerivationResult {
     ungrounded: number;
     total: number;
   };
+  diagnostics?: string[]; // Warnings from consistency checks
 }
 
 // =============================================================================
@@ -94,7 +95,22 @@ export function deriveTruthStatesFromGraph(graph: ClaimGraph): TruthDerivationRe
     }
   }
   
-  return { results, summary };
+  // CONSISTENCY CHECK: If contradiction edges exist above threshold but none were applied,
+  // this indicates a weight mismatch or threshold misalignment
+  const contradictionEdges = graph.edges.contradiction || [];
+  const contradictionThreshold = config.truthDerivation.minContradictionWeight;
+  const contradictionsAboveThreshold = contradictionEdges.filter(
+    e => e.weight >= contradictionThreshold
+  ).length;
+  
+  // Add diagnostics warning if contradictions exist but none applied
+  // This will be picked up by the caller to mark the graph as degraded
+  const diagnostics: string[] = [];
+  if (contradictionsAboveThreshold > 0 && summary.contradicted === 0) {
+    diagnostics.push('CONTRADICTIONS_PRESENT_BUT_NONE_APPLIED');
+  }
+  
+  return { results, summary, diagnostics };
 }
 
 // =============================================================================
@@ -257,15 +273,15 @@ export interface TruthScores {
   /** Percentage of claims with external verification */
   externalVerification: number;
   
-  /** Consistency score based on contradictions */
-  consistency: number;
+  /** Consistency score based on contradictions (null if cannot be computed) */
+  consistency: number | null;
   
-  /** Overall audit-ready truth score */
-  auditTruth: number;
+  /** Overall audit-ready truth score (null if cannot be computed) */
+  auditTruth: number | null;
   
   /** Mode-aware scores (separated for clarity) */
   modeAware?: {
-    consistencyScore: number;
+    consistencyScore: number | null; // null if cannot be computed
     groundingScore: number;
     evidenceScore: number;
   };
@@ -278,14 +294,16 @@ export function computeTruthScores(
   const { summary } = derivation;
   const total = summary.total;
   
+  // CRITICAL: If no claims exist, we cannot compute meaningful scores
+  // Return null for all scores (not fake 100s) - let blendScores handle it
   if (total === 0) {
     return {
       transcriptGrounding: 0,
       externalVerification: 0,
-      consistency: 100,
-      auditTruth: 0,
+      consistency: null, // No claims = cannot compute consistency (not 100)
+      auditTruth: null,  // No claims = cannot compute truth (not 0)
       modeAware: {
-        consistencyScore: 100,
+        consistencyScore: null, // No claims = cannot compute (not 100)
         groundingScore: 0,
         evidenceScore: 0,
       },

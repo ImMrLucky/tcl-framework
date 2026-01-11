@@ -308,7 +308,20 @@ const TEMPLATE_REGISTRY: Record<string, TemplateConfig> = {
 let _activeTemplate: TemplateConfig = DEFAULT_TEMPLATE_CONFIG;
 
 export function getTemplateConfig(): TemplateConfig {
-  return _activeTemplate;
+  const config = _activeTemplate;
+  
+  // SAFEGUARD: Ensure truthDerivation.minContradictionWeight is aligned with edge creation threshold
+  // This prevents configuration drift where calibration could invalidate contradictions
+  if (config.truthDerivation.minContradictionWeight > config.thresholds.contradiction) {
+    // If minContradictionWeight is higher than the creation threshold, align it
+    // (This should never happen in practice, but prevents silent failures)
+    config.truthDerivation.minContradictionWeight = Math.min(
+      config.truthDerivation.minContradictionWeight,
+      config.thresholds.contradiction
+    );
+  }
+  
+  return config;
 }
 
 export function setTemplateConfig(templateIdOrConfig: string | TemplateConfig): void {

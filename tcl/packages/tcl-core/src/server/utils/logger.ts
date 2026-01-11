@@ -37,13 +37,41 @@ const shouldLogCategory = (category: 'uploads' | 'graph'): boolean => {
 };
 
 /**
+ * Sanitize sensitive content from log data
+ */
+function sanitizeData(data: any, maxLength: number = 200): any {
+  if (!data || typeof data !== 'object') {
+    if (typeof data === 'string' && data.length > maxLength) {
+      return data.substring(0, maxLength) + '...';
+    }
+    return data;
+  }
+  
+  const sanitized: any = {};
+  for (const [key, value] of Object.entries(data)) {
+    // Skip or truncate sensitive fields
+    if (key.includes('transcript') || key.includes('text') || key.includes('quote') || key.includes('claimText')) {
+      if (typeof value === 'string' && value.length > 100) {
+        sanitized[key] = value.substring(0, 100) + '...';
+      } else {
+        sanitized[key] = value;
+      }
+    } else {
+      sanitized[key] = value;
+    }
+  }
+  return sanitized;
+}
+
+/**
  * Log upload-related messages (gated by TCL_DEBUG_UPLOADS or LOG_LEVEL=debug)
  */
 export function logUpload(level: 'debug' | 'info' | 'warn' | 'error', message: string, data?: any): void {
   if (level === 'error' || shouldLog(level) || shouldLogCategory('uploads')) {
     const prefix = `[Upload]`;
     if (data) {
-      console[level](`${prefix} ${message}`, data);
+      const sanitized = level === 'debug' ? data : sanitizeData(data);
+      console[level](`${prefix} ${message}`, sanitized);
     } else {
       console[level](`${prefix} ${message}`);
     }
@@ -57,7 +85,8 @@ export function logGraph(level: 'debug' | 'info' | 'warn' | 'error', message: st
   if (level === 'error' || shouldLog(level) || shouldLogCategory('graph')) {
     const prefix = `[Graph]`;
     if (data) {
-      console[level](`${prefix} ${message}`, data);
+      const sanitized = level === 'debug' ? data : sanitizeData(data);
+      console[level](`${prefix} ${message}`, sanitized);
     } else {
       console[level](`${prefix} ${message}`);
     }
@@ -71,7 +100,8 @@ export function log(level: 'debug' | 'info' | 'warn' | 'error', category: string
   if (shouldLog(level)) {
     const prefix = `[${category}]`;
     if (data) {
-      console[level](`${prefix} ${message}`, data);
+      const sanitized = level === 'debug' ? data : sanitizeData(data);
+      console[level](`${prefix} ${message}`, sanitized);
     } else {
       console[level](`${prefix} ${message}`);
     }

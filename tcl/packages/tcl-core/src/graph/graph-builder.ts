@@ -46,6 +46,7 @@ import { calibrateEdges } from './weight-calibration.js';
 import { deriveTruthStatesFromGraph, TruthDerivationResult, computeTruthScores, TruthScores } from './truth-state-derivation.js';
 import { buildRunDiagnostics, DiagnosticsInput, validateGraphIntegrity } from './run-diagnostics.js';
 import { createHash } from 'crypto';
+import { logGraph } from '../server/utils/logger.js';
 
 // =============================================================================
 // GRAPH BUILDER INPUT
@@ -185,29 +186,37 @@ export function buildGraph(input: GraphBuilderInput): GraphBuilderOutput {
   const step1Start = Date.now();
   const claimNodes = buildClaimNodes(input);
   pipelineSteps['claimNodes'] = Date.now() - step1Start;
-  console.log(`📋 Graph Builder: ${claimNodes.length} claim nodes (${pipelineSteps['claimNodes']}ms)`);
+  logGraph('debug', `Claim nodes: ${claimNodes.length}`, { count: claimNodes.length, duration: pipelineSteps['claimNodes'] });
   
   // Step 2: Build EvidenceNodes
   const step2Start = Date.now();
   const evidenceNodes = buildEvidenceNodes(input);
   pipelineSteps['evidenceNodes'] = Date.now() - step2Start;
-  console.log(`📄 Graph Builder: ${evidenceNodes.length} evidence nodes (${pipelineSteps['evidenceNodes']}ms)`);
+  logGraph('debug', `Evidence nodes: ${evidenceNodes.length}`, { count: evidenceNodes.length, duration: pipelineSteps['evidenceNodes'] });
   
   // Step 3: Topic Segmentation
   const step3Start = Date.now();
   const segmentation = assignTopicIds(claimNodes);
   pipelineSteps['topicSegmentation'] = Date.now() - step3Start;
-  console.log(`🏷️ Graph Builder: ${segmentation.clusters.length} topic clusters (${pipelineSteps['topicSegmentation']}ms)`);
+  logGraph('debug', `Topic clusters: ${segmentation.clusters.length}`, { count: segmentation.clusters.length, duration: pipelineSteps['topicSegmentation'] });
   
   // Step 4: Candidate Generation
   const step4Start = Date.now();
   const transcriptEvidenceCount = evidenceNodes.filter(e => e.evidenceKind === 'transcript').length;
-  console.log(`📊 Graph Builder: ${evidenceNodes.length} evidence nodes (${transcriptEvidenceCount} transcript)`);
+  logGraph('debug', `Evidence nodes breakdown`, { total: evidenceNodes.length, transcript: transcriptEvidenceCount });
   
   const candidates = generateCandidates(claimNodes, evidenceNodes);
   pipelineSteps['candidateGeneration'] = Date.now() - step4Start;
-  console.log(`🎯 Graph Builder: ${candidates.diagnostics.totalCandidatesGenerated} candidates (${pipelineSteps['candidateGeneration']}ms)`);
-  console.log(`   Breakdown: ${candidates.contradictionCandidates.length} contradiction, ${candidates.supportClaimCandidates.length} support-claim, ${candidates.supportEvidenceCandidates.length} support-evidence, ${candidates.groundingCandidates.length} grounding`);
+  logGraph('debug', `Candidates generated`, { 
+    total: candidates.diagnostics.totalCandidatesGenerated, 
+    duration: pipelineSteps['candidateGeneration'],
+    breakdown: {
+      contradiction: candidates.contradictionCandidates.length,
+      supportClaim: candidates.supportClaimCandidates.length,
+      supportEvidence: candidates.supportEvidenceCandidates.length,
+      grounding: candidates.groundingCandidates.length
+    }
+  });
   
   // Step 5: Edge Classification
   const step5Start = Date.now();
@@ -218,8 +227,15 @@ export function buildGraph(input: GraphBuilderInput): GraphBuilderOutput {
     candidates.groundingCandidates
   );
   pipelineSteps['edgeClassification'] = Date.now() - step5Start;
-  console.log(`🔗 Graph Builder: ${classified.diagnostics.edgesCreated} edges created (${pipelineSteps['edgeClassification']}ms)`);
-  console.log(`   Created: ${classified.contradictions.length} contradictions, ${classified.supports.length} supports, ${classified.groundings.length} groundings`);
+  logGraph('debug', `Edges created`, { 
+    total: classified.diagnostics.edgesCreated, 
+    duration: pipelineSteps['edgeClassification'],
+    breakdown: {
+      contradictions: classified.contradictions.length,
+      supports: classified.supports.length,
+      groundings: classified.groundings.length
+    }
+  });
   
   // Step 6: Weight Calibration
   const step6Start = Date.now();
@@ -230,7 +246,7 @@ export function buildGraph(input: GraphBuilderInput): GraphBuilderOutput {
   const calibratedContradictions = calibrateEdges(classified.contradictions, claimMap, evidenceMap);
   const calibratedGroundings = calibrateEdges(classified.groundings, claimMap, evidenceMap);
   pipelineSteps['weightCalibration'] = Date.now() - step6Start;
-  console.log(`⚖️ Graph Builder: Calibrated weights (${pipelineSteps['weightCalibration']}ms)`);
+  logGraph('debug', `Weight calibration completed`, { duration: pipelineSteps['weightCalibration'] });
   
   // Step 7: Build ClaimGraph
   const inputHash = createHash('sha256')
@@ -279,8 +295,11 @@ export function buildGraph(input: GraphBuilderInput): GraphBuilderOutput {
   const truthScores = computeTruthScores(truthDerivation, hasExternalEvidence);
   
   pipelineSteps['truthDerivation'] = Date.now() - step8Start;
-  console.log(`✅ Graph Builder: Truth scores computed (${pipelineSteps['truthDerivation']}ms)`);
-  console.log(`   Mode: ${hasExternalEvidence ? 'evidence-backed' : 'transcript-only'}, Truth: ${truthScores.auditTruth}`);
+  logGraph('debug', `Truth scores computed`, { 
+    duration: pipelineSteps['truthDerivation'],
+    mode: hasExternalEvidence ? 'evidence-backed' : 'transcript-only',
+    truth: truthScores.auditTruth
+  });
   
   // Step 9: Run Diagnostics
   const diagnosticsInput: DiagnosticsInput = {
@@ -291,6 +310,12 @@ export function buildGraph(input: GraphBuilderInput): GraphBuilderOutput {
     spectralSkipped: false, // Will be set by caller
   };
   graph.diagnostics = buildRunDiagnostics(diagnosticsInput);
+  
+  // Add consistency check warnings from truth derivation
+  if (truthDerivation.diagnostics && truthDerivation.diagnostics.length > 0) {
+    graph.diagnostics.status = 'DEGRADED';
+    graph.diagnostics.reasons.push(...truthDerivation.diagnostics);
+  }
   
   // Step 10: Validate Graph Integrity
   const integrity = validateGraphIntegrity(graph);

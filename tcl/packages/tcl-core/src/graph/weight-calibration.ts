@@ -86,6 +86,12 @@ export function calibrateEdgeWeight(input: CalibrationInput): CalibrationResult 
     calibratedWeight *= (0.8 + 0.2 * factors.slotMatchBonus);
   }
   
+  // CRITICAL: For CONTRADICTION edges, calibration must never reduce the original classification confidence.
+  // If an edge was strong enough to be labeled a contradiction, it remains strong enough to count as one.
+  if (input.edge.type === 'CONTRADICTION') {
+    calibratedWeight = Math.max(input.edge.weight, calibratedWeight);
+  }
+  
   // Clamp to 0-1
   calibratedWeight = Math.min(1, Math.max(0, calibratedWeight));
   

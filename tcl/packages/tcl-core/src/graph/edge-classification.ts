@@ -248,13 +248,16 @@ function classifyContradiction(
     contradictionScore = Math.min(1.0, contradictionScore + 0.1); // Bonus for exact slot
   }
   
+  // Store the classification score (before threshold check) for audit transparency
+  const classificationScore = contradictionScore;
+  
   // GATE 4: Threshold check
   if (contradictionScore < config.thresholds.contradiction) {
     return { rejected: true, reason: 'threshold' };
   }
   
-  // Create the edge
-  const edge = createContradictionEdge(claimA, claimB, contradictionScore, signals);
+  // Create the edge (with classificationScore preserved for audit)
+  const edge = createContradictionEdge(claimA, claimB, contradictionScore, signals, classificationScore);
   
   return { edge, rejected: false };
 }
@@ -503,7 +506,8 @@ function createContradictionEdge(
   a: ClaimNode,
   b: ClaimNode,
   weight: number,
-  signals: { slotMatch: number; entityOverlap: number; semanticSimilarity: number }
+  signals: { slotMatch: number; entityOverlap: number; semanticSimilarity: number },
+  classificationScore: number
 ): GraphEdge {
   return {
     id: `contradiction-${a.id}-${b.id}`,
@@ -519,6 +523,10 @@ function createContradictionEdge(
         semanticSimilarity: signals.semanticSimilarity,
         hasOpposingPolarity: hasOpposingPolarity(a, b),
         hasValueContradiction: valuesContradict(a.slot, b.slot),
+        // CRITICAL: Preserve classification score for audit transparency
+        // This is the score used for thresholding, before calibration
+        classificationScore: classificationScore,
+        passedThreshold: true, // This edge passed the threshold check
       },
     },
     provenance: {
