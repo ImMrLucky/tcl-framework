@@ -502,11 +502,86 @@ async function runAnalysis(input: {
     overall: validateOutput.scores.overall ?? null,
   };
 
+  // Build proper IssueV2 objects using expandIssueCandidates and rankIssuesV2
+  // This matches what the /validate endpoint does
+  let allIssuesV2: any[] = [];
+  let topIssuesV2: any[] = [];
+  let issueSummaryV2: any = null;
+
+  try {
+    const { expandIssueCandidates } = await import('../analysis/issue-expansion.js');
+    const { rankIssuesV2 } = await import('../analysis/risk-ranking.js');
+
+    // Get graph data from report
+    const graphData = validateOutput.report?.graph || {};
+    const graphSupports = graphData.supports || [];
+    const graphContradictions = graphData.contradictions || [];
+    const graphGrounding = graphData.grounding || [];
+
+    // Map claims to format expected by expandIssueCandidates
+    const claimsForIssues = (validateOutput.report?.claims || []).map((c: any) => ({
+      id: c.id,
+      text: c.text,
+      confidence: c.confidenceMetrics?.groundingScore ?? c.confidence ?? 0,
+      evidence: c.evidence || [],
+      meta: {
+        speaker: c.meta?.speaker,
+        turnIndex: c.meta?.turnIndex
+      },
+      claimType: c.claimType,
+      isAuditable: c.isAuditable,
+      topicTags: c.topicTags || [],
+      hasAbsoluteLanguage: c.hasAbsoluteLanguage || false,
+      hasMoney: c.hasMoney || false
+    }));
+
+    // Determine evidence mode based on verification level
+    const evidenceMode = input.verificationLevel === 'TRANSCRIPT_ONLY' ? 'TRANSCRIPT_ONLY' : 'WITH_EVIDENCE';
+
+    // Expand issues from graph (creates proper IssueV2 format)
+    const expansionResult = expandIssueCandidates({
+      claims: claimsForIssues,
+      contradictions: graphContradictions,
+      supports: graphSupports,
+      grounding: graphGrounding,
+      runId: 'pending', // Will be updated after evaluation is created
+      conversationId: input.conversationId,
+      evidenceMode,
+      audit: {
+        engineVersion: validateOutput.engineVersion || process.env.ENGINE_VERSION || '0.2.0',
+        scorerId: validateOutput.scorerId || 'unified-graph-v1',
+        modelFingerprint: validateOutput.report?.manifest?.modelFingerprint,
+        configHash: validateOutput.report?.manifest?.configHash,
+        inputHash: validateOutput.report?.manifest?.inputHash,
+      },
+    });
+
+    // Rank issues (deterministic) with scoring context
+    const scoringContext = {
+      mode: (evidenceMode === 'TRANSCRIPT_ONLY' ? 'transcript_only' : 'with_evidence') as 'transcript_only' | 'with_evidence',
+      numSources: 0, // No external sources for ingestion jobs
+      graphStatus: validateOutput.report?.graph?.status,
+      templateId: validateOutput.report?.manifest?.templateId,
+      isRegulatedTemplate: false,
+    };
+    const rankedResult = rankIssuesV2(expansionResult.allIssues, undefined, scoringContext);
+
+    allIssuesV2 = rankedResult.allIssues;
+    topIssuesV2 = rankedResult.topIssues;
+    issueSummaryV2 = rankedResult.summary;
+  } catch (issueError: any) {
+    console.error(`[Worker] Failed to expand/rank issues, using fallback:`, issueError);
+    // Fallback: use destructiveClaims if expansion fails
+    allIssuesV2 = validateOutput.report?.destructiveClaims || [];
+    topIssuesV2 = (validateOutput.report?.destructiveClaims || []).slice(0, 10);
+  }
+
   // Build report with issues (similar to /validate endpoint)
   const reportWithIssues = {
     ...validateOutput.report,
-    allIssuesV2: validateOutput.report.destructiveClaims || [],
-    topIssuesV2: (validateOutput.report.destructiveClaims || []).slice(0, 10),
+    allIssuesV2,
+    topIssuesV2,
+    issueSummaryV2,
   };
 
   // Create the evaluation in the database
@@ -536,6 +611,38 @@ async function runAnalysis(input: {
 
   if (!insertedEvaluation) {
     throw new Error(`Failed to create evaluation: no ID returned`);
+  }
+
+  // Update runId in allIssuesV2 and topIssuesV2 if they exist (similar to /validate endpoint)
+  if (insertedEvaluation.id && (allIssuesV2.length > 0 || topIssuesV2.length > 0)) {
+    const { createHash } = await import('crypto');
+    const updateRunId = (issue: any) => {
+      if (issue && issue.runId === 'pending') {
+        issue.runId = insertedEvaluation.id;
+        // Regenerate issueId with correct runId
+        const hash = createHash('sha256')
+          .update(`${insertedEvaluation.id}:${issue.issueKey}`)
+          .digest('hex')
+          .substring(0, 16);
+        issue.issueId = `issue_${hash}`;
+      }
+      return issue;
+    };
+
+    allIssuesV2 = allIssuesV2.map(updateRunId);
+    topIssuesV2 = topIssuesV2.map(updateRunId);
+
+    // Update the report in the database with the corrected runIds
+    const updatedReport = {
+      ...reportWithIssues,
+      allIssuesV2,
+      topIssuesV2,
+    };
+
+    await supabaseAdmin!
+      .from('evaluations')
+      .update({ report: updatedReport })
+      .eq('id', insertedEvaluation.id);
   }
 
   return insertedEvaluation.id;
