@@ -284,8 +284,12 @@ function createContradictionIssue(
   const turnIndex = claimA.meta?.turnIndex ?? claimB.meta?.turnIndex;
   
   // Extract topicId and slotKey for clustering (C1)
-  const topicId = claimA.topicId || claimB.topicId || 'unknown';
-  const slotKey = `${claimA.slot?.slotType || 'unknown'}:${claimA.slot?.entityKey || ''}`;
+  // Note: topicId and slot are not on Claim type, but may be in edge rationale or claim metadata
+  // For now, use a fallback based on claim text or edge info
+  const topicId = (edge as any).topicId || (claimA as any).topicId || (claimB as any).topicId || 'unknown';
+  const slotType = (edge as any).slotType || (claimA as any).slot?.slotType || (claimB as any).slot?.slotType || 'unknown';
+  const entityKey = (edge as any).entityKey || (claimA as any).slot?.entityKey || (claimB as any).slot?.entityKey || '';
+  const slotKey = `${slotType}:${entityKey}`;
   
   // C1: Generate clusterKey for aggregation
   const clusterKey = `${'consistency'}:${'CONTRADICTION'}:${topicId}:${slotKey}:${speakerType}`;

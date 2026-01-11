@@ -262,13 +262,14 @@ export interface IssueV2 {
     };
   };
   
-  scoring?: {
-    components: {
-      impact01: number;
-      evidence01: number;
-      signal01: number;
-      category01: number;
-    };
+    scoring?: {
+      components: {
+        impact01: number;
+        evidence01: number;
+        signal01: number;
+        category01: number;
+        verificationMultiplier?: number; // Optional for backwards compatibility
+      };
     weights: {
       impact: number;
       evidence: number;

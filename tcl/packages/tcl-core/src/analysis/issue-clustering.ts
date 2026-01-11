@@ -45,7 +45,7 @@ export function aggregateIssues(
   // Create aggregated issues from clusters
   const aggregatedIssues: AggregatedIssue[] = [];
   
-  for (const [clusterId, clusterIssues] of clusterMap.entries()) {
+  for (const [clusterId, clusterIssues] of Array.from(clusterMap.entries())) {
     if (clusterIssues.length === 0) continue;
     
     // Sort by riskScore DESC to get the worst-case issue first
@@ -134,7 +134,7 @@ export function aggregateIssues(
 function computeClusterScore(
   clusterIssues: IssueV2[],
   evalMode: EvalMode
-): AggregatedIssue['scoring'] {
+): AggregatedIssue['scoring'] & { riskScore: number } {
   const occurrences = clusterIssues.length;
   
   // Base: max atomic risk score (preserve worst-case)
@@ -181,6 +181,7 @@ function computeClusterScore(
   });
   
   return {
+    riskScore, // Add riskScore to return value
     components: {
       impact01: Math.round(avgImpact01 * 1000) / 1000,
       signal01: Math.round(avgSignal01 * 1000) / 1000,

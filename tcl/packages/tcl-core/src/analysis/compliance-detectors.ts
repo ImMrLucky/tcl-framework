@@ -92,7 +92,7 @@ function detectCVVStorage(
         type: 'PCI' as IssueTypeV2,
         category: 'compliance' as IssueCategoryV2,
         severity: 'critical',
-        severityDisplay: 'critical',
+        severityDisplay: 'high', // SeverityDisplayV2 only allows low/medium/high, cap critical to high
         impact: 'high',
         riskScore: 0.95, // Will be recomputed, but set high for compliance
         score: 95,

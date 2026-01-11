@@ -994,6 +994,18 @@ app.post("/validate", requireCapability(Capability.ANALYZE_MANUAL_UPLOAD), async
                 },
               });
               
+              // D: Detect compliance issues (PCI, recording consent, PII)
+              const { detectComplianceIssues } = await import('../analysis/compliance-detectors.js');
+              const complianceResult = detectComplianceIssues(
+                claimsForIssues,
+                evaluationIdPlaceholder,
+                (input as any).conversationId || '',
+                evidenceMode
+              );
+              
+              // Combine graph issues with compliance issues
+              const allAtomicIssues = [...expansionResult.allIssues, ...complianceResult.issues];
+              
               // Check for active scoring profile (use orgContextForProfile retrieved earlier)
               let rankingConfig: any = undefined;
               let profileConfigHash: string | undefined = undefined;

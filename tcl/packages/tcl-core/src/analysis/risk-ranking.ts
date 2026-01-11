@@ -140,7 +140,7 @@ function scoreIssue(
                        scoringContext.numSources > 0 ? 'DOC_BACKED' as const : 'EXTERNALLY_VERIFIED' as const
   } : undefined;
   const evidence01 = computeEvidence01(issue, config, evalMode);
-  const signal01 = computeSignal01(issue, config, scoringContext, allIssues);
+  const signal01 = computeSignal01(issue, config);
   const category01 = computeCategory01(issue, config);
   
   // Step 2: Get weights from config (validated on startup)
