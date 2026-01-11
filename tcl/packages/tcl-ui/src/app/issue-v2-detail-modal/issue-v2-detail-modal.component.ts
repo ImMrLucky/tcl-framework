@@ -105,14 +105,14 @@ interface IssueV2 {
           <div class="issue-overview">
             <div class="issue-header">
               <div class="badges">
-                <span class="badge severity-{{ data.issue.severity }}">{{ data.issue.severity.toUpperCase() }}</span>
-                <span class="badge type-badge">{{ data.issue.type }}</span>
-                <span class="badge category-badge">{{ data.issue.category }}</span>
-                <span class="badge" [class.transcript-only]="data.issue.verification.level === 'TRANSCRIPT_ONLY'">
-                  {{ data.issue.verification.level }}
+                <span class="badge severity-{{ data.issue.severity || 'unknown' }}">{{ (data.issue.severity || 'unknown').toUpperCase() }}</span>
+                <span class="badge type-badge">{{ data.issue.type || 'UNKNOWN' }}</span>
+                <span class="badge category-badge">{{ data.issue.category || 'other' }}</span>
+                <span class="badge" [class.transcript-only]="data.issue.verification?.level === 'TRANSCRIPT_ONLY'">
+                  {{ data.issue.verification?.level || 'NO_VERIFICATION' }}
                 </span>
                 <span class="badge" *ngIf="data.issue.reviewRequired">Review Required</span>
-                <span class="badge" *ngIf="data.issue.compliance.legalHoldSuggested">Legal Hold Suggested</span>
+                <span class="badge" *ngIf="data.issue.compliance?.legalHoldSuggested">Legal Hold Suggested</span>
               </div>
               
               <div class="metrics">
@@ -123,10 +123,10 @@ interface IssueV2 {
                   <strong>Confidence:</strong> {{ (data.issue.confidence * 100).toFixed(0) }}%
                 </div>
                 <div class="metric">
-                  <strong>Speaker:</strong> {{ data.issue.who.speaker }}
+                  <strong>Speaker:</strong> {{ data.issue.who?.speaker || 'UNKNOWN' }}
                 </div>
-                <div class="metric" *ngIf="data.issue.who.turnIndex !== undefined">
-                  <strong>Turn:</strong> {{ data.issue.who.turnIndex + 1 }}
+                <div class="metric" *ngIf="data.issue.who?.turnIndex !== undefined">
+                  <strong>Turn:</strong> {{ (data.issue.who?.turnIndex || 0) + 1 }}
                 </div>
               </div>
             </div>
@@ -135,16 +135,16 @@ interface IssueV2 {
             
             <div class="issue-content">
               <h3>Summary</h3>
-              <p>{{ data.issue.what.issueSummary }}</p>
+              <p>{{ data.issue.what?.issueSummary || 'No summary available' }}</p>
               
               <h3>Detail</h3>
-              <p>{{ data.issue.what.issueDetail }}</p>
+              <p>{{ data.issue.what?.issueDetail || 'No detail available' }}</p>
               
               <h3>Primary Claim</h3>
-              <p><strong>ID:</strong> {{ data.issue.what.primaryClaimId }}</p>
-              <p *ngIf="data.issue.what.claimText"><strong>Text:</strong> {{ data.issue.what.claimText }}</p>
+              <p><strong>ID:</strong> {{ data.issue.what?.primaryClaimId || 'N/A' }}</p>
+              <p *ngIf="data.issue.what?.claimText"><strong>Text:</strong> {{ data.issue.what.claimText }}</p>
               
-              <div *ngIf="data.issue.what.relatedClaimIds && data.issue.what.relatedClaimIds.length > 0">
+              <div *ngIf="data.issue.what?.relatedClaimIds && data.issue.what.relatedClaimIds.length > 0">
                 <h3>Related Claims</h3>
                 <ul>
                   <li *ngFor="let claimId of data.issue.what.relatedClaimIds">{{ claimId }}</li>
@@ -186,10 +186,10 @@ interface IssueV2 {
           <div class="compliance-section">
             <h3>Compliance Tags</h3>
             <div class="tags">
-              <mat-chip *ngFor="let tag of data.issue.compliance.tags">{{ tag }}</mat-chip>
+              <mat-chip *ngFor="let tag of (data.issue.compliance?.tags || [])">{{ tag }}</mat-chip>
             </div>
             
-            <div *ngIf="data.issue.compliance.impactedPolicies && data.issue.compliance.impactedPolicies.length > 0">
+            <div *ngIf="data.issue.compliance?.impactedPolicies && data.issue.compliance.impactedPolicies.length > 0">
               <h3>Impacted Policies</h3>
               <ul>
                 <li *ngFor="let policy of data.issue.compliance.impactedPolicies">
@@ -198,14 +198,14 @@ interface IssueV2 {
               </ul>
             </div>
             
-            <div *ngIf="data.issue.compliance.disclaimers.length > 0">
+            <div *ngIf="data.issue.compliance?.disclaimers && data.issue.compliance.disclaimers.length > 0">
               <h3>Disclaimers</h3>
               <ul>
                 <li *ngFor="let disclaimer of data.issue.compliance.disclaimers">{{ disclaimer }}</li>
               </ul>
             </div>
             
-            <div *ngIf="data.issue.verification.reasonCodes.length > 0">
+            <div *ngIf="data.issue.verification?.reasonCodes && data.issue.verification.reasonCodes.length > 0">
               <h3>Verification Reason Codes</h3>
               <ul>
                 <li *ngFor="let code of data.issue.verification.reasonCodes">{{ code }}</li>
