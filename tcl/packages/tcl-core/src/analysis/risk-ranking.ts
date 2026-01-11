@@ -348,7 +348,16 @@ function computeEvidence01(
   const level = issue.verification.level; // VerificationLevelV2: "EXTERNAL_VERIFIED" | "TRANSCRIPT_ONLY" | "TRANSCRIPT_PROVABLE" | "NONE"
   
   // E1: Use evidenceMap from config (no hard-coded values)
-  let baseEvidence01 = config.evidenceMap[level] || config.evidenceMap['NONE'];
+  // Map TRANSCRIPT_PROVABLE to TRANSCRIPT_ONLY for evidence scoring
+  const evidenceMapKey = level === 'TRANSCRIPT_PROVABLE' ? 'TRANSCRIPT_ONLY' : level;
+  let baseEvidence01: number;
+  if (evidenceMapKey === 'EXTERNAL_VERIFIED') {
+    baseEvidence01 = config.evidenceMap.EXTERNAL_VERIFIED;
+  } else if (evidenceMapKey === 'TRANSCRIPT_ONLY') {
+    baseEvidence01 = config.evidenceMap.TRANSCRIPT_ONLY;
+  } else {
+    baseEvidence01 = config.evidenceMap.NONE;
+  }
   
   // Apply transcript quality multiplier if available (bounded 0.9-1.1 for transcript-only)
   let qualityMultiplier = 1.0;
