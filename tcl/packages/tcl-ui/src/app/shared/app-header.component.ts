@@ -54,17 +54,38 @@ export class AppHeaderComponent implements OnInit {
   ) {}
 
   ngOnInit() {
+    // Initialize with current value synchronously to avoid flicker
+    // Check if user is authenticated using the sync method
+    if (this.authService.isAuthenticatedSync && this.authService.isAuthenticatedSync()) {
+      // Try to get current user value if accessible
+      const currentUser = (this.authService as any).currentUserSubject?.value;
+      if (currentUser) {
+        this.currentUser = currentUser;
+        this.isAuthenticated = true;
+        // Set up sidebar immediately if authenticated
+        if (typeof document !== 'undefined' && this.showNavigation) {
+          document.body.classList.add('has-sidebar');
+          this.updateSidebarClass();
+        }
+      }
+    }
+    
     this.authService.currentUser$.subscribe(user => {
+      const wasAuthenticated = this.isAuthenticated;
       this.currentUser = user;
       this.isAuthenticated = user !== null;
       
-      // Add/remove body class for sidebar
-      if (typeof document !== 'undefined') {
-        if (this.isAuthenticated && this.showNavigation) {
-          document.body.classList.add('has-sidebar');
-          this.updateSidebarClass();
-        } else {
-          document.body.classList.remove('has-sidebar', 'sidebar-collapsed');
+      // Only update sidebar visibility if authentication state actually changed
+      // This prevents flickering during route changes or brief null emissions
+      if (wasAuthenticated !== this.isAuthenticated) {
+        // Add/remove body class for sidebar
+        if (typeof document !== 'undefined') {
+          if (this.isAuthenticated && this.showNavigation) {
+            document.body.classList.add('has-sidebar');
+            this.updateSidebarClass();
+          } else {
+            document.body.classList.remove('has-sidebar', 'sidebar-collapsed');
+          }
         }
       }
       
