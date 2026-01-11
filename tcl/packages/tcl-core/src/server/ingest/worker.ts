@@ -509,14 +509,14 @@ async function runAnalysis(input: {
   let issueSummaryV2: any = null;
 
   try {
-    const { expandIssueCandidates } = await import('../analysis/issue-expansion.js');
-    const { rankIssuesV2 } = await import('../analysis/risk-ranking.js');
+    const { expandIssueCandidates } = await import('../../analysis/issue-expansion.js');
+    const { rankIssuesV2 } = await import('../../analysis/risk-ranking.js');
 
     // Get graph data from report
-    const graphData = validateOutput.report?.graph || {};
-    const graphSupports = graphData.supports || [];
-    const graphContradictions = graphData.contradictions || [];
-    const graphGrounding = graphData.grounding || [];
+    const graphData = validateOutput.report?.graph;
+    const graphSupports = graphData?.supports || [];
+    const graphContradictions = graphData?.contradictions || [];
+    const graphGrounding = graphData?.grounding || [];
 
     // Map claims to format expected by expandIssueCandidates
     const claimsForIssues = (validateOutput.report?.claims || []).map((c: any) => ({
@@ -560,7 +560,7 @@ async function runAnalysis(input: {
     const scoringContext = {
       mode: (evidenceMode === 'TRANSCRIPT_ONLY' ? 'transcript_only' : 'with_evidence') as 'transcript_only' | 'with_evidence',
       numSources: 0, // No external sources for ingestion jobs
-      graphStatus: validateOutput.report?.graph?.status,
+      graphStatus: graphData?.debug?.graphStatus,
       templateId: validateOutput.report?.manifest?.templateId,
       isRegulatedTemplate: false,
     };
