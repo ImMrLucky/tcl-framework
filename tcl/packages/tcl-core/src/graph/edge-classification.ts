@@ -207,31 +207,62 @@ function classifyContradiction(
 ): ClassificationResult {
   const { claimA, claimB, signals } = candidate;
   
-  // GATE 1: Slot compatibility (relaxed - same slotType OR high overlap)
-  // We use a relaxed check: either exact slot match OR same slotType with shared entity references
+  // GATE 1: Slot compatibility (STRICT for contradiction-eligible slots)
+  // Enforce strict slot matching for specific slot types that can contradict
   const exactSlotMatch = slotsMatch(claimA.slot, claimB.slot);
   const sameSlotType = claimA.slot.slotType === claimB.slot.slotType;
-  const hasSharedSubject = hasSharedSubjectReference(claimA, claimB);
+  const sameEntityKey = claimA.slot.entityKey && claimB.slot.entityKey && 
+                        claimA.slot.entityKey === claimB.slot.entityKey;
+  
+  // Contradiction-eligible slot types (must match exactly)
+  const contradictionEligibleSlots = [
+    'fee', 'amount', 'price', 'refund_amount',
+    'late_fee_status', 'cancellation_fee',
+    'plan_price', 'recording', 'email_confirmation',
+    'duration', 'term', 'date'
+  ];
+  
+  const isEligibleSlotType = contradictionEligibleSlots.includes(claimA.slot.slotType) ||
+                             contradictionEligibleSlots.includes(claimB.slot.slotType);
   
   if (config.gating.contradictionRequiresSameSlot) {
-    // Relaxed: allow if slotType matches OR there's a shared subject reference
-    if (!exactSlotMatch && !sameSlotType && !hasSharedSubject) {
+    // For eligible slot types, require exact match (slotType + entityKey)
+    if (isEligibleSlotType) {
+      if (!exactSlotMatch && !(sameSlotType && sameEntityKey)) {
+        return { rejected: true, reason: 'slot' };
+      }
+    } else {
+      // For other slot types, allow relaxed matching
+      const hasSharedSubject = hasSharedSubjectReference(claimA, claimB);
+      if (!exactSlotMatch && !sameSlotType && !hasSharedSubject) {
+        return { rejected: true, reason: 'slot' };
+      }
+    }
+  }
+  
+  // Disallow contradictions between unrelated facts
+  // e.g., "address updates" vs "identity verification" vs "generic customer statements"
+  const unrelatedSlotTypes = ['address', 'identity', 'generic'];
+  if (unrelatedSlotTypes.includes(claimA.slot.slotType) || 
+      unrelatedSlotTypes.includes(claimB.slot.slotType)) {
+    // Only allow if both are the same unrelated type (e.g., address vs address)
+    if (claimA.slot.slotType !== claimB.slot.slotType) {
       return { rejected: true, reason: 'slot' };
     }
   }
   
-  // GATE 2: Topic match (if configured) - but allow adjacent topics
+  // GATE 2: Topic match (STRICT) - must match topicId OR same slotType+entityKey
+  // This prevents false contradictions like "Device Protection" vs "Moving address"
   if (config.gating.contradictionRequiresSameTopic) {
-    if (claimA.topicId && claimB.topicId && claimA.topicId !== claimB.topicId) {
-      // Check if they're temporally close (within 5 turns)
-      const turnA = parseTurnIndex(claimA.span.turnId);
-      const turnB = parseTurnIndex(claimB.span.turnId);
-      const turnDistance = Math.abs(turnA - turnB);
-      
-      // Allow cross-topic if very close in conversation
-      if (turnDistance > 5) {
-        return { rejected: true, reason: 'topic' };
-      }
+    const topicMatch = claimA.topicId && claimB.topicId && claimA.topicId === claimB.topicId;
+    const slotEntityMatch = sameSlotType && 
+      claimA.slot.entityKey && 
+      claimB.slot.entityKey && 
+      claimA.slot.entityKey === claimB.slot.entityKey;
+    
+    // Must match topic OR have same slotType+entityKey
+    if (!topicMatch && !slotEntityMatch) {
+      return { rejected: true, reason: 'topic' };
     }
   }
   
@@ -240,6 +271,12 @@ function classifyContradiction(
     if (!hasOpposingPolarity(claimA, claimB)) {
       return { rejected: true, reason: 'polarity' };
     }
+  }
+  
+  // GATE 3.5: Mutual exclusivity check (for numeric/boolean slots)
+  // Even with NLI, require structured check for numeric/boolean slots
+  if (!hasMutualExclusivity(claimA, claimB)) {
+    return { rejected: true, reason: 'mutual_exclusivity' };
   }
   
   // Compute contradiction score (boost for exact slot match)
@@ -311,6 +348,50 @@ function hasSharedSubjectReference(a: ClaimNode, b: ClaimNode): boolean {
   
   // If they share 2+ significant words, consider them related
   return sharedCount >= 2;
+}
+
+// =============================================================================
+// MUTUAL EXCLUSIVITY CHECK
+// =============================================================================
+
+/**
+ * Check if two claims have mutually exclusive values (required for contradiction)
+ * For numeric slots: amounts must differ beyond tolerance OR durations differ
+ * For boolean slots: yes/no mismatch
+ * For other slots: use valuesContradict check
+ */
+function hasMutualExclusivity(a: ClaimNode, b: ClaimNode): boolean {
+  // If slots don't match, they can't be mutually exclusive
+  if (!slotsMatch(a.slot, b.slot) && a.slot.slotType !== b.slot.slotType) {
+    return false;
+  }
+  
+  // Use existing valuesContradict check (handles numeric/boolean/string)
+  if (valuesContradict(a.slot, b.slot)) {
+    return true;
+  }
+  
+  // Additional check: numeric slots with different values
+  if (a.slot.valueNorm !== undefined && b.slot.valueNorm !== undefined) {
+    if (typeof a.slot.valueNorm === 'number' && typeof b.slot.valueNorm === 'number') {
+      // For numeric slots, values must differ significantly
+      // Tolerance: 5% for amounts, 1 unit for counts/durations
+      const diff = Math.abs(a.slot.valueNorm - b.slot.valueNorm);
+      const avg = (Math.abs(a.slot.valueNorm) + Math.abs(b.slot.valueNorm)) / 2;
+      
+      if (a.slot.slotType === 'fee' || a.slot.slotType === 'amount' || a.slot.slotType === 'price') {
+        // For amounts, require >5% difference
+        return diff > (avg * 0.05);
+      } else {
+        // For counts/durations, require >1 unit difference
+        return diff > 1;
+      }
+    }
+  }
+  
+  // If we can't determine mutual exclusivity, allow it (NLI will catch false positives)
+  // But require at least opposing polarity
+  return hasOpposingPolarity(a, b);
 }
 
 // =============================================================================

@@ -28,6 +28,7 @@ import {
 } from "./analysis/reproducibility.js";
 import { computeTruthFromGraph } from "./analysis/compute-truth-from-graph.js";
 import { getEngineConfig } from "./config/engine-config.js";
+import { log } from "./server/utils/logger.js";
 
 // NEW: Unified Graph Builder (3-stage pipeline with subject slots)
 import { 
@@ -97,8 +98,8 @@ async function callSpectralService(
   groundedClaimIds: string[]
 ): Promise<SpectralReport> {
   const url = `${spectralServiceUrl.replace(/\/$/, "")}/spectral/score`;
-  console.log(`Spectral request URL: ${url}`);
-  console.log(`Spectral request payload:`, {
+  log('debug', 'Orchestrator', `Spectral request URL: ${url}`);
+  log('debug', 'Orchestrator', `Spectral request payload`, {
     claimsCount: claims.length,
     supportsCount: supports.length,
     contradictionsCount: contradictions.length,
@@ -113,12 +114,12 @@ async function callSpectralService(
   
   if (!res.ok) {
     const errorText = await res.text().catch(() => '');
-    console.error(`Spectral service HTTP error ${res.status}: ${errorText}`);
+    log('error', 'Orchestrator', `Spectral service HTTP error ${res.status}: ${errorText}`);
     throw new Error(`Spectral service error: ${res.status} - ${errorText}`);
   }
   
   const result = await res.json() as SpectralReport;
-  console.log(`Spectral response:`, result);
+  log('debug', 'Orchestrator', `Spectral response received`, { coherence: result?.coherenceScore });
   return result;
 }
 
@@ -136,7 +137,7 @@ async function callSpectralAnalyzeService(
   }
 ): Promise<SpectralReport> {
   const url = `${spectralServiceUrl.replace(/\/$/, "")}/spectral/analyze`;
-  console.log(`Spectral analyze request URL: ${url}`);
+  log('debug', 'Orchestrator', `Spectral analyze request URL: ${url}`);
   
   const payload = {
     claims,
@@ -149,7 +150,7 @@ async function callSpectralAnalyzeService(
     cycle_max_len: options?.cycleMaxLen
   };
   
-  console.log(`Spectral analyze request payload:`, {
+  log('debug', 'Orchestrator', `Spectral analyze request payload`, {
     claimsCount: claims.length,
     supportsCount: supports.length,
     contradictionsCount: contradictions.length,
@@ -164,12 +165,12 @@ async function callSpectralAnalyzeService(
   
   if (!res.ok) {
     const errorText = await res.text().catch(() => '');
-    console.error(`Spectral analyze service HTTP error ${res.status}: ${errorText}`);
+    log('error', 'Orchestrator', `Spectral analyze service HTTP error ${res.status}: ${errorText}`);
     throw new Error(`Spectral analyze service error: ${res.status} - ${errorText}`);
   }
   
   const result = await res.json() as SpectralReport;
-  console.log(`Spectral analyze response received:`, {
+  log('debug', 'Orchestrator', `Spectral analyze response received`, {
     coherenceScore: result.coherenceScore,
     truthVectorLength: result.truthVector?.length || 0,
     truthStatesLength: result.truthStates?.length || 0,
@@ -206,7 +207,7 @@ async function runUnifiedGraphPath(
   // Set template based on content or options
   const templateId = (options as any)?.template ?? detectTemplate(transcript);
   setTemplateConfig(templateId);
-  console.log(`📋 Template: ${templateId}`);
+  log('debug', 'Orchestrator', `Template: ${templateId}`);
   
   // Extract claims first using the existing extractor
   timer.start('claim_extraction');
@@ -217,10 +218,10 @@ async function runUnifiedGraphPath(
   const extractResult = extractClaimsWithTypes(transcript);
   const extractedClaims = extractResult.claims;
   timer.end('claim_extraction');
-  console.log(`📝 Extracted ${extractedClaims.length} claims (${timer.duration('claim_extraction')}ms)`);
+  log('debug', 'Orchestrator', `Extracted ${extractedClaims.length} claims`, { duration: timer.duration('claim_extraction') });
   
   if (extractedClaims.length === 0) {
-    console.warn("⚠️ No claims extracted, returning empty result");
+    log('warn', 'Orchestrator', 'No claims extracted, returning empty result');
     timer.end('unified_graph');
     return createEmptyResult(input, timer, validationStartTime);
   }
@@ -255,11 +256,12 @@ async function runUnifiedGraphPath(
   });
   timer.end('graph_build');
   
-  console.log(`🔗 Graph built: ${graphResult.metrics.totalEdges} edges in ${timer.duration('graph_build')}ms`);
-  console.log(`   Status: ${graphResult.graph.diagnostics.status}`);
-  if (graphResult.graph.diagnostics.reasons.length > 0) {
-    console.log(`   Reasons: ${graphResult.graph.diagnostics.reasons.join(', ')}`);
-  }
+  log('debug', 'Orchestrator', `Graph built`, { 
+    totalEdges: graphResult.metrics.totalEdges, 
+    duration: timer.duration('graph_build'),
+    status: graphResult.graph.diagnostics.status,
+    reasons: graphResult.graph.diagnostics.reasons
+  });
   
   // Build grounding lookup: claimId -> grounding edges
   const groundingByClaimId = new Map<string, typeof graphResult.legacy.grounding>();
@@ -364,7 +366,7 @@ async function runUnifiedGraphPath(
         console.warn(`⚠️ Spectral: 0 grounded claims. Results may be less meaningful.`);
         console.warn(`   Run will proceed with degraded quality indicator.`);
       } else {
-        console.log(`📌 Spectral: ${groundedForSpectral.length} claims grounded from transcript`);
+        log('debug', 'Orchestrator', `Spectral: ${groundedForSpectral.length} claims grounded from transcript`);
       }
       
       spectral = await callSpectralAnalyzeService(
@@ -384,7 +386,7 @@ async function runUnifiedGraphPath(
       }
       
       timer.end('spectral');
-      console.log(`✅ Spectral: coherence=${coherenceScore}${spectralDegraded ? ' (DEGRADED)' : ''} (${timer.duration('spectral')}ms)`);
+      log('debug', 'Orchestrator', `Spectral: coherence=${coherenceScore}${spectralDegraded ? ' (DEGRADED)' : ''}`, { duration: timer.duration('spectral') });
     } catch (error: any) {
       timer.end('spectral');
       console.error("❌ Spectral error:", error?.message);
@@ -662,7 +664,7 @@ async function validateOnce(input: ValidateInput, adapter?: LLMAdapter, startTim
     // PATH 2: TRUTH ENGINE (Deterministic, rule-based)
     // =========================================================================
     if (graphMode === "truth-engine") {
-      console.log("🚀 Using deterministic Truth Engine (NLI disabled)");
+      log('info', 'Orchestrator', 'Using deterministic Truth Engine (NLI disabled)');
       
       // Run the Truth Engine
       const transcript = answer && answer.trim().length > 0 ? answer : question;
@@ -698,7 +700,10 @@ async function validateOnce(input: ValidateInput, adapter?: LLMAdapter, startTim
       
       if (spectralEnabled && spectralServiceUrl && claims.length > 0) {
         try {
-          console.log(`📡 Calling Spectral with rule-based graph (${legacyGraph.contradictions.length} contradictions, ${legacyGraph.supports.length} supports)`);
+          log('debug', 'Orchestrator', `Calling Spectral with rule-based graph`, { 
+            contradictions: legacyGraph.contradictions.length, 
+            supports: legacyGraph.supports.length 
+          });
           
           spectral = await callSpectralAnalyzeService(
             spectralServiceUrl,
@@ -709,9 +714,9 @@ async function validateOnce(input: ValidateInput, adapter?: LLMAdapter, startTim
             {}
           );
           coherenceScore = spectral.coherenceScore;
-          console.log(`✅ Spectral complete. Coherence: ${coherenceScore}`);
+          log('debug', 'Orchestrator', `Spectral complete`, { coherence: coherenceScore });
         } catch (e: any) {
-          console.error("❌ Spectral error:", e.message);
+          log('error', 'Orchestrator', 'Spectral error', { message: e.message });
           spectral = { spectralSkipped: true, debugReason: `spectral_error: ${e.message}` } as any;
         }
       }

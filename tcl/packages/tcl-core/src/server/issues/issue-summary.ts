@@ -63,13 +63,16 @@ export function computeIssueSummaryV2(issues: IssueV2[]): IssueSummaryV2 {
     }
   }
 
+  // CRITICAL: When computing from allIssuesV2, we don't know the topIssuesCount
+  // In this case, set both to the same value (all issues are included)
+  // The correct distinction (topIssuesCount vs allIssuesCount) should come from rankIssuesV2 summary
   return {
     totalIssues: issues.length,
     byType: byType as Record<IssueTypeV2, number>,
     bySeverity,
     byCategory: byCategory as Record<IssueCategoryV2, number>,
-    topIssuesCount: issues.length, // If we're computing from allIssuesV2, topIssuesCount = allIssuesCount
-    allIssuesCount: issues.length,
+    topIssuesCount: issues.length, // When computed from allIssuesV2, assume all are "top" (no filtering)
+    allIssuesCount: issues.length, // Total count of all issues
   };
 }
 

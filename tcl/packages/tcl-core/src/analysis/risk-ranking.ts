@@ -260,11 +260,43 @@ function computeImpact01(issue: IssueV2, config: RiskRankingConfig): number {
 
 /**
  * Compute evidence01 from issue.verification.level (0..1)
- * Uses config.evidenceMap (no hard-coded values)
+ * For transcript-only mode, allows boost based on contradiction weight and supporting edges
+ * This prevents transcript-only from being artificially capped at 0.45
  */
 function computeEvidence01(issue: IssueV2, config: RiskRankingConfig): number {
   const level = issue.verification.level;
-  return config.evidenceMap[level];
+  let evidence01 = config.evidenceMap[level];
+  
+  // For transcript-only mode, allow boost based on graph signals
+  // This allows obvious severe contradictions to escalate even without external evidence
+  if (level === 'TRANSCRIPT_ONLY') {
+    // Base: 0.45 from config
+    let boost = 0;
+    
+    // Boost 1: Strong contradiction weight (>= 0.60)
+    if (issue.evidence.edges && issue.evidence.edges.length > 0) {
+      const contradictionEdges = issue.evidence.edges.filter(e => e.kind === 'contradiction');
+      if (contradictionEdges.length > 0) {
+        const maxContradictionWeight = Math.max(...contradictionEdges.map(e => e.weight || 0));
+        if (maxContradictionWeight >= 0.60) {
+          boost += 0.10; // Strong contradiction signal
+        }
+      }
+      
+      // Boost 2: Multiple supporting edges corroborating same conflict cluster
+      // (This indicates the contradiction is part of a larger pattern)
+      const supportEdges = issue.evidence.edges.filter(e => e.kind === 'support');
+      if (supportEdges.length >= 2) {
+        boost += 0.10; // Multiple corroborating signals
+      }
+    }
+    
+    // Clamp to <= 0.75 unless external evidence exists
+    // (We never want to exceed external verification score without actual external evidence)
+    evidence01 = Math.min(0.75, evidence01 + boost);
+  }
+  
+  return clamp01(evidence01);
 }
 
 /**
@@ -308,14 +340,67 @@ function computeSignal01(issue: IssueV2, config: RiskRankingConfig): number {
 }
 
 /**
- * Compute category01 from config (normalized)
- * Uses config.categoryNormalization (no hard-coded values)
+ * Compute category01 from category and compliance tags (0..1)
+ * Maps category and tags to meaningful risk scores
+ * NO hard-coded 0 values - always returns a meaningful score
  */
 function computeCategory01(issue: IssueV2, config: RiskRankingConfig): number {
-  const categoryMult = config.weights.categoryMultiplier?.[issue.category] || config.categoryNormalization.min;
-  // Normalize using config range
+  // Start with category multiplier if available
+  let categoryMult = config.weights.categoryMultiplier?.[issue.category] || 1.0;
+  
+  // Boost based on compliance tags (higher priority than category)
+  const tags = issue.compliance?.tags || [];
+  if (tags.length > 0) {
+    // Privacy/PCI/Security tags → highest risk
+    if (tags.some(tag => tag.includes('privacy') || tag.includes('pci') || tag.includes('security') || tag.includes('cvv'))) {
+      categoryMult = Math.max(categoryMult, 1.3);
+    }
+    // Compliance tags → high risk
+    else if (tags.some(tag => tag.includes('compliance') || tag.includes('regulatory'))) {
+      categoryMult = Math.max(categoryMult, 1.2);
+    }
+    // Billing/Fees/Refunds → high risk
+    else if (tags.some(tag => tag.includes('billing') || tag.includes('fee') || tag.includes('refund') || tag.includes('money'))) {
+      categoryMult = Math.max(categoryMult, 1.2);
+    }
+    // Customer dispute risk → medium-high risk
+    else if (tags.some(tag => tag.includes('dispute') || tag.includes('customer_risk'))) {
+      categoryMult = Math.max(categoryMult, 1.1);
+    }
+    // Consistency (general contradiction) → medium risk
+    else if (issue.category === 'consistency' || tags.some(tag => tag.includes('consistency'))) {
+      categoryMult = Math.max(categoryMult, 1.0);
+    }
+    // Soft quality / tone → lower risk
+    else if (tags.some(tag => tag.includes('tone') || tag.includes('quality'))) {
+      categoryMult = Math.max(categoryMult, 0.8);
+    }
+  }
+  
+  // Map category directly if no tags and category has known mapping
+  if (categoryMult === 1.0 && !config.weights.categoryMultiplier?.[issue.category]) {
+    // Direct category mapping (fallback if no tags)
+    const categoryMap: Record<string, number> = {
+      'privacy': 1.3,
+      'security': 1.3,
+      'compliance': 1.2,
+      'billing': 1.2,
+      'fees': 1.2,
+      'refunds': 1.2,
+      'disclosure': 1.15,
+      'consistency': 1.0,
+      'data_integrity': 1.1,
+      'other': 0.9,
+    };
+    categoryMult = categoryMap[issue.category] || 1.0;
+  }
+  
+  // Normalize using config range (1.0 to 1.3 typically)
   const range = config.categoryNormalization.max - config.categoryNormalization.min;
-  const normalized = (categoryMult - config.categoryNormalization.min) / range;
+  const normalized = range > 0 
+    ? (categoryMult - config.categoryNormalization.min) / range
+    : 0.5; // Fallback if range is invalid
+  
   return clamp01(normalized);
 }
 

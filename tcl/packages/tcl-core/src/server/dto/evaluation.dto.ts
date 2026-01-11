@@ -142,17 +142,21 @@ export function toEvaluationDto(
       } : undefined,
     };
 
-    // CRITICAL: Compute issueSummaryV2 from canonical allIssuesV2 array
-    // This ensures the summary matches the exact list the UI displays
-    // Never use legacy report.issues or multiple conflicting summaries
+    // CRITICAL: Preserve issueSummaryV2 if it exists (has correct topIssuesCount vs allIssuesCount)
+    // Only recompute if missing or if counts don't match
     const allIssuesV2 = dto.report.allIssuesV2 || [];
-    if (allIssuesV2.length > 0) {
-      // Always compute from canonical issues array (single source of truth)
-      // This ensures consistency: summary counts match the issues list
+    const existingSummary = evaluation.report.issueSummaryV2;
+    
+    if (existingSummary && existingSummary.allIssuesCount === allIssuesV2.length) {
+      // Use existing summary if it matches the current issue count (preserves topIssuesCount distinction)
+      dto.report.issueSummaryV2 = existingSummary;
+    } else if (allIssuesV2.length > 0) {
+      // Recompute only if summary is missing or counts don't match
+      // Note: When recomputing, we don't know topIssuesCount, so both counts will be the same
       dto.report.issueSummaryV2 = computeIssueSummaryV2(allIssuesV2);
-    } else if (evaluation.report.issueSummaryV2) {
-      // Keep existing summary only if no issues (for consistency)
-      dto.report.issueSummaryV2 = evaluation.report.issueSummaryV2;
+    } else if (existingSummary) {
+      // Keep existing summary if no issues (for consistency)
+      dto.report.issueSummaryV2 = existingSummary;
     }
   }
 
