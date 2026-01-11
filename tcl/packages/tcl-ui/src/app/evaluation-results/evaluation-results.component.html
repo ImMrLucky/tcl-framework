@@ -411,8 +411,8 @@
                 <ng-container matColumnDef="verification">
                   <mat-header-cell *matHeaderCellDef>Verification</mat-header-cell>
                   <mat-cell *matCellDef="let issue">
-                    <span [class.transcript-only]="issue.verification.level === 'TRANSCRIPT_ONLY'"
-                          [class.verified]="issue.verification.level === 'EXTERNAL_VERIFIED'"
+                    <span [class.transcript-only]="issue.verification?.level === 'TRANSCRIPT_ONLY'"
+                          [class.verified]="issue.verification?.level === 'EXTERNAL_VERIFIED'"
                           [matTooltip]="getVerificationTooltip(issue)">
                       {{ getVerificationLabel(issue) }}
                     </span>
