@@ -496,6 +496,7 @@ async function runAnalysis(input: {
   // Get the evaluation ID from the output
   // The validate function creates an evaluation internally
   // We need to find it by conversationId
+  // Use maybeSingle() to handle cases where evaluation might not exist yet
   const { data: evaluation, error: evalError } = await supabaseAdmin!
     .from('evaluations')
     .select('id')
@@ -503,10 +504,48 @@ async function runAnalysis(input: {
     .eq('org_id', input.orgId)
     .order('created_at', { ascending: false })
     .limit(1)
-    .single();
+    .maybeSingle();
 
-  if (evalError || !evaluation) {
-    throw new Error(`Failed to find evaluation: ${evalError?.message || 'not found'}`);
+  if (evalError) {
+    throw new Error(`Failed to find evaluation: ${evalError.message}`);
+  }
+
+  if (!evaluation) {
+    // If no evaluation found, wait a moment and retry (validate might still be creating it)
+    console.log(`[Worker] Evaluation not found immediately, waiting 2 seconds and retrying...`);
+    await new Promise(resolve => setTimeout(resolve, 2000));
+    
+    const { data: retryEvaluation, error: retryError } = await supabaseAdmin!
+      .from('evaluations')
+      .select('id')
+      .eq('conversation_id', input.conversationId)
+      .eq('org_id', input.orgId)
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (retryError) {
+      throw new Error(`Failed to find evaluation after retry: ${retryError.message}`);
+    }
+
+    if (!retryEvaluation) {
+      throw new Error(`Failed to find evaluation: evaluation was not created by validate function`);
+    }
+
+    // Use the retry result
+    const finalEvaluation = retryEvaluation;
+    
+    // Update evaluation with job/asset links
+    await supabaseAdmin!
+      .from('evaluations')
+      .update({
+        job_id: input.jobId,
+        transcript_asset_id: input.transcriptAssetId,
+        verification_level: input.verificationLevel,
+      })
+      .eq('id', finalEvaluation.id);
+
+    return finalEvaluation.id;
   }
 
   // Update evaluation with job/asset links

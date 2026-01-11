@@ -25,3 +25,7 @@ alter table public.ingestion_jobs
 add constraint ingestion_jobs_status_check
 check (status in ('UPLOADED', 'READY', 'TRANSCRIBING', 'ANALYZING', 'VERIFYING', 'COMPLETE', 'FAILED'));
 
+-- Refresh PostgREST schema cache so the new columns are immediately available
+-- This is critical - without this, Supabase API will return PGRST204 errors
+NOTIFY pgrst, 'reload schema';
+
