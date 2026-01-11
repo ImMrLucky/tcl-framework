@@ -198,7 +198,7 @@ export function classifyEdges(
 interface ClassificationResult {
   edge?: GraphEdge;
   rejected: boolean;
-  reason?: 'slot' | 'polarity' | 'threshold' | 'topic';
+  reason?: 'slot' | 'polarity' | 'threshold' | 'topic' | 'mutual_exclusivity';
 }
 
 function classifyContradiction(
@@ -276,7 +276,7 @@ function classifyContradiction(
   // GATE 3.5: Mutual exclusivity check (for numeric/boolean slots)
   // Even with NLI, require structured check for numeric/boolean slots
   if (!hasMutualExclusivity(claimA, claimB)) {
-    return { rejected: true, reason: 'mutual_exclusivity' };
+    return { rejected: true, reason: 'mutual_exclusivity' as const };
   }
   
   // Compute contradiction score (boost for exact slot match)
