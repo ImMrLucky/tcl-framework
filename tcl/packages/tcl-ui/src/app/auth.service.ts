@@ -217,8 +217,15 @@ export class AuthService {
     }
     
     // Fallback: Try Supabase getSession (handles refresh tokens, etc.)
+    // Add timeout to prevent hanging
     try {
-      const { data: { session } } = await this.supabase.auth.getSession();
+      const sessionPromise = this.supabase.auth.getSession();
+      const timeoutPromise = new Promise((_, reject) => 
+        setTimeout(() => reject(new Error('Session check timeout')), 3000)
+      );
+      
+      const result = await Promise.race([sessionPromise, timeoutPromise]) as any;
+      const { data: { session } } = result || { data: { session: null } };
       
       if (session?.access_token) {
         const expiresAt = session.expires_at;
@@ -236,8 +243,9 @@ export class AuthService {
         
         return true;
       }
-    } catch {
-      // Supabase error - already checked localStorage
+    } catch (err) {
+      // Supabase error or timeout - already checked localStorage, so return false
+      console.warn('[Auth] Session check failed or timed out in checkSession:', err);
     }
     
     return false;
@@ -726,24 +734,8 @@ export class AuthService {
   }
 
   async isAuthenticated(): Promise<boolean> {
-    // Check Supabase session - this is the source of truth
-    const { data: { session } } = await this.supabase.auth.getSession();
-    
-    if (!session) {
-      return false;
-    }
-    
-    // If we have a session but no user subject, populate it
-    if (!this.currentUserSubject.value && session.user) {
-      this.currentUserSubject.next({
-        id: session.user.id,
-        email: session.user.email
-      });
-      // Also trigger background profile load
-      this.loadUserProfileAsync(session.user.id);
-    }
-    
-    return true;
+    // Use checkSession which has localStorage fallback and timeout protection
+    return await this.checkSession();
   }
 
   // Synchronous check (for quick UI checks)

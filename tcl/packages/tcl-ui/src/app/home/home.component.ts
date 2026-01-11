@@ -32,10 +32,25 @@ export class HomeComponent implements OnInit {
     private router: Router
   ) {}
 
-  ngOnInit() {
+  async ngOnInit() {
+    // Check if user is authenticated and redirect to dashboard
+    const isAuth = await this.authService.isAuthenticated();
+    if (isAuth) {
+      console.log('[Home] User is authenticated, redirecting to dashboard');
+      this.router.navigate(['/dashboard']);
+      return;
+    }
+
+    // Subscribe to user changes (for UI updates)
     this.authService.currentUser$.subscribe(user => {
       this.currentUser = user;
       this.isAuthenticated = user !== null;
+      
+      // If user becomes authenticated while on home page, redirect
+      if (user !== null && this.router.url === '/home') {
+        console.log('[Home] User logged in, redirecting to dashboard');
+        this.router.navigate(['/dashboard']);
+      }
     });
   }
 
