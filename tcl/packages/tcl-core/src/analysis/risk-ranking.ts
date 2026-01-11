@@ -318,7 +318,7 @@ function computeEvidence01(
     provenance?: { ingestionMode: string; transcriptSource: string; transcriptQuality?: { asrConfidence01?: number; diarizationConfidence01?: number } };
   }
 ): number {
-  const level = issue.verification.level;
+  const level = issue.verification.level; // This is VerificationLevelV2: "EXTERNAL_VERIFIED" | "TRANSCRIPT_ONLY" | "TRANSCRIPT_PROVABLE" | "NONE"
   
   // Base transcript confidence: higher when transcript came from audio transcription
   let baseTranscriptConfidence = 0.15; // Default: low for user-provided transcript-only
@@ -333,7 +333,8 @@ function computeEvidence01(
   }
   
   // For non-transcript-only modes, use higher base
-  if (level === 'DOC_BACKED' || level === 'EXTERNALLY_VERIFIED' || level === 'SYSTEM_VERIFIED') {
+  // Note: level is VerificationLevelV2, so we check for EXTERNAL_VERIFIED (not EXTERNALLY_VERIFIED)
+  if (level === 'EXTERNAL_VERIFIED') {
     baseTranscriptConfidence = 0.7; // High: has external evidence
   } else if (level === 'TRANSCRIPT_PROVABLE') {
     baseTranscriptConfidence = 0.35; // Medium: transcript-provable (good alignment/diarization)

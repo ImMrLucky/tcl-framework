@@ -461,6 +461,7 @@ export interface ExecutiveSummary {
   
   verificationLevel: VerificationLevel;
   auditDefensibility: "low" | "medium" | "high"; // derived from mode + evidenceCoverage01
+  ingestionMode?: string;       // Rule 8: Show ingestion mode
   
   criticalFindings: number; // aggregated count by severity
   highFindings: number;

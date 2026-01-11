@@ -322,8 +322,8 @@ async function processAudioOnly(job: any, audioAsset: any): Promise<void> {
     ingestionMode: 'AUDIO_ONLY_TRANSCRIBED' as const,
     transcriptSource: 'AUTO_TRANSCRIBED' as const,
     hasAudio: true,
-    audioFingerprint: audioAsset.sha256 || audioAsset.content_hash,
-    transcriptFingerprint: asrAsset.content_hash,
+    audioFingerprint: (audioAsset as any).sha256 || (audioAsset as any).content_hash,
+    transcriptFingerprint: (asrAsset as any).content_hash,
     alignmentAvailable: (transcriptionResult as any).segments && (transcriptionResult as any).segments.length > 0,
   };
   
@@ -332,7 +332,7 @@ async function processAudioOnly(job: any, audioAsset: any): Promise<void> {
     asrConfidence01: (transcriptionResult as any).confidence ? Math.min(1.0, Math.max(0.0, (transcriptionResult as any).confidence)) : undefined,
     diarizationConfidence01: (transcriptionResult as any).diarizationConfidence ? Math.min(1.0, Math.max(0.0, (transcriptionResult as any).diarizationConfidence)) : undefined,
     alignmentCoverage01: provenance.alignmentAvailable ? 1.0 : 0.0,
-    noisyAudioFlag: transcriptionResult.vadStats?.noiseRatio && transcriptionResult.vadStats.noiseRatio > 0.3,
+    noisyAudioFlag: (transcriptionResult.vadStats as any)?.noiseRatio && (transcriptionResult.vadStats as any).noiseRatio > 0.3,
   };
 
   // Run analysis
