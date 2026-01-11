@@ -357,7 +357,13 @@ function createContradictionIssue(
     impact: 'high' as const, // Contradictions are high impact
     riskScore: 0, // Will be computed by ranking
     score: 0, // Will be computed by scoring
-    confidence: edge.weight || 0.7,
+    // 5.1: Ensure confidence is always populated from real signals
+    // For contradictions: use edge weight (already 0..1)
+    // Fallback to claim confidence metrics if edge weight missing
+    confidence: edge.weight ?? 
+                 (claimA as any).confidenceMetrics?.groundingScore ?? 
+                 claimA.confidence ?? 
+                 0.6, // Last resort: reasonable default (not 0.5 to avoid plateaus)
     reviewRequired: true,
     // B2: Store speaker gating info for scoring
     // @ts-ignore - temporary field for speaker gating
@@ -485,7 +491,10 @@ function createUnverifiedClaimIssue(
     impact: 'low' as const, // Unverified claims are low impact
     riskScore: 0, // Will be computed by ranking
     score: 0, // Will be computed by scoring
-    confidence: claim.confidence || 0.7,
+    // 5.1: Ensure confidence is always populated from real signals
+    confidence: claim.confidence ?? 
+                 (claim as any).confidenceMetrics?.groundingScore ?? 
+                 0.6, // Last resort: reasonable default
     reviewRequired: true, // Agent assertions/promises require review
     verification: {
       level: verificationLevel,
@@ -568,7 +577,10 @@ function createUngroundedClaimIssue(
     impact: 'low' as const, // Ungrounded claims are low impact
     riskScore: 0, // Will be computed by ranking
     score: 0, // Will be computed by scoring
-    confidence: claim.confidence || 0.5,
+    // 5.1: Ensure confidence is always populated from real signals
+    confidence: claim.confidence ?? 
+                 (claim as any).confidenceMetrics?.groundingScore ?? 
+                 0.6, // Last resort: reasonable default
     reviewRequired: true,
     verification: {
       level: 'NONE',
@@ -700,7 +712,10 @@ function createRiskSignalIssue(
     impact: 'high' as const, // Risk signals are high impact
     riskScore: 0, // Will be computed by ranking
     score: 0, // Will be computed by scoring
-    confidence: claim.confidence || 0.7,
+    // 5.1: Ensure confidence is always populated from real signals
+    confidence: claim.confidence ?? 
+                 (claim as any).confidenceMetrics?.groundingScore ?? 
+                 0.6, // Last resort: reasonable default
     reviewRequired: true,
     verification: {
       level: input.evidenceMode === 'TRANSCRIPT_PLUS_EXTERNAL' ? 'EXTERNAL_VERIFIED' : 'TRANSCRIPT_ONLY',

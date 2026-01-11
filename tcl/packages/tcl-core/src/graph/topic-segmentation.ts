@@ -10,7 +10,7 @@
 
 import { ClaimNode, TopicNode, SubjectSlot } from './types.js';
 import { getTemplateConfig } from './template-config.js';
-import { slotsMatch, computeSlotSimilarity } from './subject-slot.js';
+import { slotsMatch, computeSlotSimilarity, hasStrongAnchorMatch, anchorOverlap } from './subject-slot.js';
 
 // =============================================================================
 // TOPIC CLUSTER
@@ -80,7 +80,8 @@ function segmentBySlot(claims: ClaimNode[]): SegmentationResult {
 // =============================================================================
 
 function segmentBySemantic(claims: ClaimNode[]): SegmentationResult {
-  // Simple greedy clustering based on text similarity
+  // 6.1: Improved semantic clustering with anchor support
+  // Claims with shared anchors should cluster together
   const clusters: ClaimNode[][] = [];
   const assigned = new Set<string>();
   
@@ -92,9 +93,20 @@ function segmentBySemantic(claims: ClaimNode[]): SegmentationResult {
     let bestScore = 0;
     
     for (const cluster of clusters) {
+      // 6.1: Check anchor overlap first (stronger signal than semantic similarity)
+      const anchorScore = cluster.reduce((max, c) => {
+        const overlap = anchorOverlap(claim.anchors ?? [], c.anchors ?? []);
+        const hasStrongMatch = hasStrongAnchorMatch(claim.anchors ?? [], c.anchors ?? []);
+        // Strong anchor match = 0.7, anchor overlap = 0.5, no match = 0
+        return Math.max(max, hasStrongMatch ? 0.7 : overlap > 0 ? 0.5 : 0);
+      }, 0);
+      
       const avgSimilarity = computeAverageSimilarity(claim, cluster);
-      if (avgSimilarity > bestScore && avgSimilarity > 0.4) {
-        bestScore = avgSimilarity;
+      // Combine anchor score and semantic similarity (anchor takes precedence)
+      const combinedScore = Math.max(anchorScore, avgSimilarity);
+      
+      if (combinedScore > bestScore && combinedScore > 0.4) {
+        bestScore = combinedScore;
         bestCluster = cluster;
       }
     }
@@ -153,11 +165,29 @@ function segmentHybrid(
   claims: ClaimNode[],
   config: { turnWindow: number; minClaimsPerTopic: number }
 ): SegmentationResult {
-  // Step 1: Initial slot-based clustering
+  // 6.1: Improved hybrid segmentation with anchor support
+  // Step 1: Initial clustering (slot + anchor based)
   const slotClusters = new Map<string, ClaimNode[]>();
   
   for (const claim of claims) {
-    const key = `${claim.slot.slotType}:${claim.slot.entityKey}`;
+    // Primary key: slotType:entityKey
+    let key = `${claim.slot.slotType}:${claim.slot.entityKey}`;
+    
+    // 6.1: If claim has strong anchors, use anchor-based clustering
+    const strongAnchors = (claim.anchors ?? []).filter(a => 
+      ['MONEY', 'DATE', 'TIMEFRAME', 'PAYMENT_CARD', 'SSN_LAST4'].includes(a.type)
+    );
+    
+    if (strongAnchors.length > 0) {
+      const primaryAnchor = strongAnchors[0];
+      // Sensitive anchors get their own cluster
+      if (primaryAnchor.type === 'PAYMENT_CARD' || primaryAnchor.type === 'SSN_LAST4') {
+        key = `sensitive:${primaryAnchor.type}:${primaryAnchor.key}`;
+      } else {
+        // MONEY/DATE/TIMEFRAME cluster by anchor key
+        key = `${claim.slot.slotType}:${primaryAnchor.type}:${primaryAnchor.key}`;
+      }
+    }
     
     if (!slotClusters.has(key)) {
       slotClusters.set(key, []);
@@ -182,8 +212,17 @@ function segmentHybrid(
     let merged = false;
     
     for (const large of mergedClusters) {
+      // 6.1: Check anchor overlap first (stronger signal than slot)
+      const smallAnchors = small.flatMap(c => c.anchors ?? []);
+      const largeAnchors = large.flatMap(c => c.anchors ?? []);
+      const anchorOverlapCount = anchorOverlap(smallAnchors, largeAnchors);
+      const hasAnchorMatch = hasStrongAnchorMatch(smallAnchors, largeAnchors);
+      
       // Check slot compatibility
-      if (small[0].slot.slotType === large[0].slot.slotType) {
+      const slotCompatible = small[0].slot.slotType === large[0].slot.slotType;
+      
+      // 6.1: Merge if anchor match OR (slot compatible + temporal proximity)
+      if (hasAnchorMatch || (slotCompatible && anchorOverlapCount > 0)) {
         // Check temporal proximity
         const smallTurns = small.map(c => parseTurnIndex(c.span.turnId));
         const largeTurns = large.map(c => parseTurnIndex(c.span.turnId));
@@ -193,8 +232,9 @@ function segmentHybrid(
         const largeMin = Math.min(...largeTurns);
         const largeMax = Math.max(...largeTurns);
         
-        // Check if turns overlap or are within window
+        // Check if turns overlap or are within window (or anchor match overrides)
         if (
+          hasAnchorMatch || // Anchor match overrides temporal window
           (smallMin >= largeMin - config.turnWindow && smallMin <= largeMax + config.turnWindow) ||
           (smallMax >= largeMin - config.turnWindow && smallMax <= largeMax + config.turnWindow)
         ) {

@@ -13,7 +13,7 @@
 
 import { ClaimNode, EvidenceNode, SubjectSlot, GraphNode, RunDiagnostics } from './types.js';
 import { getTemplateConfig } from './template-config.js';
-import { computeSlotSimilarity } from './subject-slot.js';
+import { computeSlotSimilarity, hasStrongAnchorMatch } from './subject-slot.js';
 
 // =============================================================================
 // CANDIDATE TYPES
@@ -164,8 +164,23 @@ function getCandidatesForContradiction(
     // Skip self
     if (claim.id === other.id) continue;
     
+    // 5.1: Prioritize within same topic, allow cross-topic only if strong anchor match exists
+    const sameTopic = claim.topicId && other.topicId && claim.topicId === other.topicId;
+    const hasAnchorMatch = hasStrongAnchorMatch(claim.anchors ?? [], other.anchors ?? []);
+    
+    // Skip cross-topic candidates without anchor match (too loose)
+    if (!sameTopic && !hasAnchorMatch) {
+      continue;
+    }
+    
     // Compute retrieval signals
     const signals = computeRetrievalSignals(claim, other);
+    
+    // 5.1: Boost score for anchor-based candidates
+    let anchorBoost = 0;
+    if (hasAnchorMatch) {
+      anchorBoost = 0.3; // Significant boost for anchor matches
+    }
     
     // Compute weighted score
     const retrievalScore = 
@@ -173,7 +188,8 @@ function getCandidatesForContradiction(
       weights.entityOverlap * signals.entityOverlap +
       weights.semanticSimilarity * signals.semanticSimilarity +
       weights.temporalProximity * signals.temporalProximity +
-      weights.speakerRole * signals.speakerRole;
+      weights.speakerRole * signals.speakerRole +
+      anchorBoost; // Add anchor boost
     
     candidates.push({
       claimA: claim,

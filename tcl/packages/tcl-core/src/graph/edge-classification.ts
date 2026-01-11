@@ -21,7 +21,7 @@ import {
 } from './types.js';
 import { getTemplateConfig } from './template-config.js';
 import { ClaimPairCandidate, ClaimEvidenceCandidate } from './candidate-generation.js';
-import { slotsMatch, valuesContradict, hasExplicitContradictionPattern } from './subject-slot.js';
+import { slotsMatch, valuesContradict, hasExplicitContradictionPattern, hasStrongAnchorMatch } from './subject-slot.js';
 
 // =============================================================================
 // EDGE CLASSIFICATION RESULTS
@@ -251,40 +251,36 @@ function classifyContradiction(
     }
   }
   
-  // 1.1: Fix "unknown" slot contradictions - require meaningful slots
-  // Reject contradiction edges unless at least one is true:
-  // - slotType is NOT unknown and NOT general AND entityKey is NOT unknown
-  // - OR (fallback) semanticSimilarity is very high (>= 0.88) AND explicit contradiction pattern
-  const slotA = claimA.slot?.slotType;
-  const slotB = claimB.slot?.slotType;
-  const keyA = claimA.slot?.entityKey;
-  const keyB = claimB.slot?.entityKey;
+  // 4.1: Tighten contradiction edge classification with anchor-based matching
+  // Allow contradiction only if one of these is true:
+  // A) slotsMatch (meaningful slot match)
+  // B) hasStrongAnchorMatch (anchor-based match)
+  // C) Fallback: semanticSimilarity >= SEMANTIC_HIGH AND explicitPolarityFlip
+  const slotOk = slotsMatch(claimA.slot, claimB.slot);
+  const anchorOk = hasStrongAnchorMatch(claimA.anchors ?? [], claimB.anchors ?? []);
+  const polarityFlip = hasOpposingPolarity(claimA, claimB) || 
+                       hasCustomerDenialVsAssertion(claimA, claimB) ||
+                       valuesContradict(claimA.slot, claimB.slot);
+  const semanticHighThreshold = config.thresholds.semanticHighForFallback ?? 0.88;
+  const highSemantic = signals.semanticSimilarity >= semanticHighThreshold;
   
-  const meaningful = 
-    slotA && slotB &&
-    !['unknown', 'general'].includes(slotA) &&
-    !['unknown', 'general'].includes(slotB) &&
-    keyA !== 'unknown' &&
-    keyB !== 'unknown';
+  if (!(slotOk || anchorOk || (polarityFlip && highSemantic))) {
+    return { rejected: true, reason: 'slot' };
+  }
   
-  if (!meaningful) {
-    // Fallback: require explicit contradiction pattern AND high semantic similarity
-    const explicit = hasOpposingPolarity(claimA, claimB) || 
-                     hasCustomerDenialVsAssertion(claimA, claimB) ||
-                     valuesContradict(claimA.slot, claimB.slot);
-    const semanticHighThreshold = config.thresholds.semanticHighForFallback ?? 0.88;
-    const highSemantic = signals.semanticSimilarity >= semanticHighThreshold;
-    
-    if (!(explicit && highSemantic)) {
-      return { rejected: true, reason: 'slot' };
+  // 4.1: Reject contradictions across different topics unless anchor match exists
+  if (claimA.topicId && claimB.topicId && claimA.topicId !== claimB.topicId) {
+    // Allow only if strong anchor match exists (same MONEY, same DATE/TIMEFRAME, etc.)
+    if (!anchorOk) {
+      return { rejected: true, reason: 'topic' };
     }
   }
   
-  // B1: Topic + slot hard-gate for contradiction edges
+  // B1: Topic + slot hard-gate for contradiction edges (if enabled and no anchor match)
   // Do not generate contradiction edges unless topicId AND slotKey match
   // This prevents "topic drift contradictions" (e.g., device protection vs cancellation)
-  if (config.gating.contradictionRequiresSameTopic) {
-    // Hard gate: topicId must match
+  if (config.gating.contradictionRequiresSameTopic && !anchorOk) {
+    // Hard gate: topicId must match (unless anchor match exists)
     if (claimA.topicId && claimB.topicId && claimA.topicId !== claimB.topicId) {
       return { rejected: true, reason: 'topic' };
     }

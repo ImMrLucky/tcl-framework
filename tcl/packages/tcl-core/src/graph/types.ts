@@ -82,6 +82,32 @@ export interface EvidenceAnchor {
 // CLAIM NODE
 // =============================================================================
 
+// =============================================================================
+// ANCHOR TYPES (Industry-Agnostic Universal Slot Keys)
+// =============================================================================
+
+export type AnchorType =
+  | 'MONEY'
+  | 'DATE'
+  | 'TIMEFRAME'
+  | 'PERCENT'
+  | 'QUANTITY'
+  | 'ADDRESS'
+  | 'EMAIL'
+  | 'PHONE'
+  | 'PAYMENT_CARD'
+  | 'SSN_LAST4'
+  | 'URL'
+  | 'ID';
+
+export interface ClaimAnchor {
+  type: AnchorType;
+  key: string;        // normalized canonical key (e.g., MONEY: "214.73", TIMEFRAME:"7-10_bd")
+  raw?: string;       // original snippet
+  span?: { start: number; end: number };
+  confidence?: number;
+}
+
 export interface ClaimNode {
   id: string;                   // e.g., "c123"
   type: 'CLAIM';
@@ -114,6 +140,9 @@ export interface ClaimNode {
   
   /** REQUIRED - Subject slot for this claim */
   slot: SubjectSlot;
+  
+  /** Industry-agnostic anchors (universal slot keys) */
+  anchors?: ClaimAnchor[];
   
   /** Computed topic ID */
   topicId?: string;

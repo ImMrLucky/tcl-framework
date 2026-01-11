@@ -12,7 +12,7 @@
  * 4. Normalize values if present
  */
 
-import { SubjectSlot, ExtractedEntity, ClaimModality } from './types.js';
+import { SubjectSlot, ExtractedEntity, ClaimModality, ClaimAnchor, AnchorType } from './types.js';
 import { getTemplateConfig, SlotLexiconEntry } from './template-config.js';
 
 // =============================================================================
@@ -332,9 +332,24 @@ function normalizeSlotValue(value: any): string | undefined {
 // SLOT MATCHING (For contradiction eligibility)
 // =============================================================================
 
-export function slotsMatch(a: SubjectSlot, b: SubjectSlot): boolean {
-  // Exact match on slotType and entityKey
-  return a.slotType === b.slotType && a.entityKey === b.entityKey;
+/**
+ * 2.1: Check if a slot is meaningful (not unknown/general)
+ */
+export function isMeaningfulSlot(slot?: SubjectSlot): boolean {
+  if (!slot) return false;
+  if (!slot.slotType || !slot.entityKey) return false;
+  if (slot.slotType === 'unknown' || slot.slotType === 'general') return false;
+  if (slot.entityKey === 'unknown' || slot.entityKey === 'general') return false;
+  return true;
+}
+
+/**
+ * 2.1: Updated slotsMatch to prevent unknown/unknown contradictions
+ * Do NOT allow unknown/general to match
+ */
+export function slotsMatch(a?: SubjectSlot, b?: SubjectSlot): boolean {
+  if (!isMeaningfulSlot(a) || !isMeaningfulSlot(b)) return false;
+  return a!.slotType === b!.slotType && a!.entityKey === b!.entityKey;
 }
 
 export function slotsCompatible(a: SubjectSlot, b: SubjectSlot): boolean {

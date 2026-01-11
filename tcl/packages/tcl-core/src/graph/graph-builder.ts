@@ -34,7 +34,7 @@ import {
   EvidenceKind,
   RunDiagnostics,
 } from './types.js';
-import { extractEntities, computeSubjectSlot } from './subject-slot.js';
+import { extractEntities, computeSubjectSlot, extractAnchors } from './subject-slot.js';
 import { getTemplateConfig, setTemplateConfig, TemplateConfig } from './template-config.js';
 
 // Re-export for convenience
@@ -399,6 +399,7 @@ function buildClaimNodes(input: GraphBuilderInput): ClaimNode[] {
     for (const raw of input.rawClaims) {
       const entities = extractEntities(raw.text);
       const slot = computeSubjectSlot(raw.text, entities, raw.modality);
+      const anchors = extractAnchors(entities, raw.text); // 1.2: Extract industry-agnostic anchors
       
       const node: ClaimNode = {
         id: raw.id,
@@ -417,6 +418,7 @@ function buildClaimNodes(input: GraphBuilderInput): ClaimNode[] {
           percentage: entities.find(e => e.type === 'PERCENT')?.normalized,
         },
         slot,
+        anchors, // 1.2: Add anchors to claim node
         confidence: raw.confidence,
         createdAt: new Date().toISOString(),
         meta: raw.meta,
@@ -438,6 +440,7 @@ function buildClaimNodes(input: GraphBuilderInput): ClaimNode[] {
       
       const entities = extractEntities(parsed.text);
       const slot = computeSubjectSlot(parsed.text, entities);
+      const anchors = extractAnchors(entities, parsed.text); // 1.2: Extract industry-agnostic anchors
       
       const node: ClaimNode = {
         id: `c${turnIndex}`,
@@ -456,6 +459,7 @@ function buildClaimNodes(input: GraphBuilderInput): ClaimNode[] {
           date: entities.find(e => e.type === 'DATE')?.normalized,
         },
         slot,
+        anchors, // 1.2: Add anchors to claim node
         createdAt: new Date().toISOString(),
       };
       
