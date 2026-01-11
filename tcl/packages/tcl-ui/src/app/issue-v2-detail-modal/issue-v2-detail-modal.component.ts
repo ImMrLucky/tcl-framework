@@ -144,7 +144,7 @@ interface IssueV2 {
               <p><strong>ID:</strong> {{ data.issue.what?.primaryClaimId || 'N/A' }}</p>
               <p *ngIf="data.issue.what?.claimText"><strong>Text:</strong> {{ data.issue.what.claimText }}</p>
               
-              <div *ngIf="data.issue.what?.relatedClaimIds && data.issue.what?.relatedClaimIds.length > 0">
+              <div *ngIf="data.issue.what?.relatedClaimIds && (data.issue.what?.relatedClaimIds?.length ?? 0) > 0">
                 <h3>Related Claims</h3>
                 <ul>
                   <li *ngFor="let claimId of data.issue.what.relatedClaimIds">{{ claimId }}</li>
@@ -189,7 +189,7 @@ interface IssueV2 {
               <mat-chip *ngFor="let tag of (data.issue.compliance?.tags || [])">{{ tag }}</mat-chip>
             </div>
             
-            <div *ngIf="data.issue.compliance?.impactedPolicies && data.issue.compliance?.impactedPolicies.length > 0">
+            <div *ngIf="data.issue.compliance?.impactedPolicies && (data.issue.compliance?.impactedPolicies?.length ?? 0) > 0">
               <h3>Impacted Policies</h3>
               <ul>
                 <li *ngFor="let policy of data.issue.compliance.impactedPolicies">
