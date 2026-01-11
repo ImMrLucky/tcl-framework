@@ -536,7 +536,8 @@ async function runAnalysis(input: {
     }));
 
     // Determine evidence mode based on verification level
-    const evidenceMode = input.verificationLevel === 'TRANSCRIPT_ONLY' ? 'TRANSCRIPT_ONLY' : 'WITH_EVIDENCE';
+    const evidenceMode: 'TRANSCRIPT_ONLY' | 'TRANSCRIPT_PLUS_EXTERNAL' = 
+      input.verificationLevel === 'TRANSCRIPT_ONLY' ? 'TRANSCRIPT_ONLY' : 'TRANSCRIPT_PLUS_EXTERNAL';
 
     // Expand issues from graph (creates proper IssueV2 format)
     const expansionResult = expandIssueCandidates({
