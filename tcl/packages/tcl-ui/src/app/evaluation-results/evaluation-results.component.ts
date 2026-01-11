@@ -1140,10 +1140,10 @@ getMetricTooltip(metric: string): string {
   }
 
   getVerificationTooltip(issue: IssueV2): string {
-    const impactSeverity = issue.severity.toUpperCase();
+    const impactSeverity = issue.severity ? issue.severity.toUpperCase() : 'UNKNOWN';
     const displaySeverity = issue.severityDisplay ? issue.severityDisplay.toUpperCase() : impactSeverity;
     let tooltip = `Impact Severity: ${impactSeverity}`;
-    if (issue.severityDisplay && issue.severityDisplay !== issue.severity.toLowerCase()) {
+    if (issue.severityDisplay && issue.severity && issue.severityDisplay !== issue.severity.toLowerCase()) {
       tooltip += `\nDisplay Severity: ${displaySeverity} (downgraded for transcript-only)`;
     }
     tooltip += `\nVerification: ${this.getVerificationLabel(issue)}`;

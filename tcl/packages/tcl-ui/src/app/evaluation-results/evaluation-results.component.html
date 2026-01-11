@@ -330,16 +330,16 @@
                     <span class="issue-rank">#{{ pageIndex * pageSize + i + 1 }}</span>
                     <span class="issue-type">{{ issue.type }}</span>
                     <!-- Chip A: Impact Severity (severity) - what this would be if verified -->
-                    <span class="issue-severity" [class]="'severity-' + issue.severity"
-                          [matTooltip]="'Impact Severity: ' + issue.severity.toUpperCase() + (issue.severityDisplay && issue.severityDisplay !== issue.severity ? ' (Display: ' + issue.severityDisplay.toUpperCase() + ')' : '')"
+                    <span class="issue-severity" [class]="'severity-' + (issue.severity || 'unknown')"
+                          [matTooltip]="getVerificationTooltip(issue)"
                           matTooltipPosition="above">
-                      {{ issue.severity.toUpperCase() }}
+                      {{ (issue.severity || 'unknown').toUpperCase() }}
                     </span>
                     <!-- Chip B: Verification Level -->
                     <span class="verification-badge" 
-                          [class.transcript-only]="issue.verification.level === 'TRANSCRIPT_ONLY'"
-                          [matTooltip]="issue.verification.level === 'TRANSCRIPT_ONLY' ? 'Unverified (Transcript-only)' : issue.verification.level === 'EXTERNAL_VERIFIED' ? 'Externally Verified' : 'No Verification'"
-                          [class.verified]="issue.verification.level === 'EXTERNAL_VERIFIED'">
+                          [class.transcript-only]="issue.verification?.level === 'TRANSCRIPT_ONLY'"
+                          [matTooltip]="getVerificationTooltip(issue)"
+                          [class.verified]="issue.verification?.level === 'EXTERNAL_VERIFIED'">
                         {{ getVerificationLabel(issue) }}
                       </span>
                     <span class="issue-impact" *ngIf="issue.impact">
@@ -392,7 +392,7 @@
                 <ng-container matColumnDef="severity">
                   <mat-header-cell *matHeaderCellDef>Severity</mat-header-cell>
                   <mat-cell *matCellDef="let issue">
-                    <span [class]="'severity-' + issue.severity">{{ issue.severity.toUpperCase() }}</span>
+                    <span [class]="'severity-' + (issue.severity || 'unknown')">{{ (issue.severity || 'unknown').toUpperCase() }}</span>
                   </mat-cell>
                 </ng-container>
                 <ng-container matColumnDef="riskScore">
