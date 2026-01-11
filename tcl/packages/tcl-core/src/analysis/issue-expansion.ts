@@ -297,7 +297,18 @@ function createContradictionIssue(
   
   // 3.1: Fix verification logic - distinguish transcript grounding from external support
   // Compute external verification from SUPPORT edges to non-transcript evidence
+  // A2: Define TRANSCRIPT_ONLY correctly (no more accidental NONE)
+  // TRANSCRIPT_ONLY if any of these are true:
+  // - claim has meta.turnIndex, span, or provenance anchors
+  // - claim has transcript grounding edges
+  // - claim has transcript evidence refs (to transcript EvidenceNodes)
+  // NONE only if:
+  // - claim has no transcript anchors/spans/turnIndex AND no grounding edges AND no evidence refs
+  
   const hasTranscriptGrounding = input.grounding.some(g => g.claimId === edge.claimA || g.claimId === edge.claimB);
+  const hasTranscriptRefs = evidenceRefs.some(ref => ref.sourceId.startsWith('e-transcript-'));
+  const hasTurnIndex = (claimA.meta?.turnIndex !== undefined) || (claimB.meta?.turnIndex !== undefined);
+  const hasSpan = (claimA as any).span || (claimB as any).span;
   
   // Check for external support (support edges to non-transcript evidence)
   const hasExternalSupport = input.supports.some(s => {
@@ -320,13 +331,14 @@ function createContradictionIssue(
     return false;
   });
   
+  // A1: Expand verification levels (canonical)
   let verificationLevel: VerificationLevelV2;
   if (hasExternalSupport) {
-    verificationLevel = 'EXTERNAL_VERIFIED';
-  } else if (hasTranscriptGrounding) {
-    verificationLevel = 'TRANSCRIPT_ONLY';
+    verificationLevel = 'EXTERNAL_VERIFIED'; // A1: Grounded to org/per-ingestion docs/policies
+  } else if (hasTranscriptGrounding || hasTranscriptRefs || hasTurnIndex || hasSpan) {
+    verificationLevel = 'TRANSCRIPT_ONLY'; // A2: Grounded to transcript turns/spans (traceable)
   } else {
-    verificationLevel = 'NONE';
+    verificationLevel = 'NONE'; // A1: Only when truly cannot trace (should be rare)
   }
   
   // Compliance tags

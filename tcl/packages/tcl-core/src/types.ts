@@ -319,18 +319,21 @@ export interface IssueV2 {
     reasonCodes: string[];         // e.g. ["NO_EXTERNAL_EVIDENCE"]
   };
   
+  // D2: scoreBreakdown from risk-ranking (enterprise requirement)
   scoreBreakdown?: {
-    impactScore: number;
-    verificationScore: number;
-    disputeScore: number;
-    contradictionScore: number;
-    commitmentScore: number;
-    escalationScore: number;
-    templateScore: number;
-    penalties: {
-      transcriptOnlyCapPenalty?: number;
-      [key: string]: number | undefined;
+    impact01: number;
+    evidence01: number;
+    signal01: number;
+    category01: number;
+    weights: {
+      impact: number;
+      evidence: number;
+      signal: number;
+      category: number;
     };
+    risk01Raw: number;
+    risk01Clamped: number;
+    reasons: string[];
   };
   
     scoring?: {

@@ -306,10 +306,39 @@ function classifyContradiction(
     return { rejected: true, reason: 'mutual_exclusivity' as const };
   }
   
+  // F1: "unknown slot" must not create high-weight contradictions
+  // F2: Require at least one "hard signal" for high contradiction weights
+  const hasUnknownSlot = claimA.slot.entityKey === 'unknown' || claimA.slot.slotType === 'unknown' ||
+                         claimB.slot.entityKey === 'unknown' || claimB.slot.slotType === 'unknown';
+  const hasHardSignal = exactSlotMatch && 
+                        claimA.slot.entityKey !== 'unknown' && 
+                        claimB.slot.entityKey !== 'unknown' &&
+                        (polarityFlip || valuesContradict(claimA.slot, claimB.slot));
+  
   // Compute contradiction score (boost for exact slot match)
   let contradictionScore = computeContradictionScore(claimA, claimB, signals);
   if (exactSlotMatch) {
     contradictionScore = Math.min(1.0, contradictionScore + 0.1); // Bonus for exact slot
+  }
+  
+  // F1: Clamp weight lower for unknown slots OR require higher semantic similarity
+  if (hasUnknownSlot && !hasHardSignal) {
+    // F1: Unknown slot contradictions allowed only with much lower max weight OR require higher semanticSimilarity threshold
+    const unknownSlotMaxWeight = config.thresholds.contradiction * 0.7; // 70% of normal threshold
+    const unknownSlotSemanticThreshold = config.thresholds.semanticHighForFallback ?? 0.88;
+    
+    if (signals.semanticSimilarity < unknownSlotSemanticThreshold) {
+      // Require very high semantic similarity for unknown slots
+      contradictionScore = Math.min(contradictionScore, unknownSlotMaxWeight);
+    }
+  }
+  
+  // F2: Require at least one "hard signal" for high contradiction weights
+  // To allow weight > X (config): same slotType AND same entityKey (not unknown) AND opposing polarity OR numeric mismatch
+  const highWeightThreshold = config.thresholds.contradiction * 1.2; // 20% above normal threshold
+  if (contradictionScore > highWeightThreshold && !hasHardSignal) {
+    // Clamp contradiction weights lower if no hard signal
+    contradictionScore = Math.min(contradictionScore, highWeightThreshold);
   }
   
   // Store the classification score (before threshold check) for audit transparency
@@ -679,6 +708,16 @@ function classifyClaimSupport(
   // Skip if claim-to-claim support is not allowed
   if (!config.truthDerivation.allowClaimToClaimSupport) {
     return { rejected: true, reason: 'threshold' };
+  }
+  
+  // B2: Ensure SUPPORT edges don't cross topics unless strict slot match
+  // Keep topic gating rules, but ensure you can still form supports within topic clusters
+  const sameTopic = claimA.topicId && claimB.topicId && claimA.topicId === claimB.topicId;
+  const strictSlotMatch = slotsMatch(claimA.slot, claimB.slot);
+  
+  // B2: Allow cross-topic only if strict slot match (same slotType AND same entityKey)
+  if (!sameTopic && !strictSlotMatch) {
+    return { rejected: true, reason: 'topic' }; // Reject cross-topic without strict slot match
   }
   
   // GATE 1: Require slot/entity match OR shared entity key

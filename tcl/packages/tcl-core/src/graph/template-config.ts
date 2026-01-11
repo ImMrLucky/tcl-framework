@@ -176,7 +176,7 @@ export const DEFAULT_TEMPLATE_CONFIG: TemplateConfig = {
   },
   
   truthDerivation: {
-    allowClaimToClaimSupport: false, // Conservative default
+    allowClaimToClaimSupport: true, // B1: Turn on claim-to-claim support edges (default)
     minSupportWeight: 0.5,
     minContradictionWeight: 0.55,
   },

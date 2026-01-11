@@ -264,6 +264,23 @@ function scoreIssue(
     }
   }
   
+  // D2: Return scoreBreakdown from risk-ranking (enterprise requirement)
+  const scoreBreakdown = {
+    impact01,
+    evidence01,
+    signal01,
+    category01,
+    weights: {
+      impact: wImpact,
+      evidence: wEvidence,
+      signal: wSignal,
+      category: wCategory,
+    },
+    risk01Raw: risk01,
+    risk01Clamped: riskScore,
+    reasons: scoringReasons,
+  };
+  
   return {
     ...issue,
     impact: finalImpact,
@@ -271,6 +288,7 @@ function scoreIssue(
     score,
     severity, // Canonical severity (impact severity, independent of mode)
     severityDisplay, // UI convenience (may be downgraded for UNVERIFIED in transcript-only)
+    scoreBreakdown, // D2: Add scoreBreakdown to IssueV2
     scoring: {
       components: {
         impact01: Math.round(impact01 * 1000) / 1000, // Round to 3 decimals
@@ -314,6 +332,11 @@ function computeImpact01(issue: IssueV2, config: RiskRankingConfig): number {
  * - corroboration01 comes from support/confirmation/summaries and contradiction provability
  * - transcriptQualityMultiplier comes from ASR/diarization confidence (bounded 0.6-1.15)
  */
+/**
+ * E1: Compute evidence01 using evidenceMap (config-driven)
+ * E1: Update evidenceMap - EXTERNAL_VERIFIED: 1.0, TRANSCRIPT_ONLY: 0.6, NONE: 0.2
+ * Key: TRANSCRIPT_ONLY must be meaningfully higher than NONE.
+ */
 function computeEvidence01(
   issue: IssueV2, 
   config: RiskRankingConfig,
@@ -322,68 +345,46 @@ function computeEvidence01(
     provenance?: { ingestionMode: string; transcriptSource: string; transcriptQuality?: { asrConfidence01?: number; diarizationConfidence01?: number } };
   }
 ): number {
-  const level = issue.verification.level; // This is VerificationLevelV2: "EXTERNAL_VERIFIED" | "TRANSCRIPT_ONLY" | "TRANSCRIPT_PROVABLE" | "NONE"
+  const level = issue.verification.level; // VerificationLevelV2: "EXTERNAL_VERIFIED" | "TRANSCRIPT_ONLY" | "TRANSCRIPT_PROVABLE" | "NONE"
   
-  // Base transcript confidence: higher when transcript came from audio transcription
-  let baseTranscriptConfidence = 0.15; // Default: low for user-provided transcript-only
+  // E1: Use evidenceMap from config (no hard-coded values)
+  let baseEvidence01 = config.evidenceMap[level] || config.evidenceMap['NONE'];
   
-  if (evalMode?.provenance) {
-    const { ingestionMode, transcriptSource } = evalMode.provenance;
-    if (ingestionMode === 'AUDIO_AND_TRANSCRIPT' || ingestionMode === 'AUDIO_ONLY_TRANSCRIBED') {
-      baseTranscriptConfidence = 0.25; // Higher: transcript is provenance-backed from audio
-    } else if (transcriptSource === 'AUTO_TRANSCRIBED') {
-      baseTranscriptConfidence = 0.22; // Slightly higher: auto-transcribed
-    }
-  }
-  
-  // For non-transcript-only modes, use higher base
-  // Note: level is VerificationLevelV2, so we check for EXTERNAL_VERIFIED (not EXTERNALLY_VERIFIED)
-  if (level === 'EXTERNAL_VERIFIED') {
-    baseTranscriptConfidence = 0.7; // High: has external evidence
-  } else if (level === 'TRANSCRIPT_PROVABLE') {
-    baseTranscriptConfidence = 0.35; // Medium: transcript-provable (good alignment/diarization)
-  }
-  
-  // Corroboration: from support/confirmation/summaries and contradiction provability
-  let corroboration01 = 1.0;
-  
-  // Boost from support edges (confirmation)
-  if (issue.evidence.edges && issue.evidence.edges.length > 0) {
-    const supportEdges = issue.evidence.edges.filter(e => e.kind === 'support');
-    if (supportEdges.length > 0) {
-      const maxSupportWeight = Math.max(...supportEdges.map(e => e.weight || 0));
-      corroboration01 = Math.min(1.0, 1.0 + (maxSupportWeight * 0.2)); // Up to 20% boost
-    }
-  }
-  
-  // Boost from external evidence refs
-  if (issue.evidence.refs && issue.evidence.refs.length > 0) {
-    const externalRefs = issue.evidence.refs.filter(r => r.sourceType !== 'TRANSCRIPT');
-    if (externalRefs.length > 0) {
-      corroboration01 = Math.min(1.0, corroboration01 + 0.3); // Significant boost for external evidence
-    }
-  }
-  
-  // Transcript quality multiplier (bounded 0.6-1.15)
-  let transcriptQualityMultiplier = 1.0;
-  if (evalMode?.provenance?.transcriptQuality) {
+  // Apply transcript quality multiplier if available (bounded 0.9-1.1 for transcript-only)
+  let qualityMultiplier = 1.0;
+  if (level === 'TRANSCRIPT_ONLY' && evalMode?.provenance?.transcriptQuality) {
     const quality = evalMode.provenance.transcriptQuality;
     const asrConf = quality.asrConfidence01 ?? 0.8;
     const diarConf = quality.diarizationConfidence01 ?? 0.8;
     const avgQuality = (asrConf + diarConf) / 2;
-    
-    // Map quality to multiplier: 0.6 (low quality) to 1.15 (high quality)
-    transcriptQualityMultiplier = 0.6 + (avgQuality * 0.55); // 0.6 + (0.8 * 0.55) = 1.04 for avg quality
-    transcriptQualityMultiplier = Math.max(0.6, Math.min(1.15, transcriptQualityMultiplier)); // Clamp
+    // Small multiplier: 0.9 (low quality) to 1.1 (high quality)
+    qualityMultiplier = 0.9 + (avgQuality * 0.2);
+    qualityMultiplier = Math.max(0.9, Math.min(1.1, qualityMultiplier));
   }
   
-  // Compute verification01
-  const verification01 = baseTranscriptConfidence * corroboration01 * transcriptQualityMultiplier;
+  // Corroboration: from support edges (claim-to-claim or claim-to-evidence)
+  let corroboration01 = 1.0;
+  if (issue.evidence.edges && issue.evidence.edges.length > 0) {
+    const supportEdges = issue.evidence.edges.filter(e => e.kind === 'support');
+    if (supportEdges.length > 0) {
+      const maxSupportWeight = Math.max(...supportEdges.map(e => e.weight || 0));
+      // Up to 15% boost from support edges
+      corroboration01 = Math.min(1.0, 1.0 + (maxSupportWeight * 0.15));
+    }
+  }
   
-  // Hard rule: audio cannot increase impact01 or category01. Only verification confidence.
-  // This is already enforced - we're only modifying evidence01 (verification confidence)
+  // Boost from external evidence refs (only for EXTERNAL_VERIFIED)
+  if (level === 'EXTERNAL_VERIFIED' && issue.evidence.refs && issue.evidence.refs.length > 0) {
+    const externalRefs = issue.evidence.refs.filter(r => r.sourceType !== 'TRANSCRIPT');
+    if (externalRefs.length > 0) {
+      corroboration01 = Math.min(1.0, corroboration01 + 0.2); // Additional boost for external evidence
+    }
+  }
   
-  return clamp01(verification01);
+  // Compute evidence01
+  const evidence01 = baseEvidence01 * qualityMultiplier * corroboration01;
+  
+  return clamp01(evidence01);
 }
 
 /**
@@ -555,13 +556,51 @@ function computeSeverityDisplay(
   severity: SeverityV2,
   verificationLevel: VerificationLevelV2,
   issueType: IssueTypeV2,
-  compliance?: { legalHoldSuggested?: boolean },
-  scoringContext?: ScoringContext
+  compliance?: { legalHoldSuggested?: boolean; tags?: string[] },
+  scoringContext?: ScoringContext,
+  issue?: IssueV2 // E2: Optional issue for tag checking
 ): SeverityDisplayV2 {
   // Never downgrade legal hold / critical compliance signals
   if (compliance?.legalHoldSuggested) {
     // Map critical -> high for display (severityDisplay doesn't have 'critical')
     return severity === 'critical' ? 'high' : severity === 'high' ? 'high' : severity === 'medium' ? 'medium' : 'low';
+  }
+  
+  // E2: Mode safety rule - transcript-only should cap display severity only for certain types
+  // Must not downgrade:
+  // - CONTRADICTION
+  // - DATA_INTEGRITY
+  // - "recording/CVV storage" (security/compliance critical)
+  // - fee/price/refund contradictions
+  // So transcript-only can still produce High / Critical display if it's inherently provable from the call.
+  
+  // Check for security/compliance critical issues (recording/CVV storage)
+  // Note: compliance is optional, so we need to check safely
+  const tags = compliance?.tags || [];
+  const isSecurityCritical = issueType === 'DATA_INTEGRITY' || 
+                             tags.some(tag => 
+                               tag.toLowerCase().includes('cvv') ||
+                               tag.toLowerCase().includes('recording') ||
+                               tag.toLowerCase().includes('pci') ||
+                               tag.toLowerCase().includes('security')
+                             );
+  
+  // Check for fee/price/refund contradictions
+  const isMoneyContradiction = issueType === 'CONTRADICTION' && 
+                               tags.some(tag => 
+                                 tag.toLowerCase().includes('fee') ||
+                                 tag.toLowerCase().includes('price') ||
+                                 tag.toLowerCase().includes('refund') ||
+                                 tag.toLowerCase().includes('billing')
+                               );
+  
+  // E2: Never downgrade contradictions, data integrity, security/compliance critical, or money contradictions
+  if (issueType === 'CONTRADICTION' || issueType === 'DATA_INTEGRITY' || isSecurityCritical || isMoneyContradiction) {
+    // Map severity to display (critical -> high, others stay)
+    if (severity === 'critical') return 'high';
+    if (severity === 'high') return 'high';
+    if (severity === 'medium') return 'medium';
+    return 'low';
   }
   
   // Only downgrade evidence-type "UNVERIFIED" items in transcript-only mode
@@ -570,7 +609,7 @@ function computeSeverityDisplay(
     return downgradeOneBand(severity);
   }
   
-  // Do not downgrade contradictions, risk_signals, safety, harassment, etc.
+  // Do not downgrade risk_signals, safety, harassment, etc.
   // Map severity to display (critical -> high, others stay)
   if (severity === 'critical') return 'high';
   if (severity === 'high') return 'high';

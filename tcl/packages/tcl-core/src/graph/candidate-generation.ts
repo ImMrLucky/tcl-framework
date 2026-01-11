@@ -13,7 +13,7 @@
 
 import { ClaimNode, EvidenceNode, SubjectSlot, GraphNode, RunDiagnostics } from './types.js';
 import { getTemplateConfig } from './template-config.js';
-import { computeSlotSimilarity, hasStrongAnchorMatch } from './subject-slot.js';
+import { computeSlotSimilarity, hasStrongAnchorMatch, slotsMatch } from './subject-slot.js';
 
 // =============================================================================
 // CANDIDATE TYPES
@@ -215,9 +215,20 @@ function getCandidatesForSupport(
   weights: { slotMatch: number; entityOverlap: number; semanticSimilarity: number; temporalProximity: number; speakerRole: number }
 ): ClaimPairCandidate[] {
   const candidates: ClaimPairCandidate[] = [];
+  const config = getTemplateConfig();
   
   for (const other of allClaims) {
     if (claim.id === other.id) continue;
+    
+    // B2: Ensure SUPPORT edges don't cross topics unless strict slot match
+    // Keep topic gating rules, but ensure you can still form supports within topic clusters
+    const sameTopic = claim.topicId && other.topicId && claim.topicId === other.topicId;
+    const strictSlotMatch = slotsMatch(claim.slot, other.slot);
+    
+    // B2: Allow cross-topic only if strict slot match (same slotType AND same entityKey)
+    if (!sameTopic && !strictSlotMatch) {
+      continue; // Skip cross-topic candidates without strict slot match
+    }
     
     const signals = computeRetrievalSignals(claim, other);
     
