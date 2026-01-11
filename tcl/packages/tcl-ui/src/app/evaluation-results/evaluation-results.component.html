@@ -351,10 +351,10 @@
                           matTooltipClass="score-tooltip">Score: {{ ((issue.score ?? (issue.riskScore * 100))).toFixed(0) }}</span>
                   </div>
                   <div class="issue-v2-body">
-                    <div class="issue-summary">{{ issue.what.issueSummary }}</div>
+                    <div class="issue-summary">{{ issue.what?.issueSummary || 'No summary available' }}</div>
                     <div class="issue-meta">
-                      <span class="speaker-badge">{{ issue.who.speaker }}</span>
-                      <span class="category-badge">{{ issue.category }}</span>
+                      <span class="speaker-badge">{{ issue.who?.speaker || 'UNKNOWN' }}</span>
+                      <span class="category-badge">{{ issue.category || 'other' }}</span>
                       <span *ngIf="issue.reviewRequired" class="review-required">Review Required</span>
                     </div>
                   </div>
@@ -406,7 +406,7 @@
                 </ng-container>
                 <ng-container matColumnDef="summary">
                   <mat-header-cell *matHeaderCellDef>Summary</mat-header-cell>
-                  <mat-cell *matCellDef="let issue">{{ issue.what.issueSummary }}</mat-cell>
+                  <mat-cell *matCellDef="let issue">{{ issue.what?.issueSummary || 'No summary available' }}</mat-cell>
                 </ng-container>
                 <ng-container matColumnDef="verification">
                   <mat-header-cell *matHeaderCellDef>Verification</mat-header-cell>
