@@ -404,7 +404,7 @@ function createContradictionIssue(
         kind: 'contradiction',
         claimA: edge.claimA,
         claimB: edge.claimB,
-        weight: edge.weight || 0.7,
+        weight: edge.weight, // Use actual edge weight (no fallback - let scoring handle missing)
       }],
     },
     compliance: {

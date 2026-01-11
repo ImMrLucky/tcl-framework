@@ -49,10 +49,13 @@ export function rankIssuesV2(
 ): RankedIssues {
   const rankingConfig = config || getRiskRankingConfig();
   
-  // Score all issues using new pipeline
-  // Pass allIssues to computeSignal01 for normalization
+  // STEP 0: Pre-compute normalization factors from all issues
+  // This allows us to normalize edge weights and signals within the conversation
+  const normalizationFactors = computeNormalizationFactors(issues);
+  
+  // Score all issues with normalization
   const scoredIssues = issues.map(issue => {
-    return scoreIssue(issue, rankingConfig, scoringContext, issues);
+    return scoreIssue(issue, rankingConfig, scoringContext, issues, normalizationFactors);
   });
   
   // Sort deterministically with stable ordering
@@ -127,11 +130,68 @@ export function rankIssuesV2(
  * ✅ All weights from config
  * ✅ No clamping until final output
  */
+/**
+ * Compute normalization factors from all issues to create score spread
+ * This prevents all issues from clustering at the same score
+ */
+function computeNormalizationFactors(issues: IssueV2[]): {
+  maxEdgeWeight: number;
+  minEdgeWeight: number;
+  avgEdgeWeight: number;
+  edgeWeightStdDev: number;
+  maxConfidence: number;
+  minConfidence: number;
+  avgConfidence: number;
+} {
+  const edgeWeights: number[] = [];
+  const confidences: number[] = [];
+  
+  for (const issue of issues) {
+    // Collect edge weights
+    if (issue.evidence.edges && issue.evidence.edges.length > 0) {
+      for (const edge of issue.evidence.edges) {
+        if (edge.weight && edge.weight > 0) {
+          edgeWeights.push(edge.weight);
+        }
+      }
+    }
+    
+    // Collect confidences
+    if (issue.confidence && issue.confidence > 0) {
+      confidences.push(issue.confidence);
+    }
+  }
+  
+  const computeStats = (values: number[]) => {
+    if (values.length === 0) return { max: 1, min: 0, avg: 0.5, stdDev: 0.2 };
+    const max = Math.max(...values);
+    const min = Math.min(...values);
+    const avg = values.reduce((sum, v) => sum + v, 0) / values.length;
+    const variance = values.reduce((sum, v) => sum + Math.pow(v - avg, 2), 0) / values.length;
+    const stdDev = Math.sqrt(variance);
+    return { max, min, avg, stdDev };
+  };
+  
+  const edgeStats = computeStats(edgeWeights);
+  const confStats = computeStats(confidences);
+  
+  return {
+    maxEdgeWeight: edgeStats.max,
+    minEdgeWeight: edgeStats.min,
+    avgEdgeWeight: edgeStats.avg,
+    edgeWeightStdDev: edgeStats.stdDev,
+    maxConfidence: confStats.max,
+    minConfidence: confStats.min,
+    avgConfidence: confStats.avg,
+  };
+}
+
 function scoreIssue(
   issue: IssueV2,
   config: RiskRankingConfig,
   scoringContext?: ScoringContext,
-  allIssues?: IssueV2[]
+  allIssues?: IssueV2[],
+  normalizationFactors?: ReturnType<typeof computeNormalizationFactors>
 ): IssueV2 {
   // Step 1: Compute component scores (all 0..1, all from config)
   const impact01 = computeImpact01(issue, config);
@@ -141,7 +201,7 @@ function scoreIssue(
     provenance: (scoringContext as any).provenance, // Rule 7: Pass provenance for transcript quality multiplier
   } : undefined;
   const evidence01 = computeEvidence01(issue, config, evalMode);
-  const signal01 = computeSignal01(issue, config);
+  const signal01 = computeSignal01(issue, config, allIssues, normalizationFactors);
   const category01 = computeCategory01(issue, config);
   
   // Step 2: Get weights from config (validated on startup)
@@ -405,62 +465,95 @@ function computeEvidence01(
  * Compute signal01 from graph + spectral (graceful degrade)
  * 8.1: Use continuous features in scoring inputs to reduce "same score plateaus"
  * Uses edge weights, confidence, anchor strength, and structural importance
- * Falls back to degradedMode values when data missing
+ * Normalizes edge weights within conversation to create score spread
  */
-function computeSignal01(issue: IssueV2, config: RiskRankingConfig): number {
+function computeSignal01(
+  issue: IssueV2, 
+  config: RiskRankingConfig,
+  allIssues?: IssueV2[],
+  normalizationFactors?: ReturnType<typeof computeNormalizationFactors>
+): number {
   // Start with confidence (already 0..1)
-  let signal = issue.confidence || config.degradedMode.missingSpectralSignal01;
+  // Use actual confidence, not degraded fallback (creates plateaus)
+  let signal = issue.confidence || 0.4; // Lower default to allow edge weights to differentiate
   
-  // 8.1: Edge weight (continuous feature)
+  // 8.1: Edge weight (continuous feature) - NORMALIZED within conversation
   let edgeWeight01 = 0;
   if (issue.evidence.edges && issue.evidence.edges.length > 0) {
     const maxEdgeWeight = Math.max(...issue.evidence.edges.map(e => e.weight || 0));
-    edgeWeight01 = maxEdgeWeight; // Use directly (0..1)
-    // Edge weight contributes up to 0.3
-    signal = Math.min(1.0, signal + (edgeWeight01 * 0.3));
+    
+    // Normalize edge weight within conversation to create spread
+    if (normalizationFactors && normalizationFactors.maxEdgeWeight > normalizationFactors.minEdgeWeight) {
+      // Min-max normalization: (value - min) / (max - min)
+      const normalized = (maxEdgeWeight - normalizationFactors.minEdgeWeight) / 
+                        (normalizationFactors.maxEdgeWeight - normalizationFactors.minEdgeWeight);
+      edgeWeight01 = normalized;
+    } else {
+      // Fallback: use raw weight if no normalization data
+      edgeWeight01 = maxEdgeWeight;
+    }
+    
+    // Edge weight contributes significantly (up to 0.4) to differentiate issues
+    signal = Math.min(1.0, signal + (edgeWeight01 * 0.4));
   } else {
-    // No edges available, use degraded mode fallback
-    signal = Math.max(signal, config.degradedMode.missingEdgesSignal01);
+    // No edges: penalize but don't use uniform degraded mode
+    // Use a lower base that varies by issue type
+    const baseSignal = issue.type === 'CONTRADICTION' ? 0.35 : 
+                      issue.type === 'DATA_INTEGRITY' ? 0.40 :
+                      0.30;
+    signal = Math.max(signal, baseSignal);
   }
   
-  // 8.1: Anchor match strength (for contradictions)
+  // 8.1: Anchor match strength (for contradictions) - continuous boost
   // Note: anchors are on ClaimNode, not IssueV2, so we infer from clusterKey
   // If clusterKey contains anchor info (e.g., "MONEY:214.73"), boost signal
   let anchorMatchStrength01 = 0;
   if (issue.type === 'CONTRADICTION' && issue.clusterKey) {
     const hasAnchorInKey = /(MONEY|DATE|TIMEFRAME|PAYMENT_CARD|SSN_LAST4):/.test(issue.clusterKey);
     if (hasAnchorInKey) {
-      anchorMatchStrength01 = 0.4; // Moderate boost for anchor-based contradictions
-      signal = Math.min(1.0, signal + (anchorMatchStrength01 * 0.2)); // Up to 0.08 boost
+      // Extract anchor value if present (e.g., "MONEY:214.73" -> 0.4 boost)
+      // Stronger anchors (money, payment card) get higher boost
+      const anchorMatch = issue.clusterKey.match(/(MONEY|PAYMENT_CARD|SSN_LAST4):/);
+      if (anchorMatch) {
+        const anchorType = anchorMatch[1];
+        anchorMatchStrength01 = anchorType === 'MONEY' || anchorType === 'PAYMENT_CARD' ? 0.5 : 0.3;
+        signal = Math.min(1.0, signal + (anchorMatchStrength01 * 0.15)); // Up to 0.075 boost
+      }
     }
   }
   
   // 8.1: Cluster size (reversal count - how many contradictions in same cluster)
-  // This would require access to all issues in the cluster
-  // For now, use occurrences if available (from aggregated issues)
+  // Count issues in same cluster to boost signal
   let clusterSize01 = 0;
-  if ((issue as any).occurrences) {
-    // Normalize occurrences (assume max 10 for normalization)
-    clusterSize01 = Math.min(1.0, (issue as any).occurrences / 10);
-    signal = Math.min(1.0, signal + (clusterSize01 * 0.1)); // Up to 0.1 boost
+  if (allIssues && issue.clusterId) {
+    const clusterIssues = allIssues.filter(i => i.clusterId === issue.clusterId);
+    const occurrences = clusterIssues.length;
+    // Normalize occurrences (log scale to prevent saturation)
+    clusterSize01 = Math.min(1.0, Math.log1p(occurrences) / Math.log(11)); // log(11) ≈ 2.4, so 10 occurrences ≈ 0.96
+    signal = Math.min(1.0, signal + (clusterSize01 * 0.12)); // Up to 0.12 boost
+  } else if ((issue as any).occurrences) {
+    // Fallback: use occurrences if available (from aggregated issues)
+    clusterSize01 = Math.min(1.0, Math.log1p((issue as any).occurrences) / Math.log(11));
+    signal = Math.min(1.0, signal + (clusterSize01 * 0.12));
   }
   
-  // Boost from evidence refs (grounding strength)
+  // Boost from evidence refs (grounding strength) - use actual weights
   if (issue.evidence.refs && issue.evidence.refs.length > 0) {
     const weights = issue.evidence.refs.map(r => r.weight || 0).filter(w => w > 0);
     if (weights.length > 0) {
       const avgRefWeight = weights.reduce((sum, w) => sum + w, 0) / weights.length;
-      // Ref weight contributes up to 0.2
-      signal = Math.min(1.0, signal + (avgRefWeight * 0.2));
+      // Ref weight contributes up to 0.15 (reduced from 0.2 to allow edge weight to dominate)
+      signal = Math.min(1.0, signal + (avgRefWeight * 0.15));
     }
   }
   
   // Type-based signal boost (contradictions, risk signals are stronger)
-  // This could be moved to config.typeBase in future
-  if (issue.type === 'CONTRADICTION' || issue.type === 'DATA_INTEGRITY') {
-    signal = Math.min(1.0, signal + 0.15);
-  } else if (issue.type === 'RISK_SIGNAL' || issue.type === 'FEE_DISCLOSURE_RISK') {
-    signal = Math.min(1.0, signal + 0.10);
+  // Use config.typeBase if available, otherwise use smaller boosts
+  const typeBase = config.weights.typeBase?.[issue.type] || 0.5;
+  if (typeBase > 0.5) {
+    // Normalize typeBase to 0..1 contribution (typeBase is 0.3-0.8, so normalize to 0..0.2 boost)
+    const typeBoost = ((typeBase - 0.3) / 0.5) * 0.2; // Maps 0.3->0, 0.8->0.2
+    signal = Math.min(1.0, signal + typeBoost);
   }
   
   return clamp01(signal);

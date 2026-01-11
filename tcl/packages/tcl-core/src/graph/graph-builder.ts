@@ -535,34 +535,136 @@ function buildEvidenceNodes(input: GraphBuilderInput): EvidenceNode[] {
 // HELPERS
 // =============================================================================
 
+/**
+ * Enhanced speaker extraction - handles common transcript formats
+ * Supports patterns used by competitors (Gong, Chorus, CallRail, etc.):
+ * - "Agent: text" / "Customer: text"
+ * - "[Agent] text" / "[Customer] text"
+ * - "Agent - text" / "Customer - text"
+ * - "(Agent) text" / "(Customer) text"
+ * - VTT format: "<v Speaker>text"
+ * - Numbered speakers: "Speaker 1:", "Speaker 2:"
+ * - Common variations: "Rep:", "CSR:", "Caller:", "Client:", etc.
+ */
 function parseTurn(line: string, turnIndex: number): { speaker: SpeakerRole; text: string } | null {
-  // Common patterns: "Agent: ...", "Customer: ...", "[Agent] ...", etc.
-  const patterns = [
-    /^(?:Agent|AGENT|agent)\s*[:\]]\s*(.+)$/i,
-    /^(?:Customer|CUSTOMER|customer)\s*[:\]]\s*(.+)$/i,
-    /^(?:System|SYSTEM|system)\s*[:\]]\s*(.+)$/i,
-    /^(?:Assistant|ASSISTANT|assistant)\s*[:\]]\s*(.+)$/i,
-  ];
+  const trimmed = line.trim();
+  if (!trimmed || trimmed.length < 3) return null;
   
-  for (const pattern of patterns) {
-    const match = line.match(pattern);
-    if (match) {
-      let speaker: SpeakerRole = 'unknown';
-      if (/agent/i.test(line)) speaker = 'agent';
-      else if (/customer/i.test(line)) speaker = 'customer';
-      else if (/system/i.test(line)) speaker = 'system';
-      else if (/assistant/i.test(line)) speaker = 'assistant';
-      
-      return { speaker, text: match[1].trim() };
-    }
+  // Pattern 1: "Speaker: text" or "Speaker : text" (most common)
+  // Matches: Agent, Customer, Rep, CSR, Caller, Client, etc.
+  let match = trimmed.match(/^([A-Za-z][A-Za-z0-9_ ]{0,30})\s*:\s*(.+)$/);
+  if (match) {
+    const rawSpeaker = match[1].trim();
+    const text = match[2].trim();
+    const speaker = mapSpeakerLabelToRole(rawSpeaker);
+    return { speaker, text };
   }
   
-  // If no pattern matches, treat as unknown speaker
-  if (line.trim().length > 10) {
-    return { speaker: 'unknown', text: line.trim() };
+  // Pattern 2: "[Speaker] text"
+  match = trimmed.match(/^\[([A-Za-z][A-Za-z0-9_ ]{0,30})\]\s*(.+)$/);
+  if (match) {
+    const rawSpeaker = match[1].trim();
+    const text = match[2].trim();
+    const speaker = mapSpeakerLabelToRole(rawSpeaker);
+    return { speaker, text };
+  }
+  
+  // Pattern 3: "Speaker - text" or "Speaker — text"
+  match = trimmed.match(/^([A-Za-z][A-Za-z0-9_ ]{0,30})\s*[-–—]\s*(.+)$/);
+  if (match) {
+    const rawSpeaker = match[1].trim();
+    const text = match[2].trim();
+    const speaker = mapSpeakerLabelToRole(rawSpeaker);
+    return { speaker, text };
+  }
+  
+  // Pattern 4: "(Speaker) text"
+  match = trimmed.match(/^\(([A-Za-z][A-Za-z0-9_ ]{0,30})\)\s*(.+)$/);
+  if (match) {
+    const rawSpeaker = match[1].trim();
+    const text = match[2].trim();
+    const speaker = mapSpeakerLabelToRole(rawSpeaker);
+    return { speaker, text };
+  }
+  
+  // Pattern 5: VTT format "<v Speaker>text"
+  match = trimmed.match(/^<v\s+([^>]+)>\s*(.*)$/i);
+  if (match) {
+    const rawSpeaker = match[1].trim();
+    const text = match[2].trim();
+    const speaker = mapSpeakerLabelToRole(rawSpeaker);
+    return { speaker, text };
+  }
+  
+  // Pattern 6: Numbered speakers "Speaker 1:", "Speaker 2:" (alternate pattern)
+  // Try to infer from context if we see alternating patterns
+  // For now, if no pattern matches, treat as unknown but still extract text
+  if (trimmed.length > 10) {
+    return { speaker: 'unknown', text: trimmed };
   }
   
   return null;
+}
+
+/**
+ * Map speaker label to canonical role using comprehensive pattern matching
+ * Handles common variations used across different transcript formats
+ */
+function mapSpeakerLabelToRole(rawSpeaker: string): SpeakerRole {
+  const normalized = rawSpeaker.trim().toLowerCase();
+  
+  // Agent patterns (comprehensive list from competitors)
+  const agentPatterns = [
+    /agent/i, /rep/i, /csr/i, /advisor/i, /representative/i,
+    /associate/i, /operator/i, /specialist/i, /consultant/i,
+    /support/i, /service/i, /staff/i, /employee/i, /team\s*member/i,
+    /sales/i, /account\s*manager/i, /account\s*exec/i, /ae/i,
+    /sdr/i, /bdr/i, /inside\s*sales/i
+  ];
+  
+  // Customer patterns
+  const customerPatterns = [
+    /customer/i, /caller/i, /client/i, /member/i, /user/i,
+    /guest/i, /visitor/i, /patient/i, /subscriber/i,
+    /prospect/i, /lead/i, /buyer/i, /purchaser/i
+  ];
+  
+  // System/Bot patterns
+  const systemPatterns = [
+    /bot/i, /ivr/i, /system/i, /auto/i, /virtual/i, /ai/i,
+    /assistant/i, /automated/i, /voice\s*mail/i
+  ];
+  
+  // Supervisor patterns
+  const supervisorPatterns = [
+    /supervisor/i, /manager/i, /lead/i, /senior/i, /director/i,
+    /supervisor/i, /team\s*lead/i
+  ];
+  
+  // Check patterns in order of specificity
+  for (const pattern of agentPatterns) {
+    if (pattern.test(normalized)) return 'agent';
+  }
+  
+  for (const pattern of customerPatterns) {
+    if (pattern.test(normalized)) return 'customer';
+  }
+  
+  for (const pattern of systemPatterns) {
+    if (pattern.test(normalized)) return 'system';
+  }
+  
+  for (const pattern of supervisorPatterns) {
+    if (pattern.test(normalized)) return 'agent'; // Supervisor is typically an agent role
+  }
+  
+  // Numbered speakers: "Speaker 1", "Speaker 2" - try to infer from context
+  // For now, default to unknown - could be enhanced with context-aware logic
+  if (/speaker\s*\d+/i.test(normalized)) {
+    return 'unknown'; // Would need conversation context to determine
+  }
+  
+  return 'unknown';
 }
 
 function detectModality(text: string): ClaimModality {
