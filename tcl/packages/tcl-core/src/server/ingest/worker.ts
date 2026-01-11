@@ -530,12 +530,53 @@ async function runAnalysis(input: {
   // This ensures consistency with the /validate endpoint
   const { validate } = await import('../../orchestrator.js');
   
+  // 2.1: Fix "support edges empty" - pass docs from ingestion
+  // Get org-level policies and per-conversation sources
+  const orgPolicySources: Array<{ id: string; text: string }> = [];
+  const conversationSources: Array<{ id: string; text: string }> = [];
+  
+  // Fetch active org-level policies
+  if (supabaseAdmin) {
+    try {
+      const { data: policies } = await supabaseAdmin
+        .from('policies')
+        .select('id, content, name')
+        .eq('org_id', input.orgId)
+        .eq('status', 'active')
+        .order('activated_at', { ascending: false });
+      
+      if (policies) {
+        for (const policy of policies) {
+          orgPolicySources.push({
+            id: `policy-${policy.id}`,
+            text: policy.content,
+          });
+        }
+      }
+    } catch (policyError) {
+      console.warn(`[Worker] Failed to fetch org policies for job ${input.jobId}:`, policyError);
+    }
+  }
+  
+  // TODO: Fetch per-conversation attachments/documents from assets table
+  // For now, conversationSources is empty, but structure is ready
+  
+  const allSources = [
+    ...conversationSources,
+    ...orgPolicySources,
+  ];
+  
+  // 3.2: Evidence mode must be derived from actual evidence presence
+  const hasExternalSources = allSources.length > 0;
+  const evidenceMode = hasExternalSources ? 'TRANSCRIPT_PLUS_EXTERNAL' : 'TRANSCRIPT_ONLY';
+  
   const validateInput = {
     question: input.transcript,
     answer: '',
-    sources: [] as Array<{ id: string; text: string }>,
+    sources: allSources,
     options: {
       conversationId: input.conversationId,
+      evidenceMode, // Pass evidence mode to orchestrator
     } as any,
   };
 

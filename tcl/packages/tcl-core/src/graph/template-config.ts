@@ -44,6 +44,7 @@ export interface TemplateConfig {
     grounding: number;
     slotMatch: number;        // Minimum slot similarity for consideration
     semanticSimilarity: number; // Fallback similarity threshold
+    semanticHighForFallback?: number; // High semantic similarity for fallback contradiction (default 0.88)
   };
   
   /** Weight factors for retrieval and calibration */

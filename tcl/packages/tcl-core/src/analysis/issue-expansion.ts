@@ -295,12 +295,35 @@ function createContradictionIssue(
   const clusterKey = `${'consistency'}:${'CONTRADICTION'}:${topicId}:${slotKey}:${speakerType}`;
   const clusterId = createHash('sha256').update(clusterKey).digest('hex').substring(0, 16);
   
-  // Determine verification level based on evidence mode and actual grounding
-  let verificationLevel: VerificationLevelV2 = 'NONE';
-  const hasGrounding = input.grounding.some(g => g.claimId === edge.claimA || g.claimId === edge.claimB);
-  if (input.evidenceMode === 'TRANSCRIPT_PLUS_EXTERNAL' && hasGrounding) {
+  // 3.1: Fix verification logic - distinguish transcript grounding from external support
+  // Compute external verification from SUPPORT edges to non-transcript evidence
+  const hasTranscriptGrounding = input.grounding.some(g => g.claimId === edge.claimA || g.claimId === edge.claimB);
+  
+  // Check for external support (support edges to non-transcript evidence)
+  const hasExternalSupport = input.supports.some(s => {
+    const involvesClaim = s.claimA === edge.claimA || s.claimB === edge.claimA || 
+                          s.claimA === edge.claimB || s.claimB === edge.claimB;
+    if (!involvesClaim) return false;
+    
+    // Check if support is to external evidence (not transcript)
+    const evidenceId = (s as any).evidenceId || (s as any).targetId;
+    if (evidenceId && !evidenceId.startsWith('e-transcript-')) {
+      return true; // External evidence support
+    }
+    
+    // Also check if support edge has evidenceKind that's not transcript
+    const evidenceKind = (s as any).evidenceKind;
+    if (evidenceKind && evidenceKind !== 'transcript') {
+      return true; // External evidence support
+    }
+    
+    return false;
+  });
+  
+  let verificationLevel: VerificationLevelV2;
+  if (hasExternalSupport) {
     verificationLevel = 'EXTERNAL_VERIFIED';
-  } else if (input.evidenceMode === 'TRANSCRIPT_ONLY' && hasGrounding) {
+  } else if (hasTranscriptGrounding) {
     verificationLevel = 'TRANSCRIPT_ONLY';
   } else {
     verificationLevel = 'NONE';

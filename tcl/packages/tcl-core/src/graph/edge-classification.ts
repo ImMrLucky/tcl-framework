@@ -251,6 +251,35 @@ function classifyContradiction(
     }
   }
   
+  // 1.1: Fix "unknown" slot contradictions - require meaningful slots
+  // Reject contradiction edges unless at least one is true:
+  // - slotType is NOT unknown and NOT general AND entityKey is NOT unknown
+  // - OR (fallback) semanticSimilarity is very high (>= 0.88) AND explicit contradiction pattern
+  const slotA = claimA.slot?.slotType;
+  const slotB = claimB.slot?.slotType;
+  const keyA = claimA.slot?.entityKey;
+  const keyB = claimB.slot?.entityKey;
+  
+  const meaningful = 
+    slotA && slotB &&
+    !['unknown', 'general'].includes(slotA) &&
+    !['unknown', 'general'].includes(slotB) &&
+    keyA !== 'unknown' &&
+    keyB !== 'unknown';
+  
+  if (!meaningful) {
+    // Fallback: require explicit contradiction pattern AND high semantic similarity
+    const explicit = hasOpposingPolarity(claimA, claimB) || 
+                     hasCustomerDenialVsAssertion(claimA, claimB) ||
+                     valuesContradict(claimA.slot, claimB.slot);
+    const semanticHighThreshold = config.thresholds.semanticHighForFallback ?? 0.88;
+    const highSemantic = signals.semanticSimilarity >= semanticHighThreshold;
+    
+    if (!(explicit && highSemantic)) {
+      return { rejected: true, reason: 'slot' };
+    }
+  }
+  
   // B1: Topic + slot hard-gate for contradiction edges
   // Do not generate contradiction edges unless topicId AND slotKey match
   // This prevents "topic drift contradictions" (e.g., device protection vs cancellation)
