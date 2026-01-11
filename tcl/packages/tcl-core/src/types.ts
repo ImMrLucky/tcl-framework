@@ -116,7 +116,13 @@ export type ContradictionPair = {
 export type SupportBasis = 'TRANSCRIPT' | 'EXTERNAL' | 'NONE';
 
 /** Verification level based on available evidence - for EvalMode */
-export type VerificationLevel = "TRANSCRIPT_ONLY" | "DOC_BACKED" | "EXTERNALLY_VERIFIED";
+export type VerificationLevel = 
+  | "UNVERIFIED"
+  | "TRANSCRIPT_ONLY"
+  | "TRANSCRIPT_PROVABLE"
+  | "DOC_BACKED"
+  | "SYSTEM_VERIFIED"
+  | "EXTERNALLY_VERIFIED";
 
 /** Evidence mode for the evaluation run */
 export type EvidenceMode = 'TRANSCRIPT_ONLY' | 'TRANSCRIPT_PLUS_EXTERNAL';
@@ -206,8 +212,73 @@ export type SeverityDisplayV2 = "low" | "medium" | "high";
 
 export type SpeakerV2 = "AGENT" | "CUSTOMER" | "SYSTEM" | "UNKNOWN";
 
-export type VerificationLevelV2 = "EXTERNAL_VERIFIED" | "TRANSCRIPT_ONLY" | "NONE";
+export type VerificationLevelV2 = "EXTERNAL_VERIFIED" | "TRANSCRIPT_ONLY" | "TRANSCRIPT_PROVABLE" | "NONE";
 // VerificationLevel is already defined elsewhere, using that definition
+
+// ============================================================================
+// INGESTION MODE & PROVENANCE
+// ============================================================================
+
+export type IngestionMode =
+  | "TRANSCRIPT_ONLY"
+  | "AUDIO_AND_TRANSCRIPT"
+  | "AUDIO_ONLY_TRANSCRIBED"
+  | "DOC_BACKED";
+
+export type Provenance = {
+  ingestionMode: IngestionMode;
+  transcriptSource: "USER_PROVIDED" | "AUTO_TRANSCRIBED" | "UNKNOWN";
+  hasAudio: boolean;
+  audioFingerprint?: string;      // hash, duration, codec, etc.
+  transcriptFingerprint?: string; // hash
+  alignmentAvailable: boolean;    // word/segment timestamps available
+};
+
+export type TranscriptQuality = {
+  asrConfidence01?: number;  // 0..1
+  diarizationConfidence01?: number;
+  alignmentCoverage01?: number; // % of tokens with timestamps
+  noisyAudioFlag?: boolean;
+};
+
+export type AudioMeta = {
+  fingerprint: string;
+  durationMs?: number;
+  codec?: string;
+  sampleRate?: number;
+  channels?: number;
+};
+
+export type EvidenceDoc = {
+  id: string;
+  kind: "document" | "policy" | "system_fact";
+  content: string;
+  sourceId?: string;
+};
+
+export type NormalizedTranscript = {
+  turns: Array<{
+    turnIndex: number;
+    speaker: string;
+    text: string;
+    startTimeMs?: number;
+    endTimeMs?: number;
+    timestamp?: string;
+  }>;
+  participants: Array<{
+    id: string;
+    role: string;
+    displayName: string;
+  }>;
+};
+
+export type AnalysisInput = {
+  transcript: NormalizedTranscript; // always required (may be provided or generated)
+  audio?: AudioMeta;                // optional
+  externalEvidence?: EvidenceDoc[]; // optional
+  provenance: Provenance;
+  transcriptQuality?: TranscriptQuality;
+};
 
 export interface EvalMode {
   verificationLevel: VerificationLevel;

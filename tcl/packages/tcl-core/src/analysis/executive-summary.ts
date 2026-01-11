@@ -15,13 +15,18 @@ export interface ExecutiveSummaryInput {
   coherenceScore: number | null;
   consistencyScore: number | null;
   evalMode: EvalMode;
+  provenance?: {
+    ingestionMode: string;
+    transcriptSource: string;
+    hasAudio: boolean;
+  };
 }
 
 /**
  * E1-E3: Compute executive summary from aggregated issues
  */
 export function computeExecutiveSummary(input: ExecutiveSummaryInput): ExecutiveSummary {
-  const { aggregatedIssues, truthScore, coherenceScore, consistencyScore, evalMode } = input;
+  const { aggregatedIssues, truthScore, coherenceScore, consistencyScore, evalMode, provenance } = input;
   
   // E2: Compute overallRiskScore from aggregated issues
   const overallRiskScore = computeOverallRiskScore(aggregatedIssues, coherenceScore);
@@ -31,6 +36,13 @@ export function computeExecutiveSummary(input: ExecutiveSummaryInput): Executive
   const highFindings = aggregatedIssues.filter(i => i.severity === 'high').length;
   const mediumFindings = aggregatedIssues.filter(i => i.severity === 'medium').length;
   const lowFindings = aggregatedIssues.filter(i => i.severity === 'low').length;
+  
+  // Rule 8: Add ingestion mode to disclaimers
+  const ingestionLabel = provenance ? 
+    (provenance.ingestionMode === 'DOC_BACKED' ? 'Doc-Backed' :
+     provenance.ingestionMode === 'AUDIO_AND_TRANSCRIPT' ? 'Audio + Transcript' :
+     provenance.ingestionMode === 'AUDIO_ONLY_TRANSCRIBED' ? 'Audio Only (Transcribed)' :
+     'Transcript Only') : 'Unknown';
   
   // E1: Top root causes from aggregated issues
   const topRootCauses = aggregatedIssues
@@ -48,9 +60,22 @@ export function computeExecutiveSummary(input: ExecutiveSummaryInput): Executive
   // E3: Audit defensibility from mode + evidenceCoverage01
   const auditDefensibility = computeAuditDefensibility(evalMode);
   
-  // E3: Disclaimers
+  // E3: Disclaimers (Rule 8: Include ingestion mode and audit readiness)
   const disclaimers: string[] = [];
-  if (evalMode.verificationLevel === 'TRANSCRIPT_ONLY') {
+  
+  // Add ingestion mode label
+  disclaimers.push(`Ingestion: ${ingestionLabel}`);
+  
+  // Audit readiness based on mode
+  if (provenance?.ingestionMode === 'DOC_BACKED') {
+    disclaimers.push('✅ Audit Ready: Analysis includes external evidence verification.');
+  } else if (provenance?.hasAudio || provenance?.ingestionMode === 'AUDIO_AND_TRANSCRIPT' || provenance?.ingestionMode === 'AUDIO_ONLY_TRANSCRIBED') {
+    disclaimers.push('⚠️ Partial Audit Readiness: Transcript-evidence + provenance (audio-backed transcript).');
+  } else {
+    disclaimers.push('⚠️ Partial Audit Readiness: Transcript-evidence only (not externally verified).');
+  }
+  
+  if (evalMode.verificationLevel === 'TRANSCRIPT_ONLY' || evalMode.verificationLevel === 'TRANSCRIPT_PROVABLE') {
     disclaimers.push('This analysis is based on transcript content only and has not been externally verified against policy documents, billing records, or other external evidence sources.');
   }
   if (evalMode.evidenceCoverage01 < 0.5) {
@@ -64,6 +89,7 @@ export function computeExecutiveSummary(input: ExecutiveSummaryInput): Executive
     consistencyScore: consistencyScore ?? 0,
     verificationLevel: evalMode.verificationLevel,
     auditDefensibility,
+    ingestionMode: provenance?.ingestionMode, // Rule 8: Include ingestion mode
     criticalFindings,
     highFindings,
     mediumFindings,

@@ -137,7 +137,8 @@ function scoreIssue(
   const impact01 = computeImpact01(issue, config);
   const evalMode = scoringContext ? {
     verificationLevel: scoringContext.mode === 'transcript_only' ? 'TRANSCRIPT_ONLY' as const : 
-                       scoringContext.numSources > 0 ? 'DOC_BACKED' as const : 'EXTERNALLY_VERIFIED' as const
+                       scoringContext.numSources > 0 ? 'DOC_BACKED' as const : 'EXTERNALLY_VERIFIED' as const,
+    provenance: (scoringContext as any).provenance, // Rule 7: Pass provenance for transcript quality multiplier
   } : undefined;
   const evidence01 = computeEvidence01(issue, config, evalMode);
   const signal01 = computeSignal01(issue, config);
@@ -299,43 +300,85 @@ function computeImpact01(issue: IssueV2, config: RiskRankingConfig): number {
 }
 
 /**
- * Compute evidence01 from issue.verification.level (0..1)
- * A3: Fix evidence scoring in transcript-only (currently too high)
- * Transcript-only should be 0.15 (low audit defensibility), not boosted
+ * Compute evidence01 (verification confidence) from issue.verification.level (0..1)
+ * Rule 7: Incorporates transcript provenance correctly
+ * 
+ * verification01 = baseTranscriptConfidence × corroboration01 × transcriptQualityMultiplier
+ * 
+ * Where:
+ * - baseTranscriptConfidence is higher when transcript came from audio transcription
+ * - corroboration01 comes from support/confirmation/summaries and contradiction provability
+ * - transcriptQualityMultiplier comes from ASR/diarization confidence (bounded 0.6-1.15)
  */
 function computeEvidence01(
   issue: IssueV2, 
   config: RiskRankingConfig,
-  evalMode?: { verificationLevel: 'TRANSCRIPT_ONLY' | 'DOC_BACKED' | 'EXTERNALLY_VERIFIED' }
+  evalMode?: { 
+    verificationLevel: 'TRANSCRIPT_ONLY' | 'TRANSCRIPT_PROVABLE' | 'DOC_BACKED' | 'EXTERNALLY_VERIFIED';
+    provenance?: { ingestionMode: string; transcriptSource: string; transcriptQuality?: { asrConfidence01?: number; diarizationConfidence01?: number } };
+  }
 ): number {
   const level = issue.verification.level;
   
-  // A3: Transcript-only gets low evidence score (low audit defensibility)
-  if (level === 'TRANSCRIPT_ONLY' || evalMode?.verificationLevel === 'TRANSCRIPT_ONLY') {
-    return 0.15; // Low audit defensibility - no external evidence
+  // Base transcript confidence: higher when transcript came from audio transcription
+  let baseTranscriptConfidence = 0.15; // Default: low for user-provided transcript-only
+  
+  if (evalMode?.provenance) {
+    const { ingestionMode, transcriptSource } = evalMode.provenance;
+    if (ingestionMode === 'AUDIO_AND_TRANSCRIPT' || ingestionMode === 'AUDIO_ONLY_TRANSCRIBED') {
+      baseTranscriptConfidence = 0.25; // Higher: transcript is provenance-backed from audio
+    } else if (transcriptSource === 'AUTO_TRANSCRIBED') {
+      baseTranscriptConfidence = 0.22; // Slightly higher: auto-transcribed
+    }
   }
   
-  // For other modes, compute from refs, edges, grounding, docMatches
-  // This will be enhanced in future to consider actual evidence coverage
-  let evidence01 = config.evidenceMap[level] || 0.2;
+  // For non-transcript-only modes, use higher base
+  if (level === 'DOC_BACKED' || level === 'EXTERNALLY_VERIFIED' || level === 'SYSTEM_VERIFIED') {
+    baseTranscriptConfidence = 0.7; // High: has external evidence
+  } else if (level === 'TRANSCRIPT_PROVABLE') {
+    baseTranscriptConfidence = 0.35; // Medium: transcript-provable (good alignment/diarization)
+  }
   
-  // Boost based on actual evidence refs/edges if available
+  // Corroboration: from support/confirmation/summaries and contradiction provability
+  let corroboration01 = 1.0;
+  
+  // Boost from support edges (confirmation)
+  if (issue.evidence.edges && issue.evidence.edges.length > 0) {
+    const supportEdges = issue.evidence.edges.filter(e => e.kind === 'support');
+    if (supportEdges.length > 0) {
+      const maxSupportWeight = Math.max(...supportEdges.map(e => e.weight || 0));
+      corroboration01 = Math.min(1.0, 1.0 + (maxSupportWeight * 0.2)); // Up to 20% boost
+    }
+  }
+  
+  // Boost from external evidence refs
   if (issue.evidence.refs && issue.evidence.refs.length > 0) {
     const externalRefs = issue.evidence.refs.filter(r => r.sourceType !== 'TRANSCRIPT');
     if (externalRefs.length > 0) {
-      evidence01 = Math.max(evidence01, 0.7); // Has external evidence
+      corroboration01 = Math.min(1.0, corroboration01 + 0.3); // Significant boost for external evidence
     }
   }
   
-  if (issue.evidence.edges && issue.evidence.edges.length > 0) {
-    const groundingEdges = issue.evidence.edges.filter(e => e.kind === 'grounding');
-    if (groundingEdges.length > 0) {
-      const maxGroundingWeight = Math.max(...groundingEdges.map(e => e.weight || 0));
-      evidence01 = Math.max(evidence01, 0.5 + (maxGroundingWeight * 0.3)); // Boost from grounding
-    }
+  // Transcript quality multiplier (bounded 0.6-1.15)
+  let transcriptQualityMultiplier = 1.0;
+  if (evalMode?.provenance?.transcriptQuality) {
+    const quality = evalMode.provenance.transcriptQuality;
+    const asrConf = quality.asrConfidence01 ?? 0.8;
+    const diarConf = quality.diarizationConfidence01 ?? 0.8;
+    const avgQuality = (asrConf + diarConf) / 2;
+    
+    // Map quality to multiplier: 0.6 (low quality) to 1.15 (high quality)
+    transcriptQualityMultiplier = 0.6 + (avgQuality * 0.55); // 0.6 + (0.8 * 0.55) = 1.04 for avg quality
+    transcriptQualityMultiplier = Math.max(0.6, Math.min(1.15, transcriptQualityMultiplier)); // Clamp
   }
   
-  return clamp01(evidence01);
+  // Compute verification01
+  const verification01 = baseTranscriptConfidence * corroboration01 * transcriptQualityMultiplier;
+  
+  // Hard rule: audio cannot increase impact01 or category01. Only verification confidence.
+  // This is already enforced - we're only modifying evidence01 (verification confidence)
+  
+  return clamp01(verification01);
 }
 
 /**

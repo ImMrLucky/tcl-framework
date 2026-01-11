@@ -327,13 +327,25 @@ function hasSharedSubjectReference(a: ClaimNode, b: ClaimNode): boolean {
   
   if (aHasPronoun !== bHasPronoun) {
     // One has pronoun, one doesn't - check if they're close in conversation
-    const turnA = parseTurnIndex(a.span.turnId);
-    const turnB = parseTurnIndex(b.span.turnId);
-    const turnDistance = Math.abs(turnA - turnB);
+    // Rule 4: Use timestamps if available (90 seconds), else fallback to turns (2 turns)
+    const aTime = a.meta?.startTimeMs ?? a.meta?.timestampMs;
+    const bTime = b.meta?.startTimeMs ?? b.meta?.timestampMs;
     
-    // If within 3 turns, likely a reference
-    if (turnDistance <= 3) {
-      return true;
+    if (aTime !== undefined && bTime !== undefined) {
+      // Use time-based distance (90 seconds window)
+      const timeDistanceSec = Math.abs(aTime - bTime) / 1000;
+      if (timeDistanceSec <= 90) {
+        return true; // Within 90 seconds, likely a reference
+      }
+    } else {
+      // Fallback: Use turn IDs (2 turns window)
+      const turnA = parseTurnIndex(a.span.turnId);
+      const turnB = parseTurnIndex(b.span.turnId);
+      const turnDistance = Math.abs(turnA - turnB);
+      
+      if (turnDistance <= 2) {
+        return true; // Within 2 turns, likely a reference
+      }
     }
   }
   

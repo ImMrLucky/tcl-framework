@@ -203,6 +203,15 @@ async function processTranscriptOnly(job: any, transcriptAsset: any): Promise<vo
   // Run analysis
   await updateJobProgress(job.id, 'ANALYZING', 50);
 
+  // Rule 0: Build provenance for TRANSCRIPT_ONLY mode
+  const provenance = {
+    ingestionMode: 'TRANSCRIPT_ONLY' as const,
+    transcriptSource: 'USER_PROVIDED' as const,
+    hasAudio: false,
+    alignmentAvailable: false,
+    transcriptFingerprint: transcriptAsset.sha256 || transcriptAsset.content_hash,
+  };
+  
   const evaluationId = await runAnalysis({
     orgId: job.org_id,
     projectId: job.project_id,
@@ -213,6 +222,8 @@ async function processTranscriptOnly(job: any, transcriptAsset: any): Promise<vo
     verificationLevel: 'TRANSCRIPT_ONLY',
     transcriptAssetId: transcriptAsset.id,
     jobId: job.id,
+    ingestionMode: 'TRANSCRIPT_ONLY',
+    provenance,
   });
 
   // Store normalized transcript asset
@@ -306,6 +317,24 @@ async function processAudioOnly(job: any, audioAsset: any): Promise<void> {
     job.created_by_user_id
   );
 
+  // Rule 0: Build provenance for AUDIO_ONLY_TRANSCRIBED mode
+  const provenance = {
+    ingestionMode: 'AUDIO_ONLY_TRANSCRIBED' as const,
+    transcriptSource: 'AUTO_TRANSCRIBED' as const,
+    hasAudio: true,
+    audioFingerprint: audioAsset.sha256 || audioAsset.content_hash,
+    transcriptFingerprint: asrAsset.content_hash,
+    alignmentAvailable: (transcriptionResult as any).segments && (transcriptionResult as any).segments.length > 0,
+  };
+  
+  // Rule 2: Build transcript quality from ASR results
+  const transcriptQuality = {
+    asrConfidence01: (transcriptionResult as any).confidence ? Math.min(1.0, Math.max(0.0, (transcriptionResult as any).confidence)) : undefined,
+    diarizationConfidence01: (transcriptionResult as any).diarizationConfidence ? Math.min(1.0, Math.max(0.0, (transcriptionResult as any).diarizationConfidence)) : undefined,
+    alignmentCoverage01: provenance.alignmentAvailable ? 1.0 : 0.0,
+    noisyAudioFlag: transcriptionResult.vadStats?.noiseRatio && transcriptionResult.vadStats.noiseRatio > 0.3,
+  };
+
   // Run analysis
   const evaluationId = await runAnalysis({
     orgId: job.org_id,
@@ -314,9 +343,14 @@ async function processAudioOnly(job: any, audioAsset: any): Promise<void> {
     conversationId,
     transcript: transcriptText,
     userId: job.created_by_user_id,
-    verificationLevel: 'AUDIO_VERIFIED',
+    verificationLevel: 'TRANSCRIPT_ONLY', // Still transcript-only, but with provenance
     transcriptAssetId: asrAsset.id,
     jobId: job.id,
+    ingestionMode: 'AUDIO_ONLY_TRANSCRIBED',
+    provenance: {
+      ...provenance,
+      transcriptQuality,
+    },
   });
 
   // Update job as complete
@@ -345,6 +379,16 @@ async function processAudioPlusTranscript(job: any, audioAsset: any, transcriptA
     job.created_by_user_id
   );
 
+  // Rule 0: Build provenance for AUDIO_AND_TRANSCRIPT mode
+  const provenance = {
+    ingestionMode: 'AUDIO_AND_TRANSCRIPT' as const,
+    transcriptSource: 'USER_PROVIDED' as const, // User provided transcript, audio is for verification
+    hasAudio: true,
+    audioFingerprint: audioAsset?.sha256 || audioAsset?.content_hash,
+    transcriptFingerprint: transcriptAsset.sha256 || transcriptAsset.content_hash,
+    alignmentAvailable: false, // Will be set after audio transcription if available
+  };
+
   // Run analysis on uploaded transcript
   const evaluationId = await runAnalysis({
     orgId: job.org_id,
@@ -353,9 +397,11 @@ async function processAudioPlusTranscript(job: any, audioAsset: any, transcriptA
     conversationId,
     transcript: normalized.text,
     userId: job.created_by_user_id,
-    verificationLevel: 'TRANSCRIPT_PROVIDED',
+    verificationLevel: 'TRANSCRIPT_ONLY', // Analysis uses transcript, audio is for verification
     transcriptAssetId: transcriptAsset.id,
     jobId: job.id,
+    ingestionMode: 'AUDIO_AND_TRANSCRIPT',
+    provenance,
   });
 
   // Step 2: Transcribe audio in background (optional - don't block on failure)
@@ -477,6 +523,8 @@ async function runAnalysis(input: {
   verificationLevel: string;
   transcriptAssetId: string;
   jobId: string;
+  ingestionMode?: string; // Rule 0: Ingestion mode
+  provenance?: any; // Rule 0: Provenance metadata
 }): Promise<string> {
   // Use the existing validate function to run the full pipeline
   // This ensures consistency with the /validate endpoint
@@ -607,6 +655,11 @@ async function runAnalysis(input: {
       coherenceScore: validateOutput.scores.coherence,
       consistencyScore: validateOutput.scores.consistency,
       evalMode,
+      provenance: input.provenance ? {
+        ingestionMode: input.ingestionMode || input.provenance.ingestionMode || 'TRANSCRIPT_ONLY',
+        transcriptSource: input.provenance.transcriptSource || 'UNKNOWN',
+        hasAudio: input.provenance.hasAudio || false,
+      } : undefined,
     });
     
     // Build report with issues (similar to /validate endpoint)
@@ -620,6 +673,13 @@ async function runAnalysis(input: {
       executiveSummary, // E1-E3: Root-cause driven executive summary
       // A1: Add EvalMode to report
       evalMode,
+      // Rule 0: Add provenance to report
+      provenance: input.provenance || {
+        ingestionMode: input.ingestionMode || 'TRANSCRIPT_ONLY',
+        transcriptSource: 'UNKNOWN',
+        hasAudio: false,
+        alignmentAvailable: false,
+      },
     };
   } catch (issueError: any) {
     console.error(`[Worker] Failed to expand/rank issues, using fallback:`, issueError);

@@ -684,18 +684,36 @@ function tokenize(text: string): Set<string> {
 }
 
 function computeTemporalProximity(a: ClaimNode, b: ClaimNode): number {
-  // Use turn IDs to compute proximity
+  // Rule 4: Use timestamps if available (90 seconds), else fallback to turns (2 turns)
+  // This improves accuracy for audio+transcript without changing logic
+  
+  // Check if timestamps are available (from audio alignment)
+  const aTime = a.meta?.startTimeMs ?? a.meta?.timestampMs;
+  const bTime = b.meta?.startTimeMs ?? b.meta?.timestampMs;
+  
+  if (aTime !== undefined && bTime !== undefined) {
+    // Use time-based distance (90 seconds window)
+    const timeDistanceSec = Math.abs(aTime - bTime) / 1000;
+    const WINDOW_SECONDS = 90; // config
+    
+    if (timeDistanceSec <= WINDOW_SECONDS) {
+      // Decay within window
+      const normalized = timeDistanceSec / WINDOW_SECONDS;
+      return 1.0 - (normalized * 0.3); // 1.0 at 0s, 0.7 at 90s
+    }
+    return 0.1; // Beyond window
+  }
+  
+  // Fallback: Use turn IDs (2 turns window)
   const turnA = parseInt(a.span.turnId.replace(/[^\d]/g, ''), 10) || 0;
   const turnB = parseInt(b.span.turnId.replace(/[^\d]/g, ''), 10) || 0;
   
-  const distance = Math.abs(turnA - turnB);
+  const turnDistance = Math.abs(turnA - turnB);
+  const WINDOW_TURNS = 2; // config
   
-  // Decay function: closer turns have higher score
-  // Within 5 turns: high score
-  // Beyond 20 turns: low score
-  if (distance <= 5) return 1.0;
-  if (distance <= 10) return 0.7;
-  if (distance <= 20) return 0.4;
+  if (turnDistance <= WINDOW_TURNS) return 1.0;
+  if (turnDistance <= 5) return 0.7;
+  if (turnDistance <= 10) return 0.4;
   return 0.1;
 }
 
