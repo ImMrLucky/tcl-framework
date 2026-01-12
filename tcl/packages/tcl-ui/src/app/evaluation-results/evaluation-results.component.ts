@@ -118,7 +118,8 @@ interface IssueV2 {
     reasons: string[];
   };
   who: {
-    speaker: 'AGENT' | 'CUSTOMER' | 'SYSTEM' | 'UNKNOWN';
+    speaker: 'AGENT' | 'CUSTOMER' | 'SYSTEM' | 'MIXED' | 'UNKNOWN';
+    speakerLabel?: string; // B3: Raw speaker label (e.g., "AGENT", "CUSTOMER", "KENT")
     turnIndex?: number;
   };
   what: {
