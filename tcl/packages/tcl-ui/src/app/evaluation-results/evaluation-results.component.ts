@@ -433,6 +433,21 @@ export class EvaluationResultsComponent implements OnInit {
       const atomicIssues = report?.issues?.atomic ?? report?.allIssuesV2 ?? [];
       const groupedIssues = report?.issues?.grouped ?? report?.topIssuesV2 ?? [];
       
+      // Debug logging
+      console.log('🔍 Loading issues from report:', {
+        hasIssuesObject: !!report?.issues,
+        issuesAtomic: report?.issues?.atomic?.length,
+        issuesGrouped: report?.issues?.grouped?.length,
+        allIssuesV2: report?.allIssuesV2?.length,
+        topIssuesV2: report?.topIssuesV2?.length,
+        topIssuesV2FirstItem: report?.topIssuesV2?.[0] ? {
+          keys: Object.keys(report.topIssuesV2[0]),
+          hasRollup: 'rollup' in report.topIssuesV2[0],
+          hasClusterId: 'clusterId' in report.topIssuesV2[0],
+          hasIssueId: 'issueId' in report.topIssuesV2[0],
+        } : null,
+      });
+      
       if (Array.isArray(atomicIssues) && atomicIssues.length > 0) {
         // G3: Ensure All Issues is sorted by riskScore desc, then severity, then impact, then verification
         this.allIssuesV2 = [...atomicIssues].sort((a, b) => {
@@ -462,17 +477,73 @@ export class EvaluationResultsComponent implements OnInit {
         
         // A3: Use groupedIssues from canonical structure or legacy alias
         if (Array.isArray(groupedIssues) && groupedIssues.length > 0) {
-          // Check if it's already grouped (has rollup property) or still atomic
-          const firstItem = groupedIssues[0];
-          if (firstItem && 'rollup' in firstItem) {
-            // It's already grouped
-            this.topIssuesV2 = groupedIssues as GroupedIssue[];
+          // Check if it's already grouped (has rollup property or clusterId) or still atomic
+          const firstItem = groupedIssues[0] as any;
+          const hasRollup = firstItem && 'rollup' in firstItem;
+          const hasClusterId = firstItem && 'clusterId' in firstItem;
+          const hasIssueId = firstItem && 'issueId' in firstItem;
+          // GroupedIssue has clusterId and rollup, but not issueId (atomic issues have issueId)
+          // Also check for other indicators: has 'what' with 'issueSummary' but no 'issueId'
+          const hasWhat = firstItem && 'what' in firstItem;
+          const isGrouped = hasRollup || (hasClusterId && !hasIssueId) || (hasClusterId && hasWhat);
+          
+          if (isGrouped) {
+            // It's already grouped - ensure it has the rollup structure
+            // If rollup is missing, try to construct it from the data
+            const processedGrouped = groupedIssues.map((item: any) => {
+              if (!item.rollup && item.clusterId) {
+                // Construct rollup from available data
+                return {
+                  ...item,
+                  rollup: {
+                    atomicIssueCount: item.occurrences || 1,
+                    atomicIssueIds: item.evidence?.atomicIssueIds || [],
+                    issueKeys: [],
+                    involvedClaimIds: item.evidence?.claimIds || [],
+                    involvedTurnIndexes: item.firstTurnIndex !== undefined && item.lastTurnIndex !== undefined 
+                      ? Array.from({ length: item.lastTurnIndex - item.firstTurnIndex + 1 }, (_, i) => item.firstTurnIndex + i)
+                      : [],
+                  },
+                };
+              }
+              return item;
+            });
+            
+            this.topIssuesV2 = processedGrouped as GroupedIssue[];
+            console.log('✅ Loaded grouped issues (topIssuesV2):', {
+              count: this.topIssuesV2.length,
+              firstItem: {
+                clusterId: firstItem?.clusterId,
+                hasRollup: hasRollup,
+                hasClusterId: hasClusterId,
+                hasIssueId: hasIssueId,
+                hasWhat: hasWhat,
+                rollupCount: hasRollup ? firstItem?.rollup?.atomicIssueCount : (firstItem as any)?.occurrences,
+              },
+            });
           } else {
             // Backwards compat: it's still atomic issues, convert to empty array
             // (we'll show issueClustersV2 instead if available)
+            console.warn('⚠️ topIssuesV2 contains atomic issues, not grouped. First item:', {
+              keys: firstItem ? Object.keys(firstItem) : 'null',
+              hasRollup,
+              hasClusterId,
+              hasIssueId,
+              hasWhat,
+              sample: firstItem ? {
+                id: firstItem.issueId || firstItem.clusterId,
+                type: firstItem.type,
+              } : null,
+            });
             this.topIssuesV2 = [];
           }
         } else {
+          console.warn('⚠️ No grouped issues found. groupedIssues:', {
+            type: typeof groupedIssues,
+            isArray: Array.isArray(groupedIssues),
+            length: groupedIssues?.length,
+            value: groupedIssues,
+          });
           this.topIssuesV2 = [];
         }
         
