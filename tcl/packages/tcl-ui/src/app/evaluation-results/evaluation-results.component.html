@@ -310,7 +310,7 @@
             </mat-card-title>
             <mat-card-subtitle>
               Aggregated issues grouped by root cause | 
-              Total occurrences: {{ issueClustersV2.clusters.reduce((sum, c) => sum + c.occurrences, 0) }}
+              Total occurrences: {{ getTotalClusterOccurrences() }}
             </mat-card-subtitle>
           </mat-card-header>
           <mat-card-content>

@@ -607,6 +607,16 @@ export class EvaluationResultsComponent implements OnInit {
     return tooltip;
   }
 
+  /**
+   * G2: Calculate total occurrences across all clusters
+   */
+  getTotalClusterOccurrences(): number {
+    if (!this.issueClustersV2 || !this.issueClustersV2.clusters) {
+      return 0;
+    }
+    return this.issueClustersV2.clusters.reduce((sum, c) => sum + c.occurrences, 0);
+  }
+
   getSeverity(issue: Issue): 'critical' | 'high' | 'medium' | 'low' {
     // Use pre-computed severity if available (handles nested structure)
     const severity = (issue as any).risk?.severity || issue.severity;
