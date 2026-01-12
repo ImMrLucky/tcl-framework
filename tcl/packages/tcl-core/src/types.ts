@@ -65,7 +65,9 @@ export type Claim = {
   };
   // Metadata for transcript-aware extraction
   meta?: {
-    speaker?: string; // "Agent" | "Customer" | "Other"
+    speaker?: string; // "Agent" | "Customer" | "Other" (legacy)
+    speakerType?: "agent" | "customer" | "unknown"; // B2: Normalized speaker type
+    speakerLabel?: string; // B2: Raw speaker label (e.g., "AGENT", "CUSTOMER", "KENT")
     turnIndex?: number;
   };
   
@@ -210,7 +212,7 @@ export type ImpactV2 = "low" | "medium" | "high";
 
 export type SeverityDisplayV2 = "low" | "medium" | "high";
 
-export type SpeakerV2 = "AGENT" | "CUSTOMER" | "SYSTEM" | "UNKNOWN";
+export type SpeakerV2 = "AGENT" | "CUSTOMER" | "SYSTEM" | "MIXED" | "UNKNOWN";
 
 export type VerificationLevelV2 = "EXTERNAL_VERIFIED" | "TRANSCRIPT_ONLY" | "TRANSCRIPT_PROVABLE" | "NONE";
 // VerificationLevel is already defined elsewhere, using that definition
@@ -367,6 +369,7 @@ export interface IssueV2 {
 
   who: {
     speaker: SpeakerV2;
+    speakerLabel?: string; // B3: Raw speaker label (e.g., "AGENT", "CUSTOMER", "KENT")
     turnIndex?: number;
   };
 

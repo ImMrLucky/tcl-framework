@@ -36,6 +36,7 @@ import {
 } from './types.js';
 import { extractEntities, computeSubjectSlot, extractAnchors } from './subject-slot.js';
 import { getTemplateConfig, setTemplateConfig, TemplateConfig } from './template-config.js';
+import { normalizeTranscript, speakerTypeToRole } from './transcript-normalizer.js';
 
 // Re-export for convenience
 export { setTemplateConfig, getTemplateConfig, TemplateConfig };
@@ -427,32 +428,25 @@ function buildClaimNodes(input: GraphBuilderInput): ClaimNode[] {
       claimNodes.push(node);
     }
   } else if (input.transcript) {
-    // Parse transcript into claims (simple line-based extraction)
-    const lines = input.transcript.split('\n').filter(l => l.trim());
-    let turnIndex = 0;
+    // B1: Normalize transcript into structured turns with speaker info
+    const normalizedTurns = normalizeTranscript(input.transcript);
     
-    for (const line of lines) {
-      const parsed = parseTurn(line, turnIndex);
-      if (!parsed) {
-        turnIndex++;
-        continue;
-      }
-      
-      const entities = extractEntities(parsed.text);
-      const slot = computeSubjectSlot(parsed.text, entities);
-      const anchors = extractAnchors(entities, parsed.text); // 1.2: Extract industry-agnostic anchors
+    for (const turn of normalizedTurns) {
+      const entities = extractEntities(turn.text);
+      const slot = computeSubjectSlot(turn.text, entities);
+      const anchors = extractAnchors(entities, turn.text); // 1.2: Extract industry-agnostic anchors
       
       const node: ClaimNode = {
-        id: `c${turnIndex}`,
+        id: `c${turn.turnIndex}`,
         type: 'CLAIM',
-        text: parsed.text,
-        speakerRole: parsed.speaker,
+        text: turn.text,
+        speakerRole: turn.speakerType === 'agent' ? 'agent' : turn.speakerType === 'customer' ? 'customer' : 'unknown',
         span: {
-          turnId: `turn-${turnIndex}`,
+          turnId: `turn-${turn.turnIndex}`,
           startChar: 0,
-          endChar: parsed.text.length,
+          endChar: turn.text.length,
         },
-        modality: detectModality(parsed.text),
+        modality: detectModality(turn.text),
         entities,
         normalized: {
           amount: entities.find(e => e.type === 'MONEY')?.normalized,
@@ -461,10 +455,15 @@ function buildClaimNodes(input: GraphBuilderInput): ClaimNode[] {
         slot,
         anchors, // 1.2: Add anchors to claim node
         createdAt: new Date().toISOString(),
+        // B2: Attach speaker info to claim
+        meta: {
+          speakerType: turn.speakerType,
+          speakerLabel: turn.speakerLabelRaw,
+          turnIndex: turn.turnIndex,
+        },
       };
       
       claimNodes.push(node);
-      turnIndex++;
     }
   }
   

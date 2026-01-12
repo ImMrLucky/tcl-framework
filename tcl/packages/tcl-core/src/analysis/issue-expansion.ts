@@ -23,6 +23,7 @@ import type {
   VerificationLevelV2,
 } from '../types.js';
 import { getRiskRankingConfig } from '../config/risk-ranking.js';
+import { deriveIssueSpeaker, speakerTypeToRole } from '../graph/transcript-normalizer.js';
 
 export interface IssueExpansionInput {
   claims: Claim[];
@@ -265,20 +266,26 @@ function createContradictionIssue(
     })));
   }
   
-  // Determine speaker (prioritize agent)
-  const speakerA: SpeakerV2 = 
-    claimA.meta?.speaker === 'Agent' || claimA.meta?.speaker === 'AGENT' ? 'AGENT' :
-    claimA.meta?.speaker === 'Customer' || claimA.meta?.speaker === 'CUSTOMER' ? 'CUSTOMER' :
-    'UNKNOWN';
-  const speakerB: SpeakerV2 = 
-    claimB.meta?.speaker === 'Agent' || claimB.meta?.speaker === 'AGENT' ? 'AGENT' :
-    claimB.meta?.speaker === 'Customer' || claimB.meta?.speaker === 'CUSTOMER' ? 'CUSTOMER' :
-    'UNKNOWN';
+  // B3: Derive issue speaker from claims using new speaker info structure
+  const claimSpeakers = [
+    {
+      speakerType: claimA.meta?.speakerType || (claimA.meta?.speaker === 'Agent' || claimA.meta?.speaker === 'AGENT' ? 'agent' : 
+                                                 claimA.meta?.speaker === 'Customer' || claimA.meta?.speaker === 'CUSTOMER' ? 'customer' : 'unknown'),
+      speakerLabel: claimA.meta?.speakerLabel,
+    },
+    {
+      speakerType: claimB.meta?.speakerType || (claimB.meta?.speaker === 'Agent' || claimB.meta?.speaker === 'AGENT' ? 'agent' : 
+                                                 claimB.meta?.speaker === 'Customer' || claimB.meta?.speaker === 'CUSTOMER' ? 'customer' : 'unknown'),
+      speakerLabel: claimB.meta?.speakerLabel,
+    },
+  ];
   
-  const speaker: SpeakerV2 = speakerA === 'AGENT' ? 'AGENT' : speakerB === 'AGENT' ? 'AGENT' : speakerA;
+  const issueSpeaker = deriveIssueSpeaker(claimSpeakers);
+  const speaker: SpeakerV2 = issueSpeaker.speaker;
+  const speakerLabel = issueSpeaker.speakerLabel;
   
   // B2: Speaker gating - determine if this is AGENT↔AGENT (normal) vs customer dispute
-  const isAgentAgent = speakerA === 'AGENT' && speakerB === 'AGENT';
+  const isAgentAgent = claimSpeakers[0].speakerType === 'agent' && claimSpeakers[1].speakerType === 'agent';
   const speakerType = isAgentAgent ? 'agent' : 'mixed';
   
   const turnIndex = claimA.meta?.turnIndex ?? claimB.meta?.turnIndex;
@@ -389,6 +396,7 @@ function createContradictionIssue(
     },
     who: {
       speaker,
+      speakerLabel: speakerLabel,
       turnIndex,
     },
     what: {
@@ -470,10 +478,12 @@ function createUnverifiedClaimIssue(
     }
   }
   
-  const speaker: SpeakerV2 = 
-    claim.meta?.speaker === 'Agent' || claim.meta?.speaker === 'AGENT' ? 'AGENT' :
-    claim.meta?.speaker === 'Customer' || claim.meta?.speaker === 'CUSTOMER' ? 'CUSTOMER' :
-    'UNKNOWN';
+  // B3: Derive speaker from claim using new speaker info structure
+  const speakerType = claim.meta?.speakerType || 
+    (claim.meta?.speaker === 'Agent' || claim.meta?.speaker === 'AGENT' ? 'agent' : 
+     claim.meta?.speaker === 'Customer' || claim.meta?.speaker === 'CUSTOMER' ? 'customer' : 'unknown');
+  const speaker: SpeakerV2 = speakerTypeToRole(speakerType);
+  const speakerLabel = claim.meta?.speakerLabel;
   
   // Compliance tags
   const complianceTags: string[] = [];
@@ -530,6 +540,7 @@ function createUnverifiedClaimIssue(
     },
     who: {
       speaker,
+      speakerLabel: speakerLabel,
       turnIndex: claim.meta?.turnIndex,
     },
     what: {
@@ -586,10 +597,12 @@ function createUngroundedClaimIssue(
   const issueKey = `ungrounded:${claim.id}`;
   const issueId = generateIssueId(input.runId, issueKey);
   
-  const speaker: SpeakerV2 = 
-    claim.meta?.speaker === 'Agent' || claim.meta?.speaker === 'AGENT' ? 'AGENT' :
-    claim.meta?.speaker === 'Customer' || claim.meta?.speaker === 'CUSTOMER' ? 'CUSTOMER' :
-    'UNKNOWN';
+  // B3: Derive speaker from claim using new speaker info structure
+  const speakerType = claim.meta?.speakerType || 
+    (claim.meta?.speaker === 'Agent' || claim.meta?.speaker === 'AGENT' ? 'agent' : 
+     claim.meta?.speaker === 'Customer' || claim.meta?.speaker === 'CUSTOMER' ? 'customer' : 'unknown');
+  const speaker: SpeakerV2 = speakerTypeToRole(speakerType);
+  const speakerLabel = claim.meta?.speakerLabel;
   
   // Compliance tags
   const complianceTags: string[] = ['missing_evidence'];
@@ -625,6 +638,7 @@ function createUngroundedClaimIssue(
     },
     who: {
       speaker,
+      speakerLabel: speakerLabel,
       turnIndex: claim.meta?.turnIndex,
     },
     what: {
@@ -722,10 +736,12 @@ function createRiskSignalIssue(
     turnIndex: ref.turnIndex,
   }));
   
-  const speaker: SpeakerV2 = 
-    claim.meta?.speaker === 'Agent' || claim.meta?.speaker === 'AGENT' ? 'AGENT' :
-    claim.meta?.speaker === 'Customer' || claim.meta?.speaker === 'CUSTOMER' ? 'CUSTOMER' :
-    'UNKNOWN';
+  // B3: Derive speaker from claim using new speaker info structure
+  const speakerType = claim.meta?.speakerType || 
+    (claim.meta?.speaker === 'Agent' || claim.meta?.speaker === 'AGENT' ? 'agent' : 
+     claim.meta?.speaker === 'Customer' || claim.meta?.speaker === 'CUSTOMER' ? 'customer' : 'unknown');
+  const speaker: SpeakerV2 = speakerTypeToRole(speakerType);
+  const speakerLabel = claim.meta?.speakerLabel;
   
   // Determine category based on signals
   let category: IssueCategoryV2 = 'compliance';

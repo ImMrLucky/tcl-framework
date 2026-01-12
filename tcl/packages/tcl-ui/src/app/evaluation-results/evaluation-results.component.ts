@@ -428,10 +428,13 @@ export class EvaluationResultsComponent implements OnInit {
       // Load IssueV2 (Enterprise-Grade) - PRIMARY
       const report = this.evaluation.report as any;
       
-      // Load allIssuesV2 and topIssuesV2
-      if (report?.allIssuesV2 && Array.isArray(report.allIssuesV2)) {
+      // A3: Load issues using canonical structure with fallback to legacy aliases
+      const atomicIssues = report?.issues?.atomic ?? report?.allIssuesV2 ?? [];
+      const groupedIssues = report?.issues?.grouped ?? report?.topIssuesV2 ?? [];
+      
+      if (Array.isArray(atomicIssues) && atomicIssues.length > 0) {
         // G3: Ensure All Issues is sorted by riskScore desc, then severity, then impact, then verification
-        this.allIssuesV2 = [...report.allIssuesV2].sort((a, b) => {
+        this.allIssuesV2 = [...atomicIssues].sort((a, b) => {
           // Primary: riskScore DESC
           const riskA = a.riskScore ?? 0;
           const riskB = b.riskScore ?? 0;
@@ -456,14 +459,13 @@ export class EvaluationResultsComponent implements OnInit {
           return verB - verA;
         });
         
-        // Use topIssuesV2 from report (now contains grouped/clustered issues)
-        // If it's not present or is still atomic issues (backwards compat), we'll handle it below
-        if (report.topIssuesV2 && Array.isArray(report.topIssuesV2)) {
+        // A3: Use groupedIssues from canonical structure or legacy alias
+        if (Array.isArray(groupedIssues) && groupedIssues.length > 0) {
           // Check if it's already grouped (has rollup property) or still atomic
-          const firstItem = report.topIssuesV2[0];
+          const firstItem = groupedIssues[0];
           if (firstItem && 'rollup' in firstItem) {
             // It's already grouped
-            this.topIssuesV2 = report.topIssuesV2 as GroupedIssue[];
+            this.topIssuesV2 = groupedIssues as GroupedIssue[];
           } else {
             // Backwards compat: it's still atomic issues, convert to empty array
             // (we'll show issueClustersV2 instead if available)
@@ -797,6 +799,19 @@ export class EvaluationResultsComponent implements OnInit {
       return 0;
     }
     return this.topIssuesV2.reduce((sum, g) => sum + g.rollup.atomicIssueCount, 0);
+  }
+
+  /**
+   * Get speaker display label (shows speakerLabel if available, otherwise speaker)
+   * Part B: Fix speaker attribution - show raw label if type is unknown
+   */
+  getSpeakerDisplayLabel(issue: IssueV2): string {
+    // If speakerLabel exists and speaker is UNKNOWN, show the label (e.g., "KENT" instead of "UNKNOWN")
+    if (issue.who?.speakerLabel && (issue.who?.speaker === 'UNKNOWN' || issue.who?.speaker === 'MIXED')) {
+      return issue.who.speakerLabel;
+    }
+    // Otherwise show the canonical speaker role
+    return issue.who?.speaker || 'UNKNOWN';
   }
 
   getSeverity(issue: Issue): 'critical' | 'high' | 'medium' | 'low' {

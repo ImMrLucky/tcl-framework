@@ -1071,10 +1071,17 @@ app.post("/validate", requireCapability(Capability.ANALYZE_MANUAL_UPLOAD), async
               
               // Cluster collapsing: Collapse atomic issues into grouped clusters for topIssuesV2
               const { collapseIssuesToClusters } = await import('../analysis/issue-cluster-collapse.js');
-              const groupedIssues = collapseIssuesToClusters(rankedResult.allIssues);
+              const atomicIssues = rankedResult.allIssues;
+              const groupedIssues = collapseIssuesToClusters(atomicIssues);
               
-              // Store in report
-              (out.report as any).allIssuesV2 = rankedResult.allIssues; // Atomic issues (unchanged)
+              // A1: Store in canonical structure
+              (out.report as any).issues = {
+                atomic: atomicIssues,
+                grouped: groupedIssues,
+              };
+              
+              // Legacy aliases for backwards compatibility
+              (out.report as any).allIssuesV2 = atomicIssues; // Atomic issues (unchanged)
               (out.report as any).topIssuesV2 = groupedIssues; // Grouped/clustered issues (one per clusterId)
               (out.report as any).topAggregatedIssues = topClusters; // Top 10 clusters (backwards compat)
               (out.report as any).aggregatedIssues = clusteringResult.aggregatedIssues; // All aggregated issues (backwards compat)
