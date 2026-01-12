@@ -240,14 +240,32 @@ export interface EvaluationV2Dto {
 
 /**
  * Strip legacy fields from an issue (v2 canonical shape)
+ * B2: Remove scoreBreakdown and severityDisplay completely
  */
 function stripLegacyFields(issue: any): any {
-  const { scoreBreakdown, severityDisplay, ...cleanIssue } = issue;
+  if (!issue || typeof issue !== 'object') {
+    return issue;
+  }
   
-  // Recursively clean nested objects
-  if (cleanIssue.evidence?.verification) {
-    // Keep evidence.verification but ensure it matches top-level verification
-    // (top-level verification is canonical)
+  // Create a new object without legacy fields
+  const cleanIssue: any = {};
+  
+  for (const key in issue) {
+    if (key === 'scoreBreakdown' || key === 'severityDisplay') {
+      // Skip legacy fields
+      continue;
+    }
+    
+    // Recursively clean nested objects/arrays
+    if (Array.isArray(issue[key])) {
+      cleanIssue[key] = issue[key].map((item: any) => 
+        typeof item === 'object' ? stripLegacyFields(item) : item
+      );
+    } else if (issue[key] && typeof issue[key] === 'object' && !(issue[key] instanceof Date)) {
+      cleanIssue[key] = stripLegacyFields(issue[key]);
+    } else {
+      cleanIssue[key] = issue[key];
+    }
   }
   
   return cleanIssue;
@@ -272,9 +290,34 @@ export function toEvaluationV2Dto(evaluation: any): EvaluationV2Dto {
   };
 
   if (evaluation.report) {
-    // Clean issues: remove scoreBreakdown and severityDisplay
-    const atomicIssues = (evaluation.report.allIssuesV2 || evaluation.report.issues?.atomic || []).map(stripLegacyFields);
-    const groupedIssues = (evaluation.report.topIssuesV2 || evaluation.report.issues?.grouped || []).map(stripLegacyFields);
+    // B2: Clean issues: remove scoreBreakdown and severityDisplay
+    // Use defensive approach: strip + explicit delete
+    const rawAtomicIssues = evaluation.report.allIssuesV2 || evaluation.report.issues?.atomic || [];
+    const rawGroupedIssues = evaluation.report.topIssuesV2 || evaluation.report.issues?.grouped || [];
+    
+    const atomicIssues = rawAtomicIssues.map((issue: any) => {
+      const cleaned = stripLegacyFields(issue);
+      // Defensive: explicitly delete if still present (handles edge cases)
+      if ('scoreBreakdown' in cleaned) {
+        delete cleaned.scoreBreakdown;
+      }
+      if ('severityDisplay' in cleaned) {
+        delete cleaned.severityDisplay;
+      }
+      return cleaned;
+    });
+    
+    const groupedIssues = rawGroupedIssues.map((issue: any) => {
+      const cleaned = stripLegacyFields(issue);
+      // Defensive: explicitly delete if still present
+      if ('scoreBreakdown' in cleaned) {
+        delete cleaned.scoreBreakdown;
+      }
+      if ('severityDisplay' in cleaned) {
+        delete cleaned.severityDisplay;
+      }
+      return cleaned;
+    });
     
     dto.report = {
       issues: {
