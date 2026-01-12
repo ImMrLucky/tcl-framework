@@ -1281,7 +1281,50 @@
   color: #10b981;
 }
 
-/* IssueV2 Styles */
+/* G2: Issue Clusters (Top Aggregated Issues) Styles */
+.issue-clusters {
+  .top-clusters-summary { margin-bottom: 30px; }
+  .cluster-v2-list { display: flex; flex-direction: column; gap: 16px; }
+  .cluster-v2-item {
+    padding: 16px; border-radius: 8px; border: 1px solid #e0e0e0; cursor: pointer; transition: all 0.2s;
+    &:hover { box-shadow: 0 2px 8px rgba(0,0,0,0.1); transform: translateY(-2px); }
+    &.critical { border-left: 4px solid #991b1b; background: #fef2f2; }
+    &.high { border-left: 4px solid #ea580c; background: #fff7ed; }
+    &.medium { border-left: 4px solid #2563eb; background: #eff6ff; }
+    &.low { border-left: 4px solid #16a34a; background: #f0fdf4; }
+  }
+  .cluster-v2-header { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; flex-wrap: wrap; }
+  .cluster-rank { font-weight: bold; font-size: 1.1em; color: #666; }
+  .cluster-type { padding: 4px 10px; background: #6366f1; color: white; border-radius: 4px; font-size: 0.85em; font-weight: 500; }
+  .cluster-category { padding: 4px 10px; background: #8b5cf6; color: white; border-radius: 4px; font-size: 0.85em; font-weight: 500; }
+  .cluster-severity {
+    padding: 4px 10px; border-radius: 4px; font-size: 0.85em; font-weight: 500;
+    &.severity-critical { background: #991b1b; color: white; }
+    &.severity-high { background: #ea580c; color: white; }
+    &.severity-medium { background: #2563eb; color: white; }
+    &.severity-low { background: #16a34a; color: white; }
+  }
+  .cluster-occurrences {
+    padding: 4px 10px; background: #f0f0f0; color: #666; border-radius: 4px; font-size: 0.85em; font-weight: 500;
+  }
+  .cluster-risk-score { font-weight: 600; color: #333; }
+  .cluster-v2-body {
+    .cluster-title { font-size: 1.1em; font-weight: 600; color: #333; margin-bottom: 8px; }
+    .cluster-summary { font-size: 0.95em; color: #555; margin-bottom: 8px; line-height: 1.5; }
+    .cluster-meta { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+    .turn-range { font-size: 0.85em; color: #666; }
+  }
+  .verification-badge, .review-required {
+    padding: 3px 8px; border-radius: 4px; font-size: 0.8em;
+  }
+  .verification-badge { font-weight: 500; &.transcript-only { background: #e3f2fd; color: #1976d2; } &.verified { background: #d1fae5; color: #047857; } }
+  .review-required { background: #fef3c7; color: #92400e; font-weight: 500; }
+  .info-text {
+    font-size: 0.9em; color: #666; margin-bottom: 16px; padding: 12px; background: #f9fafb; border-radius: 6px; border-left: 3px solid #6366f1;
+  }
+}
+
+/* IssueV2 Styles (All Issues - Atomic) */
 .issue-v2 {
   .top-issues-summary { margin-bottom: 30px; }
   .issue-v2-list { display: flex; flex-direction: column; gap: 16px; }
@@ -1311,7 +1354,7 @@
   .verification-badge, .speaker-badge, .category-badge, .review-required {
     padding: 3px 8px; border-radius: 4px; font-size: 0.8em;
   }
-  .verification-badge { font-weight: 500; &.transcript-only { background: #e3f2fd; color: #1976d2; } }
+  .verification-badge { font-weight: 500; &.transcript-only { background: #e3f2fd; color: #1976d2; } &.verified { background: #d1fae5; color: #047857; } }
   .speaker-badge { background: #f0f0f0; }
   .category-badge { background: #8b5cf6; color: white; }
   .review-required { background: #fef3c7; color: #92400e; font-weight: 500; }

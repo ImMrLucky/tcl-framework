@@ -336,14 +336,16 @@ export interface IssueV2 {
     reasons: string[];
   };
   
-    scoring?: {
-      components: {
-        impact01: number;
-        evidence01: number;
-        signal01: number;
-        category01: number;
-        verificationMultiplier?: number; // Optional for backwards compatibility
-      };
+  scoring?: {
+    components: {
+      impact01: number;
+      evidence01: number;
+      signal01: number;
+      category01: number;
+      verificationMultiplier?: number; // Optional for backwards compatibility
+      risk01Raw?: number; // A3: Add to components
+      risk01Final?: number; // A3: Add to components
+    };
     weights: {
       impact: number;
       evidence: number;
@@ -351,6 +353,7 @@ export interface IssueV2 {
       category: number;
     };
     reasons: string[];
+    modeCapsApplied?: string[]; // A3: Track which caps were applied
   };
   
   severityReason?: string[];        // Human-readable reasons for severity
@@ -389,6 +392,15 @@ export interface IssueV2 {
       claimB?: string;
       weight: number;
     }>;
+    // D1: Always populate evidence.verification
+    verification?: {
+      level: VerificationLevelV2;
+      reasonCodes: string[];
+      provenance: {
+        transcriptAnchors: Array<{ turnIndex: number; claimId: string }>;
+        externalDocRefs: string[];
+      };
+    };
   };
 
   compliance: {

@@ -349,10 +349,90 @@ function classifyContradiction(
     return { rejected: true, reason: 'threshold' };
   }
   
-  // Create the edge (with classificationScore preserved for audit)
-  const edge = createContradictionEdge(claimA, claimB, contradictionScore, signals, classificationScore);
+  // E3: Determine contradiction class for weight calibration
+  const contradictionClass = classifyContradictionType(claimA, claimB, signals);
+  
+  // Create the edge (with classificationScore and contradictionClass preserved for audit)
+  const edge = createContradictionEdge(claimA, claimB, contradictionScore, signals, classificationScore, contradictionClass);
   
   return { edge, rejected: false };
+}
+
+/**
+ * E3: Classify contradiction type for weight calibration
+ * Returns: NUMERIC_MISMATCH, BINARY_REVERSAL, COMMITMENT_REVERSAL, POLICY_ASSERTION, SOFT_INCONSISTENCY
+ */
+function classifyContradictionType(
+  claimA: ClaimNode,
+  claimB: ClaimNode,
+  signals: { slotMatch: number; entityOverlap: number; semanticSimilarity: number }
+): 'NUMERIC_MISMATCH' | 'BINARY_REVERSAL' | 'COMMITMENT_REVERSAL' | 'POLICY_ASSERTION' | 'SOFT_INCONSISTENCY' {
+  const slotA = claimA.slot;
+  const slotB = claimB.slot;
+  const textA = claimA.text.toLowerCase();
+  const textB = claimB.text.toLowerCase();
+  
+  // NUMERIC_MISMATCH: Different amounts/days
+  if (slotA.valueNorm !== undefined && slotB.valueNorm !== undefined) {
+    if (typeof slotA.valueNorm === 'number' && typeof slotB.valueNorm === 'number') {
+      const diff = Math.abs(slotA.valueNorm - slotB.valueNorm);
+      const avg = (Math.abs(slotA.valueNorm) + Math.abs(slotB.valueNorm)) / 2;
+      // If values differ by more than 5%, it's a numeric mismatch
+      if (diff > avg * 0.05) {
+        return 'NUMERIC_MISMATCH';
+      }
+    }
+  }
+  
+  // BINARY_REVERSAL: yes/no, recorded/not recorded, can/can't
+  const binaryPatterns = [
+    { yes: /\b(yes|can|will|do|does|did|has|have|is|are|was|were)\b/i, no: /\b(no|can't|cannot|won't|don't|doesn't|didn't|hasn't|haven't|isn't|aren't|wasn't|weren't)\b/i },
+    { yes: /\b(recorded|recording|on)\b/i, no: /\b(not\s*recorded|not\s*recording|off)\b/i },
+    { yes: /\b(waived|waive|free|zero|no\s*fee)\b/i, no: /\b(fee|charge|cost|price)\b/i },
+  ];
+  
+  for (const { yes, no } of binaryPatterns) {
+    const aIsYes = yes.test(textA) && !no.test(textA);
+    const bIsNo = no.test(textB) && !yes.test(textB);
+    const aIsNo = no.test(textA) && !yes.test(textA);
+    const bIsYes = yes.test(textB) && !no.test(textB);
+    
+    if ((aIsYes && bIsNo) || (aIsNo && bIsYes)) {
+      return 'BINARY_REVERSAL';
+    }
+  }
+  
+  // COMMITMENT_REVERSAL: guaranteed/never increase → later walkback
+  const commitmentWords = ['guarantee', 'guaranteed', 'never', 'always', 'locked', 'promise', 'promised', 'assure', 'assured'];
+  const reversalWords = ['can\'t', 'cannot', 'won\'t', 'unable', 'impossible', 'not possible', 'can no longer'];
+  
+  const aHasCommitment = commitmentWords.some(w => textA.includes(w));
+  const bHasReversal = reversalWords.some(w => textB.includes(w));
+  const bHasCommitment = commitmentWords.some(w => textB.includes(w));
+  const aHasReversal = reversalWords.some(w => textA.includes(w));
+  
+  if ((aHasCommitment && bHasReversal) || (bHasCommitment && aHasReversal)) {
+    return 'COMMITMENT_REVERSAL';
+  }
+  
+  // POLICY_ASSERTION: store CVV, required fee, can't email (high compliance risk)
+  const policyKeywords = ['cvv', 'cvc', 'security code', 'card code', 'store', 'save', 'required', 'must', 'policy', 'compliance'];
+  const hasPolicyKeyword = policyKeywords.some(k => textA.includes(k) || textB.includes(k));
+  
+  if (hasPolicyKeyword && (valuesContradict(slotA, slotB) || hasOpposingPolarity(claimA, claimB))) {
+    return 'POLICY_ASSERTION';
+  }
+  
+  // SOFT_INCONSISTENCY: uncertain statements, hedges
+  const hedgeWords = ['maybe', 'perhaps', 'might', 'could', 'possibly', 'probably', 'likely', 'unclear', 'uncertain'];
+  const hasHedge = hedgeWords.some(w => textA.includes(w) || textB.includes(w));
+  
+  if (hasHedge || signals.semanticSimilarity < 0.7) {
+    return 'SOFT_INCONSISTENCY';
+  }
+  
+  // Default: treat as soft inconsistency if no strong signal
+  return 'SOFT_INCONSISTENCY';
 }
 
 // Helper: Parse turn index from turnId string
@@ -656,7 +736,8 @@ function createContradictionEdge(
   b: ClaimNode,
   weight: number,
   signals: { slotMatch: number; entityOverlap: number; semanticSimilarity: number },
-  classificationScore: number
+  classificationScore: number,
+  contradictionClass: 'NUMERIC_MISMATCH' | 'BINARY_REVERSAL' | 'COMMITMENT_REVERSAL' | 'POLICY_ASSERTION' | 'SOFT_INCONSISTENCY'
 ): GraphEdge {
   return {
     id: `contradiction-${a.id}-${b.id}`,
@@ -676,6 +757,8 @@ function createContradictionEdge(
         // This is the score used for thresholding, before calibration
         classificationScore: classificationScore,
         passedThreshold: true, // This edge passed the threshold check
+        // E3: Add contradiction class for weight calibration
+        contradictionClass: contradictionClass,
       },
     },
     provenance: {

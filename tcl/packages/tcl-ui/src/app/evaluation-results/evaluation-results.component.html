@@ -298,19 +298,96 @@
     </mat-card>
 
     <div class="main-layout">
-      <!-- B) Issues Section with Toggle -->
+      <!-- B) Issues Section -->
       <div class="main-content">
-        <!-- IssueV2 is the primary view - no toggle needed -->
         
-        <!-- IssueV2 Display (Enterprise-Grade) - Primary View -->
+        <!-- G2: Top Issues (Clustered) - Manager-grade view -->
+        <mat-card class="issues-card issue-clusters" *ngIf="issueClustersV2 && issueClustersV2.topClusters.length > 0">
+          <mat-card-header>
+            <mat-card-title>
+              <mat-icon>group_work</mat-icon>
+              Top Issues (Clustered) - {{ issueClustersV2.topClusters.length }} Root Causes
+            </mat-card-title>
+            <mat-card-subtitle>
+              Aggregated issues grouped by root cause | 
+              Total occurrences: {{ issueClustersV2.clusters.reduce((sum, c) => sum + c.occurrences, 0) }}
+            </mat-card-subtitle>
+          </mat-card-header>
+          <mat-card-content>
+            <div class="top-clusters-summary">
+              <h3>Top Issues (Clustered) - {{ issueClustersV2.topClusters.length }} Root Causes</h3>
+              <p class="info-text">
+                Issues are grouped by root cause to reduce duplication. Each cluster represents multiple occurrences of the same issue type.
+              </p>
+              <div class="cluster-v2-list">
+                <div class="cluster-v2-item" *ngFor="let cluster of paginatedTopClusters; let i = index"
+                     [class.critical]="cluster.severity === 'critical'"
+                     [class.high]="cluster.severity === 'high'"
+                     [class.medium]="cluster.severity === 'medium'"
+                     [class.low]="cluster.severity === 'low'"
+                     (click)="openClusterDetail(cluster)">
+                  <div class="cluster-v2-header">
+                    <span class="cluster-rank">#{{ clusterPageIndex * clusterPageSize + i + 1 }}</span>
+                    <span class="cluster-type">{{ cluster.type }}</span>
+                    <span class="cluster-category">{{ cluster.category }}</span>
+                    <!-- Severity chip - use severityDisplay if available, fallback to severity -->
+                    <span class="cluster-severity" [class]="'severity-' + (cluster.severity || 'unknown')"
+                          [matTooltip]="getClusterVerificationTooltip(cluster)"
+                          matTooltipPosition="above">
+                      {{ ((cluster as any).severityDisplay || cluster.severity || 'unknown').toUpperCase() }}
+                    </span>
+                    <!-- Verification badge -->
+                    <span class="verification-badge" 
+                          [class.transcript-only]="cluster.verification?.level === 'TRANSCRIPT_ONLY'"
+                          [matTooltip]="getClusterVerificationTooltip(cluster)"
+                          [class.verified]="cluster.verification?.level === 'EXTERNAL_VERIFIED'">
+                      {{ getClusterVerificationLabel(cluster) }}
+                    </span>
+                    <!-- Occurrences count -->
+                    <span class="cluster-occurrences" *ngIf="cluster.occurrences > 1">
+                      {{ cluster.occurrences }} occurrences
+                    </span>
+                    <span class="cluster-risk-score" 
+                          [matTooltip]="'Risk Score: ' + (cluster.riskScore * 100).toFixed(0) + '%'"
+                          matTooltipPosition="above">Score: {{ (cluster.riskScore * 100).toFixed(0) }}</span>
+                  </div>
+                  <div class="cluster-v2-body">
+                    <div class="cluster-title">{{ cluster.title }}</div>
+                    <div class="cluster-summary">{{ cluster.summary }}</div>
+                    <div class="cluster-meta">
+                      <span class="turn-range" *ngIf="cluster.firstTurnIndex !== undefined && cluster.lastTurnIndex !== undefined">
+                        Turns {{ cluster.firstTurnIndex }}-{{ cluster.lastTurnIndex }}
+                      </span>
+                      <span *ngIf="cluster.reviewRequired" class="review-required">Review Required</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+              
+              <!-- Pagination for clusters -->
+              <mat-paginator
+                *ngIf="issueClustersV2"
+                [length]="issueClustersV2.topClusters.length"
+                [pageSize]="clusterPageSize"
+                [pageIndex]="clusterPageIndex"
+                [pageSizeOptions]="clusterPageSizeOptions"
+                [showFirstLastButtons]="true"
+                (page)="onClusterPageChange($event)"
+                aria-label="Select page of clusters">
+              </mat-paginator>
+            </div>
+          </mat-card-content>
+        </mat-card>
+        
+        <!-- G3: All Issues (Atomic) - Auditor-grade view -->
         <mat-card class="issues-card issue-v2" *ngIf="allIssuesV2.length > 0">
           <mat-card-header>
             <mat-card-title>
-              <mat-icon>verified</mat-icon>
-              Enterprise Issues (V2) - All {{ allIssuesV2.length }} Issues
+              <mat-icon>list</mat-icon>
+              All Issues (Atomic) - {{ allIssuesV2.length }} Issues
             </mat-card-title>
             <mat-card-subtitle *ngIf="issueSummaryV2">
-              Top {{ issueSummaryV2.topIssuesCount }} ranked by risk | 
+              All atomic issues sorted by risk score | 
               By Type: {{ getIssueV2TypeSummary() }} | 
               By Severity: {{ getIssueV2SeveritySummary() }}
             </mat-card-subtitle>
@@ -329,11 +406,11 @@
                   <div class="issue-v2-header">
                     <span class="issue-rank">#{{ pageIndex * pageSize + i + 1 }}</span>
                     <span class="issue-type">{{ issue.type }}</span>
-                    <!-- Chip A: Impact Severity (severity) - what this would be if verified -->
-                    <span class="issue-severity" [class]="'severity-' + (issue.severity || 'unknown')"
+                    <!-- Chip A: Severity Display (severityDisplay) - what UI shows (may be capped in transcript-only) -->
+                    <span class="issue-severity" [class]="'severity-' + (issue.severityDisplay || issue.severity || 'unknown')"
                           [matTooltip]="getVerificationTooltip(issue)"
                           matTooltipPosition="above">
-                      {{ (issue.severity || 'unknown').toUpperCase() }}
+                      {{ (issue.severityDisplay || issue.severity || 'unknown').toUpperCase() }}
                     </span>
                     <!-- Chip B: Verification Level -->
                     <span class="verification-badge" 
@@ -342,6 +419,7 @@
                           [class.verified]="issue.verification?.level === 'EXTERNAL_VERIFIED'">
                         {{ getVerificationLabel(issue) }}
                       </span>
+                    <!-- Impact (separate from severity) -->
                     <span class="issue-impact" *ngIf="issue.impact">
                       Impact: {{ getImpactLabel(issue) }}
                     </span>
@@ -392,7 +470,9 @@
                 <ng-container matColumnDef="severity">
                   <mat-header-cell *matHeaderCellDef>Severity</mat-header-cell>
                   <mat-cell *matCellDef="let issue">
-                    <span [class]="'severity-' + (issue.severity || 'unknown')">{{ (issue.severity || 'unknown').toUpperCase() }}</span>
+                    <span [class]="'severity-' + (issue.severityDisplay || issue.severity || 'unknown')">
+                      {{ (issue.severityDisplay || issue.severity || 'unknown').toUpperCase() }}
+                    </span>
                   </mat-cell>
                 </ng-container>
                 <ng-container matColumnDef="riskScore">

@@ -217,15 +217,34 @@ function scoreIssue(
     (wSignal * signal01) +
     (wCategory * category01);
   
+  // Initialize scoring reasons early (used in mode caps)
+  const scoringReasons: string[] = [];
+  
   // A2: Apply verification multiplier (separate impact from verification)
   // Impact = how bad if true (customer harm, $ amounts, legal, compliance)
   // Verification = how defensible/provable in audit
-  const verificationMultiplier = evalMode?.verificationLevel === 'TRANSCRIPT_ONLY' ? 0.85 :
-                                  evalMode?.verificationLevel === 'DOC_BACKED' ? 1.00 :
-                                  1.10; // EXTERNALLY_VERIFIED
+  // C1: Use config.verificationMultiplier instead of hard-coded values
+  const verificationLevelKey = evalMode?.verificationLevel === 'TRANSCRIPT_ONLY' ? 'TRANSCRIPT_ONLY' :
+                                evalMode?.verificationLevel === 'DOC_BACKED' || evalMode?.verificationLevel === 'EXTERNALLY_VERIFIED' ? 'EXTERNAL_VERIFIED' :
+                                'NONE';
+  const verificationMultiplier = config.verificationMultiplier?.[verificationLevelKey] ?? 
+                                 (verificationLevelKey === 'TRANSCRIPT_ONLY' ? 0.85 :
+                                  verificationLevelKey === 'EXTERNAL_VERIFIED' ? 1.0 : 0.7);
+  
+  // B1: Apply mode caps ONLY for specific issue types (not contradictions)
+  let cappedRisk01 = risk01;
+  const modeCaps = config.modeCaps?.transcript_only;
+  const modeCapsApplied: string[] = [];
+  if (scoringContext?.mode === 'transcript_only' && modeCaps && modeCaps.applyToTypes.includes(issue.type)) {
+    if (risk01 > modeCaps.maxRisk01) {
+      cappedRisk01 = modeCaps.maxRisk01;
+      modeCapsApplied.push(`transcript_only_cap_${issue.type}`);
+      scoringReasons.push(`Transcript-only cap applied to ${issue.type}: risk01 reduced from ${risk01.toFixed(3)} to ${cappedRisk01.toFixed(3)}`);
+    }
+  }
   
   // Apply multiplier to riskScore (not impact - impact stays unchanged)
-  const adjustedRisk01 = risk01 * verificationMultiplier;
+  const adjustedRisk01 = cappedRisk01 * verificationMultiplier;
   
   // B2: Speaker gating - downgrade non-AGENT↔AGENT contradictions
   // AGENT↔AGENT: normal contradiction scoring
@@ -284,7 +303,12 @@ function scoreIssue(
   // Note: impact is NOT affected by transcript-only mode (only severityDisplay is capped)
   
   // Step 8: Build scoring explanation (enterprise requirement)
-  const scoringReasons: string[] = [];
+  // scoringReasons already initialized above
+  
+  // B2: Add reason if impact != severity
+  if (finalImpact === 'high' && severity !== 'high' && severity !== 'critical') {
+    scoringReasons.push(`High impact but ${severity} severity due to ${issue.verification.level === 'TRANSCRIPT_ONLY' ? 'transcript-only evidence level' : 'evidence limitations'}`);
+  }
   
   // Impact reason
   if (finalImpact === 'high') {
@@ -324,21 +348,25 @@ function scoreIssue(
     }
   }
   
-  // D2: Return scoreBreakdown from risk-ranking (enterprise requirement)
+  // A3: Return full scoreBreakdown from risk-ranking (enterprise requirement)
   const scoreBreakdown = {
     impact01,
     evidence01,
     signal01,
     category01,
+    verificationMultiplier,
+    risk01Raw: risk01,
+    risk01Capped: cappedRisk01,
+    risk01Final: adjustedRisk01,
+    risk01Clamped: riskScore,
     weights: {
       impact: wImpact,
       evidence: wEvidence,
       signal: wSignal,
       category: wCategory,
     },
-    risk01Raw: risk01,
-    risk01Clamped: riskScore,
     reasons: scoringReasons,
+    modeCapsApplied: modeCapsApplied.length > 0 ? modeCapsApplied : undefined,
   };
   
   return {
@@ -356,6 +384,8 @@ function scoreIssue(
         signal01: Math.round(signal01 * 1000) / 1000,
         category01: Math.round(category01 * 1000) / 1000,
         verificationMultiplier: Math.round(verificationMultiplier * 1000) / 1000,
+        risk01Raw: Math.round(risk01 * 1000) / 1000, // A3: Add to components
+        risk01Final: Math.round(adjustedRisk01 * 1000) / 1000, // A3: Add to components
       },
       weights: {
         impact: wImpact,
@@ -364,6 +394,7 @@ function scoreIssue(
         category: wCategory,
       },
       reasons: scoringReasons,
+      modeCapsApplied: modeCapsApplied.length > 0 ? modeCapsApplied : undefined,
     },
   };
 }
@@ -766,96 +797,7 @@ function applyCategoryMinimums(
   return severity;
 }
 
-/**
- * Legacy fallback: Compute risk score for a single issue using composite scoring formula
- * @deprecated Use scoreIssue() instead
- */
-function computeRiskScore(issue: IssueV2, config: RiskRankingConfig): IssueV2 {
-  // Get weights (with defaults if not in config)
-  const w_severity = config.weights.severityWeight || 0.25;
-  const w_category = 0.15; // Default if not in config
-  const w_confidence = config.weights.confidenceWeight || 0.20;
-  const w_structure = config.weights.structuralImportanceWeight || 0.15;
-  const w_impact = config.weights.customerImpactWeight || 0.30;
-  const w_evidencePenalty = config.weights.evidencePenaltyWeight || 0.10;
-  
-  // Normalize severity to 0..1 (critical=1.0, high=0.75, medium=0.5, low=0.25)
-  const severity01 = {
-    critical: 1.0,
-    high: 0.75,
-    medium: 0.5,
-    low: 0.25,
-  }[issue.severity] || 0.5;
-  
-  // Category multiplier (normalized to 0..1)
-  const categoryMult = config.weights.categoryMultiplier?.[issue.category] || 1.0;
-  const category01 = clamp01(categoryMult / 1.3); // Normalize assuming max is 1.3
-  
-  // Confidence (already 0..1)
-  const confidence01 = issue.confidence;
-  
-  // Structural importance (from spectral if available, else use edge strength)
-  let structuralImportance = 0.5; // Default
-  if (issue.evidence.edges && issue.evidence.edges.length > 0) {
-    structuralImportance = Math.max(...issue.evidence.edges.map(e => e.weight || 0));
-  } else if (issue.evidence.refs && issue.evidence.refs.length > 0) {
-    const weights = issue.evidence.refs.map(r => r.weight || 0).filter(w => w > 0);
-    if (weights.length > 0) {
-      structuralImportance = weights.reduce((a, b) => a + b, 0) / weights.length;
-    }
-  }
-  
-  // Customer impact (based on type and category)
-  let impact01 = 0.5; // Default
-  if (issue.type === 'RISK_SIGNAL' || issue.type === 'CONTRADICTION') {
-    impact01 = 0.8;
-  } else if (issue.category === 'compliance' || issue.compliance.tags?.some(tag => 
-    tag.includes('fee') || tag.includes('billing') || tag.includes('refund'))) {
-    impact01 = 0.7;
-  } else if (issue.compliance.tags?.includes('high_impact')) {
-    impact01 = 0.75;
-  }
-  
-  // Evidence penalty (lower score if transcript-only or no evidence)
-  let evidencePenalty01 = 0;
-  if (issue.verification.level === 'TRANSCRIPT_ONLY') {
-    evidencePenalty01 = 0.2; // Small penalty for transcript-only
-  } else if (issue.verification.level === 'NONE') {
-    evidencePenalty01 = 0.4; // Larger penalty for no evidence
-  }
-  
-  // Compute composite score (0..100)
-  const compositeScore = 100 * clamp01(
-    w_severity * severity01 +
-    w_category * category01 +
-    w_confidence * confidence01 +
-    w_structure * structuralImportance +
-    w_impact * impact01 -
-    w_evidencePenalty * evidencePenalty01
-  );
-  
-  // Convert to riskScore (0..1) for backward compatibility
-  const riskScore = compositeScore / 100;
-  
-  // Determine severity from composite score thresholds
-  const severity = deriveSeverity(riskScore, config);
-  
-  // Update legal hold suggestion (high/critical + agent + disclosure/billing)
-  const legalHoldSuggested = 
-    (severity === 'high' || severity === 'critical') &&
-    issue.who.speaker === 'AGENT' &&
-    (issue.category === 'disclosure' || issue.category === 'billing' || issue.category === 'compliance');
-  
-  return {
-    ...issue,
-    riskScore, // Keep as 0..1 for backward compatibility
-    severity,
-    compliance: {
-      ...issue.compliance,
-      legalHoldSuggested,
-    },
-  };
-}
+// Removed deprecated computeRiskScore function - use scoreIssue() instead
 
 /**
  * Clamp value to [0, 1]

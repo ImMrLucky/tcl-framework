@@ -9,6 +9,7 @@ import { readFileSync } from 'fs';
 import { join } from 'path';
 import { fileURLToPath } from 'url';
 import { dirname } from 'path';
+import type { ImpactV2 } from '../types.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -60,6 +61,23 @@ export interface RiskRankingConfig {
     TRANSCRIPT_ONLY: number;
     NONE: number;
   };
+  // Verification multiplier (applied to riskScore, not impact)
+  verificationMultiplier?: {
+    EXTERNAL_VERIFIED: number;
+    TRANSCRIPT_ONLY: number;
+    NONE: number;
+  };
+  // Mode caps (transcript-only caps for specific issue types only)
+  modeCaps?: {
+    transcript_only: {
+      applyToTypes: string[];
+      maxRisk01: number;
+    };
+  };
+  // Type impact mapping (type -> impact level)
+  typeImpactMap?: Record<string, ImpactV2>;
+  // Category weights (for category01 computation)
+  categoryWeights?: Record<string, number>;
   // Category normalization range
   categoryNormalization: {
     min: number;

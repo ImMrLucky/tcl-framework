@@ -22,7 +22,47 @@
   "evidenceMap": {
     "EXTERNAL_VERIFIED": 1.0,
     "TRANSCRIPT_ONLY": 0.6,
-    "NONE": 0.2
+    "NONE": 0.15
+  },
+  "verificationMultiplier": {
+    "EXTERNAL_VERIFIED": 1.0,
+    "TRANSCRIPT_ONLY": 0.85,
+    "NONE": 0.7
+  },
+  "modeCaps": {
+    "transcript_only": {
+      "applyToTypes": ["UNVERIFIED_CLAIM", "UNSUPPORTED_POLICY_CLAIM"],
+      "maxRisk01": 0.60
+    }
+  },
+  "typeImpactMap": {
+    "PCI": "high",
+    "CONTRADICTION": "high",
+    "DATA_INTEGRITY": "high",
+    "SECURITY": "high",
+    "PRIVACY": "high",
+    "DECEPTIVE_PROMISE": "high",
+    "COMMITMENT_REVERSAL": "high",
+    "FEE_DISCLOSURE_RISK": "high",
+    "POLICY": "high",
+    "RISK_SIGNAL": "medium",
+    "UNVERIFIED_CLAIM": "medium",
+    "UNSUPPORTED_CLAIM": "medium",
+    "UNGROUNDED": "low",
+    "OTHER": "low"
+  },
+  "categoryWeights": {
+    "compliance": 1.0,
+    "consistency": 0.9,
+    "billing": 1.0,
+    "fees": 1.0,
+    "refunds": 1.0,
+    "privacy": 1.0,
+    "security": 1.0,
+    "disclosure": 1.0,
+    "data_integrity": 1.0,
+    "evidence": 1.0,
+    "other": 1.0
   },
   "categoryNormalization": {
     "min": 1.0,

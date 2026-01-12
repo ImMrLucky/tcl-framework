@@ -406,6 +406,18 @@ function createContradictionIssue(
         claimB: edge.claimB,
         weight: edge.weight, // Use actual edge weight (no fallback - let scoring handle missing)
       }],
+      // D1: Always populate evidence.verification
+      verification: {
+        level: verificationLevel,
+        reasonCodes: input.evidenceMode === 'TRANSCRIPT_ONLY' ? ['NO_EXTERNAL_EVIDENCE'] : [],
+        provenance: {
+          transcriptAnchors: [
+            ...(claimA.meta?.turnIndex !== undefined ? [{ turnIndex: claimA.meta.turnIndex, claimId: edge.claimA }] : []),
+            ...(claimB.meta?.turnIndex !== undefined ? [{ turnIndex: claimB.meta.turnIndex, claimId: edge.claimB }] : []),
+          ],
+          externalDocRefs: hasExternalSupport ? evidenceRefs.filter(r => !r.sourceId.startsWith('e-transcript-')).map(r => r.sourceId) : [],
+        },
+      },
     },
     compliance: {
       tags: complianceTags,
@@ -483,6 +495,9 @@ function createUnverifiedClaimIssue(
     verificationLevel = 'NONE';
   }
   
+  // Store verificationLevel for use in evidence.verification below
+  const finalVerificationLevel = verificationLevel;
+  
   // Disclaimers
   const disclaimers: string[] = [];
   if (verificationLevel === 'TRANSCRIPT_ONLY') {
@@ -532,6 +547,16 @@ function createUnverifiedClaimIssue(
           claimA: claim.id,
           weight: g.weight || 0.7,
         })),
+      // D1: Always populate evidence.verification
+      verification: {
+        level: verificationLevel,
+        reasonCodes: verificationLevel === 'TRANSCRIPT_ONLY' ? ['NO_EXTERNAL_EVIDENCE'] : 
+                     verificationLevel === 'NONE' ? ['NO_GROUNDING'] : [],
+        provenance: {
+          transcriptAnchors: claim.meta?.turnIndex !== undefined ? [{ turnIndex: claim.meta.turnIndex, claimId: claim.id }] : [],
+          externalDocRefs: [],
+        },
+      },
     },
     compliance: {
       tags: complianceTags,
@@ -611,6 +636,15 @@ function createUngroundedClaimIssue(
     evidence: {
       refs: [], // No evidence refs for ungrounded claims
       edges: [],
+      // D1: Always populate evidence.verification
+      verification: {
+        level: 'NONE',
+        reasonCodes: ['NO_GROUNDING_EVIDENCE'],
+        provenance: {
+          transcriptAnchors: [],
+          externalDocRefs: [],
+        },
+      },
     },
     compliance: {
       tags: complianceTags,
@@ -706,6 +740,17 @@ function createRiskSignalIssue(
   // Compliance tags
   const complianceTags: string[] = ['high_impact', ...riskSignals.map(s => s.toLowerCase())];
   
+  // Determine verification level
+  const hasGrounding = evidenceRefs.length > 0 || input.grounding.some(g => g.claimId === claim.id);
+  let verificationLevel: VerificationLevelV2 = 'NONE';
+  if (input.evidenceMode === 'TRANSCRIPT_PLUS_EXTERNAL' && hasGrounding) {
+    verificationLevel = 'EXTERNAL_VERIFIED';
+  } else if (input.evidenceMode === 'TRANSCRIPT_ONLY' && hasGrounding) {
+    verificationLevel = 'TRANSCRIPT_ONLY';
+  } else {
+    verificationLevel = 'NONE';
+  }
+  
   // Disclaimers
   const disclaimers: string[] = [];
   if (input.evidenceMode === 'TRANSCRIPT_ONLY') {
@@ -730,8 +775,9 @@ function createRiskSignalIssue(
                  0.6, // Last resort: reasonable default
     reviewRequired: true,
     verification: {
-      level: input.evidenceMode === 'TRANSCRIPT_PLUS_EXTERNAL' ? 'EXTERNAL_VERIFIED' : 'TRANSCRIPT_ONLY',
-      reasonCodes: input.evidenceMode === 'TRANSCRIPT_ONLY' ? ['NO_EXTERNAL_EVIDENCE'] : [],
+      level: verificationLevel,
+      reasonCodes: verificationLevel === 'TRANSCRIPT_ONLY' ? ['NO_EXTERNAL_EVIDENCE'] : 
+                   verificationLevel === 'NONE' ? ['NO_GROUNDING'] : [],
     },
     who: {
       speaker,
@@ -752,6 +798,16 @@ function createRiskSignalIssue(
           claimA: claim.id,
           weight: g.weight || 0.7,
         })),
+      // D1: Always populate evidence.verification
+      verification: {
+        level: verificationLevel,
+        reasonCodes: verificationLevel === 'TRANSCRIPT_ONLY' ? ['NO_EXTERNAL_EVIDENCE'] : 
+                     verificationLevel === 'NONE' ? ['NO_GROUNDING'] : [],
+        provenance: {
+          transcriptAnchors: claim.meta?.turnIndex !== undefined ? [{ turnIndex: claim.meta.turnIndex, claimId: claim.id }] : [],
+          externalDocRefs: [],
+        },
+      },
     },
     compliance: {
       tags: complianceTags,

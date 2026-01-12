@@ -81,15 +81,40 @@ export function calibrateEdgeWeight(input: CalibrationInput): CalibrationResult 
   // Apply ASR confidence
   calibratedWeight *= factors.asrConfidenceFactor;
   
-  // Apply slot match bonus for contradictions
+  // E3: Apply contradiction class-based weight calibration
   if (input.edge.type === 'CONTRADICTION') {
+    // Apply slot match bonus
     calibratedWeight *= (0.8 + 0.2 * factors.slotMatchBonus);
+    
+    // E3: Apply contradiction class multiplier (hard mismatch vs soft correction)
+    const contradictionClass = (input.edge.rationale.signals as any).contradictionClass as 
+      'NUMERIC_MISMATCH' | 'BINARY_REVERSAL' | 'COMMITMENT_REVERSAL' | 'POLICY_ASSERTION' | 'SOFT_INCONSISTENCY' | undefined;
+    
+    if (contradictionClass) {
+      // Higher base weight for hard mismatches, lower for soft inconsistencies
+      const classMultipliers: Record<string, number> = {
+        'NUMERIC_MISMATCH': 1.15,      // Different amounts/days - high weight
+        'BINARY_REVERSAL': 1.20,       // yes/no, recorded/not - very high weight
+        'COMMITMENT_REVERSAL': 1.25,   // guaranteed → walkback - highest weight
+        'POLICY_ASSERTION': 1.18,      // CVV storage, required fee - high compliance risk
+        'SOFT_INCONSISTENCY': 0.85,     // Uncertain statements, hedges - lower weight
+      };
+      
+      const multiplier = classMultipliers[contradictionClass] || 1.0;
+      calibratedWeight *= multiplier;
+    }
   }
   
   // CRITICAL: For CONTRADICTION edges, calibration must never reduce the original classification confidence.
   // If an edge was strong enough to be labeled a contradiction, it remains strong enough to count as one.
+  // However, E3 allows SOFT_INCONSISTENCY to be lower than original (they're intentionally softer)
   if (input.edge.type === 'CONTRADICTION') {
-    calibratedWeight = Math.max(input.edge.weight, calibratedWeight);
+    const contradictionClass = (input.edge.rationale.signals as any).contradictionClass;
+    if (contradictionClass !== 'SOFT_INCONSISTENCY') {
+      // For hard mismatches, never reduce below original
+      calibratedWeight = Math.max(input.edge.weight, calibratedWeight);
+    }
+    // For SOFT_INCONSISTENCY, allow reduction (they're intentionally softer)
   }
   
   // Clamp to 0-1

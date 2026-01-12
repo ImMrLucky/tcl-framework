@@ -1062,11 +1062,19 @@ app.post("/validate", requireCapability(Capability.ANALYZE_MANUAL_UPLOAD), async
                 evalMode,
               });
               
+              // F1: Build issueClustersV2 aggregation output
+              const topClusters = clusteringResult.aggregatedIssues.slice(0, 10); // Top 10 clusters
+              const issueClustersV2 = {
+                clusters: clusteringResult.aggregatedIssues, // All clusters
+                topClusters: topClusters, // Top N clusters (for UI)
+              };
+              
               // Store in report
               (out.report as any).allIssuesV2 = rankedResult.allIssues;
               (out.report as any).topIssuesV2 = rankedResult.topIssues; // Keep for backwards compatibility
-              (out.report as any).topAggregatedIssues = clusteringResult.aggregatedIssues.slice(0, 10); // Top 10 clusters
-              (out.report as any).aggregatedIssues = clusteringResult.aggregatedIssues; // All aggregated issues
+              (out.report as any).topAggregatedIssues = topClusters; // Top 10 clusters (backwards compat)
+              (out.report as any).aggregatedIssues = clusteringResult.aggregatedIssues; // All aggregated issues (backwards compat)
+              (out.report as any).issueClustersV2 = issueClustersV2; // F1: New structured output
               (out.report as any).issueSummaryV2 = rankedResult.summary;
               (out.report as any).executiveSummary = executiveSummary; // E1-E3: Root-cause driven executive summary
               (out.report as any).evalMode = evalMode; // A1: Add EvalMode to report

@@ -168,6 +168,43 @@ interface IssueSummaryV2 {
   allIssuesCount: number;
 }
 
+// G2: Aggregated Issue (Cluster) type
+interface AggregatedIssue {
+  clusterId: string;
+  clusterKey: string;
+  category: string;
+  type: string;
+  title: string;
+  summary: string;
+  severity: 'low' | 'medium' | 'high' | 'critical';
+  riskScore: number;
+  occurrences: number;
+  firstTurnIndex: number;
+  lastTurnIndex: number;
+  verification: {
+    level: 'EXTERNAL_VERIFIED' | 'TRANSCRIPT_ONLY' | 'NONE';
+    reasonCodes: string[];
+  };
+  reviewRequired: boolean;
+  evidence: {
+    refs: any[];
+    edges: any[];
+    atomicIssueIds: string[];
+    claimIds: string[];
+  };
+  scoring: {
+    components: {
+      impact01: number;
+      signal01: number;
+      evidence01: number;
+      category01: number;
+      clusterPenalty01: number;
+      verificationMultiplier: number;
+    };
+    reasons: string[];
+  };
+}
+
 // Legacy clustered issue type (for backward compatibility)
 interface ClusteredIssue {
   id: string;
@@ -270,11 +307,23 @@ export class EvaluationResultsComponent implements OnInit {
   topIssuesV2: IssueV2[] = [];
   issueSummaryV2: IssueSummaryV2 | null = null;
   
+  // G2: Issue Clusters (Top Aggregated Issues)
+  issueClustersV2: {
+    clusters: AggregatedIssue[];
+    topClusters: AggregatedIssue[];
+  } | null = null;
+  
   // Pagination for top issues
   paginatedTopIssues: IssueV2[] = [];
   pageSize = 10;
   pageIndex = 0;
   pageSizeOptions = [5, 10, 25, 50];
+  
+  // Pagination for top clusters
+  paginatedTopClusters: AggregatedIssue[] = [];
+  clusterPageSize = 10;
+  clusterPageIndex = 0;
+  clusterPageSizeOptions = [5, 10, 25, 50];
 
   constructor(
     private route: ActivatedRoute,
@@ -321,9 +370,34 @@ export class EvaluationResultsComponent implements OnInit {
       
       // Load allIssuesV2 and topIssuesV2
       if (report?.allIssuesV2 && Array.isArray(report.allIssuesV2)) {
-        this.allIssuesV2 = report.allIssuesV2;
+        // G3: Ensure All Issues is sorted by riskScore desc, then severity, then impact, then verification
+        this.allIssuesV2 = [...report.allIssuesV2].sort((a, b) => {
+          // Primary: riskScore DESC
+          const riskA = a.riskScore ?? 0;
+          const riskB = b.riskScore ?? 0;
+          if (riskB !== riskA) return riskB - riskA;
+          
+          // Secondary: severity (high > medium > low)
+          const severityOrder: Record<string, number> = { critical: 4, high: 3, medium: 2, low: 1 };
+          const sevA = severityOrder[a.severity || 'low'] ?? 1;
+          const sevB = severityOrder[b.severity || 'low'] ?? 1;
+          if (sevB !== sevA) return sevB - sevA;
+          
+          // Tertiary: impact
+          const impactOrder: Record<string, number> = { high: 3, medium: 2, low: 1 };
+          const impA = impactOrder[a.impact || 'low'] ?? 1;
+          const impB = impactOrder[b.impact || 'low'] ?? 1;
+          if (impB !== impA) return impB - impA;
+          
+          // Quaternary: verification level
+          const verifOrder: Record<string, number> = { EXTERNAL_VERIFIED: 3, TRANSCRIPT_ONLY: 2, NONE: 1 };
+          const verA = verifOrder[a.verification?.level || 'NONE'] ?? 1;
+          const verB = verifOrder[b.verification?.level || 'NONE'] ?? 1;
+          return verB - verA;
+        });
+        
         // Use topIssuesV2 from report, or default to first 10 (not 4)
-        this.topIssuesV2 = report.topIssuesV2 || report.allIssuesV2.slice(0, 10);
+        this.topIssuesV2 = report.topIssuesV2 || this.allIssuesV2.slice(0, 10);
         
         // Defense in depth: compute summary from issues if backend summary is missing/incomplete
         const existingSummary = report.issueSummaryV2;
@@ -361,6 +435,30 @@ export class EvaluationResultsComponent implements OnInit {
         this.topIssuesV2 = [];
         this.paginatedTopIssues = [];
         this.issueSummaryV2 = null;
+      }
+      
+      // G2: Load issueClustersV2 (Top Aggregated Issues)
+      if (report?.issueClustersV2) {
+        this.issueClustersV2 = report.issueClustersV2;
+        this.updatePaginatedTopClusters();
+        if (this.issueClustersV2) {
+          console.log('✅ Loaded Issue Clusters V2:', {
+            totalClusters: this.issueClustersV2.clusters?.length ?? 0,
+            topClusters: this.issueClustersV2.topClusters?.length ?? 0,
+          });
+        }
+      } else {
+        // Fallback: try aggregatedIssues or topAggregatedIssues (backwards compat)
+        if (report?.aggregatedIssues && Array.isArray(report.aggregatedIssues)) {
+          this.issueClustersV2 = {
+            clusters: report.aggregatedIssues,
+            topClusters: report.topAggregatedIssues || report.aggregatedIssues.slice(0, 10),
+          };
+          this.updatePaginatedTopClusters();
+        } else {
+          this.issueClustersV2 = null;
+          this.paginatedTopClusters = [];
+        }
       }
       
       // Extract top offenders from IssueV2 if available
@@ -435,6 +533,78 @@ export class EvaluationResultsComponent implements OnInit {
     this.pageIndex = event.pageIndex;
     this.pageSize = event.pageSize;
     this.updatePaginatedTopIssues();
+  }
+  
+  /**
+   * G2: Update paginated top clusters based on current page settings
+   */
+  updatePaginatedTopClusters(): void {
+    if (!this.issueClustersV2 || !this.issueClustersV2.topClusters) {
+      this.paginatedTopClusters = [];
+      return;
+    }
+    const startIndex = this.clusterPageIndex * this.clusterPageSize;
+    const endIndex = startIndex + this.clusterPageSize;
+    this.paginatedTopClusters = this.issueClustersV2.topClusters.slice(startIndex, endIndex);
+  }
+  
+  /**
+   * G2: Handle cluster page change event from paginator
+   */
+  onClusterPageChange(event: PageEvent): void {
+    this.clusterPageIndex = event.pageIndex;
+    this.clusterPageSize = event.pageSize;
+    this.updatePaginatedTopClusters();
+  }
+  
+  /**
+   * G2: Open cluster detail modal (shows all atomic issues in the cluster)
+   */
+  openClusterDetail(cluster: AggregatedIssue): void {
+    // Find all atomic issues in this cluster
+    const atomicIssues = this.allIssuesV2.filter(issue => 
+      cluster.evidence.atomicIssueIds.includes(issue.issueId)
+    );
+    
+    // Open a dialog showing cluster details and atomic issues
+    // For now, open the first atomic issue's detail modal
+    // TODO: Create a dedicated cluster detail modal component
+    if (atomicIssues.length > 0) {
+      this.openIssueV2Detail(atomicIssues[0]);
+    }
+  }
+  
+  /**
+   * G2: Get verification label for cluster
+   */
+  getClusterVerificationLabel(cluster: AggregatedIssue): string {
+    const level = cluster.verification?.level || 'NONE';
+    switch (level) {
+      case 'EXTERNAL_VERIFIED':
+        return 'Externally Verified';
+      case 'TRANSCRIPT_ONLY':
+        return 'Transcript Only';
+      case 'NONE':
+        return 'Unverified';
+      default:
+        return 'Unknown';
+    }
+  }
+  
+  /**
+   * G2: Get verification tooltip for cluster
+   */
+  getClusterVerificationTooltip(cluster: AggregatedIssue): string {
+    const level = cluster.verification?.level || 'NONE';
+    const reasonCodes = cluster.verification?.reasonCodes || [];
+    let tooltip = `Verification: ${this.getClusterVerificationLabel(cluster)}`;
+    if (reasonCodes.length > 0) {
+      tooltip += `\nReason: ${reasonCodes.join(', ')}`;
+    }
+    if (cluster.occurrences > 1) {
+      tooltip += `\nOccurrences: ${cluster.occurrences}`;
+    }
+    return tooltip;
   }
 
   getSeverity(issue: Issue): 'critical' | 'high' | 'medium' | 'low' {

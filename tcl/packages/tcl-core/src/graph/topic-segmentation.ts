@@ -61,10 +61,37 @@ export function assignTopicIds(claims: ClaimNode[]): SegmentationResult {
 // =============================================================================
 
 function segmentBySlot(claims: ClaimNode[]): SegmentationResult {
+  // E2: Improved slot-based segmentation with semantic slot families
   const clusterMap = new Map<string, ClaimNode[]>();
   
   for (const claim of claims) {
-    const key = `${claim.slot.slotType}`;
+    const slot = claim.slot;
+    let key = `${slot.slotType}`;
+    
+    // E2: If slotType is one of {REFUND, FEE, PLAN_PRICE, RECORDING, PAYMENT_METHOD}, enforce stable topic IDs
+    const semanticSlotTypes = new Set(['refund', 'fee', 'plan_price', 'recording', 'payment_method', 'commitment']);
+    if (semanticSlotTypes.has(slot.slotType)) {
+      // Use entityKey to create stable topic clusters
+      // e.g., "FEE:LATE_FEE" vs "FEE:CANCELLATION_FEE" should be different topics
+      key = `${slot.slotType}:${slot.entityKey || 'unknown'}`;
+    } else if (slot.slotType === 'amount' && slot.entityKey) {
+      // Group similar amounts together (within 10% tolerance)
+      const amountMatch = slot.entityKey.match(/AMOUNT:(\d+\.?\d*)/);
+      if (amountMatch) {
+        const amount = parseFloat(amountMatch[1]);
+        // Round to nearest 10% bucket for clustering
+        const bucket = Math.round(amount / (amount * 0.1 || 1));
+        key = `amount:${bucket}`;
+      } else {
+        key = `${slot.slotType}:${slot.entityKey}`;
+      }
+    } else if (slot.slotType === 'timeframe' && slot.entityKey) {
+      // Group similar timeframes together
+      key = `${slot.slotType}:${slot.entityKey}`;
+    } else if (slot.entityKey && slot.entityKey !== 'unknown' && slot.entityKey !== 'general') {
+      // Use entityKey for better clustering
+      key = `${slot.slotType}:${slot.entityKey}`;
+    }
     
     if (!clusterMap.has(key)) {
       clusterMap.set(key, []);
