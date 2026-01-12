@@ -334,7 +334,7 @@
                     <span class="cluster-severity" [class]="'severity-' + (cluster.severity || 'unknown')"
                           [matTooltip]="getClusterVerificationTooltip(cluster)"
                           matTooltipPosition="above">
-                      {{ ((cluster as any).severityDisplay || cluster.severity || 'unknown').toUpperCase() }}
+                      {{ getClusterSeverityDisplay(cluster) }}
                     </span>
                     <!-- Verification badge -->
                     <span class="verification-badge" 
@@ -410,7 +410,7 @@
                     <span class="issue-severity" [class]="'severity-' + (issue.severityDisplay || issue.severity || 'unknown')"
                           [matTooltip]="getVerificationTooltip(issue)"
                           matTooltipPosition="above">
-                      {{ (issue.severityDisplay || issue.severity || 'unknown').toUpperCase() }}
+                      {{ getIssueSeverityDisplay(issue) }}
                     </span>
                     <!-- Chip B: Verification Level -->
                     <span class="verification-badge" 
@@ -426,7 +426,7 @@
                     <span class="issue-risk-score" 
                           [matTooltip]="getScoreTooltip(issue)"
                           matTooltipPosition="above"
-                          matTooltipClass="score-tooltip">Score: {{ ((issue.score ?? (issue.riskScore * 100))).toFixed(0) }}</span>
+                          matTooltipClass="score-tooltip">Score: {{ getIssueScore(issue) }}</span>
                   </div>
                   <div class="issue-v2-body">
                     <div class="issue-summary">{{ issue.what?.issueSummary || 'No summary available' }}</div>
@@ -471,7 +471,7 @@
                   <mat-header-cell *matHeaderCellDef>Severity</mat-header-cell>
                   <mat-cell *matCellDef="let issue">
                     <span [class]="'severity-' + (issue.severityDisplay || issue.severity || 'unknown')">
-                      {{ (issue.severityDisplay || issue.severity || 'unknown').toUpperCase() }}
+                      {{ getIssueSeverityDisplay(issue) }}
                     </span>
                   </mat-cell>
                 </ng-container>
@@ -481,7 +481,7 @@
                     <span [matTooltip]="getScoreTooltip(issue)"
                           matTooltipPosition="above"
                           matTooltipClass="score-tooltip"
-                          style="cursor: help;">{{ ((issue.score ?? (issue.riskScore * 100))).toFixed(0) }}%</span>
+                          style="cursor: help;">{{ getIssueScore(issue) }}%</span>
                   </mat-cell>
                 </ng-container>
                 <ng-container matColumnDef="summary">

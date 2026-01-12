@@ -608,6 +608,14 @@ export class EvaluationResultsComponent implements OnInit {
   }
 
   /**
+   * G2: Get severity display for cluster (for UI rendering)
+   */
+  getClusterSeverityDisplay(cluster: AggregatedIssue): string {
+    // AggregatedIssue doesn't have severityDisplay, so use severity directly
+    return (cluster.severity || 'unknown').toUpperCase();
+  }
+
+  /**
    * G2: Calculate total occurrences across all clusters
    */
   getTotalClusterOccurrences(): number {
@@ -1336,6 +1344,21 @@ getMetricTooltip(metric: string): string {
   getImpactLabel(issue: IssueV2): string {
     const impact = (issue as any).impact || 'medium';
     return `Impact: ${impact.toUpperCase()}`;
+  }
+
+  /**
+   * Get severity display string for issue (uppercase, for UI rendering)
+   */
+  getIssueSeverityDisplay(issue: IssueV2): string {
+    return (issue.severityDisplay || issue.severity || 'unknown').toUpperCase();
+  }
+
+  /**
+   * Get formatted score for issue (0-100)
+   */
+  getIssueScore(issue: IssueV2): string {
+    const score = issue.score ?? (issue.riskScore * 100);
+    return score.toFixed(0);
   }
 
   /**
