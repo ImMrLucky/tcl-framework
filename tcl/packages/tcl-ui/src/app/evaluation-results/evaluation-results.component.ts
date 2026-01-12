@@ -205,6 +205,60 @@ interface AggregatedIssue {
   };
 }
 
+// GroupedIssue: Cluster rollup for "Top Issues (Grouped)" table
+interface GroupedIssue {
+  clusterId: string;
+  clusterKey: string;
+  category: string;
+  type: string;
+  topicId?: string;
+  slotKey?: string;
+  severity: 'low' | 'medium' | 'high' | 'critical';
+  severityDisplay: 'low' | 'medium' | 'high';
+  riskScore: number;
+  score: number;
+  confidence: number;
+  impact?: 'low' | 'medium' | 'high';
+  reviewRequired: boolean;
+  verification: {
+    level: string;
+    reasonCodes?: string[];
+  };
+  what: {
+    issueSummary: string;
+    issueDetail?: string;
+    representativeClaimText?: string;
+    primaryClaimId?: string;
+    relatedClaimIds?: string[];
+  };
+  rollup: {
+    atomicIssueCount: number;
+    atomicIssueIds: string[];
+    issueKeys: string[];
+    involvedClaimIds: string[];
+    involvedTurnIndexes: number[];
+    topEdges?: Array<{
+      kind: string;
+      claimA?: string;
+      claimB?: string;
+      weight?: number;
+    }>;
+    refs?: Array<{
+      quote?: string;
+      sourceId?: string;
+      sourceType?: string;
+      turnIndex?: number;
+    }>;
+  };
+  audit: {
+    scorerId: string;
+    createdAt: string;
+    engineVersion: string;
+    inputHash?: string;
+    configHash?: string;
+  };
+}
+
 // Legacy clustered issue type (for backward compatibility)
 interface ClusteredIssue {
   id: string;
@@ -304,7 +358,7 @@ export class EvaluationResultsComponent implements OnInit {
   
   // IssueV2 (Enterprise-Grade) - Only view
   allIssuesV2: IssueV2[] = [];
-  topIssuesV2: IssueV2[] = [];
+  topIssuesV2: GroupedIssue[] = []; // Now contains grouped/clustered issues
   issueSummaryV2: IssueSummaryV2 | null = null;
   
   // G2: Issue Clusters (Top Aggregated Issues)
@@ -319,6 +373,12 @@ export class EvaluationResultsComponent implements OnInit {
   pageIndex = 0;
   pageSizeOptions = [5, 10, 25, 50];
   
+  // Pagination for grouped issues (topIssuesV2)
+  paginatedGroupedIssues: GroupedIssue[] = [];
+  groupedPageSize = 10;
+  groupedPageIndex = 0;
+  groupedPageSizeOptions = [5, 10, 25, 50];
+
   // Pagination for top clusters
   paginatedTopClusters: AggregatedIssue[] = [];
   clusterPageSize = 10;
@@ -396,8 +456,22 @@ export class EvaluationResultsComponent implements OnInit {
           return verB - verA;
         });
         
-        // Use topIssuesV2 from report, or default to first 10 (not 4)
-        this.topIssuesV2 = report.topIssuesV2 || this.allIssuesV2.slice(0, 10);
+        // Use topIssuesV2 from report (now contains grouped/clustered issues)
+        // If it's not present or is still atomic issues (backwards compat), we'll handle it below
+        if (report.topIssuesV2 && Array.isArray(report.topIssuesV2)) {
+          // Check if it's already grouped (has rollup property) or still atomic
+          const firstItem = report.topIssuesV2[0];
+          if (firstItem && 'rollup' in firstItem) {
+            // It's already grouped
+            this.topIssuesV2 = report.topIssuesV2 as GroupedIssue[];
+          } else {
+            // Backwards compat: it's still atomic issues, convert to empty array
+            // (we'll show issueClustersV2 instead if available)
+            this.topIssuesV2 = [];
+          }
+        } else {
+          this.topIssuesV2 = [];
+        }
         
         // Defense in depth: compute summary from issues if backend summary is missing/incomplete
         const existingSummary = report.issueSummaryV2;
@@ -460,6 +534,9 @@ export class EvaluationResultsComponent implements OnInit {
           this.paginatedTopClusters = [];
         }
       }
+
+      // Update pagination for grouped issues
+      this.updatePaginatedGroupedIssues();
       
       // Extract top offenders from IssueV2 if available
       this.extractTopOffenders();
@@ -623,6 +700,103 @@ export class EvaluationResultsComponent implements OnInit {
       return 0;
     }
     return this.issueClustersV2.clusters.reduce((sum, c) => sum + c.occurrences, 0);
+  }
+
+  /**
+   * Update pagination for grouped issues
+   */
+  updatePaginatedGroupedIssues(): void {
+    if (!this.topIssuesV2 || this.topIssuesV2.length === 0) {
+      this.paginatedGroupedIssues = [];
+      return;
+    }
+    const startIndex = this.groupedPageIndex * this.groupedPageSize;
+    const endIndex = startIndex + this.groupedPageSize;
+    this.paginatedGroupedIssues = this.topIssuesV2.slice(startIndex, endIndex);
+  }
+
+  /**
+   * Handle grouped issues page change
+   */
+  onGroupedPageChange(event: PageEvent): void {
+    this.groupedPageIndex = event.pageIndex;
+    this.groupedPageSize = event.pageSize;
+    this.updatePaginatedGroupedIssues();
+  }
+
+  /**
+   * Get severity display for grouped issue
+   */
+  getGroupedSeverityDisplay(grouped: GroupedIssue): string {
+    return (grouped.severityDisplay || grouped.severity || 'unknown').toUpperCase();
+  }
+
+  /**
+   * Get verification label for grouped issue
+   */
+  getGroupedVerificationLabel(grouped: GroupedIssue): string {
+    const level = grouped.verification?.level || 'NONE';
+    switch (level) {
+      case 'EXTERNAL_VERIFIED':
+        return 'Externally Verified';
+      case 'TRANSCRIPT_ONLY':
+      case 'TRANSCRIPT_PROVABLE':
+        return 'Transcript Only';
+      case 'NONE':
+        return 'Unverified';
+      default:
+        return 'Unknown';
+    }
+  }
+
+  /**
+   * Get verification tooltip for grouped issue
+   */
+  getGroupedVerificationTooltip(grouped: GroupedIssue): string {
+    const level = grouped.verification?.level || 'NONE';
+    const reasonCodes = grouped.verification?.reasonCodes || [];
+    let tooltip = `Verification: ${this.getGroupedVerificationLabel(grouped)}`;
+    if (reasonCodes.length > 0) {
+      tooltip += `\nReason: ${reasonCodes.join(', ')}`;
+    }
+    if (grouped.rollup.atomicIssueCount > 1) {
+      tooltip += `\nAtomic Issues: ${grouped.rollup.atomicIssueCount}`;
+    }
+    return tooltip;
+  }
+
+  /**
+   * Open grouped issue detail (shows drilldown with atomic issues)
+   */
+  openGroupedIssueDetail(grouped: GroupedIssue): void {
+    // Find all atomic issues in this cluster
+    const atomicIssues = this.allIssuesV2.filter(issue => 
+      grouped.rollup.atomicIssueIds.includes(issue.issueId)
+    );
+    
+    // Open a dialog showing cluster details and atomic issues
+    // For now, open the first atomic issue's detail modal if available
+    // TODO: Create a dedicated grouped issue detail modal component
+    if (atomicIssues.length > 0) {
+      this.openIssueV2Detail(atomicIssues[0]);
+    } else {
+      // Fallback: show snackbar with cluster info
+      this.snackBar.open(
+        `Grouped Issue: ${grouped.what.issueSummary} (${grouped.rollup.atomicIssueCount} atomic issues)`,
+        'Dismiss',
+        { duration: 5000 }
+      );
+    }
+  }
+
+  /**
+   * Calculate total atomic issues across all grouped issues
+   */
+  getTotalAtomicIssuesInGrouped(): number {
+    if (!this.topIssuesV2 || this.topIssuesV2.length === 0) {
+      return 0;
+    }
+    return this.topIssuesV2.reduce((sum, g) => sum + g.rollup.atomicIssueCount, 0);
   }
 
   getSeverity(issue: Issue): 'critical' | 'high' | 'medium' | 'low' {

@@ -1069,9 +1069,13 @@ app.post("/validate", requireCapability(Capability.ANALYZE_MANUAL_UPLOAD), async
                 topClusters: topClusters, // Top N clusters (for UI)
               };
               
+              // Cluster collapsing: Collapse atomic issues into grouped clusters for topIssuesV2
+              const { collapseIssuesToClusters } = await import('../analysis/issue-cluster-collapse.js');
+              const groupedIssues = collapseIssuesToClusters(rankedResult.allIssues);
+              
               // Store in report
-              (out.report as any).allIssuesV2 = rankedResult.allIssues;
-              (out.report as any).topIssuesV2 = rankedResult.topIssues; // Keep for backwards compatibility
+              (out.report as any).allIssuesV2 = rankedResult.allIssues; // Atomic issues (unchanged)
+              (out.report as any).topIssuesV2 = groupedIssues; // Grouped/clustered issues (one per clusterId)
               (out.report as any).topAggregatedIssues = topClusters; // Top 10 clusters (backwards compat)
               (out.report as any).aggregatedIssues = clusteringResult.aggregatedIssues; // All aggregated issues (backwards compat)
               (out.report as any).issueClustersV2 = issueClustersV2; // F1: New structured output

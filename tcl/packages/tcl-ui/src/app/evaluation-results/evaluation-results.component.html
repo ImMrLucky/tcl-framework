@@ -301,8 +301,86 @@
       <!-- B) Issues Section -->
       <div class="main-content">
         
-        <!-- G2: Top Issues (Clustered) - Manager-grade view -->
-        <mat-card class="issues-card issue-clusters" *ngIf="issueClustersV2 && issueClustersV2.topClusters.length > 0">
+        <!-- Top Issues (Grouped) - Manager-grade view -->
+        <mat-card class="issues-card issue-grouped" *ngIf="topIssuesV2 && topIssuesV2.length > 0">
+          <mat-card-header>
+            <mat-card-title>
+              <mat-icon>group_work</mat-icon>
+              Top Issues (Grouped) - {{ topIssuesV2.length }} Clustered Findings
+            </mat-card-title>
+            <mat-card-subtitle>
+              Clustered findings ranked by risk (recommended) | 
+              Total atomic issues: {{ getTotalAtomicIssuesInGrouped() }}
+            </mat-card-subtitle>
+          </mat-card-header>
+          <mat-card-content>
+            <div class="grouped-issues-summary">
+              <h3>Top Issues (Grouped) - {{ topIssuesV2.length }} Clustered Findings</h3>
+              <p class="info-text">
+                Issues are grouped by cluster to reduce duplication. Each row represents multiple atomic issues that share the same root cause.
+              </p>
+              <div class="grouped-issue-list">
+                <div class="grouped-issue-item" *ngFor="let grouped of paginatedGroupedIssues; let i = index"
+                     [class.critical]="grouped.severity === 'critical'"
+                     [class.high]="grouped.severity === 'high'"
+                     [class.medium]="grouped.severity === 'medium'"
+                     [class.low]="grouped.severity === 'low'"
+                     (click)="openGroupedIssueDetail(grouped)">
+                  <div class="grouped-issue-header">
+                    <span class="grouped-rank">#{{ groupedPageIndex * groupedPageSize + i + 1 }}</span>
+                    <span class="grouped-type">{{ grouped.type }}</span>
+                    <span class="grouped-category">{{ grouped.category }}</span>
+                    <!-- Severity chip -->
+                    <span class="grouped-severity" [class]="'severity-' + (grouped.severity || 'unknown')"
+                          [matTooltip]="getGroupedVerificationTooltip(grouped)"
+                          matTooltipPosition="above">
+                      {{ getGroupedSeverityDisplay(grouped) }}
+                    </span>
+                    <!-- Verification badge -->
+                    <span class="verification-badge" 
+                          [class.transcript-only]="grouped.verification?.level === 'TRANSCRIPT_ONLY' || grouped.verification?.level === 'TRANSCRIPT_PROVABLE'"
+                          [matTooltip]="getGroupedVerificationTooltip(grouped)"
+                          [class.verified]="grouped.verification?.level === 'EXTERNAL_VERIFIED'">
+                      {{ getGroupedVerificationLabel(grouped) }}
+                    </span>
+                    <!-- Atomic issue count -->
+                    <span class="atomic-count" *ngIf="grouped.rollup.atomicIssueCount > 1">
+                      {{ grouped.rollup.atomicIssueCount }} atomic issues
+                    </span>
+                    <span class="grouped-risk-score" 
+                          [matTooltip]="'Risk Score: ' + grouped.score + '%'"
+                          matTooltipPosition="above">Score: {{ grouped.score }}</span>
+                  </div>
+                  <div class="grouped-issue-body">
+                    <div class="grouped-summary">{{ grouped.what.issueSummary }}</div>
+                    <div class="grouped-meta">
+                      <span class="turn-range" *ngIf="grouped.rollup.involvedTurnIndexes && grouped.rollup.involvedTurnIndexes.length > 0">
+                        <mat-icon class="meta-icon">chat</mat-icon> 
+                        Turns {{ grouped.rollup.involvedTurnIndexes[0] }}-{{ grouped.rollup.involvedTurnIndexes[grouped.rollup.involvedTurnIndexes.length - 1] }}
+                      </span>
+                      <span *ngIf="grouped.reviewRequired" class="review-required">Review Required</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+              
+              <!-- Pagination for grouped issues -->
+              <mat-paginator
+                *ngIf="topIssuesV2"
+                [length]="topIssuesV2.length"
+                [pageSize]="groupedPageSize"
+                [pageIndex]="groupedPageIndex"
+                [pageSizeOptions]="groupedPageSizeOptions"
+                [showFirstLastButtons]="true"
+                (page)="onGroupedPageChange($event)"
+                aria-label="Select page of grouped issues">
+              </mat-paginator>
+            </div>
+          </mat-card-content>
+        </mat-card>
+
+        <!-- G2: Top Issues (Clustered) - Manager-grade view (Legacy, using issueClustersV2) -->
+        <mat-card class="issues-card issue-clusters" *ngIf="issueClustersV2 && issueClustersV2.topClusters.length > 0 && (!topIssuesV2 || topIssuesV2.length === 0)">
           <mat-card-header>
             <mat-card-title>
               <mat-icon>group_work</mat-icon>
@@ -379,23 +457,23 @@
           </mat-card-content>
         </mat-card>
         
-        <!-- G3: All Issues (Atomic) - Auditor-grade view -->
+        <!-- All Findings (Atomic) - Auditor-grade view -->
         <mat-card class="issues-card issue-v2" *ngIf="allIssuesV2.length > 0">
           <mat-card-header>
             <mat-card-title>
               <mat-icon>list</mat-icon>
-              All Issues (Atomic) - {{ allIssuesV2.length }} Issues
+              All Findings (Atomic) - {{ allIssuesV2.length }} Issues
             </mat-card-title>
             <mat-card-subtitle *ngIf="issueSummaryV2">
-              All atomic issues sorted by risk score | 
+              Every detected issue/edge, ranked by risk (audit & debugging) | 
               By Type: {{ getIssueV2TypeSummary() }} | 
               By Severity: {{ getIssueV2SeveritySummary() }}
             </mat-card-subtitle>
           </mat-card-header>
           <mat-card-content>
-            <!-- Top Issues Summary with Pagination -->
+            <!-- All Findings Summary with Pagination -->
             <div class="top-issues-summary" *ngIf="allIssuesV2.length > 0">
-              <h3>All Issues ({{ allIssuesV2.length }}) - Ranked by Risk Score</h3>
+              <h3>All Findings ({{ allIssuesV2.length }}) - Ranked by Risk Score</h3>
               <div class="issue-v2-list">
                 <div class="issue-v2-item" *ngFor="let issue of paginatedTopIssues; let i = index" 
                      [class.critical]="issue.severity === 'critical'"

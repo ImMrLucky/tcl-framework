@@ -468,6 +468,79 @@ export interface AggregatedIssue {
   };
 }
 
+/**
+ * GroupedIssue: Cluster rollup for "Top Issues (Grouped)" table
+ * One row per clusterId, representing all atomic issues in that cluster
+ */
+export interface GroupedIssue {
+  clusterId: string;
+  clusterKey: string;
+
+  category: string;       // e.g. "consistency"
+  type: string;           // e.g. "CONTRADICTION" or "PCI"
+  topicId?: string;       // best available topicId in cluster
+  slotKey?: string;       // best available slotKey in cluster
+
+  severity: "low"|"medium"|"high"|"critical";
+  severityDisplay: "low"|"medium"|"high"; // keep consistent with UI rules
+
+  riskScore: number;      // cluster risk score 0..1
+  score: number;          // 0..100 (derived from riskScore)
+
+  confidence: number;     // cluster confidence 0..1
+  impact?: "low"|"medium"|"high"; // optional: cluster impact (derived)
+
+  reviewRequired: boolean;
+  verification: { 
+    level: VerificationLevelV2; 
+    reasonCodes?: string[] 
+  };
+
+  // Summary strings for manager UI
+  what: {
+    issueSummary: string;
+    issueDetail?: string;
+    representativeClaimText?: string;
+    primaryClaimId?: string;
+    relatedClaimIds?: string[];
+  };
+
+  // Drilldown + diagnostics
+  rollup: {
+    atomicIssueCount: number;
+    atomicIssueIds: string[];
+    issueKeys: string[];
+
+    involvedClaimIds: string[];
+    involvedTurnIndexes: number[];
+
+    // strongest edges to show "why"
+    topEdges?: Array<{
+      kind: "contradiction"|"support"|"grounding"|string;
+      claimA?: string;
+      claimB?: string;
+      weight?: number;
+    }>;
+
+    // references aggregated (quotes, doc refs)
+    refs?: Array<{
+      quote?: string;
+      sourceId?: string;
+      sourceType?: string; // TRANSCRIPT / DOC / etc
+      turnIndex?: number;
+    }>;
+  };
+
+  // Keep audit provenance
+  audit: {
+    scorerId: string;
+    createdAt: string;
+    engineVersion: string;
+    inputHash?: string;
+    configHash?: string;
+  };
+}
+
 export interface ExecutiveSummary {
   overallRiskScore: number;      // 0..100
   truthScore: number;            // existing
