@@ -468,11 +468,46 @@ export class AuditService {
 
   /**
    * Get evaluation by ID
+   * F2: Uses v2 API by default (canonical response, no legacy fields)
    */
-  getEvaluation(evaluationId: string): Observable<{ evaluation: Evaluation }> {
-    return this.http.get<{ evaluation: Evaluation }>(
-      `${this.apiBase}/evaluations/${evaluationId}`
+  getEvaluation(evaluationId: string, useV2: boolean = true): Observable<{ evaluation: Evaluation }> {
+    const url = useV2 
+      ? `${this.apiBase}/evaluations/${evaluationId}?v=2`
+      : `${this.apiBase}/evaluations/${evaluationId}`;
+    
+    return this.http.get<{ evaluation: Evaluation }>(url).pipe(
+      // G2: Contract test - runtime assertion in dev mode
+      map(response => {
+        // Check for forbidden keys in development (when not in production build)
+        if (typeof window !== 'undefined' && !(window as any).__PRODUCTION__) {
+          this.checkForForbiddenKeys(response);
+        }
+        return response;
+      })
     );
+  }
+  
+  /**
+   * G2: Contract test - check for forbidden legacy keys
+   */
+  private checkForForbiddenKeys(response: any): void {
+    const forbiddenKeys = ['scoreBreakdown', 'severityDisplay'];
+    const issues = [
+      ...(response.evaluation?.report?.allIssuesV2 || []),
+      ...(response.evaluation?.report?.topIssuesV2 || []),
+      ...(response.evaluation?.report?.issues?.atomic || []),
+      ...(response.evaluation?.report?.issues?.grouped || []),
+    ];
+    
+    for (const issue of issues) {
+      for (const key of forbiddenKeys) {
+        if (key in issue) {
+          console.error(`🚨 FORBIDDEN KEY DETECTED: ${key} in issue ${issue.issueId || issue.clusterId}`);
+          console.error('Issue:', issue);
+          throw new Error(`V2 API contract violation: forbidden key "${key}" found in response. This indicates legacy field emission in the backend.`);
+        }
+      }
+    }
   }
 
   /**

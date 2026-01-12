@@ -92,7 +92,7 @@ interface IssueV2 {
   type: 'CONTRADICTION' | 'UNVERIFIED_CLAIM' | 'UNSUPPORTED_CLAIM' | 'NUMERIC_MISMATCH' | 'COMMITMENT_INCONSISTENCY' | 'FEE_DISCLOSURE_RISK' | 'DATA_INTEGRITY' | 'OTHER';
   category: 'evidence' | 'consistency' | 'compliance' | 'billing' | 'disclosure' | 'data_integrity' | 'other';
   severity: 'low' | 'medium' | 'high' | 'critical';
-  severityDisplay?: 'low' | 'medium' | 'high'; // What UI shows (capped in transcript-only)
+  // severity removed - use severity field directly
   impact?: 'low' | 'medium' | 'high'; // How bad if true (not affected by mode)
   riskScore: number;
   score?: number; // Numeric for sorting (0..100)
@@ -215,7 +215,7 @@ interface GroupedIssue {
   topicId?: string;
   slotKey?: string;
   severity: 'low' | 'medium' | 'high' | 'critical';
-  severityDisplay: 'low' | 'medium' | 'high';
+  // severity removed - use severity field directly
   riskScore: number;
   score: number;
   confidence: number;
@@ -802,7 +802,7 @@ export class EvaluationResultsComponent implements OnInit {
    * Get severity display for grouped issue
    */
   getGroupedSeverityDisplay(grouped: GroupedIssue): string {
-    return (grouped.severityDisplay || grouped.severity || 'unknown').toUpperCase();
+    return (grouped.severity || 'unknown').toUpperCase();
   }
 
   /**
@@ -1568,8 +1568,7 @@ getMetricTooltip(metric: string): string {
    * Get severity display label for UI (respects transcript-only caps)
    */
   getSeverityDisplay(issue: IssueV2): string {
-    const severityDisplay = (issue as any).severityDisplay || issue.severity;
-    return severityDisplay.toUpperCase();
+    return (issue.severity || 'unknown').toUpperCase();
   }
 
   /**
@@ -1590,10 +1589,10 @@ getMetricTooltip(metric: string): string {
 
   getVerificationTooltip(issue: IssueV2): string {
     const impactSeverity = issue.severity ? issue.severity.toUpperCase() : 'UNKNOWN';
-    const displaySeverity = issue.severityDisplay ? issue.severityDisplay.toUpperCase() : impactSeverity;
-    let tooltip = `Impact Severity: ${impactSeverity}`;
-    if (issue.severityDisplay && issue.severity && issue.severityDisplay !== issue.severity.toLowerCase()) {
-      tooltip += `\nDisplay Severity: ${displaySeverity} (downgraded for transcript-only)`;
+    const displaySeverity = (issue.severity || 'unknown').toUpperCase();
+    let tooltip = `Severity: ${displaySeverity}`;
+    if (issue.impact && issue.severity && issue.impact !== issue.severity.toLowerCase()) {
+      tooltip += `\nImpact: ${issue.impact.toUpperCase()}`;
     }
     tooltip += `\nVerification: ${this.getVerificationLabel(issue)}`;
     return tooltip;
@@ -1611,7 +1610,7 @@ getMetricTooltip(metric: string): string {
    * Get severity display string for issue (uppercase, for UI rendering)
    */
   getIssueSeverityDisplay(issue: IssueV2): string {
-    return (issue.severityDisplay || issue.severity || 'unknown').toUpperCase();
+    return (issue.severity || 'unknown').toUpperCase();
   }
 
   /**
@@ -1627,8 +1626,7 @@ getMetricTooltip(metric: string): string {
    * In transcript-only mode, even high impact issues should not show as "high risk"
    */
   shouldShowAsHighRisk(issue: IssueV2): boolean {
-    const severityDisplay = (issue as any).severityDisplay || issue.severity;
-    return severityDisplay === 'high' || severityDisplay === 'critical';
+    return issue.severity === 'high' || issue.severity === 'critical';
   }
 
   /**

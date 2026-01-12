@@ -182,3 +182,120 @@ export function toEvaluationSlimDto(evaluation: any): EvaluationSlimDto {
   };
 }
 
+/**
+ * B1: V2 DTO - Canonical v2 response shape (no legacy fields)
+ * Strips scoreBreakdown and severityDisplay from all issues
+ */
+export interface EvaluationV2Dto {
+  id: string;
+  org_id: string;
+  project_id: string;
+  env: string;
+  conversation_id: string | null;
+  scores: {
+    truth?: number;
+    overall?: number;
+    coherence?: number;
+    consistency?: number;
+    spectral?: {
+      coherenceScore?: number;
+      contradictionEnergy?: number;
+      supportEnergy?: number;
+      circularityScore?: number;
+      spectralGap?: number;
+      cycleMass?: number;
+      heatTrace?: number;
+    };
+    counts?: {
+      claims?: number;
+      contradicted?: number;
+      ungrounded?: number;
+      supported?: number;
+    };
+  };
+  refusal: boolean;
+  scorer_id: string | null;
+  engine_version: string;
+  latency_ms: number;
+  created_at: string;
+  
+  report?: {
+    issues?: {
+      atomic: any[];
+      grouped: any[];
+    };
+    topIssuesV2?: any[];
+    allIssuesV2?: any[];
+    issueSummaryV2?: any;
+    claims?: any[];
+    graph?: {
+      contradictions?: any[];
+      supports?: any[];
+    };
+    spectral?: any;
+    executiveSummary?: any;
+    evalMode?: any;
+  };
+}
+
+/**
+ * Strip legacy fields from an issue (v2 canonical shape)
+ */
+function stripLegacyFields(issue: any): any {
+  const { scoreBreakdown, severityDisplay, ...cleanIssue } = issue;
+  
+  // Recursively clean nested objects
+  if (cleanIssue.evidence?.verification) {
+    // Keep evidence.verification but ensure it matches top-level verification
+    // (top-level verification is canonical)
+  }
+  
+  return cleanIssue;
+}
+
+/**
+ * Convert database evaluation row to V2 DTO (canonical, no legacy fields)
+ */
+export function toEvaluationV2Dto(evaluation: any): EvaluationV2Dto {
+  const dto: EvaluationV2Dto = {
+    id: evaluation.id,
+    org_id: evaluation.org_id,
+    project_id: evaluation.project_id,
+    env: evaluation.env,
+    conversation_id: evaluation.conversation_id,
+    scores: evaluation.scores || {},
+    refusal: evaluation.refusal || false,
+    scorer_id: evaluation.scorer_id,
+    engine_version: evaluation.engine_version,
+    latency_ms: evaluation.latency_ms,
+    created_at: evaluation.created_at,
+  };
+
+  if (evaluation.report) {
+    // Clean issues: remove scoreBreakdown and severityDisplay
+    const atomicIssues = (evaluation.report.allIssuesV2 || evaluation.report.issues?.atomic || []).map(stripLegacyFields);
+    const groupedIssues = (evaluation.report.topIssuesV2 || evaluation.report.issues?.grouped || []).map(stripLegacyFields);
+    
+    dto.report = {
+      issues: {
+        atomic: atomicIssues,
+        grouped: groupedIssues,
+      },
+      // Legacy aliases for backward compatibility (but cleaned)
+      topIssuesV2: groupedIssues,
+      allIssuesV2: atomicIssues,
+      issueSummaryV2: evaluation.report.issueSummaryV2,
+      claims: evaluation.report.claims,
+      graph: evaluation.report.graph ? {
+        contradictions: evaluation.report.graph.contradictions,
+        supports: evaluation.report.graph.supports,
+      } : undefined,
+      spectral: evaluation.report.spectral,
+      executiveSummary: evaluation.report.executiveSummary,
+      evalMode: evaluation.report.evalMode,
+    };
+  }
+
+  return dto;
+}
+

@@ -50,9 +50,8 @@ export function computeIssueSummaryV2(issues: IssueV2[]): IssueSummaryV2 {
     const category = issue.category || 'other';
     byCategory[category] = (byCategory[category] || 0) + 1;
 
-    // Count by severity: use severityDisplay ?? severity ?? "medium"
-    // This ensures the summary matches what the UI displays
-    const sev = (issue.severityDisplay ?? issue.severity ?? 'medium') as SeverityV2;
+    // Count by severity: use severity (canonical)
+    const sev = (issue.severity ?? 'medium') as SeverityV2;
     
     // Normalize severity to valid values only
     if (sev === 'low' || sev === 'medium' || sev === 'high' || sev === 'critical') {

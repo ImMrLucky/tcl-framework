@@ -308,10 +308,9 @@ export interface IssueV2 {
 
   type: IssueTypeV2;
   category: IssueCategoryV2;
-  severity: SeverityV2;            // computed via ranking (deprecated, use severityDisplay)
-  severityDisplay: SeverityDisplayV2; // What UI shows (capped in transcript-only)
+  severity: SeverityV2;            // Canonical severity (high/medium/low)
   impact: ImpactV2;                // How bad if true (not affected by mode)
-  riskScore: number;               // 0..1 normalized (computed) - deprecated, use score
+  riskScore: number;               // 0..1 normalized (computed)
   score: number;                   // Numeric for sorting (0..100)
   confidence: number;              // 0..1 (based on edge weights / extractor confidence)
   reviewRequired: boolean;
@@ -321,32 +320,15 @@ export interface IssueV2 {
     reasonCodes: string[];         // e.g. ["NO_EXTERNAL_EVIDENCE"]
   };
   
-  // D2: scoreBreakdown from risk-ranking (enterprise requirement)
-  scoreBreakdown?: {
-    impact01: number;
-    evidence01: number;
-    signal01: number;
-    category01: number;
-    weights: {
-      impact: number;
-      evidence: number;
-      signal: number;
-      category: number;
-    };
-    risk01Raw: number;
-    risk01Clamped: number;
-    reasons: string[];
-  };
-  
-  scoring?: {
+  scoring: {
     components: {
       impact01: number;
       evidence01: number;
       signal01: number;
       category01: number;
-      verificationMultiplier?: number; // Optional for backwards compatibility
-      risk01Raw?: number; // A3: Add to components
-      risk01Final?: number; // A3: Add to components
+      verificationMultiplier: number;
+      risk01Raw: number;
+      risk01Final: number;
     };
     weights: {
       impact: number;
@@ -355,7 +337,7 @@ export interface IssueV2 {
       category: number;
     };
     reasons: string[];
-    modeCapsApplied?: string[]; // A3: Track which caps were applied
+    modeCapsApplied?: string[]; // Track which caps were applied (optional, only if caps were applied)
   };
   
   severityReason?: string[];        // Human-readable reasons for severity
@@ -485,7 +467,6 @@ export interface GroupedIssue {
   slotKey?: string;       // best available slotKey in cluster
 
   severity: "low"|"medium"|"high"|"critical";
-  severityDisplay: "low"|"medium"|"high"; // keep consistent with UI rules
 
   riskScore: number;      // cluster risk score 0..1
   score: number;          // 0..100 (derived from riskScore)

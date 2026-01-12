@@ -372,7 +372,6 @@ function createContradictionIssue(
     type: 'CONTRADICTION',
     category: 'consistency',
     severity: 'medium', // Will be recomputed by ranking
-    severityDisplay: 'medium' as const, // Will be recomputed by scoring
     impact: 'high' as const, // Contradictions are high impact
     riskScore: 0, // Will be computed by ranking
     score: 0, // Will be computed by scoring
@@ -433,6 +432,7 @@ function createContradictionIssue(
       legalHoldSuggested: false, // Will be recomputed by ranking
       disclaimers,
     },
+    scoring: createDefaultScoring(),
     audit: {
       createdAt: new Date().toISOString(),
       engineVersion: input.audit.engineVersion,
@@ -524,7 +524,6 @@ function createUnverifiedClaimIssue(
     type: 'UNVERIFIED_CLAIM',
     category: 'evidence',
     severity: 'low', // Will be recomputed by ranking
-    severityDisplay: 'low' as const, // Will be recomputed by scoring
     impact: 'low' as const, // Unverified claims are low impact
     riskScore: 0, // Will be computed by ranking
     score: 0, // Will be computed by scoring
@@ -575,6 +574,7 @@ function createUnverifiedClaimIssue(
       legalHoldSuggested: false,
       disclaimers,
     },
+    scoring: createDefaultScoring(),
     audit: {
       createdAt: new Date().toISOString(),
       engineVersion: input.audit.engineVersion,
@@ -623,7 +623,6 @@ function createUngroundedClaimIssue(
     type: 'UNGROUNDED',
     category: 'evidence',
     severity: 'medium', // Will be recomputed by ranking
-    severityDisplay: 'medium' as const, // Will be recomputed by scoring
     impact: 'low' as const, // Ungrounded claims are low impact
     riskScore: 0, // Will be computed by ranking
     score: 0, // Will be computed by scoring
@@ -666,6 +665,7 @@ function createUngroundedClaimIssue(
       legalHoldSuggested: false,
       disclaimers,
     },
+    scoring: createDefaultScoring(),
     audit: {
       createdAt: new Date().toISOString(),
       engineVersion: input.audit.engineVersion,
@@ -781,7 +781,6 @@ function createRiskSignalIssue(
     type: 'RISK_SIGNAL',
     category,
     severity: 'high', // Will be recomputed by ranking
-    severityDisplay: 'high' as const, // Will be recomputed by scoring (may be capped)
     impact: 'high' as const, // Risk signals are high impact
     riskScore: 0, // Will be computed by ranking
     score: 0, // Will be computed by scoring
@@ -831,6 +830,7 @@ function createRiskSignalIssue(
       legalHoldSuggested: true, // Risk signals suggest legal hold
       disclaimers,
     },
+    scoring: createDefaultScoring(),
     audit: {
       createdAt: new Date().toISOString(),
       engineVersion: input.audit.engineVersion,

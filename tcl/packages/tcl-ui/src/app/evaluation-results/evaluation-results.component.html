@@ -328,8 +328,8 @@
                   <div class="issue-v2-header">
                     <span class="issue-rank">#{{ pageIndex * pageSize + i + 1 }}</span>
                     <span class="issue-type">{{ issue.type }}</span>
-                    <!-- Chip A: Severity Display (severityDisplay) - what UI shows (may be capped in transcript-only) -->
-                    <span class="issue-severity" [class]="'severity-' + (issue.severityDisplay || issue.severity || 'unknown')"
+                    <!-- Chip A: Severity (canonical) -->
+                    <span class="issue-severity" [class]="'severity-' + (issue.severity || 'unknown')"
                           [matTooltip]="getVerificationTooltip(issue)"
                           matTooltipPosition="above">
                       {{ getIssueSeverityDisplay(issue) }}

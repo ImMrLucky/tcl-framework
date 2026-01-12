@@ -260,8 +260,7 @@ export function convertIssueV3ToV2(issue: TclIssueV3): IssueV2 {
     conversationId: '', // Will be set by caller
     type: issue.type as any,
     category: issue.category as any,
-    severity: issue.impactSeverity, // Map impactSeverity to severity
-    severityDisplay: issue.impactSeverity === 'critical' ? 'high' : issue.impactSeverity, // Map for display
+    severity: issue.impactSeverity === 'critical' ? 'high' : issue.impactSeverity, // Map critical to high (canonical)
     impact: issue.impactSeverity === 'critical' ? 'high' : issue.impactSeverity === 'high' ? 'high' : issue.impactSeverity === 'medium' ? 'medium' : 'low',
     riskScore: issue.riskScore,
     score: Math.round(issue.riskScore * 100),

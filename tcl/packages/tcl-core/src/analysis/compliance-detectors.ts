@@ -91,8 +91,7 @@ function detectCVVStorage(
         conversationId,
         type: 'PCI' as IssueTypeV2,
         category: 'compliance' as IssueCategoryV2,
-        severity: 'critical',
-        severityDisplay: 'high', // SeverityDisplayV2 only allows low/medium/high, cap critical to high
+        severity: 'high', // Critical severity is mapped to high (canonical)
         impact: 'high',
         riskScore: 0.95, // Will be recomputed, but set high for compliance
         score: 95,
@@ -129,12 +128,48 @@ function detectCVVStorage(
             ? ['This finding is grounded in transcript content only and is not externally verified.']
             : [],
         },
-        audit: {
-          createdAt: new Date().toISOString(),
-          engineVersion: process.env.ENGINE_VERSION || '0.2.0',
-          scorerId: 'compliance-detector-v1',
+        scoring: {
+          components: {
+            impact01: 0,
+            evidence01: 0,
+            signal01: 0,
+            category01: 0,
+            verificationMultiplier: 1,
+            risk01Raw: 0,
+            risk01Final: 0,
+          },
+          weights: {
+            impact: 0.4,
+            evidence: 0.3,
+            signal: 0.2,
+            category: 0.1,
+          },
+          reasons: [],
         },
-      });
+      scoring: {
+        components: {
+          impact01: 0,
+          evidence01: 0,
+          signal01: 0,
+          category01: 0,
+          verificationMultiplier: 1,
+          risk01Raw: 0,
+          risk01Final: 0,
+        },
+        weights: {
+          impact: 0.4,
+          evidence: 0.3,
+          signal: 0.2,
+          category: 0.1,
+        },
+        reasons: [],
+      },
+      audit: {
+        createdAt: new Date().toISOString(),
+        engineVersion: process.env.ENGINE_VERSION || '0.2.0',
+        scorerId: 'compliance-detector-v1',
+      },
+    });
     }
   }
   
@@ -197,7 +232,6 @@ function detectRecordingConsent(
       type: 'RECORDING_CONSENT' as IssueTypeV2,
       category: 'compliance' as IssueCategoryV2,
       severity: 'high',
-      severityDisplay: 'high',
       impact: 'high',
       riskScore: 0.85,
       score: 85,
@@ -242,6 +276,24 @@ function detectRecordingConsent(
         disclaimers: evidenceMode === 'TRANSCRIPT_ONLY' 
           ? ['This finding is grounded in transcript content only and is not externally verified.']
           : [],
+        },
+      scoring: {
+        components: {
+          impact01: 0,
+          evidence01: 0,
+          signal01: 0,
+          category01: 0,
+          verificationMultiplier: 1,
+          risk01Raw: 0,
+          risk01Final: 0,
+        },
+        weights: {
+          impact: 0.4,
+          evidence: 0.3,
+          signal: 0.2,
+          category: 0.1,
+        },
+        reasons: [],
       },
       audit: {
         createdAt: new Date().toISOString(),
@@ -298,7 +350,6 @@ function detectPIICollection(
         type: 'PII_COLLECTION' as IssueTypeV2,
         category: 'compliance' as IssueCategoryV2,
         severity: 'high',
-        severityDisplay: 'high',
         impact: 'high',
         riskScore: 0.80,
         score: 80,
@@ -335,12 +386,30 @@ function detectPIICollection(
             ? ['This finding is grounded in transcript content only and is not externally verified.']
             : [],
         },
-        audit: {
-          createdAt: new Date().toISOString(),
-          engineVersion: process.env.ENGINE_VERSION || '0.2.0',
-          scorerId: 'compliance-detector-v1',
+      scoring: {
+        components: {
+          impact01: 0,
+          evidence01: 0,
+          signal01: 0,
+          category01: 0,
+          verificationMultiplier: 1,
+          risk01Raw: 0,
+          risk01Final: 0,
         },
-      });
+        weights: {
+          impact: 0.4,
+          evidence: 0.3,
+          signal: 0.2,
+          category: 0.1,
+        },
+        reasons: [],
+      },
+      audit: {
+        createdAt: new Date().toISOString(),
+        engineVersion: process.env.ENGINE_VERSION || '0.2.0',
+        scorerId: 'compliance-detector-v1',
+      },
+    });
     }
   }
   

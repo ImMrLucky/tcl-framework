@@ -281,8 +281,8 @@ function scoreIssue(
   // Apply category-based minimums (e.g., CONTRADICTION involving MONEY/FEES/REFUND => min "high")
   severity = applyCategoryMinimums(severity, issue, config);
   
-  // Step 7: Compute severityDisplay with conditional downgrade (not blanket cap)
-  const severityDisplay = computeSeverityDisplay(
+  // Step 7: Compute final severity (may be downgraded for transcript-only unverified claims)
+  const finalSeverity = computeSeverityDisplay(
     severity,
     issue.verification.level,
     issue.type,
@@ -300,14 +300,14 @@ function scoreIssue(
   const finalImpact: ImpactV2 = issue.impact || 
     (impact01 >= impactThresholds.high ? 'high' : 
      impact01 >= impactThresholds.medium ? 'medium' : 'low');
-  // Note: impact is NOT affected by transcript-only mode (only severityDisplay is capped)
+  // Note: impact is NOT affected by transcript-only mode (only severity may be downgraded)
   
   // Step 8: Build scoring explanation (enterprise requirement)
   // scoringReasons already initialized above
   
   // B2: Add reason if impact != severity
-  if (finalImpact === 'high' && severity !== 'high' && severity !== 'critical') {
-    scoringReasons.push(`High impact but ${severity} severity due to ${issue.verification.level === 'TRANSCRIPT_ONLY' ? 'transcript-only evidence level' : 'evidence limitations'}`);
+  if (finalImpact === 'high' && finalSeverity !== 'high' && finalSeverity !== 'critical') {
+    scoringReasons.push(`High impact but ${finalSeverity} severity due to ${issue.verification.level === 'TRANSCRIPT_ONLY' ? 'transcript-only evidence level' : 'evidence limitations'}`);
   }
   
   // Impact reason
@@ -341,42 +341,20 @@ function scoreIssue(
     scoringReasons.push(`High-risk category: ${issue.category}`);
   }
   
-  // Severity display downgrade reason (only for UNVERIFIED types in transcript-only)
+  // Severity downgrade reason (only for UNVERIFIED types in transcript-only)
   if (scoringContext?.mode === 'transcript_only' && issue.verification.level === 'TRANSCRIPT_ONLY' && issue.type === 'UNVERIFIED_CLAIM') {
-    if (severityDisplay !== severity.toLowerCase() && severityDisplay !== severity) {
-      scoringReasons.push('Display severity downgraded for unverified claim in transcript-only mode');
+    if (finalSeverity !== severity.toLowerCase() && finalSeverity !== severity) {
+      scoringReasons.push('Severity downgraded for unverified claim in transcript-only mode');
     }
   }
   
-  // A3: Return full scoreBreakdown from risk-ranking (enterprise requirement)
-  const scoreBreakdown = {
-    impact01,
-    evidence01,
-    signal01,
-    category01,
-    verificationMultiplier,
-    risk01Raw: risk01,
-    risk01Capped: cappedRisk01,
-    risk01Final: adjustedRisk01,
-    risk01Clamped: riskScore,
-    weights: {
-      impact: wImpact,
-      evidence: wEvidence,
-      signal: wSignal,
-      category: wCategory,
-    },
-    reasons: scoringReasons,
-    modeCapsApplied: modeCapsApplied.length > 0 ? modeCapsApplied : undefined,
-  };
-  
+  // B4: Return only canonical scoring structure (no scoreBreakdown)
   return {
     ...issue,
     impact: finalImpact,
     riskScore,
     score,
-    severity, // Canonical severity (impact severity, independent of mode)
-    severityDisplay, // UI convenience (may be downgraded for UNVERIFIED in transcript-only)
-    scoreBreakdown, // D2: Add scoreBreakdown to IssueV2
+    severity: finalSeverity, // Canonical severity (may be downgraded for transcript-only unverified)
     scoring: {
       components: {
         impact01: Math.round(impact01 * 1000) / 1000, // Round to 3 decimals
@@ -384,8 +362,8 @@ function scoreIssue(
         signal01: Math.round(signal01 * 1000) / 1000,
         category01: Math.round(category01 * 1000) / 1000,
         verificationMultiplier: Math.round(verificationMultiplier * 1000) / 1000,
-        risk01Raw: Math.round(risk01 * 1000) / 1000, // A3: Add to components
-        risk01Final: Math.round(adjustedRisk01 * 1000) / 1000, // A3: Add to components
+        risk01Raw: Math.round(risk01 * 1000) / 1000,
+        risk01Final: Math.round(adjustedRisk01 * 1000) / 1000,
       },
       weights: {
         impact: wImpact,

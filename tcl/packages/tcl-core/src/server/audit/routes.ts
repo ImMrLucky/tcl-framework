@@ -259,6 +259,7 @@ export function setupAuditRoutes(app: express.Application) {
       
       const { id } = req.params;
       const mode = req.query.mode as string; // 'slim' or undefined
+      const version = req.query.v as string; // '2' for v2 API
       
       const { data: evaluation, error } = await supabaseAdmin
         .from('evaluations')
@@ -271,7 +272,14 @@ export function setupAuditRoutes(app: express.Application) {
         return res.status(404).json({ error: "Evaluation not found" });
       }
       
-      // Use DTO to control response shape
+      // B1: V2 API - canonical response shape (no legacy fields)
+      if (version === '2') {
+        const { toEvaluationV2Dto } = await import('../dto/evaluation.dto.js');
+        const dto = toEvaluationV2Dto(evaluation);
+        return res.json({ evaluation: dto });
+      }
+      
+      // Legacy API (backward compatibility)
       const { toEvaluationDto, toEvaluationSlimDto } = await import('../dto/evaluation.dto.js');
       const dto = mode === 'slim' 
         ? toEvaluationSlimDto(evaluation)

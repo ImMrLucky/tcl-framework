@@ -49,9 +49,6 @@ export function toIssueDto(
     severity = rawIssue.risk.severity;
   }
   
-  // Extract severityDisplay (may be capped for transcript-only)
-  const severityDisplay = rawIssue.severityDisplay || rawIssue.risk?.severityDisplay || severity;
-  
   // Extract impact
   const impact = rawIssue.impact || rawIssue.risk?.impact || 'medium';
   
@@ -77,7 +74,6 @@ export function toIssueDto(
     type,
     category,
     severity: severity as 'low' | 'medium' | 'high' | 'critical',
-    severityDisplay: severityDisplay as 'low' | 'medium' | 'high',
     impact: impact as 'low' | 'medium' | 'high',
     riskScore,
     score,

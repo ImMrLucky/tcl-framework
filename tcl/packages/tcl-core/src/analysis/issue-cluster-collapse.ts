@@ -47,10 +47,6 @@ export function collapseIssuesToClusters(atomicIssues: IssueV2[]): GroupedIssue[
     );
     const clusterSeverity: SeverityV2 = highestRiskIssue.severity || 'low';
     
-    // severityDisplay: Use the severityDisplay of the highest-risk member
-    const clusterSeverityDisplay: SeverityDisplayV2 = 
-      (highestRiskIssue.severityDisplay || clusterSeverity) as SeverityDisplayV2;
-    
     // 4) verification: If any atomic issue is externally verified, mark cluster as verified
     const verificationLevels: VerificationLevelV2[] = clusterIssues
       .map(i => i.verification?.level)
@@ -163,7 +159,6 @@ export function collapseIssuesToClusters(atomicIssues: IssueV2[]): GroupedIssue[
       topicId: topicIds[0] || representativeIssue.topicId,
       slotKey: slotKeys[0] || representativeIssue.slotKey,
       severity: clusterSeverity,
-      severityDisplay: clusterSeverityDisplay,
       riskScore: maxRiskScore,
       score: Math.round(maxRiskScore * 100),
       confidence: maxConfidence,
