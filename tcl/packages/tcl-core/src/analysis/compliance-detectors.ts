@@ -146,24 +146,6 @@ function detectCVVStorage(
           },
           reasons: [],
         },
-      scoring: {
-        components: {
-          impact01: 0,
-          evidence01: 0,
-          signal01: 0,
-          category01: 0,
-          verificationMultiplier: 1,
-          risk01Raw: 0,
-          risk01Final: 0,
-        },
-        weights: {
-          impact: 0.4,
-          evidence: 0.3,
-          signal: 0.2,
-          category: 0.1,
-        },
-        reasons: [],
-      },
       audit: {
         createdAt: new Date().toISOString(),
         engineVersion: process.env.ENGINE_VERSION || '0.2.0',

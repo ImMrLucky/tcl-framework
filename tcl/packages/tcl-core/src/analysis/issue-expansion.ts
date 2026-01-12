@@ -25,6 +25,30 @@ import type {
 import { getRiskRankingConfig } from '../config/risk-ranking.js';
 import { deriveIssueSpeaker, speakerTypeToRole } from '../graph/transcript-normalizer.js';
 
+/**
+ * Create default scoring object (will be replaced by risk-ranking)
+ */
+function createDefaultScoring(): IssueV2['scoring'] {
+  return {
+    components: {
+      impact01: 0,
+      evidence01: 0,
+      signal01: 0,
+      category01: 0,
+      verificationMultiplier: 1,
+      risk01Raw: 0,
+      risk01Final: 0,
+    },
+    weights: {
+      impact: 0.4,
+      evidence: 0.3,
+      signal: 0.2,
+      category: 0.1,
+    },
+    reasons: [],
+  };
+}
+
 export interface IssueExpansionInput {
   claims: Claim[];
   contradictions: ContradictionEdge[];

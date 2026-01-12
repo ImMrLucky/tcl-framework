@@ -83,6 +83,24 @@ export function toIssueDto(
       level: rawIssue.verification?.level || rawIssue.verificationLevel || 'NONE',
       reasonCodes: rawIssue.verification?.reasonCodes || rawIssue.verification?.reasons || [],
     },
+    scoring: rawIssue.scoring || {
+      components: {
+        impact01: 0,
+        evidence01: 0,
+        signal01: 0,
+        category01: 0,
+        verificationMultiplier: 1,
+        risk01Raw: riskScore,
+        risk01Final: riskScore,
+      },
+      weights: {
+        impact: 0.4,
+        evidence: 0.3,
+        signal: 0.2,
+        category: 0.1,
+      },
+      reasons: [],
+    },
     who: {
       speaker: rawIssue.who?.speaker || rawIssue.speaker || 'UNKNOWN',
       turnIndex: rawIssue.who?.turnIndex ?? rawIssue.turnIndex,

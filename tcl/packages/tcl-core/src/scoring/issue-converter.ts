@@ -270,6 +270,24 @@ export function convertIssueV3ToV2(issue: TclIssueV3): IssueV2 {
       level: verificationLevelV2 as any,
       reasonCodes: issue.reasonCodes,
     },
+    scoring: {
+      components: {
+        impact01: 0,
+        evidence01: 0,
+        signal01: 0,
+        category01: 0,
+        verificationMultiplier: 1,
+        risk01Raw: issue.riskScore,
+        risk01Final: issue.riskScore,
+      },
+      weights: {
+        impact: 0.4,
+        evidence: 0.3,
+        signal: 0.2,
+        category: 0.1,
+      },
+      reasons: [],
+    },
     who: {
       speaker: 'UNKNOWN' as any,
       turnIndex: issue.trace.transcriptSpans?.[0]?.start,

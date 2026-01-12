@@ -306,7 +306,7 @@ function scoreIssue(
   // scoringReasons already initialized above
   
   // B2: Add reason if impact != severity
-  if (finalImpact === 'high' && finalSeverity !== 'high' && finalSeverity !== 'critical') {
+  if (finalImpact === 'high' && finalSeverity !== 'high') {
     scoringReasons.push(`High impact but ${finalSeverity} severity due to ${issue.verification.level === 'TRANSCRIPT_ONLY' ? 'transcript-only evidence level' : 'evidence limitations'}`);
   }
   
