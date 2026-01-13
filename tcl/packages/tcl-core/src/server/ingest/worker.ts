@@ -218,6 +218,7 @@ async function processTranscriptOnly(job: any, transcriptAsset: any): Promise<vo
     env: job.env,
     conversationId,
     transcript: normalized.text,
+    normalizedConversation: normalized.normalizedConversation, // Pass structured turns with speaker info
     userId: job.created_by_user_id,
     verificationLevel: 'TRANSCRIPT_ONLY',
     transcriptAssetId: transcriptAsset.id,
@@ -396,6 +397,7 @@ async function processAudioPlusTranscript(job: any, audioAsset: any, transcriptA
     env: job.env,
     conversationId,
     transcript: normalized.text,
+    normalizedConversation: normalized.normalizedConversation, // Pass structured turns with speaker info
     userId: job.created_by_user_id,
     verificationLevel: 'TRANSCRIPT_ONLY', // Analysis uses transcript, audio is for verification
     transcriptAssetId: transcriptAsset.id,
@@ -519,6 +521,7 @@ async function runAnalysis(input: {
   env: string;
   conversationId: string;
   transcript: string;
+  normalizedConversation?: any; // CRITICAL: Structured turns with speaker info from normalization
   userId: string;
   verificationLevel: string;
   transcriptAssetId: string;
@@ -577,6 +580,7 @@ async function runAnalysis(input: {
     options: {
       conversationId: input.conversationId,
       evidenceMode, // Pass evidence mode to orchestrator
+      normalizedConversation: input.normalizedConversation, // CRITICAL: Pass structured turns with speaker info
     } as any,
   };
 

@@ -19,6 +19,8 @@ export interface NormalizedTranscript {
   }>;
   language?: string;
   metadata?: Record<string, any>;
+  // CRITICAL: Preserve normalized conversation structure so speaker info isn't lost
+  normalizedConversation?: import('../ingestion/types.js').NormalizedConversation;
 }
 
 /**
@@ -67,6 +69,8 @@ export async function normalizeTranscript(
       turnsCount: normalized.turns.length,
       participantsCount: normalized.participants.length,
     },
+    // CRITICAL: Preserve the full normalized conversation so speaker info can be used in analysis
+    normalizedConversation: normalized,
   };
 }
 

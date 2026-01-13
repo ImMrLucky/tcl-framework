@@ -218,7 +218,7 @@ const TOPIC_PATTERNS: Record<string, RegExp> = {
   account: /\b(account|profile|settings)\b/i,
 };
 
-function extractTopics(text: string): string[] {
+export function extractTopics(text: string): string[] {
   const topics: string[] = [];
   for (const [topic, pattern] of Object.entries(TOPIC_PATTERNS)) {
     if (pattern.test(text)) {
@@ -228,11 +228,11 @@ function extractTopics(text: string): string[] {
   return topics;
 }
 
-function hasAbsoluteLanguage(text: string): boolean {
+export function hasAbsoluteLanguage(text: string): boolean {
   return /\b(always|never|guaranteed|definitely|absolutely|no way|any time|100%)\b/i.test(text);
 }
 
-function hasMoney(text: string): boolean {
+export function hasMoney(text: string): boolean {
   return /\$[\d,]+|\d+\s*(dollars?|cents?)/i.test(text);
 }
 

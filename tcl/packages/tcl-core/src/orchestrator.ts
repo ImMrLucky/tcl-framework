@@ -1,5 +1,14 @@
 import { ValidateInput, ValidateOutput, SpectralReport, Source, RunManifest, Claim, GraphDebugInfo } from "./types.js";
-import { extractClaims, extractClaimsWithTypes, type ExtractedClaim } from "./claim_extractor.js";
+import { 
+  extractClaims, 
+  extractClaimsWithTypes, 
+  type ExtractedClaim,
+  classifyClaimType,
+  isAuditableClaimType,
+  extractTopics,
+  hasAbsoluteLanguage,
+  hasMoney
+} from "./claim_extractor.js";
 import { attachEvidenceAndFindViolations } from "./evidence.js";
 import { findLogicViolations } from "./logic.js";
 import { blendScores, shouldRefuse, assessRunQuality } from "./scoring.js";
@@ -209,16 +218,70 @@ async function runUnifiedGraphPath(
   setTemplateConfig(templateId);
   log('debug', 'Orchestrator', `Template: ${templateId}`);
   
-  // Extract claims first using the existing extractor
+  // Extract claims - use normalized turns if available (preserves speaker info), otherwise fall back to text parsing
   timer.start('claim_extraction');
-  const isCallTranscript = transcript.includes('Agent:') || transcript.includes('Customer:') ||
-                           transcript.includes('AGENT:') || transcript.includes('CUSTOMER:');
+  let extractedClaims: ExtractedClaim[] = [];
   
-  // extractClaimsWithTypes is synchronous and returns { claims, allItems, stats }
-  const extractResult = extractClaimsWithTypes(transcript);
-  const extractedClaims = extractResult.claims;
+  const normalizedConversation = (options as any)?.normalizedConversation;
+  if (normalizedConversation?.turns && Array.isArray(normalizedConversation.turns) && normalizedConversation.turns.length > 0) {
+    // CRITICAL: Use normalized turns directly - they have proper speaker information
+    log('debug', 'Orchestrator', `Using normalized turns (${normalizedConversation.turns.length} turns) with speaker info`);
+    
+    // Extract claims from normalized turns, preserving speaker information
+    let claimIdx = 1;
+    for (const turn of normalizedConversation.turns) {
+      if (!turn.text || turn.text.trim().length < 8) continue;
+      
+      // Get participant info for speaker attribution
+      const participant = normalizedConversation.participants?.find((p: any) => p.id === turn.participantId);
+      const speakerRole = turn.role || participant?.role || 'unknown';
+      const speakerLabel = turn.speakerLabel || participant?.displayName;
+      
+      // Map role to speaker string format
+      let speaker: string | undefined;
+      if (speakerRole === 'agent' || speakerRole === 'AGENT') {
+        speaker = 'Agent';
+      } else if (speakerRole === 'customer' || speakerRole === 'CUSTOMER' || speakerRole === 'caller') {
+        speaker = 'Customer';
+      }
+      
+      // Extract claim type
+      const claimType = classifyClaimType(turn.text, speaker);
+      const isAuditable = isAuditableClaimType(claimType);
+      
+      if (isAuditable) {
+        extractedClaims.push({
+          id: `c${claimIdx++}`,
+          text: turn.text,
+          confidence: 0, // Will be computed from graph
+          evidence: [],
+          meta: {
+            speaker,
+            speakerType: speakerRole === 'agent' ? 'agent' : speakerRole === 'customer' ? 'customer' : 'unknown',
+            speakerLabel,
+            turnIndex: turn.turnIndex,
+          },
+          claimType,
+          isAuditable: true,
+          topicTags: extractTopics(turn.text),
+          hasAbsoluteLanguage: hasAbsoluteLanguage(turn.text),
+          hasMoney: hasMoney(turn.text),
+        });
+      }
+    }
+    
+    log('debug', 'Orchestrator', `Extracted ${extractedClaims.length} claims from normalized turns`);
+  } else {
+    // Fallback: parse from plain text (loses speaker info)
+    const isCallTranscript = transcript.includes('Agent:') || transcript.includes('Customer:') ||
+                             transcript.includes('AGENT:') || transcript.includes('CUSTOMER:');
+    
+    const extractResult = extractClaimsWithTypes(transcript);
+    extractedClaims = extractResult.claims;
+    log('debug', 'Orchestrator', `Extracted ${extractedClaims.length} claims from plain text (no normalized turns available)`);
+  }
+  
   timer.end('claim_extraction');
-  log('debug', 'Orchestrator', `Extracted ${extractedClaims.length} claims`, { duration: timer.duration('claim_extraction') });
   
   if (extractedClaims.length === 0) {
     log('warn', 'Orchestrator', 'No claims extracted, returning empty result');
@@ -230,14 +293,16 @@ async function runUnifiedGraphPath(
   const rawClaims = extractedClaims.map((c, i) => ({
     id: c.id || `c${i}`,
     text: c.text,
-    speakerRole: normalizeSpeaker(c.meta?.speaker),
+    speakerRole: c.meta?.speakerType === 'agent' ? 'agent' : 
+                 c.meta?.speakerType === 'customer' ? 'customer' : 
+                 normalizeSpeaker(c.meta?.speaker),
     span: { 
       turnId: `turn-${c.meta?.turnIndex ?? i}`, 
       startChar: 0, 
       endChar: c.text.length 
     },
     modality: undefined, // Will be detected by graph builder
-    meta: c.meta,
+    meta: c.meta, // CRITICAL: Preserve all meta including speakerType and speakerLabel
   }));
   
   // Build the unified graph
