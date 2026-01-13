@@ -309,14 +309,37 @@ async function runUnifiedGraphPath(
     
     // Preserve speaker information from graph node meta (which came from original extracted claims)
     // CRITICAL: Preserve speakerType and speakerLabel so issues can correctly identify speakers
+    // Derive from multiple sources: nodeMeta, speakerRole, or fallback to 'unknown'
     const nodeMeta = c.meta || {};
-    const speakerType = nodeMeta.speakerType || 
-      (c.speakerRole === 'agent' ? 'agent' : 
-       c.speakerRole === 'customer' ? 'customer' : 'unknown');
-    const speakerLabel = nodeMeta.speakerLabel;
+    
+    // Try to get speakerType from meta first, then derive from speakerRole or speaker string
+    let speakerType = nodeMeta.speakerType;
+    if (!speakerType) {
+      if (c.speakerRole === 'agent' || c.speakerRole === 'customer') {
+        speakerType = c.speakerRole;
+      } else if (nodeMeta.speaker) {
+        // Derive from speaker string (e.g., "Agent" -> "agent", "Customer" -> "customer")
+        const speakerLower = nodeMeta.speaker.toLowerCase();
+        if (speakerLower === 'agent' || speakerLower === 'agnt') {
+          speakerType = 'agent';
+        } else if (speakerLower === 'customer' || speakerLower === 'cust' || speakerLower === 'caller') {
+          speakerType = 'customer';
+        } else {
+          speakerType = 'unknown';
+        }
+      } else {
+        speakerType = 'unknown';
+      }
+    }
+    
+    // Preserve speakerLabel from meta, or derive from speaker if available
+    const speakerLabel = nodeMeta.speakerLabel || 
+      (nodeMeta.speaker && nodeMeta.speaker !== 'Agent' && nodeMeta.speaker !== 'Customer' ? nodeMeta.speaker : undefined);
+    
+    // Set speaker in standard format (Agent/Customer/undefined)
     const speaker = nodeMeta.speaker || 
-      (c.speakerRole === 'agent' ? 'Agent' : 
-       c.speakerRole === 'customer' ? 'Customer' : undefined);
+      (speakerType === 'agent' ? 'Agent' : 
+       speakerType === 'customer' ? 'Customer' : undefined);
     
     return {
       id: c.id,

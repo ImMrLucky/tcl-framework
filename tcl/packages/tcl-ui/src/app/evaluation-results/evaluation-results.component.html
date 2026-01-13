@@ -500,10 +500,10 @@
                 <span class="claim-id">{{ claim.id }}</span>
                 <span 
                   class="claim-speaker"
-                  [class.agent]="claim.meta?.speaker?.toLowerCase() === 'agent'"
-                  [class.customer]="claim.meta?.speaker?.toLowerCase() === 'customer'"
+                  [class.agent]="claim.meta?.speaker?.toLowerCase() === 'agent' || claim.meta?.speakerType === 'agent'"
+                  [class.customer]="claim.meta?.speaker?.toLowerCase() === 'customer' || claim.meta?.speakerType === 'customer'"
                 >
-                  {{ claim.meta?.speaker || 'Unknown' }}
+                  {{ claim.meta?.speakerLabel || claim.meta?.speaker || (claim.meta?.speakerType === 'agent' ? 'Agent' : claim.meta?.speakerType === 'customer' ? 'Customer' : 'Unknown') }}
                 </span>
                 <span class="claim-text">{{ claim.text }}</span>
                 <span class="claim-turn" *ngIf="claim.meta?.turnIndex !== undefined">

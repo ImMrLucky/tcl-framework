@@ -913,12 +913,26 @@ export class EvaluationResultsComponent implements OnInit {
    * Part B: Fix speaker attribution - show raw label if type is unknown
    */
   getSpeakerDisplayLabel(issue: IssueV2): string {
-    // If speakerLabel exists and speaker is UNKNOWN, show the label (e.g., "KENT" instead of "UNKNOWN")
+    // If speakerLabel exists and speaker is UNKNOWN or MIXED, show the label (e.g., "KENT" instead of "UNKNOWN")
     if (issue.who?.speakerLabel && (issue.who?.speaker === 'UNKNOWN' || issue.who?.speaker === 'MIXED')) {
       return issue.who.speakerLabel;
     }
-    // Otherwise show the canonical speaker role
-    return issue.who?.speaker || 'UNKNOWN';
+    // If speaker is set, show it
+    if (issue.who?.speaker && issue.who.speaker !== 'UNKNOWN') {
+      return issue.who.speaker;
+    }
+    // Fallback: try to get from primary claim if available
+    if (issue.what?.primaryClaimId) {
+      const claim = this.evaluation?.report?.claims?.find((c: any) => c.id === issue.what.primaryClaimId);
+      if (claim?.meta?.speaker) {
+        return claim.meta.speaker;
+      }
+      if (claim?.meta?.speakerLabel) {
+        return claim.meta.speakerLabel;
+      }
+    }
+    // Last resort
+    return 'UNKNOWN';
   }
 
   getSeverity(issue: Issue): 'critical' | 'high' | 'medium' | 'low' {
