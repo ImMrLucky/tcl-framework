@@ -307,6 +307,17 @@ async function runUnifiedGraphPath(
     // Get truth state from derivation
     const truthResult = graphResult.truthDerivation.results.find(r => r.claimId === c.id);
     
+    // Preserve speaker information from graph node meta (which came from original extracted claims)
+    // CRITICAL: Preserve speakerType and speakerLabel so issues can correctly identify speakers
+    const nodeMeta = c.meta || {};
+    const speakerType = nodeMeta.speakerType || 
+      (c.speakerRole === 'agent' ? 'agent' : 
+       c.speakerRole === 'customer' ? 'customer' : 'unknown');
+    const speakerLabel = nodeMeta.speakerLabel;
+    const speaker = nodeMeta.speaker || 
+      (c.speakerRole === 'agent' ? 'Agent' : 
+       c.speakerRole === 'customer' ? 'Customer' : undefined);
+    
     return {
       id: c.id,
       text: c.text,
@@ -315,7 +326,9 @@ async function runUnifiedGraphPath(
       evidenceRefs, // NEW: Actual grounding refs
       truthState: truthResult?.truthState,
       meta: {
-        speaker: c.speakerRole === 'agent' ? 'Agent' : c.speakerRole === 'customer' ? 'Customer' : undefined,
+        speaker,
+        speakerType,
+        speakerLabel,
         turnIndex: parseInt(c.span.turnId.replace(/[^\d]/g, ''), 10) || 0,
       },
       claimKind: c.modality === 'question' ? 'question' : 

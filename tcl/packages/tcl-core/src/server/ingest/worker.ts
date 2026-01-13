@@ -610,16 +610,22 @@ async function runAnalysis(input: {
     const graphGrounding = graphData?.grounding || [];
 
     // Map claims to format expected by expandIssueCandidates
+    // CRITICAL: Preserve all speaker information (speaker, speakerType, speakerLabel) 
+    // so issues can correctly identify who made the claim
     const claimsForIssues = (validateOutput.report?.claims || []).map((c: any) => ({
       id: c.id,
       text: c.text,
       confidence: c.confidenceMetrics?.groundingScore ?? c.confidence ?? 0,
       evidence: c.evidence || [],
+      evidenceRefs: c.evidenceRefs || [],
       meta: {
         speaker: c.meta?.speaker,
+        speakerType: c.meta?.speakerType,
+        speakerLabel: c.meta?.speakerLabel,
         turnIndex: c.meta?.turnIndex
       },
       claimType: c.claimType,
+      claimKind: c.claimKind,
       isAuditable: c.isAuditable,
       topicTags: c.topicTags || [],
       hasAbsoluteLanguage: c.hasAbsoluteLanguage || false,
