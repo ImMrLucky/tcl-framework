@@ -833,8 +833,9 @@ export class EvaluationResultsComponent implements OnInit {
     if (reasonCodes.length > 0) {
       tooltip += `\nReason: ${reasonCodes.join(', ')}`;
     }
-    if (grouped.rollup.atomicIssueCount > 1) {
-      tooltip += `\nAtomic Issues: ${grouped.rollup.atomicIssueCount}`;
+    const atomicCount = grouped.rollup?.atomicIssueCount ?? 0;
+    if (atomicCount > 1) {
+      tooltip += `\nAtomic Issues: ${atomicCount}`;
     }
     return tooltip;
   }
@@ -844,8 +845,9 @@ export class EvaluationResultsComponent implements OnInit {
    */
   openGroupedIssueDetail(grouped: GroupedIssue): void {
     // Find all atomic issues in this cluster
+    const atomicIssueIds = grouped.rollup?.atomicIssueIds ?? [];
     const atomicIssues = this.allIssuesV2.filter(issue => 
-      grouped.rollup.atomicIssueIds.includes(issue.issueId)
+      atomicIssueIds.includes(issue.issueId)
     );
     
     // Open a dialog showing cluster details and atomic issues
@@ -855,8 +857,9 @@ export class EvaluationResultsComponent implements OnInit {
       this.openIssueV2Detail(atomicIssues[0]);
     } else {
       // Fallback: show snackbar with cluster info
+      const atomicCount = grouped.rollup?.atomicIssueCount ?? 0;
       this.snackBar.open(
-        `Grouped Issue: ${grouped.what.issueSummary} (${grouped.rollup.atomicIssueCount} atomic issues)`,
+        `Grouped Issue: ${grouped.what.issueSummary} (${atomicCount} atomic issues)`,
         'Dismiss',
         { duration: 5000 }
       );
@@ -870,7 +873,39 @@ export class EvaluationResultsComponent implements OnInit {
     if (!this.topIssuesV2 || this.topIssuesV2.length === 0) {
       return 0;
     }
-    return this.topIssuesV2.reduce((sum, g) => sum + g.rollup.atomicIssueCount, 0);
+    return this.topIssuesV2.reduce((sum, g) => sum + (g.rollup?.atomicIssueCount ?? 0), 0);
+  }
+
+  /**
+   * Safely get atomic issue count from grouped issue
+   */
+  getGroupedAtomicIssueCount(grouped: GroupedIssue): number {
+    return grouped.rollup?.atomicIssueCount ?? 0;
+  }
+
+  /**
+   * Safely check if grouped issue has multiple atomic issues
+   */
+  hasMultipleAtomicIssues(grouped: GroupedIssue): boolean {
+    return (grouped.rollup?.atomicIssueCount ?? 0) > 1;
+  }
+
+  /**
+   * Safely check if grouped issue has involved turn indexes
+   */
+  hasInvolvedTurnIndexes(grouped: GroupedIssue): boolean {
+    return (grouped.rollup?.involvedTurnIndexes?.length ?? 0) > 0;
+  }
+
+  /**
+   * Safely get turn range display for grouped issue
+   */
+  getGroupedTurnRange(grouped: GroupedIssue): string {
+    if (!grouped.rollup?.involvedTurnIndexes || grouped.rollup.involvedTurnIndexes.length === 0) {
+      return '';
+    }
+    const indexes = grouped.rollup.involvedTurnIndexes;
+    return `${indexes[0]}-${indexes[indexes.length - 1]}`;
   }
 
   /**

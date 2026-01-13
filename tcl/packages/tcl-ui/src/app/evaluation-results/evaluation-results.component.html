@@ -341,8 +341,8 @@
                           [class.verified]="cluster.verification?.level === 'EXTERNAL_VERIFIED'">
                       {{ getGroupedVerificationLabel(cluster) }}
                     </span>
-                    <span class="cluster-occurrences" *ngIf="cluster.rollup?.atomicIssueCount > 1">
-                      {{ cluster.rollup.atomicIssueCount }} atomic findings
+                    <span class="cluster-occurrences" *ngIf="hasMultipleAtomicIssues(cluster)">
+                      {{ getGroupedAtomicIssueCount(cluster) }} atomic findings
                     </span>
                     <span class="cluster-risk-score"
                           [matTooltip]="'Risk Score: ' + (cluster.riskScore * 100).toFixed(0) + '%'"
@@ -352,8 +352,8 @@
                     <div class="cluster-title">{{ cluster.what.issueSummary }}</div>
                     <div class="cluster-summary">{{ cluster.what.issueDetail }}</div>
                     <div class="cluster-meta">
-                      <span class="turn-range" *ngIf="cluster.rollup?.involvedTurnIndexes?.length > 0">
-                        <mat-icon class="meta-icon">chat</mat-icon> Turns {{ cluster.rollup.involvedTurnIndexes[0] }}-{{ cluster.rollup.involvedTurnIndexes[cluster.rollup.involvedTurnIndexes.length - 1] }}
+                      <span class="turn-range" *ngIf="hasInvolvedTurnIndexes(cluster)">
+                        <mat-icon class="meta-icon">chat</mat-icon> Turns {{ getGroupedTurnRange(cluster) }}
                       </span>
                       <span *ngIf="cluster.reviewRequired" class="review-required">Review Required</span>
                     </div>
