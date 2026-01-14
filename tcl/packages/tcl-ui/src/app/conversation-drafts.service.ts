@@ -108,5 +108,15 @@ export class ConversationDraftsService {
   deleteDraft(conversationId: string): Observable<{ success: boolean }> {
     return this.http.delete<{ success: boolean }>(`${this.apiBase}/conversations/${conversationId}`);
   }
+
+  /**
+   * Run evaluation for a conversation with ready transcript
+   */
+  runEvaluation(conversationId: string): Observable<{ success: boolean; evaluationId: string; conversationId: string }> {
+    return this.http.post<{ success: boolean; evaluationId: string; conversationId: string }>(
+      `${this.apiBase}/conversations/${conversationId}/evaluate`,
+      {}
+    );
+  }
 }
 

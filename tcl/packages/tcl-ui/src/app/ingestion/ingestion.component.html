@@ -172,24 +172,24 @@
                 </mat-card-title>
               </mat-card-header>
               <mat-card-content>
-                <p>Audio uploaded. You can transcribe now or later.</p>
+                <p>Audio uploaded. Choose to analyze now or later.</p>
                 <div class="transcription-actions">
                   <button
                     mat-raised-button
                     color="primary"
-                    (click)="startTranscription()"
+                    (click)="analyzeNow()"
                     [disabled]="loading"
                   >
                     <mat-icon>play_arrow</mat-icon>
-                    Transcribe now
+                    Analyze Now
                   </button>
                   <button
                     mat-stroked-button
-                    (click)="saveDraftForLater()"
+                    (click)="analyzeLater()"
                     [disabled]="loading"
                   >
                     <mat-icon>schedule</mat-icon>
-                    Do later
+                    Analyze Later
                   </button>
                 </div>
               </mat-card-content>

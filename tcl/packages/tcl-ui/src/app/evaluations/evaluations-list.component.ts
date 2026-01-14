@@ -2,6 +2,7 @@ import { Component, OnInit, OnDestroy } from '@angular/core';
 import { firstValueFrom } from 'rxjs';
 import { CommonModule } from '@angular/common';
 import { Router, RouterModule } from '@angular/router';
+import { HttpClient } from '@angular/common/http';
 import { MatCardModule } from '@angular/material/card';
 import { MatTableModule } from '@angular/material/table';
 import { MatButtonModule } from '@angular/material/button';
@@ -72,6 +73,8 @@ export interface EvaluationSearchResult {
   conversationId: string;
   env: string;
   scores: any;
+  audioAssetId?: string | null;
+  transcriptAssetId?: string | null;
   report: {
     source?: {
       sourceTitle?: string;
@@ -387,6 +390,36 @@ export interface EvaluationSearchResult {
               </td>
             </ng-container>
 
+            <!-- Transcript Column -->
+            <ng-container matColumnDef="transcript">
+              <th mat-header-cell *matHeaderCellDef>Transcript</th>
+              <td mat-cell *matCellDef="let ev">
+                <button 
+                  *ngIf="ev.transcriptAssetId" 
+                  mat-icon-button 
+                  (click)="downloadTranscript(ev.transcriptAssetId!); $event.stopPropagation()"
+                  matTooltip="Download transcript">
+                  <mat-icon>description</mat-icon>
+                </button>
+                <span *ngIf="!ev.transcriptAssetId" class="no-data">-</span>
+              </td>
+            </ng-container>
+
+            <!-- Audio Column -->
+            <ng-container matColumnDef="audio">
+              <th mat-header-cell *matHeaderCellDef>Audio</th>
+              <td mat-cell *matCellDef="let ev">
+                <button 
+                  *ngIf="ev.audioAssetId" 
+                  mat-icon-button 
+                  (click)="downloadAudio(ev.audioAssetId!); $event.stopPropagation()"
+                  matTooltip="Download audio">
+                  <mat-icon>audiotrack</mat-icon>
+                </button>
+                <span *ngIf="!ev.audioAssetId" class="no-data">-</span>
+              </td>
+            </ng-container>
+
             <!-- Actions Column -->
             <ng-container matColumnDef="actions">
               <th mat-header-cell *matHeaderCellDef>Actions</th>
@@ -639,7 +672,7 @@ export class EvaluationsListComponent implements OnInit {
   pageIndex = 0;
   totalEvaluations = 0;
   
-  displayedColumns = ['evaluationId', 'createdAt', 'agent', 'totalIssues', 'highCritical', 'verifiedPercent', 'topCategories', 'actions'];
+  displayedColumns = ['evaluationId', 'createdAt', 'agent', 'totalIssues', 'highCritical', 'verifiedPercent', 'topCategories', 'transcript', 'audio', 'actions'];
 
   // Drafts
   drafts: ConversationDraft[] = [];
@@ -653,7 +686,8 @@ export class EvaluationsListComponent implements OnInit {
     private draftsService: ConversationDraftsService,
     private authService: AuthService,
     private memberService: MemberService,
-    private snackBar: MatSnackBar
+    private snackBar: MatSnackBar,
+    private http: HttpClient
   ) {}
 
   ngOnInit() {
@@ -909,15 +943,67 @@ export class EvaluationsListComponent implements OnInit {
     }
 
     try {
-      // Navigate to evaluation creation - the backend will handle creating the evaluation
-      // For now, we'll use the existing evaluation endpoint
-      // TODO: Update this to use the proper evaluation creation endpoint
-      this.router.navigate(['/evaluations/new'], { 
-        queryParams: { conversationId: draft.id } 
-      });
+      const result = await firstValueFrom(
+        this.draftsService.runEvaluation(draft.id)
+      );
+
+      this.snackBar.open('Evaluation started', 'Close', { duration: 3000 });
+      await this.loadEvaluations();
+      await this.loadDrafts();
     } catch (error: any) {
       console.error('Failed to run evaluation:', error);
       this.snackBar.open('Failed to run evaluation: ' + (error.error?.error || error.message), 'Close', {
+        duration: 5000
+      });
+    }
+  }
+
+  /**
+   * Get API base URL
+   */
+  private get apiBase(): string {
+    if (typeof window !== 'undefined') {
+      const apiUrl = (window as any).__TCL_API_URL;
+      if (apiUrl) {
+        return `${apiUrl}/api`;
+      }
+    }
+    return '/api';
+  }
+
+  /**
+   * Download transcript asset
+   */
+  async downloadTranscript(assetId: string) {
+    try {
+      const response = await firstValueFrom(
+        this.http.get<{ downloadUrl: string; filename: string }>(`${this.apiBase}/assets/${assetId}/download`)
+      );
+
+      // Open download URL in new tab
+      window.open(response.downloadUrl, '_blank');
+    } catch (error: any) {
+      console.error('Failed to download transcript:', error);
+      this.snackBar.open('Failed to download transcript: ' + (error.error?.error || error.message), 'Close', {
+        duration: 5000
+      });
+    }
+  }
+
+  /**
+   * Download audio asset
+   */
+  async downloadAudio(assetId: string) {
+    try {
+      const response = await firstValueFrom(
+        this.http.get<{ downloadUrl: string; filename: string }>(`${this.apiBase}/assets/${assetId}/download`)
+      );
+
+      // Open download URL in new tab
+      window.open(response.downloadUrl, '_blank');
+    } catch (error: any) {
+      console.error('Failed to download audio:', error);
+      this.snackBar.open('Failed to download audio: ' + (error.error?.error || error.message), 'Close', {
         duration: 5000
       });
     }

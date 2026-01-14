@@ -944,40 +944,68 @@ export function registerIngestionJobRoutes(app: express.Express) {
           return res.status(403).json({ error: 'Access denied. Job belongs to a different organization.' });
         }
 
-        // Verify file exists in storage using download (strongest verification)
-        // This ensures the file is actually accessible, not just listed
-        const { data: fileContent, error: dlError } = await supabaseAdmin!
-          .storage
-          .from(bucket)
-          .download(objectPath);
+        // Verify file exists in storage using a lightweight HEAD request
+        // This avoids downloading large files which can cause timeouts
+        // We'll use the storage API's info endpoint if available, otherwise skip verification
+        // (The frontend already verified the upload succeeded before calling this endpoint)
+        try {
+          // Try to get file info without downloading - use list with exact path match
+          const pathParts = objectPath.split('/');
+          const fileName = pathParts.pop() || '';
+          const directoryPath = pathParts.join('/') || '';
+          
+          const { data: files, error: listError } = await supabaseAdmin!
+            .storage
+            .from(bucket)
+            .list(directoryPath, {
+              limit: 1000,
+            });
 
-        if (dlError) {
-          logError('FinalizeUpload', 'File not downloadable in storage', {
+          if (!listError && files) {
+            const fileExists = files.some((f: any) => f.name === fileName);
+            if (!fileExists) {
+              logError('FinalizeUpload', 'File not found in storage list', { 
+                bucket, 
+                objectPath, 
+                fileName,
+                directoryPath
+              });
+              return res.status(400).json({
+                error: 'STORAGE_VERIFY_FAILED',
+                message: `File not found at ${bucket}/${objectPath}. Upload may have failed.`,
+              });
+            }
+            
+            const fileInfo = files.find((f: any) => f.name === fileName);
+            if (fileInfo && fileInfo.metadata?.size === 0) {
+              logError('FinalizeUpload', 'File exists but is empty', { bucket, objectPath });
+              return res.status(400).json({
+                error: 'STORAGE_VERIFY_FAILED',
+                message: `File at ${bucket}/${objectPath} exists but is empty. Upload may have failed.`,
+              });
+            }
+            
+            logUpload('debug', 'File verified in storage', {
+              bucket,
+              objectPath,
+              size: fileInfo?.metadata?.size || 'unknown',
+            });
+          } else {
+            // If list fails, log warning but continue (frontend already verified upload)
+            logUpload('warn', 'Could not verify file via list, continuing anyway', {
+              bucket,
+              objectPath,
+              error: listError?.message,
+            });
+          }
+        } catch (verifyError: any) {
+          // If verification fails, log but continue (frontend already verified upload succeeded)
+          logUpload('warn', 'File verification error, continuing anyway', {
             bucket,
             objectPath,
-            error: dlError.message,
-          });
-          return res.status(400).json({
-            error: 'STORAGE_VERIFY_FAILED',
-            message: `File not downloadable at ${bucket}/${objectPath}: ${dlError.message}. Upload likely failed or used wrong path encoding.`,
+            error: verifyError.message,
           });
         }
-
-        // Verify we got actual content (not empty)
-        if (!fileContent || (fileContent instanceof Blob && fileContent.size === 0)) {
-          logError('FinalizeUpload', 'File exists but is empty', { bucket, objectPath });
-          return res.status(400).json({
-            error: 'STORAGE_VERIFY_FAILED',
-            message: `File at ${bucket}/${objectPath} exists but is empty. Upload may have failed.`,
-          });
-        }
-
-        // File verified successfully
-        logUpload('debug', 'File verified in storage', {
-          bucket,
-          objectPath,
-          size: fileContent instanceof Blob ? fileContent.size : 'unknown',
-        });
 
         // Create asset record
         const assetType = kind === 'audio' ? 'AUDIO' : 'TRANSCRIPT_UPLOADED';

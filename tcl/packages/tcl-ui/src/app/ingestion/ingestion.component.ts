@@ -1278,9 +1278,20 @@ export class IngestionComponent implements OnInit, OnDestroy {
   }
 
   /**
-   * Start transcription for audio draft
+   * Analyze Later - redirect to evaluations page
    */
-  async startTranscription() {
+  async analyzeLater() {
+    this.snackBar.open('Saved to Drafts. Analyze any time from Evaluations.', 'Close', {
+      duration: 4000
+    });
+    // Navigate to evaluations page
+    this.router.navigate(['/evaluations']);
+  }
+
+  /**
+   * Analyze Now - start transcription, wait for completion, then run evaluation
+   */
+  async analyzeNow() {
     if (!this.audioDraftId) {
       this.snackBar.open('No draft conversation found', 'Close', { duration: 3000 });
       return;
@@ -1288,35 +1299,100 @@ export class IngestionComponent implements OnInit, OnDestroy {
 
     this.loading = true;
     try {
-      const result = await firstValueFrom(
+      // Step 1: Start transcription
+      console.log('[Analyze Now] Starting transcription...');
+      const transcribeResult = await firstValueFrom(
         this.draftsService.transcribeDraft(this.audioDraftId)
       );
 
-      this.audioDraftStatus = result.status as any;
-      this.snackBar.open('Transcription started. You can leave the app — processing will continue.', 'Close', {
-        duration: 5000
+      this.audioDraftStatus = transcribeResult.status as any;
+      this.snackBar.open('Transcription started. Processing audio...', 'Close', {
+        duration: 3000
+      });
+
+      // Step 2: Poll for transcription completion
+      console.log('[Analyze Now] Polling for transcription completion...');
+      let pollCount = 0;
+      const maxPolls = 60; // 5 minutes max (5 second intervals)
+      let transcriptReady = false;
+
+      while (pollCount < maxPolls && !transcriptReady) {
+        await new Promise(resolve => setTimeout(resolve, 5000)); // Wait 5 seconds
+
+        try {
+          const draft = await firstValueFrom(
+            this.draftsService.getConversation(this.audioDraftId)
+          );
+
+          const status = draft.conversation.draftStatus;
+          console.log(`[Analyze Now] Poll ${pollCount + 1}: Status = ${status}`);
+
+          if (status === 'TRANSCRIPT_READY') {
+            transcriptReady = true;
+            this.audioDraftStatus = status as any;
+            break;
+          } else if (status === 'TRANSCRIPTION_FAILED') {
+            throw new Error(draft.conversation.transcriptionError || 'Transcription failed');
+          }
+
+          pollCount++;
+        } catch (pollError: any) {
+          console.error('[Analyze Now] Poll error:', pollError);
+          // Continue polling unless it's a critical error
+          if (pollError.error?.error && !pollError.error.error.includes('not found')) {
+            throw pollError;
+          }
+        }
+      }
+
+      if (!transcriptReady) {
+        throw new Error('Transcription timed out. Please check back later on the Evaluations page.');
+      }
+
+      // Step 3: Run evaluation
+      console.log('[Analyze Now] Transcript ready, running evaluation...');
+      this.snackBar.open('Transcript ready. Running evaluation...', 'Close', {
+        duration: 3000
+      });
+
+      const evaluationResult = await firstValueFrom(
+        this.draftsService.runEvaluation(this.audioDraftId)
+      );
+
+      console.log('[Analyze Now] Evaluation created:', evaluationResult);
+      this.snackBar.open('Analysis complete!', 'Close', {
+        duration: 3000
       });
 
       // Navigate to evaluations page
       this.router.navigate(['/evaluations']);
     } catch (error: any) {
-      console.error('Failed to start transcription:', error);
-      this.snackBar.open('Failed to start transcription: ' + (error.error?.error || error.message), 'Close', {
+      console.error('Failed to analyze:', error);
+      const errorMessage = error.error?.error || error.message || 'Unknown error';
+      this.snackBar.open('Analysis failed: ' + errorMessage, 'Close', {
         duration: 5000
       });
+      // Still navigate to evaluations so user can see the draft status
+      this.router.navigate(['/evaluations']);
+    } finally {
       this.loading = false;
     }
   }
 
   /**
+   * Start transcription for audio draft (kept for backwards compatibility)
+   * @deprecated Use analyzeNow() for new flow
+   */
+  async startTranscription() {
+    await this.analyzeNow();
+  }
+
+  /**
    * Save draft and navigate to evaluations (Do later)
+   * @deprecated Use analyzeLater() for new flow
    */
   async saveDraftForLater() {
-    this.snackBar.open('Saved to Drafts. Transcribe any time from Evaluations.', 'Close', {
-      duration: 4000
-    });
-    // Navigate to evaluations page
-    this.router.navigate(['/evaluations']);
+    await this.analyzeLater();
   }
 
   /**

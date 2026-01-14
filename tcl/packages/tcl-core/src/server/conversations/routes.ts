@@ -404,6 +404,156 @@ export function setupConversationRoutes(app: express.Application) {
     }
   });
 
+  // ============================================================================
+  // POST /api/conversations/:id/evaluate - Create evaluation from conversation
+  // ============================================================================
+  app.post('/api/conversations/:id/evaluate', async (req, res) => {
+    try {
+      const context = await getOrgContext(req);
+      
+      if (!context || context.error || !context.userId) {
+        return res.status(401).json({ error: context?.error || 'Authorization required' });
+      }
+
+      if (!supabaseAdmin) {
+        return res.status(503).json({ error: 'Supabase not configured' });
+      }
+
+      const { id } = req.params;
+
+      // Get conversation and verify access
+      const { data: conversation, error: convError } = await supabaseAdmin
+        .from('conversations')
+        .select('id, org_id, project_id, env, draft_status, transcript_asset_id, audio_asset_id, raw_text, content, created_by')
+        .eq('id', id)
+        .eq('org_id', context.orgId)
+        .maybeSingle();
+
+      if (convError || !conversation) {
+        return res.status(404).json({ error: 'Conversation not found or access denied' });
+      }
+
+      // Verify transcript is ready
+      if (conversation.draft_status !== 'TRANSCRIPT_READY') {
+        return res.status(400).json({ 
+          error: `Cannot create evaluation: conversation status is ${conversation.draft_status}. Transcript must be ready.` 
+        });
+      }
+
+      if (!conversation.transcript_asset_id) {
+        return res.status(400).json({ error: 'No transcript asset found for this conversation' });
+      }
+
+      // Get transcript text
+      const transcriptText = conversation.raw_text || conversation.content;
+      if (!transcriptText) {
+        return res.status(400).json({ error: 'No transcript text found in conversation' });
+      }
+
+      // Import runAnalysis from worker
+      const { runAnalysis } = await import('../ingest/worker.js');
+
+      // Create evaluation using runAnalysis
+      const evaluationId = await runAnalysis({
+        orgId: context.orgId,
+        projectId: conversation.project_id || context.projectId || '',
+        env: conversation.env || context.env || 'sandbox',
+        conversationId: conversation.id,
+        transcript: transcriptText,
+        normalizedConversation: null, // Will be normalized by runAnalysis
+        userId: conversation.created_by || context.userId,
+        verificationLevel: conversation.audio_asset_id ? 'AUDIO_PLUS_TRANSCRIPT' : 'TRANSCRIPT_ONLY',
+        transcriptAssetId: conversation.transcript_asset_id,
+        jobId: null, // No job ID for direct evaluation creation
+        ingestionMode: conversation.audio_asset_id ? 'AUDIO_PLUS_TRANSCRIPT' : 'TRANSCRIPT_ONLY',
+        provenance: {
+          source: 'direct_evaluation',
+          audioAssetId: conversation.audio_asset_id || null,
+          transcriptAssetId: conversation.transcript_asset_id,
+        },
+      });
+
+      // Update conversation status to EVALUATED
+      await supabaseAdmin
+        .from('conversations')
+        .update({
+          draft_status: 'EVALUATED',
+          evaluation_id: evaluationId,
+        })
+        .eq('id', id);
+
+      // Log audit
+      await logAudit({
+        orgId: context.orgId,
+        actorUserId: context.userId,
+        action: 'conversation.evaluate',
+        targetType: 'conversation',
+        targetId: id,
+        meta: { evaluationId },
+      });
+
+      res.json({
+        success: true,
+        evaluationId,
+        conversationId: id,
+      });
+    } catch (error: any) {
+      console.error('Error creating evaluation from conversation:', error);
+      res.status(500).json({ error: error.message || 'Unknown error' });
+    }
+  });
+
+  // ============================================================================
+  // GET /api/assets/:id/download - Get download URL for an asset
+  // ============================================================================
+  app.get('/api/assets/:id/download', async (req, res) => {
+    try {
+      const context = await getOrgContext(req);
+      
+      if (!context || context.error) {
+        return res.status(401).json({ error: context?.error || 'Authorization required' });
+      }
+
+      if (!supabaseAdmin) {
+        return res.status(503).json({ error: 'Supabase not configured' });
+      }
+
+      const { id } = req.params;
+
+      // Get asset details
+      const { data: asset, error: assetError } = await supabaseAdmin
+        .from('assets')
+        .select('id, org_id, bucket, object_path, filename')
+        .eq('id', id)
+        .eq('org_id', context.orgId)
+        .maybeSingle();
+
+      if (assetError || !asset) {
+        return res.status(404).json({ error: 'Asset not found or access denied' });
+      }
+
+      // Generate signed URL for download (expires in 1 hour)
+      const { data: signedUrlData, error: urlError } = await supabaseAdmin
+        .storage
+        .from(asset.bucket)
+        .createSignedUrl(asset.object_path, 3600); // 1 hour expiry
+
+      if (urlError || !signedUrlData) {
+        return res.status(500).json({ error: 'Failed to generate download URL' });
+      }
+
+      res.json({
+        downloadUrl: signedUrlData.signedUrl,
+        filename: asset.filename || 'download',
+        bucket: asset.bucket,
+        objectPath: asset.object_path,
+      });
+    } catch (error: any) {
+      console.error('Error getting asset download URL:', error);
+      res.status(500).json({ error: error.message || 'Unknown error' });
+    }
+  });
+
   console.log('Conversation routes registered successfully');
 }
 
