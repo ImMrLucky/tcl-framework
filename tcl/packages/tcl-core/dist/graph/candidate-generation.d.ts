@@ -43,3 +43,15 @@ export interface CandidateGenerationResult {
     };
 }
 export declare function generateCandidates(claims: ClaimNode[], evidenceNodes: EvidenceNode[]): CandidateGenerationResult;
+/**
+ * Text Similarity Interface
+ * Allows swapping implementations (current: 3-gram cosine, future: embeddings)
+ */
+interface TextSimilarityProvider {
+    computeSimilarity(textA: string, textB: string): number;
+}
+/**
+ * Set the text similarity provider (for future embedding support)
+ */
+export declare function setTextSimilarityProvider(provider: TextSimilarityProvider): void;
+export {};

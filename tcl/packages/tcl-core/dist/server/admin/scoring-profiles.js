@@ -88,8 +88,9 @@ export function setupScoringProfilesRoutes(app) {
             if (!context || context.error) {
                 return res.status(401).json({ error: context?.error || 'Authorization required' });
             }
-            // Check admin role
-            if (context.role !== 'owner' && context.role !== 'admin') {
+            // Check admin role (normalize to lowercase for comparison)
+            const normalizedRole = context.role?.toLowerCase();
+            if (normalizedRole !== 'owner' && normalizedRole !== 'admin') {
                 return res.status(403).json({ error: 'Admin access required' });
             }
             if (!supabaseAdmin) {
@@ -120,8 +121,9 @@ export function setupScoringProfilesRoutes(app) {
             if (!context || context.error) {
                 return res.status(401).json({ error: context?.error || 'Authorization required' });
             }
-            // Check admin role
-            if (context.role !== 'owner' && context.role !== 'admin') {
+            // Check admin role (normalize to lowercase for comparison)
+            const normalizedRole = context.role?.toLowerCase();
+            if (normalizedRole !== 'owner' && normalizedRole !== 'admin') {
                 return res.status(403).json({ error: 'Admin access required' });
             }
             if (!supabaseAdmin) {
@@ -187,8 +189,9 @@ export function setupScoringProfilesRoutes(app) {
             if (!context || context.error) {
                 return res.status(401).json({ error: context?.error || 'Authorization required' });
             }
-            // Check admin role
-            if (context.role !== 'owner' && context.role !== 'admin') {
+            // Check admin role (normalize to lowercase for comparison)
+            const normalizedRole = context.role?.toLowerCase();
+            if (normalizedRole !== 'owner' && normalizedRole !== 'admin') {
                 return res.status(403).json({ error: 'Admin access required' });
             }
             if (!supabaseAdmin) {
@@ -247,8 +250,9 @@ export function setupScoringProfilesRoutes(app) {
             if (!context || context.error) {
                 return res.status(401).json({ error: context?.error || 'Authorization required' });
             }
-            // Check admin role
-            if (context.role !== 'owner' && context.role !== 'admin') {
+            // Check admin role (normalize to lowercase for comparison)
+            const normalizedRole = context.role?.toLowerCase();
+            if (normalizedRole !== 'owner' && normalizedRole !== 'admin') {
                 return res.status(403).json({ error: 'Admin access required' });
             }
             if (!supabaseAdmin) {

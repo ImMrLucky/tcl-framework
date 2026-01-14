@@ -51,6 +51,17 @@ export interface EvidenceAnchor {
     /** Exact text at anchor */
     text?: string;
 }
+export type AnchorType = 'MONEY' | 'DATE' | 'TIMEFRAME' | 'PERCENT' | 'QUANTITY' | 'ADDRESS' | 'EMAIL' | 'PHONE' | 'PAYMENT_CARD' | 'SSN_LAST4' | 'URL' | 'ID';
+export interface ClaimAnchor {
+    type: AnchorType;
+    key: string;
+    raw?: string;
+    span?: {
+        start: number;
+        end: number;
+    };
+    confidence?: number;
+}
 export interface ClaimNode {
     id: string;
     type: 'CLAIM';
@@ -75,6 +86,8 @@ export interface ClaimNode {
     normalized: NormalizedValues;
     /** REQUIRED - Subject slot for this claim */
     slot: SubjectSlot;
+    /** Industry-agnostic anchors (universal slot keys) */
+    anchors?: ClaimAnchor[];
     /** Computed topic ID */
     topicId?: string;
     /** ASR or extraction confidence */

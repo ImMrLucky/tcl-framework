@@ -43,9 +43,8 @@ export function computeIssueSummaryV2(issues) {
         // Count by category
         const category = issue.category || 'other';
         byCategory[category] = (byCategory[category] || 0) + 1;
-        // Count by severity: use severityDisplay ?? severity ?? "medium"
-        // This ensures the summary matches what the UI displays
-        const sev = (issue.severityDisplay ?? issue.severity ?? 'medium');
+        // Count by severity: use severity (canonical)
+        const sev = (issue.severity ?? 'medium');
         // Normalize severity to valid values only
         if (sev === 'low' || sev === 'medium' || sev === 'high' || sev === 'critical') {
             bySeverity[sev] = (bySeverity[sev] || 0) + 1;
@@ -55,13 +54,16 @@ export function computeIssueSummaryV2(issues) {
             bySeverity.medium = (bySeverity.medium || 0) + 1;
         }
     }
+    // CRITICAL: When computing from allIssuesV2, we don't know the topIssuesCount
+    // In this case, set both to the same value (all issues are included)
+    // The correct distinction (topIssuesCount vs allIssuesCount) should come from rankIssuesV2 summary
     return {
         totalIssues: issues.length,
         byType: byType,
         bySeverity,
         byCategory: byCategory,
-        topIssuesCount: issues.length, // If we're computing from allIssuesV2, topIssuesCount = allIssuesCount
-        allIssuesCount: issues.length,
+        topIssuesCount: issues.length, // When computed from allIssuesV2, assume all are "top" (no filtering)
+        allIssuesCount: issues.length, // Total count of all issues
     };
 }
 /**

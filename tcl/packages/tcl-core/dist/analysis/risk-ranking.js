@@ -20,9 +20,12 @@ import { getRiskRankingConfig } from '../config/risk-ranking.js';
  */
 export function rankIssuesV2(issues, config, scoringContext) {
     const rankingConfig = config || getRiskRankingConfig();
-    // Score all issues using new pipeline
+    // STEP 0: Pre-compute normalization factors from all issues
+    // This allows us to normalize edge weights and signals within the conversation
+    const normalizationFactors = computeNormalizationFactors(issues);
+    // Score all issues with normalization
     const scoredIssues = issues.map(issue => {
-        return scoreIssue(issue, rankingConfig, scoringContext);
+        return scoreIssue(issue, rankingConfig, scoringContext, issues, normalizationFactors);
     });
     // Sort deterministically with stable ordering
     // MODE SAFETY: Ranking is ALWAYS based on riskScore (not severityDisplay)
@@ -90,11 +93,59 @@ export function rankIssuesV2(issues, config, scoringContext) {
  * ✅ All weights from config
  * ✅ No clamping until final output
  */
-function scoreIssue(issue, config, scoringContext) {
+/**
+ * Compute normalization factors from all issues to create score spread
+ * This prevents all issues from clustering at the same score
+ */
+function computeNormalizationFactors(issues) {
+    const edgeWeights = [];
+    const confidences = [];
+    for (const issue of issues) {
+        // Collect edge weights
+        if (issue.evidence.edges && issue.evidence.edges.length > 0) {
+            for (const edge of issue.evidence.edges) {
+                if (edge.weight && edge.weight > 0) {
+                    edgeWeights.push(edge.weight);
+                }
+            }
+        }
+        // Collect confidences
+        if (issue.confidence && issue.confidence > 0) {
+            confidences.push(issue.confidence);
+        }
+    }
+    const computeStats = (values) => {
+        if (values.length === 0)
+            return { max: 1, min: 0, avg: 0.5, stdDev: 0.2 };
+        const max = Math.max(...values);
+        const min = Math.min(...values);
+        const avg = values.reduce((sum, v) => sum + v, 0) / values.length;
+        const variance = values.reduce((sum, v) => sum + Math.pow(v - avg, 2), 0) / values.length;
+        const stdDev = Math.sqrt(variance);
+        return { max, min, avg, stdDev };
+    };
+    const edgeStats = computeStats(edgeWeights);
+    const confStats = computeStats(confidences);
+    return {
+        maxEdgeWeight: edgeStats.max,
+        minEdgeWeight: edgeStats.min,
+        avgEdgeWeight: edgeStats.avg,
+        edgeWeightStdDev: edgeStats.stdDev,
+        maxConfidence: confStats.max,
+        minConfidence: confStats.min,
+        avgConfidence: confStats.avg,
+    };
+}
+function scoreIssue(issue, config, scoringContext, allIssues, normalizationFactors) {
     // Step 1: Compute component scores (all 0..1, all from config)
     const impact01 = computeImpact01(issue, config);
-    const evidence01 = computeEvidence01(issue, config);
-    const signal01 = computeSignal01(issue, config);
+    const evalMode = scoringContext ? {
+        verificationLevel: scoringContext.mode === 'transcript_only' ? 'TRANSCRIPT_ONLY' :
+            scoringContext.numSources > 0 ? 'DOC_BACKED' : 'EXTERNALLY_VERIFIED',
+        provenance: scoringContext.provenance, // Rule 7: Pass provenance for transcript quality multiplier
+    } : undefined;
+    const evidence01 = computeEvidence01(issue, config, evalMode);
+    const signal01 = computeSignal01(issue, config, allIssues, normalizationFactors);
     const category01 = computeCategory01(issue, config);
     // Step 2: Get weights from config (validated on startup)
     const wImpact = config.weights.riskScoring.impact;
@@ -106,16 +157,62 @@ function scoreIssue(issue, config, scoringContext) {
         (wEvidence * evidence01) +
         (wSignal * signal01) +
         (wCategory * category01);
+    // Initialize scoring reasons early (used in mode caps)
+    const scoringReasons = [];
+    // A2: Apply verification multiplier (separate impact from verification)
+    // Impact = how bad if true (customer harm, $ amounts, legal, compliance)
+    // Verification = how defensible/provable in audit
+    // C1: Use config.verificationMultiplier instead of hard-coded values
+    const verificationLevelKey = evalMode?.verificationLevel === 'TRANSCRIPT_ONLY' ? 'TRANSCRIPT_ONLY' :
+        evalMode?.verificationLevel === 'DOC_BACKED' || evalMode?.verificationLevel === 'EXTERNALLY_VERIFIED' ? 'EXTERNAL_VERIFIED' :
+            'NONE';
+    const verificationMultiplier = config.verificationMultiplier?.[verificationLevelKey] ??
+        (verificationLevelKey === 'TRANSCRIPT_ONLY' ? 0.85 :
+            verificationLevelKey === 'EXTERNAL_VERIFIED' ? 1.0 : 0.7);
+    // B1: Apply mode caps ONLY for specific issue types (not contradictions)
+    let cappedRisk01 = risk01;
+    const modeCaps = config.modeCaps?.transcript_only;
+    const modeCapsApplied = [];
+    if (scoringContext?.mode === 'transcript_only' && modeCaps && modeCaps.applyToTypes.includes(issue.type)) {
+        if (risk01 > modeCaps.maxRisk01) {
+            cappedRisk01 = modeCaps.maxRisk01;
+            modeCapsApplied.push(`transcript_only_cap_${issue.type}`);
+            scoringReasons.push(`Transcript-only cap applied to ${issue.type}: risk01 reduced from ${risk01.toFixed(3)} to ${cappedRisk01.toFixed(3)}`);
+        }
+    }
+    // Apply multiplier to riskScore (not impact - impact stays unchanged)
+    const adjustedRisk01 = cappedRisk01 * verificationMultiplier;
+    // B2: Speaker gating - downgrade non-AGENT↔AGENT contradictions
+    // AGENT↔AGENT: normal contradiction scoring
+    // CUSTOMER↔AGENT: "dispute/allegation" (lower severity cap unless agent explicitly commits)
+    // CUSTOMER↔CUSTOMER: informational (do not score high)
+    let finalRisk01 = adjustedRisk01;
+    const speakerGating = issue._speakerGating;
+    if (speakerGating && !speakerGating.isAgentAgent) {
+        // Downgrade contradictions that aren't AGENT↔AGENT
+        const downgradedImpact01 = impact01 * 0.6; // Reduce impact
+        const downgradedSignal01 = signal01 * 0.4; // Reduce signal
+        // Recompute risk01 with downgraded components
+        finalRisk01 = (wImpact * downgradedImpact01) +
+            (wEvidence * evidence01) +
+            (wSignal * downgradedSignal01) +
+            (wCategory * category01);
+        finalRisk01 = finalRisk01 * verificationMultiplier;
+    }
     // Step 4: Clamp to 0..1
-    const riskScore = clamp01(risk01);
+    const riskScore = clamp01(finalRisk01);
     // Step 5: Convert to 0..100 score
     const score = Math.round(riskScore * 100);
     // Step 6: Derive severity from riskScore (canonical severity, independent of mode)
     let severity = deriveSeverity(riskScore, config);
+    // B2: Apply severity cap for non-AGENT↔AGENT contradictions
+    if (speakerGating && !speakerGating.isAgentAgent && severity === 'high') {
+        severity = 'medium'; // Cap at medium for customer disputes
+    }
     // Apply category-based minimums (e.g., CONTRADICTION involving MONEY/FEES/REFUND => min "high")
     severity = applyCategoryMinimums(severity, issue, config);
-    // Step 7: Compute severityDisplay with conditional downgrade (not blanket cap)
-    const severityDisplay = computeSeverityDisplay(severity, issue.verification.level, issue.type, issue.compliance, scoringContext);
+    // Step 7: Compute final severity (may be downgraded for transcript-only unverified claims)
+    const finalSeverity = computeSeverityDisplay(severity, issue.verification.level, issue.type, issue.compliance, scoringContext);
     // MODE SAFETY: impact is UNCHANGED in transcript-only mode
     // Preserve existing impact if set, otherwise derive from impact01 using config thresholds
     // Use midpoints between impactMap values as thresholds
@@ -126,9 +223,13 @@ function scoreIssue(issue, config, scoringContext) {
     const finalImpact = issue.impact ||
         (impact01 >= impactThresholds.high ? 'high' :
             impact01 >= impactThresholds.medium ? 'medium' : 'low');
-    // Note: impact is NOT affected by transcript-only mode (only severityDisplay is capped)
+    // Note: impact is NOT affected by transcript-only mode (only severity may be downgraded)
     // Step 8: Build scoring explanation (enterprise requirement)
-    const scoringReasons = [];
+    // scoringReasons already initialized above
+    // B2: Add reason if impact != severity
+    if (finalImpact === 'high' && finalSeverity !== 'high') {
+        scoringReasons.push(`High impact but ${finalSeverity} severity due to ${issue.verification.level === 'TRANSCRIPT_ONLY' ? 'transcript-only evidence level' : 'evidence limitations'}`);
+    }
     // Impact reason
     if (finalImpact === 'high') {
         scoringReasons.push(`High impact: ${issue.type} in ${issue.category} category`);
@@ -161,25 +262,28 @@ function scoreIssue(issue, config, scoringContext) {
     if (categoryMult >= config.categoryNormalization.max * 0.9) {
         scoringReasons.push(`High-risk category: ${issue.category}`);
     }
-    // Severity display downgrade reason (only for UNVERIFIED types in transcript-only)
+    // Severity downgrade reason (only for UNVERIFIED types in transcript-only)
     if (scoringContext?.mode === 'transcript_only' && issue.verification.level === 'TRANSCRIPT_ONLY' && issue.type === 'UNVERIFIED_CLAIM') {
-        if (severityDisplay !== severity.toLowerCase() && severityDisplay !== severity) {
-            scoringReasons.push('Display severity downgraded for unverified claim in transcript-only mode');
+        if (finalSeverity !== severity.toLowerCase() && finalSeverity !== severity) {
+            scoringReasons.push('Severity downgraded for unverified claim in transcript-only mode');
         }
     }
+    // B4: Return only canonical scoring structure (no scoreBreakdown)
     return {
         ...issue,
         impact: finalImpact,
         riskScore,
         score,
-        severity, // Canonical severity (impact severity, independent of mode)
-        severityDisplay, // UI convenience (may be downgraded for UNVERIFIED in transcript-only)
+        severity: finalSeverity, // Canonical severity (may be downgraded for transcript-only unverified)
         scoring: {
             components: {
                 impact01: Math.round(impact01 * 1000) / 1000, // Round to 3 decimals
                 evidence01: Math.round(evidence01 * 1000) / 1000,
                 signal01: Math.round(signal01 * 1000) / 1000,
                 category01: Math.round(category01 * 1000) / 1000,
+                verificationMultiplier: Math.round(verificationMultiplier * 1000) / 1000,
+                risk01Raw: Math.round(risk01 * 1000) / 1000,
+                risk01Final: Math.round(adjustedRisk01 * 1000) / 1000,
             },
             weights: {
                 impact: wImpact,
@@ -188,6 +292,7 @@ function scoreIssue(issue, config, scoringContext) {
                 category: wCategory,
             },
             reasons: scoringReasons,
+            modeCapsApplied: modeCapsApplied.length > 0 ? modeCapsApplied : undefined,
         },
     };
 }
@@ -195,65 +300,224 @@ function scoreIssue(issue, config, scoringContext) {
  * Compute impact01 from issue.impact (0..1)
  * Uses config.impactMap (no hard-coded values)
  */
+/**
+ * 8.1: Compute impact01 using continuous features to reduce plateaus
+ * Impact should vary based on issue type, category, and specific signals
+ */
 function computeImpact01(issue, config) {
     const impact = issue.impact || 'low';
     return config.impactMap[impact];
 }
 /**
- * Compute evidence01 from issue.verification.level (0..1)
- * Uses config.evidenceMap (no hard-coded values)
+ * Compute evidence01 (verification confidence) from issue.verification.level (0..1)
+ * Rule 7: Incorporates transcript provenance correctly
+ *
+ * verification01 = baseTranscriptConfidence × corroboration01 × transcriptQualityMultiplier
+ *
+ * Where:
+ * - baseTranscriptConfidence is higher when transcript came from audio transcription
+ * - corroboration01 comes from support/confirmation/summaries and contradiction provability
+ * - transcriptQualityMultiplier comes from ASR/diarization confidence (bounded 0.6-1.15)
  */
-function computeEvidence01(issue, config) {
-    const level = issue.verification.level;
-    return config.evidenceMap[level];
+/**
+ * E1: Compute evidence01 using evidenceMap (config-driven)
+ * E1: Update evidenceMap - EXTERNAL_VERIFIED: 1.0, TRANSCRIPT_ONLY: 0.6, NONE: 0.2
+ * Key: TRANSCRIPT_ONLY must be meaningfully higher than NONE.
+ */
+function computeEvidence01(issue, config, evalMode) {
+    const level = issue.verification.level; // VerificationLevelV2: "EXTERNAL_VERIFIED" | "TRANSCRIPT_ONLY" | "TRANSCRIPT_PROVABLE" | "NONE"
+    // E1: Use evidenceMap from config (no hard-coded values)
+    // Map TRANSCRIPT_PROVABLE to TRANSCRIPT_ONLY for evidence scoring
+    const evidenceMapKey = level === 'TRANSCRIPT_PROVABLE' ? 'TRANSCRIPT_ONLY' : level;
+    let baseEvidence01;
+    if (evidenceMapKey === 'EXTERNAL_VERIFIED') {
+        baseEvidence01 = config.evidenceMap.EXTERNAL_VERIFIED;
+    }
+    else if (evidenceMapKey === 'TRANSCRIPT_ONLY') {
+        baseEvidence01 = config.evidenceMap.TRANSCRIPT_ONLY;
+    }
+    else {
+        baseEvidence01 = config.evidenceMap.NONE;
+    }
+    // Apply transcript quality multiplier if available (bounded 0.9-1.1 for transcript-only)
+    let qualityMultiplier = 1.0;
+    if (level === 'TRANSCRIPT_ONLY' && evalMode?.provenance?.transcriptQuality) {
+        const quality = evalMode.provenance.transcriptQuality;
+        const asrConf = quality.asrConfidence01 ?? 0.8;
+        const diarConf = quality.diarizationConfidence01 ?? 0.8;
+        const avgQuality = (asrConf + diarConf) / 2;
+        // Small multiplier: 0.9 (low quality) to 1.1 (high quality)
+        qualityMultiplier = 0.9 + (avgQuality * 0.2);
+        qualityMultiplier = Math.max(0.9, Math.min(1.1, qualityMultiplier));
+    }
+    // Corroboration: from support edges (claim-to-claim or claim-to-evidence)
+    let corroboration01 = 1.0;
+    if (issue.evidence.edges && issue.evidence.edges.length > 0) {
+        const supportEdges = issue.evidence.edges.filter(e => e.kind === 'support');
+        if (supportEdges.length > 0) {
+            const maxSupportWeight = Math.max(...supportEdges.map(e => e.weight || 0));
+            // Up to 15% boost from support edges
+            corroboration01 = Math.min(1.0, 1.0 + (maxSupportWeight * 0.15));
+        }
+    }
+    // Boost from external evidence refs (only for EXTERNAL_VERIFIED)
+    if (level === 'EXTERNAL_VERIFIED' && issue.evidence.refs && issue.evidence.refs.length > 0) {
+        const externalRefs = issue.evidence.refs.filter(r => r.sourceType !== 'TRANSCRIPT');
+        if (externalRefs.length > 0) {
+            corroboration01 = Math.min(1.0, corroboration01 + 0.2); // Additional boost for external evidence
+        }
+    }
+    // Compute evidence01
+    const evidence01 = baseEvidence01 * qualityMultiplier * corroboration01;
+    return clamp01(evidence01);
 }
 /**
  * Compute signal01 from graph + spectral (graceful degrade)
  * Uses edge weights, confidence, and structural importance
  * Falls back to degradedMode values when data missing
  */
-function computeSignal01(issue, config) {
+/**
+ * Compute signal01 from graph + spectral (graceful degrade)
+ * 8.1: Use continuous features in scoring inputs to reduce "same score plateaus"
+ * Uses edge weights, confidence, anchor strength, and structural importance
+ * Normalizes edge weights within conversation to create score spread
+ */
+function computeSignal01(issue, config, allIssues, normalizationFactors) {
     // Start with confidence (already 0..1)
-    let signal = issue.confidence || config.degradedMode.missingSpectralSignal01;
-    // Boost from edge weights (contradiction/support edges)
+    // Use actual confidence, not degraded fallback (creates plateaus)
+    let signal = issue.confidence || 0.4; // Lower default to allow edge weights to differentiate
+    // 8.1: Edge weight (continuous feature) - NORMALIZED within conversation
+    let edgeWeight01 = 0;
     if (issue.evidence.edges && issue.evidence.edges.length > 0) {
         const maxEdgeWeight = Math.max(...issue.evidence.edges.map(e => e.weight || 0));
-        // Edge weight contributes up to 0.3 (could be config-driven in future)
-        signal = Math.min(1.0, signal + (maxEdgeWeight * 0.3));
+        // Normalize edge weight within conversation to create spread
+        if (normalizationFactors && normalizationFactors.maxEdgeWeight > normalizationFactors.minEdgeWeight) {
+            // Min-max normalization: (value - min) / (max - min)
+            const normalized = (maxEdgeWeight - normalizationFactors.minEdgeWeight) /
+                (normalizationFactors.maxEdgeWeight - normalizationFactors.minEdgeWeight);
+            edgeWeight01 = normalized;
+        }
+        else {
+            // Fallback: use raw weight if no normalization data
+            edgeWeight01 = maxEdgeWeight;
+        }
+        // Edge weight contributes significantly (up to 0.4) to differentiate issues
+        signal = Math.min(1.0, signal + (edgeWeight01 * 0.4));
     }
     else {
-        // No edges available, use degraded mode fallback
-        signal = Math.max(signal, config.degradedMode.missingEdgesSignal01);
+        // No edges: penalize but don't use uniform degraded mode
+        // Use a lower base that varies by issue type
+        const baseSignal = issue.type === 'CONTRADICTION' ? 0.35 :
+            issue.type === 'DATA_INTEGRITY' ? 0.40 :
+                0.30;
+        signal = Math.max(signal, baseSignal);
     }
-    // Boost from evidence refs (grounding strength)
+    // 8.1: Anchor match strength (for contradictions) - continuous boost
+    // Note: anchors are on ClaimNode, not IssueV2, so we infer from clusterKey
+    // If clusterKey contains anchor info (e.g., "MONEY:214.73"), boost signal
+    let anchorMatchStrength01 = 0;
+    if (issue.type === 'CONTRADICTION' && issue.clusterKey) {
+        const hasAnchorInKey = /(MONEY|DATE|TIMEFRAME|PAYMENT_CARD|SSN_LAST4):/.test(issue.clusterKey);
+        if (hasAnchorInKey) {
+            // Extract anchor value if present (e.g., "MONEY:214.73" -> 0.4 boost)
+            // Stronger anchors (money, payment card) get higher boost
+            const anchorMatch = issue.clusterKey.match(/(MONEY|PAYMENT_CARD|SSN_LAST4):/);
+            if (anchorMatch) {
+                const anchorType = anchorMatch[1];
+                anchorMatchStrength01 = anchorType === 'MONEY' || anchorType === 'PAYMENT_CARD' ? 0.5 : 0.3;
+                signal = Math.min(1.0, signal + (anchorMatchStrength01 * 0.15)); // Up to 0.075 boost
+            }
+        }
+    }
+    // 8.1: Cluster size (reversal count - how many contradictions in same cluster)
+    // Count issues in same cluster to boost signal
+    let clusterSize01 = 0;
+    if (allIssues && issue.clusterId) {
+        const clusterIssues = allIssues.filter(i => i.clusterId === issue.clusterId);
+        const occurrences = clusterIssues.length;
+        // Normalize occurrences (log scale to prevent saturation)
+        clusterSize01 = Math.min(1.0, Math.log1p(occurrences) / Math.log(11)); // log(11) ≈ 2.4, so 10 occurrences ≈ 0.96
+        signal = Math.min(1.0, signal + (clusterSize01 * 0.12)); // Up to 0.12 boost
+    }
+    else if (issue.occurrences) {
+        // Fallback: use occurrences if available (from aggregated issues)
+        clusterSize01 = Math.min(1.0, Math.log1p(issue.occurrences) / Math.log(11));
+        signal = Math.min(1.0, signal + (clusterSize01 * 0.12));
+    }
+    // Boost from evidence refs (grounding strength) - use actual weights
     if (issue.evidence.refs && issue.evidence.refs.length > 0) {
         const weights = issue.evidence.refs.map(r => r.weight || 0).filter(w => w > 0);
         if (weights.length > 0) {
             const avgRefWeight = weights.reduce((sum, w) => sum + w, 0) / weights.length;
-            // Ref weight contributes up to 0.2 (could be config-driven in future)
-            signal = Math.min(1.0, signal + (avgRefWeight * 0.2));
+            // Ref weight contributes up to 0.15 (reduced from 0.2 to allow edge weight to dominate)
+            signal = Math.min(1.0, signal + (avgRefWeight * 0.15));
         }
     }
     // Type-based signal boost (contradictions, risk signals are stronger)
-    // This could be moved to config.typeBase in future
-    if (issue.type === 'CONTRADICTION' || issue.type === 'DATA_INTEGRITY') {
-        signal = Math.min(1.0, signal + 0.15);
-    }
-    else if (issue.type === 'RISK_SIGNAL' || issue.type === 'FEE_DISCLOSURE_RISK') {
-        signal = Math.min(1.0, signal + 0.10);
+    // Use config.typeBase if available, otherwise use smaller boosts
+    const typeBase = config.weights.typeBase?.[issue.type] || 0.5;
+    if (typeBase > 0.5) {
+        // Normalize typeBase to 0..1 contribution (typeBase is 0.3-0.8, so normalize to 0..0.2 boost)
+        const typeBoost = ((typeBase - 0.3) / 0.5) * 0.2; // Maps 0.3->0, 0.8->0.2
+        signal = Math.min(1.0, signal + typeBoost);
     }
     return clamp01(signal);
 }
 /**
- * Compute category01 from config (normalized)
- * Uses config.categoryNormalization (no hard-coded values)
+ * Compute category01 from category and compliance tags (0..1)
+ * Maps category and tags to meaningful risk scores
+ * NO hard-coded 0 values - always returns a meaningful score
+ */
+/**
+ * 8.1: Compute category01 using continuous features to reduce plateaus
+ * Uses tag counts, category base score, and continuous multipliers
  */
 function computeCategory01(issue, config) {
-    const categoryMult = config.weights.categoryMultiplier?.[issue.category] || config.categoryNormalization.min;
-    // Normalize using config range
-    const range = config.categoryNormalization.max - config.categoryNormalization.min;
-    const normalized = (categoryMult - config.categoryNormalization.min) / range;
-    return clamp01(normalized);
+    // Start with category multiplier if available (continuous base, 0..1)
+    let categoryBase = config.weights.categoryMultiplier?.[issue.category] || 0.5;
+    // 8.1: Use continuous tag scoring instead of binary checks
+    // Count tags and apply continuous boosts
+    const tags = issue.compliance?.tags || [];
+    let tagBoost = 0;
+    if (tags.length > 0) {
+        // Count high-priority tags (continuous feature)
+        const highPriorityCount = tags.filter(tag => tag.includes('privacy') || tag.includes('pci') || tag.includes('security') || tag.includes('cvv')).length;
+        const complianceCount = tags.filter(tag => tag.includes('compliance') || tag.includes('regulatory')).length;
+        const billingCount = tags.filter(tag => tag.includes('billing') || tag.includes('fee') || tag.includes('refund') || tag.includes('money')).length;
+        const disputeCount = tags.filter(tag => tag.includes('dispute') || tag.includes('customer_risk')).length;
+        const qualityCount = tags.filter(tag => tag.includes('tone') || tag.includes('quality')).length;
+        // Continuous boosts based on counts (normalized)
+        tagBoost = Math.min(0.5, (highPriorityCount * 0.15) + // Up to 0.15 per high-priority tag
+            (complianceCount * 0.12) + // Up to 0.12 per compliance tag
+            (billingCount * 0.10) + // Up to 0.10 per billing tag
+            (disputeCount * 0.08) - // Up to 0.08 per dispute tag
+            (qualityCount * 0.05) // Penalty for quality tags
+        );
+    }
+    // Consistency category gets base boost if it's a contradiction
+    if (issue.category === 'consistency' && issue.type === 'CONTRADICTION') {
+        categoryBase = Math.max(categoryBase, 0.7);
+    }
+    // 8.1: Combine base and tag boost (continuous, not binary)
+    const category01 = clamp01(categoryBase + tagBoost);
+    // Fallback: Map category directly if no tags and category has known mapping
+    if (category01 === 0.5 && !config.weights.categoryMultiplier?.[issue.category]) {
+        // Direct category mapping (fallback if no tags)
+        const categoryMap = {
+            'privacy': 0.9,
+            'security': 0.9,
+            'compliance': 0.8,
+            'billing': 0.8,
+            'fees': 0.8,
+            'refunds': 0.8,
+            'disclosure': 0.75,
+            'consistency': 0.6,
+            'data_integrity': 0.7,
+            'other': 0.5,
+        };
+        return clamp01(categoryMap[issue.category] || 0.5);
+    }
+    return category01;
 }
 /**
  * Derive severity from riskScore using thresholds
@@ -277,18 +541,51 @@ function deriveSeverity(riskScore, config) {
  * - Downgrade by one band (critical->high->medium->low), not forced to medium
  * - Do not downgrade contradictions, risk_signals, safety, harassment, etc.
  */
-function computeSeverityDisplay(severity, verificationLevel, issueType, compliance, scoringContext) {
+function computeSeverityDisplay(severity, verificationLevel, issueType, compliance, scoringContext, issue // E2: Optional issue for tag checking
+) {
     // Never downgrade legal hold / critical compliance signals
     if (compliance?.legalHoldSuggested) {
         // Map critical -> high for display (severityDisplay doesn't have 'critical')
         return severity === 'critical' ? 'high' : severity === 'high' ? 'high' : severity === 'medium' ? 'medium' : 'low';
+    }
+    // E2: Mode safety rule - transcript-only should cap display severity only for certain types
+    // Must not downgrade:
+    // - CONTRADICTION
+    // - DATA_INTEGRITY
+    // - "recording/CVV storage" (security/compliance critical)
+    // - fee/price/refund contradictions
+    // So transcript-only can still produce High / Critical display if it's inherently provable from the call.
+    // Check for security/compliance critical issues (recording/CVV storage)
+    // Note: compliance is optional, so we need to check safely
+    const tags = compliance?.tags || [];
+    const isSecurityCritical = issueType === 'DATA_INTEGRITY' ||
+        tags.some(tag => tag.toLowerCase().includes('cvv') ||
+            tag.toLowerCase().includes('recording') ||
+            tag.toLowerCase().includes('pci') ||
+            tag.toLowerCase().includes('security'));
+    // Check for fee/price/refund contradictions
+    const isMoneyContradiction = issueType === 'CONTRADICTION' &&
+        tags.some(tag => tag.toLowerCase().includes('fee') ||
+            tag.toLowerCase().includes('price') ||
+            tag.toLowerCase().includes('refund') ||
+            tag.toLowerCase().includes('billing'));
+    // E2: Never downgrade contradictions, data integrity, security/compliance critical, or money contradictions
+    if (issueType === 'CONTRADICTION' || issueType === 'DATA_INTEGRITY' || isSecurityCritical || isMoneyContradiction) {
+        // Map severity to display (critical -> high, others stay)
+        if (severity === 'critical')
+            return 'high';
+        if (severity === 'high')
+            return 'high';
+        if (severity === 'medium')
+            return 'medium';
+        return 'low';
     }
     // Only downgrade evidence-type "UNVERIFIED" items in transcript-only mode
     if (scoringContext?.mode === 'transcript_only' && verificationLevel === 'TRANSCRIPT_ONLY' && issueType === 'UNVERIFIED_CLAIM') {
         // Downgrade by one band (critical->high->medium->low), but do NOT force medium
         return downgradeOneBand(severity);
     }
-    // Do not downgrade contradictions, risk_signals, safety, harassment, etc.
+    // Do not downgrade risk_signals, safety, harassment, etc.
     // Map severity to display (critical -> high, others stay)
     if (severity === 'critical')
         return 'high';
@@ -338,85 +635,7 @@ function applyCategoryMinimums(severity, issue, config) {
     }
     return severity;
 }
-/**
- * Legacy fallback: Compute risk score for a single issue using composite scoring formula
- * @deprecated Use scoreIssue() instead
- */
-function computeRiskScore(issue, config) {
-    // Get weights (with defaults if not in config)
-    const w_severity = config.weights.severityWeight || 0.25;
-    const w_category = 0.15; // Default if not in config
-    const w_confidence = config.weights.confidenceWeight || 0.20;
-    const w_structure = config.weights.structuralImportanceWeight || 0.15;
-    const w_impact = config.weights.customerImpactWeight || 0.30;
-    const w_evidencePenalty = config.weights.evidencePenaltyWeight || 0.10;
-    // Normalize severity to 0..1 (critical=1.0, high=0.75, medium=0.5, low=0.25)
-    const severity01 = {
-        critical: 1.0,
-        high: 0.75,
-        medium: 0.5,
-        low: 0.25,
-    }[issue.severity] || 0.5;
-    // Category multiplier (normalized to 0..1)
-    const categoryMult = config.weights.categoryMultiplier?.[issue.category] || 1.0;
-    const category01 = clamp01(categoryMult / 1.3); // Normalize assuming max is 1.3
-    // Confidence (already 0..1)
-    const confidence01 = issue.confidence;
-    // Structural importance (from spectral if available, else use edge strength)
-    let structuralImportance = 0.5; // Default
-    if (issue.evidence.edges && issue.evidence.edges.length > 0) {
-        structuralImportance = Math.max(...issue.evidence.edges.map(e => e.weight || 0));
-    }
-    else if (issue.evidence.refs && issue.evidence.refs.length > 0) {
-        const weights = issue.evidence.refs.map(r => r.weight || 0).filter(w => w > 0);
-        if (weights.length > 0) {
-            structuralImportance = weights.reduce((a, b) => a + b, 0) / weights.length;
-        }
-    }
-    // Customer impact (based on type and category)
-    let impact01 = 0.5; // Default
-    if (issue.type === 'RISK_SIGNAL' || issue.type === 'CONTRADICTION') {
-        impact01 = 0.8;
-    }
-    else if (issue.category === 'compliance' || issue.compliance.tags?.some(tag => tag.includes('fee') || tag.includes('billing') || tag.includes('refund'))) {
-        impact01 = 0.7;
-    }
-    else if (issue.compliance.tags?.includes('high_impact')) {
-        impact01 = 0.75;
-    }
-    // Evidence penalty (lower score if transcript-only or no evidence)
-    let evidencePenalty01 = 0;
-    if (issue.verification.level === 'TRANSCRIPT_ONLY') {
-        evidencePenalty01 = 0.2; // Small penalty for transcript-only
-    }
-    else if (issue.verification.level === 'NONE') {
-        evidencePenalty01 = 0.4; // Larger penalty for no evidence
-    }
-    // Compute composite score (0..100)
-    const compositeScore = 100 * clamp01(w_severity * severity01 +
-        w_category * category01 +
-        w_confidence * confidence01 +
-        w_structure * structuralImportance +
-        w_impact * impact01 -
-        w_evidencePenalty * evidencePenalty01);
-    // Convert to riskScore (0..1) for backward compatibility
-    const riskScore = compositeScore / 100;
-    // Determine severity from composite score thresholds
-    const severity = deriveSeverity(riskScore, config);
-    // Update legal hold suggestion (high/critical + agent + disclosure/billing)
-    const legalHoldSuggested = (severity === 'high' || severity === 'critical') &&
-        issue.who.speaker === 'AGENT' &&
-        (issue.category === 'disclosure' || issue.category === 'billing' || issue.category === 'compliance');
-    return {
-        ...issue,
-        riskScore, // Keep as 0..1 for backward compatibility
-        severity,
-        compliance: {
-            ...issue.compliance,
-            legalHoldSuggested,
-        },
-    };
-}
+// Removed deprecated computeRiskScore function - use scoreIssue() instead
 /**
  * Clamp value to [0, 1]
  */

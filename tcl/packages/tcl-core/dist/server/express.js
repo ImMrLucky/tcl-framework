@@ -4,7 +4,7 @@ import express from "express";
 import multer from "multer";
 import { transcribeAudio, isValidAudioFormat } from "./transcription.js";
 import { supabaseAdmin, provisionUser, getUserOrgs, getUserRole, checkUserPermission, getOrgProjects, getProjectEnvs, generateApiKey, logAudit, trackUsage } from "./supabase.js";
-import { inviteMember, updateMemberRole, removeMember, listMembers } from "./member-management.js";
+import { inviteMember, updateMemberRole, removeMember } from "./member-management.js";
 import { setupIntegrationRoutes } from "./integrations/routes.js";
 import { setupAuditRoutes } from "./audit/routes.js";
 import { setupIssueWorkflowRoutes } from "./issues/routes.js";
@@ -13,6 +13,12 @@ import { setupExportRoutes } from "./exports/routes.js";
 import { setupEvaluationSearchRoutes } from "./evaluations/search.js";
 import { setupPolicyRoutes } from "./policies/routes.js";
 import { setupEvidenceRoutes } from "./evidence/routes.js";
+import { setupOrgRoutes } from "./orgs/routes.js";
+import { setupProjectRoutes } from "./projects/routes.js";
+import { setupTemplateRoutes } from "./templates/routes.js";
+import { setupConversationRoutes } from "./conversations/routes.js";
+import { resolveEvidenceSet } from "./evidence/service.js";
+import { startIndexingWorker } from "./evidence/indexing-worker.js";
 import { setupScoringProfilesRoutes } from "./admin/scoring-profiles.js";
 import { setupApiKeyRoutes } from "./api-keys/routes.js";
 import { setupAnalyzeEndpoint } from "./api-keys/analyze-endpoint.js";
@@ -872,6 +878,11 @@ app.post("/validate", requireCapability(Capability.ANALYZE_MANUAL_UPLOAD), async
                                     inputHash: out.report?.manifest?.inputHash,
                                 },
                             });
+                            // D: Detect compliance issues (PCI, recording consent, PII)
+                            const { detectComplianceIssues } = await import('../analysis/compliance-detectors.js');
+                            const complianceResult = detectComplianceIssues(claimsForIssues, evaluationIdPlaceholder, input.conversationId || '', evidenceMode);
+                            // Combine graph issues with compliance issues
+                            const allAtomicIssues = [...expansionResult.allIssues, ...complianceResult.issues];
                             // Check for active scoring profile (use orgContextForProfile retrieved earlier)
                             let rankingConfig = undefined;
                             let profileConfigHash = undefined;
@@ -905,11 +916,50 @@ app.post("/validate", requireCapability(Capability.ANALYZE_MANUAL_UPLOAD), async
                                 templateId: out.report?.manifest?.templateId,
                                 isRegulatedTemplate: false, // TODO: detect from template
                             };
-                            const rankedResult = rankIssuesV2(expansionResult.allIssues, rankingConfig, scoringContext);
-                            // Store in report
-                            out.report.allIssuesV2 = rankedResult.allIssues;
-                            out.report.topIssuesV2 = rankedResult.topIssues;
+                            const rankedResult = rankIssuesV2(allAtomicIssues, rankingConfig, scoringContext);
+                            // C2-C3: Aggregate issues into clusters
+                            const { aggregateIssues } = await import('../analysis/issue-clustering.js');
+                            const evalMode = {
+                                verificationLevel: evidenceMode === 'TRANSCRIPT_ONLY' ? 'TRANSCRIPT_ONLY' :
+                                    'DOC_BACKED',
+                                hasExternalEvidence: evidenceMode === 'TRANSCRIPT_PLUS_EXTERNAL',
+                                evidenceCoverage01: 0, // TODO: compute from actual evidence coverage
+                                transcriptOnlyReasonCodes: evidenceMode === 'TRANSCRIPT_ONLY' ? ['NO_EXTERNAL_EVIDENCE'] : [],
+                            };
+                            const clusteringResult = aggregateIssues(rankedResult.allIssues, evalMode);
+                            // E1-E3: Compute executive summary from aggregated issues
+                            const { computeExecutiveSummary } = await import('../analysis/executive-summary.js');
+                            const executiveSummary = computeExecutiveSummary({
+                                aggregatedIssues: clusteringResult.aggregatedIssues,
+                                truthScore: out.scores?.truth ?? null,
+                                coherenceScore: out.scores?.coherence ?? null,
+                                consistencyScore: out.scores?.consistency ?? null,
+                                evalMode,
+                            });
+                            // F1: Build issueClustersV2 aggregation output
+                            const topClusters = clusteringResult.aggregatedIssues.slice(0, 10); // Top 10 clusters
+                            const issueClustersV2 = {
+                                clusters: clusteringResult.aggregatedIssues, // All clusters
+                                topClusters: topClusters, // Top N clusters (for UI)
+                            };
+                            // Cluster collapsing: Collapse atomic issues into grouped clusters for topIssuesV2
+                            const { collapseIssuesToClusters } = await import('../analysis/issue-cluster-collapse.js');
+                            const atomicIssues = rankedResult.allIssues;
+                            const groupedIssues = collapseIssuesToClusters(atomicIssues);
+                            // A1: Store in canonical structure
+                            out.report.issues = {
+                                atomic: atomicIssues,
+                                grouped: groupedIssues,
+                            };
+                            // Legacy aliases for backwards compatibility
+                            out.report.allIssuesV2 = atomicIssues; // Atomic issues (unchanged)
+                            out.report.topIssuesV2 = groupedIssues; // Grouped/clustered issues (one per clusterId)
+                            out.report.topAggregatedIssues = topClusters; // Top 10 clusters (backwards compat)
+                            out.report.aggregatedIssues = clusteringResult.aggregatedIssues; // All aggregated issues (backwards compat)
+                            out.report.issueClustersV2 = issueClustersV2; // F1: New structured output
                             out.report.issueSummaryV2 = rankedResult.summary;
+                            out.report.executiveSummary = executiveSummary; // E1-E3: Root-cause driven executive summary
+                            out.report.evalMode = evalMode; // A1: Add EvalMode to report
                             out.report.issuesByClaim = expansionResult.issuesByClaim;
                             console.log("9️⃣ ISSUE V2 EXPANSION:", {
                                 allIssuesCount: rankedResult.allIssues.length,
@@ -1019,6 +1069,54 @@ app.post("/validate", requireCapability(Capability.ANALYZE_MANUAL_UPLOAD), async
             try {
                 // Check if conversation_id is provided in request body
                 const conversationId = req.body.conversation_id;
+                // ============================================================================
+                // EVIDENCE SYSTEM: Resolve evidence set for this evaluation
+                // ============================================================================
+                const evidenceParams = req.body.evidence || {};
+                let evidenceSet = null;
+                let evidenceDiagnostics = {};
+                try {
+                    evidenceSet = await resolveEvidenceSet(context.orgId, context.projectId, evidenceParams.templateId, conversationId, evidenceParams.simulationMode || false, evidenceParams.includeOrgEvidence !== false, // Default: true
+                    evidenceParams.includeProjectEvidence !== false, // Default: true
+                    evidenceParams.includeTemplateEvidence !== false // Default: true
+                    );
+                    // Add conversation-level evidence IDs if provided
+                    if (evidenceSet && evidenceParams.conversationEvidenceIds && Array.isArray(evidenceParams.conversationEvidenceIds)) {
+                        evidenceSet.conversationEvidenceIds = evidenceParams.conversationEvidenceIds;
+                        // Add to resolvedEvidenceIds
+                        evidenceSet.resolvedEvidenceIds = [
+                            ...(evidenceSet.resolvedEvidenceIds || []),
+                            ...evidenceParams.conversationEvidenceIds,
+                        ];
+                    }
+                    // Collect diagnostics
+                    if (evidenceSet) {
+                        try {
+                            const { data: failedIndexing } = await supabaseAdmin
+                                .from('evidence_items')
+                                .select('id, title, index_error')
+                                .eq('org_id', context.orgId)
+                                .eq('index_status', 'FAILED')
+                                .in('id', evidenceSet.resolvedEvidenceIds || []);
+                            if (failedIndexing && failedIndexing.length > 0) {
+                                evidenceDiagnostics.indexingFailures = failedIndexing.map(item => ({
+                                    evidenceItemId: item.id,
+                                    error: item.index_error || 'Unknown indexing error',
+                                }));
+                            }
+                        }
+                        catch (diagError) {
+                            console.warn('Failed to collect evidence diagnostics:', diagError);
+                        }
+                    }
+                }
+                catch (evidenceError) {
+                    console.warn('Failed to resolve evidence set:', evidenceError);
+                    // Continue without evidence - evaluation can still run
+                    evidenceDiagnostics = {
+                        indexingFailures: [],
+                    };
+                }
                 // Build proper scores structure that frontend expects
                 const spectralReport = out.report?.spectral || {};
                 const spectralSkipped = spectralReport.spectralSkipped === true;
@@ -1107,7 +1205,18 @@ app.post("/validate", requireCapability(Capability.ANALYZE_MANUAL_UPLOAD), async
                     scorer_id: out.scorerId || null,
                     engine_version: process.env.ENGINE_VERSION || '0.2.0',
                     latency_ms: latency,
-                    report: reportWithIssues
+                    report: reportWithIssues,
+                    // Evidence system fields
+                    template_id: evidenceParams.templateId || null,
+                    simulation_mode: evidenceParams.simulationMode || false,
+                    evidence_set: evidenceSet || {
+                        orgEvidenceIds: [],
+                        projectEvidenceIds: [],
+                        conversationEvidenceIds: [],
+                        templateEvidenceIds: [],
+                        resolvedEvidenceIds: [],
+                    },
+                    evidence_diagnostics: evidenceDiagnostics,
                 })
                     .select('id')
                     .single();
@@ -1569,29 +1678,8 @@ app.post("/api/me/orgs", async (req, res) => {
 // Member Management Endpoints
 // ============================================
 // List members of an organization
-app.get("/api/orgs/:orgId/members", async (req, res) => {
-    try {
-        const { orgId } = req.params;
-        const userId = req.body.userId || req.query.userId;
-        if (!userId) {
-            return res.status(400).json({ error: "userId required" });
-        }
-        if (!supabaseAdmin) {
-            return res.status(503).json({ error: "Supabase not configured" });
-        }
-        // Check if user has view permission (all members can view)
-        const canView = await checkUserPermission(userId, orgId, 'view');
-        if (!canView) {
-            return res.status(403).json({ error: "Insufficient permissions" });
-        }
-        const members = await listMembers(orgId);
-        res.json({ members });
-    }
-    catch (e) {
-        console.error("List members error:", e);
-        res.status(500).json({ error: e?.message ?? "unknown error" });
-    }
-});
+// NOTE: This endpoint is now handled by setupOrgRoutes in orgs/routes.ts
+// Removed duplicate endpoint - use /api/orgs/:orgId/members from orgs/routes.ts instead
 // Invite a member to an organization
 app.post("/api/orgs/:orgId/members/invite", async (req, res) => {
     try {
@@ -2641,6 +2729,11 @@ app.post("/api/orgs/:orgId/projects/:projectId/api-keys/:keyId/revoke", async (r
         });
     }
 });
+// Setup conversation routes (drafts, transcription) BEFORE general /api/conversations routes
+// This ensures more specific routes like /api/conversations/drafts/audio are matched first
+console.log("Registering conversation routes...");
+setupConversationRoutes(app);
+console.log("Conversation routes registered successfully");
 // Create conversation (ingest transcript)
 app.post("/api/conversations", async (req, res) => {
     try {
@@ -2906,6 +2999,16 @@ console.log("Issue workflow routes registered successfully");
 // Setup analytics routes
 console.log("Registering analytics routes...");
 setupAnalyticsRoutes(app);
+// Setup org routes
+console.log("Registering org routes...");
+setupOrgRoutes(app);
+console.log("Org routes registered successfully");
+// Setup project routes
+console.log("Registering project routes...");
+setupProjectRoutes(app);
+console.log("Project routes registered successfully");
+setupTemplateRoutes(app);
+console.log("Template routes registered successfully");
 console.log("Analytics routes registered successfully");
 // Setup export routes
 console.log("Registering export routes...");
@@ -3000,6 +3103,14 @@ try {
         if (address && typeof address === 'object') {
             console.log(`Server bound to ${address.address}:${address.port}`);
         }
+        // Start evidence indexing worker
+        try {
+            startIndexingWorker();
+            console.log('✅ Evidence indexing worker started');
+        }
+        catch (err) {
+            console.warn('⚠️ Failed to start evidence indexing worker:', err.message);
+        }
         // Try to load modules after server starts
         loadModules().catch((err) => {
             console.error("Module loading failed (non-critical for health check):", err?.message);
@@ -3021,5 +3132,29 @@ process.on('uncaughtException', (error) => {
     console.error('Uncaught Exception:', error);
 });
 process.on('unhandledRejection', (reason, promise) => {
-    console.error('Unhandled Rejection at:', promise, 'reason:', reason);
+    console.error('========== UNHANDLED REJECTION ==========');
+    console.error('Promise:', promise);
+    console.error('Reason:', reason);
+    if (reason instanceof Error) {
+        console.error('Error message:', reason.message);
+        console.error('Error stack:', reason.stack);
+    }
+    console.error('==========================================');
+});
+// Global error handler middleware (must be last)
+app.use((err, req, res, next) => {
+    console.error('========== GLOBAL ERROR HANDLER ==========');
+    console.error('Path:', req.path);
+    console.error('Method:', req.method);
+    console.error('Error:', err);
+    console.error('Error message:', err?.message);
+    console.error('Error stack:', err?.stack);
+    console.error('==========================================');
+    if (!res.headersSent) {
+        res.status(500).json({
+            error: 'INTERNAL_ERROR',
+            message: err?.message || 'An unexpected error occurred',
+            details: process.env.NODE_ENV === 'development' ? err?.stack : undefined
+        });
+    }
 });

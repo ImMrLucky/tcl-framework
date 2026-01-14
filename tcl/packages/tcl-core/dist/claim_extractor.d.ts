@@ -9,6 +9,9 @@ export interface ExtractedClaim extends Claim {
     hasAbsoluteLanguage: boolean;
     hasMoney: boolean;
 }
+export declare function extractTopics(text: string): string[];
+export declare function hasAbsoluteLanguage(text: string): boolean;
+export declare function hasMoney(text: string): boolean;
 export interface ExtractClaimsResult {
     claims: ExtractedClaim[];
     allItems: ExtractedClaim[];

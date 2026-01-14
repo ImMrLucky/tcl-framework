@@ -95,8 +95,8 @@ export function getRiskRankingConfig() {
             },
             evidenceMap: {
                 EXTERNAL_VERIFIED: 1.0,
-                TRANSCRIPT_ONLY: 0.45,
-                NONE: 0.20,
+                TRANSCRIPT_ONLY: 0.6, // E1: Updated to 0.6 (was 0.45)
+                NONE: 0.2,
             },
             categoryNormalization: {
                 min: 1.0,

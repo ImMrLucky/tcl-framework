@@ -210,8 +210,7 @@ export function convertIssueV3ToV2(issue) {
         conversationId: '', // Will be set by caller
         type: issue.type,
         category: issue.category,
-        severity: issue.impactSeverity, // Map impactSeverity to severity
-        severityDisplay: issue.impactSeverity === 'critical' ? 'high' : issue.impactSeverity, // Map for display
+        severity: issue.impactSeverity === 'critical' ? 'high' : issue.impactSeverity, // Map critical to high (canonical)
         impact: issue.impactSeverity === 'critical' ? 'high' : issue.impactSeverity === 'high' ? 'high' : issue.impactSeverity === 'medium' ? 'medium' : 'low',
         riskScore: issue.riskScore,
         score: Math.round(issue.riskScore * 100),
@@ -220,6 +219,24 @@ export function convertIssueV3ToV2(issue) {
         verification: {
             level: verificationLevelV2,
             reasonCodes: issue.reasonCodes,
+        },
+        scoring: {
+            components: {
+                impact01: 0,
+                evidence01: 0,
+                signal01: 0,
+                category01: 0,
+                verificationMultiplier: 1,
+                risk01Raw: issue.riskScore,
+                risk01Final: issue.riskScore,
+            },
+            weights: {
+                impact: 0.4,
+                evidence: 0.3,
+                signal: 0.2,
+                category: 0.1,
+            },
+            reasons: [],
         },
         who: {
             speaker: 'UNKNOWN',

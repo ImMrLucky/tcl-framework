@@ -29,8 +29,6 @@ export function toIssueDto(rawIssue, evaluationId, evaluationCreatedAt) {
     else if (rawIssue.risk?.severity) {
         severity = rawIssue.risk.severity;
     }
-    // Extract severityDisplay (may be capped for transcript-only)
-    const severityDisplay = rawIssue.severityDisplay || rawIssue.risk?.severityDisplay || severity;
     // Extract impact
     const impact = rawIssue.impact || rawIssue.risk?.impact || 'medium';
     // Extract category
@@ -51,7 +49,6 @@ export function toIssueDto(rawIssue, evaluationId, evaluationCreatedAt) {
         type,
         category,
         severity: severity,
-        severityDisplay: severityDisplay,
         impact: impact,
         riskScore,
         score,
@@ -60,6 +57,24 @@ export function toIssueDto(rawIssue, evaluationId, evaluationCreatedAt) {
         verification: {
             level: rawIssue.verification?.level || rawIssue.verificationLevel || 'NONE',
             reasonCodes: rawIssue.verification?.reasonCodes || rawIssue.verification?.reasons || [],
+        },
+        scoring: rawIssue.scoring || {
+            components: {
+                impact01: 0,
+                evidence01: 0,
+                signal01: 0,
+                category01: 0,
+                verificationMultiplier: 1,
+                risk01Raw: riskScore,
+                risk01Final: riskScore,
+            },
+            weights: {
+                impact: 0.4,
+                evidence: 0.3,
+                signal: 0.2,
+                category: 0.1,
+            },
+            reasons: [],
         },
         who: {
             speaker: rawIssue.who?.speaker || rawIssue.speaker || 'UNKNOWN',

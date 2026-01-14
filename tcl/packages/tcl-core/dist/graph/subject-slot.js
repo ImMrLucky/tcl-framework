@@ -106,6 +106,18 @@ function extractLexiconEntities(text, lexicon) {
 // =============================================================================
 export function computeSubjectSlot(text, entities, modality) {
     const config = getTemplateConfig();
+    const textLower = text.toLowerCase();
+    // E1: Step 0: Check for semantic slots (industry-agnostic policy-like statements)
+    const semanticSlot = extractSemanticSlot(text, entities);
+    if (semanticSlot) {
+        return {
+            slotType: semanticSlot.slotType,
+            entityKey: semanticSlot.entityKey,
+            value: extractSlotValue(entities),
+            valueNorm: normalizeSlotValue(extractSlotValue(entities)),
+            qualifiers: extractQualifiers(text, entities),
+        };
+    }
     // Step 1: Find primary entity from lexicon-matched entities
     const lexiconEntities = entities.filter(e => Object.values(config.slotLexicon).some(l => l.entityKey === e.normalized));
     if (lexiconEntities.length > 0) {
@@ -149,6 +161,106 @@ export function computeSubjectSlot(text, entities, modality) {
         value: undefined,
         valueNorm: undefined,
     };
+}
+/**
+ * E1: Extract industry-agnostic semantic slots for numeric + policy-like statements
+ * Returns slotType and entityKey for: AMOUNT, TIMEFRAME, FEE, REFUND, RECORDING, PAYMENT_METHOD, PLAN_PRICE, COMMITMENT
+ */
+function extractSemanticSlot(text, entities) {
+    const textLower = text.toLowerCase();
+    // FEE (late fee, cancellation fee, termination fee)
+    const feePatterns = [
+        { pattern: /\b(late\s*fee|cancellation\s*fee|termination\s*fee|early\s*termination|etf)\b/i, key: 'FEE' },
+        { pattern: /\bfee\b.*?\b(?:late|cancel|terminat|early)\b/i, key: 'FEE' },
+    ];
+    for (const { pattern, key } of feePatterns) {
+        if (pattern.test(text)) {
+            const moneyEntity = entities.find(e => e.type === 'MONEY');
+            const feeKey = moneyEntity ? `FEE:${moneyEntity.normalized}` : 'FEE:unknown';
+            return { slotType: 'fee', entityKey: feeKey };
+        }
+    }
+    // REFUND (refund amount, refund months)
+    const refundPatterns = [
+        { pattern: /\brefund\b/i, key: 'REFUND' },
+        { pattern: /\bcredit\b.*?\b(?:refund|back)\b/i, key: 'REFUND' },
+    ];
+    for (const { pattern, key } of refundPatterns) {
+        if (pattern.test(text)) {
+            const moneyEntity = entities.find(e => e.type === 'MONEY');
+            const durationEntity = entities.find(e => e.type === 'DURATION');
+            if (moneyEntity) {
+                return { slotType: 'refund', entityKey: `REFUND_AMOUNT:${moneyEntity.normalized}` };
+            }
+            else if (durationEntity && /\bmonth/i.test(text)) {
+                return { slotType: 'refund', entityKey: `REFUND_MONTHS:${durationEntity.normalized}` };
+            }
+            else {
+                return { slotType: 'refund', entityKey: 'REFUND:unknown' };
+            }
+        }
+    }
+    // RECORDING (recorded / not recorded)
+    const recordingPatterns = [
+        { pattern: /\b(?:call|conversation|this)\s*(?:is|will\s*be|are)\s*(?:recorded|being\s*recorded)\b/i, key: 'RECORDING:yes' },
+        { pattern: /\b(?:not|not\s*being|won't\s*be|aren't)\s*recorded\b/i, key: 'RECORDING:no' },
+        { pattern: /\brecord(?:ing|ed)\s*(?:yes|no|on|off)\b/i, key: 'RECORDING' },
+    ];
+    for (const { pattern, key } of recordingPatterns) {
+        if (pattern.test(text)) {
+            return { slotType: 'recording', entityKey: key.includes(':') ? key : 'RECORDING:unknown' };
+        }
+    }
+    // PAYMENT_METHOD (card/CVV storage)
+    const paymentPatterns = [
+        { pattern: /\b(?:card|credit\s*card|debit\s*card|payment\s*card)\b/i, key: 'PAYMENT_METHOD:card' },
+        { pattern: /\b(?:CVV|CVC|security\s*code|card\s*code)\b/i, key: 'PAYMENT_METHOD:cvv' },
+        { pattern: /\b(?:store|storing|save|saving)\s*(?:card|CVV|payment)\b/i, key: 'PAYMENT_METHOD:storage' },
+    ];
+    for (const { pattern, key } of paymentPatterns) {
+        if (pattern.test(text)) {
+            return { slotType: 'payment_method', entityKey: key };
+        }
+    }
+    // PLAN_PRICE (plan monthly rate)
+    const planPricePatterns = [
+        { pattern: /\b(?:plan|monthly|rate|price)\b.*?\$\d+/i, key: 'PLAN_PRICE' },
+        { pattern: /\$\d+.*?\b(?:plan|monthly|rate|price)\b/i, key: 'PLAN_PRICE' },
+    ];
+    for (const { pattern, key } of planPricePatterns) {
+        if (pattern.test(text)) {
+            const moneyEntity = entities.find(e => e.type === 'MONEY');
+            const planKey = moneyEntity ? `PLAN_PRICE:${moneyEntity.normalized}` : 'PLAN_PRICE:unknown';
+            return { slotType: 'plan_price', entityKey: planKey };
+        }
+    }
+    // COMMITMENT (guarantee/never/locked)
+    const commitmentPatterns = [
+        { pattern: /\b(?:guarantee|guaranteed|never\s*(?:increase|change|go\s*up)|locked|lock\s*in)\b/i, key: 'COMMITMENT:strong' },
+        { pattern: /\b(?:promise|promised|commit|committed|assure|assured)\b/i, key: 'COMMITMENT:moderate' },
+    ];
+    for (const { pattern, key } of commitmentPatterns) {
+        if (pattern.test(text)) {
+            return { slotType: 'commitment', entityKey: key };
+        }
+    }
+    // AMOUNT (money) - if money entity exists and no other semantic slot matched
+    const moneyEntity = entities.find(e => e.type === 'MONEY');
+    if (moneyEntity) {
+        // Check if it's part of a fee/refund/plan context (already handled above)
+        if (!/\b(fee|refund|plan|price|rate)\b/i.test(text)) {
+            return { slotType: 'amount', entityKey: `AMOUNT:${moneyEntity.normalized}` };
+        }
+    }
+    // TIMEFRAME - if timeframe pattern exists
+    const timeframePattern = /\b(\d+)\s*(?:hours?|days?|weeks?|months?|business\s*days?)\b|\bnext\s*(?:cycle|billing\s*cycle)\b/i;
+    if (timeframePattern.test(text)) {
+        const durationEntity = entities.find(e => e.type === 'DURATION');
+        if (durationEntity) {
+            return { slotType: 'timeframe', entityKey: `TIMEFRAME:${durationEntity.normalized}` };
+        }
+    }
+    return null;
 }
 // =============================================================================
 // INFER PRIMARY ENTITY TYPE
@@ -275,8 +387,27 @@ function normalizeSlotValue(value) {
 // =============================================================================
 // SLOT MATCHING (For contradiction eligibility)
 // =============================================================================
+/**
+ * 2.1: Check if a slot is meaningful (not unknown/general)
+ */
+export function isMeaningfulSlot(slot) {
+    if (!slot)
+        return false;
+    if (!slot.slotType || !slot.entityKey)
+        return false;
+    if (slot.slotType === 'unknown' || slot.slotType === 'general')
+        return false;
+    if (slot.entityKey === 'unknown' || slot.entityKey === 'general')
+        return false;
+    return true;
+}
+/**
+ * 2.1: Updated slotsMatch to prevent unknown/unknown contradictions
+ * Do NOT allow unknown/general to match
+ */
 export function slotsMatch(a, b) {
-    // Exact match on slotType and entityKey
+    if (!isMeaningfulSlot(a) || !isMeaningfulSlot(b))
+        return false;
     return a.slotType === b.slotType && a.entityKey === b.entityKey;
 }
 export function slotsCompatible(a, b) {
@@ -306,6 +437,283 @@ export function valuesContradict(a, b) {
         return false;
     if (a.valueNorm === undefined || b.valueNorm === undefined)
         return false;
+    // Check for explicit contradiction patterns first
+    if (hasExplicitContradictionPattern(a, b)) {
+        return true;
+    }
+    // For numeric values, use tolerance-based comparison
+    if (typeof a.valueNorm === 'number' && typeof b.valueNorm === 'number') {
+        return valuesContradictNumeric(a.valueNorm, b.valueNorm, a.slotType);
+    }
+    // For string values, exact mismatch = contradiction
+    if (typeof a.valueNorm === 'string' && typeof b.valueNorm === 'string') {
+        return a.valueNorm !== b.valueNorm;
+    }
     // Different normalized values = potential contradiction
     return a.valueNorm !== b.valueNorm;
+}
+/**
+ * Check for explicit contradiction patterns: increase/decrease, waived/not waived, no fee/fee
+ */
+export function hasExplicitContradictionPattern(a, b) {
+    const aText = (a.valueNorm?.toString() || '').toLowerCase();
+    const bText = (b.valueNorm?.toString() || '').toLowerCase();
+    // Increase vs Decrease patterns
+    const increaseWords = ['increase', 'increased', 'increasing', 'higher', 'more', 'up', 'raise', 'raised'];
+    const decreaseWords = ['decrease', 'decreased', 'decreasing', 'lower', 'less', 'down', 'reduce', 'reduced'];
+    const aIsIncrease = increaseWords.some(w => aText.includes(w));
+    const bIsDecrease = decreaseWords.some(w => bText.includes(w));
+    const aIsDecrease = decreaseWords.some(w => aText.includes(w));
+    const bIsIncrease = increaseWords.some(w => bText.includes(w));
+    if ((aIsIncrease && bIsDecrease) || (aIsDecrease && bIsIncrease)) {
+        return true;
+    }
+    // Waived vs Not Waived patterns
+    const waivedWords = ['waived', 'waive', 'no fee', 'no charge', 'free', 'zero', '0', '$0'];
+    const notWaivedWords = ['fee', 'charge', 'cost', 'price'];
+    const aIsWaived = waivedWords.some(w => aText.includes(w));
+    const bHasFee = notWaivedWords.some(w => bText.includes(w)) && !waivedWords.some(w => bText.includes(w));
+    const bIsWaived = waivedWords.some(w => bText.includes(w));
+    const aHasFee = notWaivedWords.some(w => aText.includes(w)) && !waivedWords.some(w => aText.includes(w));
+    if ((aIsWaived && bHasFee) || (bIsWaived && aHasFee)) {
+        return true;
+    }
+    // No fee vs Fee (numeric check)
+    if (typeof a.valueNorm === 'number' && typeof b.valueNorm === 'number') {
+        const aIsZero = Math.abs(a.valueNorm) < 0.01; // Within 1 cent
+        const bIsZero = Math.abs(b.valueNorm) < 0.01;
+        const aIsNonZero = Math.abs(a.valueNorm) >= 0.01;
+        const bIsNonZero = Math.abs(b.valueNorm) >= 0.01;
+        if ((aIsZero && bIsNonZero) || (bIsZero && aIsNonZero)) {
+            return true;
+        }
+    }
+    return false;
+}
+/**
+ * Check if two numeric values contradict with tolerance
+ */
+function valuesContradictNumeric(valueA, valueB, slotType) {
+    // For money (in cents), use 1% tolerance or $0.01 minimum
+    if (slotType.includes('fee') || slotType.includes('payment') || slotType.includes('money') || slotType.includes('amount')) {
+        const tolerance = Math.max(1, Math.abs(valueA) * 0.01); // 1% or 1 cent, whichever is larger
+        return Math.abs(valueA - valueB) > tolerance;
+    }
+    // For percentages, use 0.1% tolerance
+    if (slotType.includes('percent') || slotType.includes('rate') || slotType.includes('apr')) {
+        return Math.abs(valueA - valueB) > 0.1;
+    }
+    // For dates (as timestamps), exact match required
+    if (slotType.includes('date') || slotType.includes('time')) {
+        return valueA !== valueB;
+    }
+    // For durations (months, days), exact match required
+    if (slotType.includes('duration') || slotType.includes('term') || slotType.includes('month')) {
+        return Math.abs(valueA - valueB) >= 1; // At least 1 unit difference
+    }
+    // For other numeric values, use 1% relative tolerance
+    const tolerance = Math.max(0.01, Math.abs(valueA) * 0.01);
+    return Math.abs(valueA - valueB) > tolerance;
+}
+// =============================================================================
+// ANCHOR-BASED MATCHING (Industry-Agnostic)
+// =============================================================================
+/**
+ * 3.1: Compute anchor overlap between two claim anchor sets
+ */
+export function anchorOverlap(a = [], b = []) {
+    const setA = new Set(a.map(x => `${x.type}:${x.key}`));
+    let hits = 0;
+    for (const x of b) {
+        if (setA.has(`${x.type}:${x.key}`))
+            hits++;
+    }
+    return hits;
+}
+/**
+ * 3.1: Check if two claims have strong anchor matches
+ * Strong if share MONEY or DATE/TIMEFRAME or ADDRESS/EMAIL/PHONE/CARD/SSN_LAST4
+ */
+export function hasStrongAnchorMatch(aAnchors = [], bAnchors = []) {
+    const strongTypes = new Set(['MONEY', 'DATE', 'TIMEFRAME', 'ADDRESS', 'EMAIL', 'PHONE', 'PAYMENT_CARD', 'SSN_LAST4']);
+    const setA = new Set(aAnchors.filter(x => strongTypes.has(x.type)).map(x => `${x.type}:${x.key}`));
+    return bAnchors.some(x => strongTypes.has(x.type) && setA.has(`${x.type}:${x.key}`));
+}
+// =============================================================================
+// ANCHOR EXTRACTION (Industry-Agnostic)
+// =============================================================================
+/**
+ * 1.2: Extract anchors from entities (generic, industry-agnostic)
+ * Converts extracted entities into normalized anchor keys
+ */
+export function extractAnchors(entities, text) {
+    const anchors = [];
+    // MONEY → normalized decimal string (2dp)
+    const moneyEntity = entities.find(e => e.type === 'MONEY');
+    if (moneyEntity && moneyEntity.normalized) {
+        const amount = typeof moneyEntity.normalized === 'number' ? moneyEntity.normalized / 100 : moneyEntity.normalized;
+        anchors.push({
+            type: 'MONEY',
+            key: typeof amount === 'number' ? amount.toFixed(2) : String(amount),
+            raw: moneyEntity.value,
+            span: moneyEntity.span,
+            confidence: moneyEntity.confidence,
+        });
+    }
+    // DATE → normalized ISO or text normalized
+    const dateEntity = entities.find(e => e.type === 'DATE');
+    if (dateEntity && dateEntity.normalized) {
+        anchors.push({
+            type: 'DATE',
+            key: String(dateEntity.normalized),
+            raw: dateEntity.value,
+            span: dateEntity.span,
+            confidence: dateEntity.confidence,
+        });
+    }
+    // TIMEFRAME → normalize "24 hours", "7–10 business days", "next cycle"
+    const timeframePatterns = [
+        { pattern: /\b(\d+)\s*hours?\b/i, normalize: (m) => `${m[1]}_h` },
+        { pattern: /\b(\d+)\s*days?\b/i, normalize: (m) => `${m[1]}_d` },
+        { pattern: /\b(\d+)\s*weeks?\b/i, normalize: (m) => `${m[1]}_w` },
+        { pattern: /\b(\d+)\s*months?\b/i, normalize: (m) => `${m[1]}_m` },
+        { pattern: /\b(\d+)[-–](\d+)\s*business\s*days?\b/i, normalize: (m) => `${m[1]}-${m[2]}_bd` },
+        { pattern: /\bnext\s*cycle\b/i, normalize: () => 'next_cycle' },
+        { pattern: /\bnext\s*billing\s*cycle\b/i, normalize: () => 'next_billing_cycle' },
+    ];
+    for (const { pattern, normalize } of timeframePatterns) {
+        const match = text.match(pattern);
+        if (match) {
+            anchors.push({
+                type: 'TIMEFRAME',
+                key: normalize(match),
+                raw: match[0],
+                span: match.index !== undefined ? { start: match.index, end: match.index + match[0].length } : undefined,
+            });
+            break; // Only add first match
+        }
+    }
+    // PERCENT
+    const percentEntity = entities.find(e => e.type === 'PERCENT');
+    if (percentEntity && percentEntity.normalized) {
+        anchors.push({
+            type: 'PERCENT',
+            key: String(percentEntity.normalized),
+            raw: percentEntity.value,
+            span: percentEntity.span,
+            confidence: percentEntity.confidence,
+        });
+    }
+    // QUANTITY (from DURATION or other numeric entities)
+    const durationEntity = entities.find(e => e.type === 'DURATION');
+    if (durationEntity && durationEntity.normalized) {
+        anchors.push({
+            type: 'QUANTITY',
+            key: String(durationEntity.normalized),
+            raw: durationEntity.value,
+            span: durationEntity.span,
+            confidence: durationEntity.confidence,
+        });
+    }
+    // EMAIL
+    const emailPattern = /\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b/g;
+    const emailMatch = text.match(emailPattern);
+    if (emailMatch) {
+        for (const email of emailMatch) {
+            anchors.push({
+                type: 'EMAIL',
+                key: email.toLowerCase(),
+                raw: email,
+                span: text.indexOf(email) !== -1 ? { start: text.indexOf(email), end: text.indexOf(email) + email.length } : undefined,
+            });
+        }
+    }
+    // PHONE
+    const phonePattern = /\b(?:\+?1[-.\s]?)?\(?([0-9]{3})\)?[-.\s]?([0-9]{3})[-.\s]?([0-9]{4})\b/g;
+    const phoneMatch = text.match(phonePattern);
+    if (phoneMatch) {
+        for (const phone of phoneMatch) {
+            const normalized = phone.replace(/\D/g, '');
+            anchors.push({
+                type: 'PHONE',
+                key: normalized.length === 10 ? normalized : normalized.slice(-10), // Last 10 digits
+                raw: phone,
+                span: text.indexOf(phone) !== -1 ? { start: text.indexOf(phone), end: text.indexOf(phone) + phone.length } : undefined,
+            });
+        }
+    }
+    // PAYMENT_CARD (masked - only last 4)
+    const cardPattern = /\b(?:\d[-\s]?){13,19}\b/g;
+    const cardMatch = text.match(cardPattern);
+    if (cardMatch) {
+        for (const card of cardMatch) {
+            const digits = card.replace(/\D/g, '');
+            if (digits.length >= 13 && digits.length <= 19) {
+                const last4 = digits.slice(-4);
+                anchors.push({
+                    type: 'PAYMENT_CARD',
+                    key: `card_last4:${last4}`,
+                    raw: card,
+                    span: text.indexOf(card) !== -1 ? { start: text.indexOf(card), end: text.indexOf(card) + card.length } : undefined,
+                });
+            }
+        }
+    }
+    // CVV (presence only - never store digits)
+    const cvvPattern = /\b(?:CVV|CVC|security\s*code|card\s*code)\b.*?\b\d{3,4}\b/i;
+    if (cvvPattern.test(text)) {
+        anchors.push({
+            type: 'PAYMENT_CARD', // Use same type for CVV
+            key: 'cvv_present:true',
+            raw: 'CVV mentioned',
+        });
+    }
+    // SSN_LAST4
+    const ssnPattern = /\b(?:SSN|social\s*security|last\s*four)\b.*?\b(\d{4})\b/i;
+    const ssnMatch = text.match(ssnPattern);
+    if (ssnMatch && ssnMatch[1]) {
+        anchors.push({
+            type: 'SSN_LAST4',
+            key: `ssn_last4:${ssnMatch[1]}`,
+            raw: `SSN last 4: ${ssnMatch[1]}`,
+        });
+    }
+    // URL
+    const urlPattern = /https?:\/\/[^\s]+/gi;
+    const urlMatch = text.match(urlPattern);
+    if (urlMatch) {
+        for (const url of urlMatch) {
+            anchors.push({
+                type: 'URL',
+                key: url.toLowerCase(),
+                raw: url,
+                span: text.indexOf(url) !== -1 ? { start: text.indexOf(url), end: text.indexOf(url) + url.length } : undefined,
+            });
+        }
+    }
+    return anchors;
+}
+/**
+ * Helper function for customer denial vs assertion pattern
+ */
+export function hasCustomerDenialVsAssertion(claimA, claimB) {
+    // Check if one is a customer denial and the other is an agent assertion
+    const aText = (claimA.text || '').toLowerCase();
+    const bText = (claimB.text || '').toLowerCase();
+    const aSpeaker = claimA.speakerRole || claimA.meta?.speaker || '';
+    const bSpeaker = claimB.speakerRole || claimB.meta?.speaker || '';
+    const denialWords = ['no', 'not', "don't", "didn't", "won't", "can't", "cannot", 'never', 'none', 'nothing'];
+    const assertionWords = ['yes', 'will', 'can', 'do', 'does', 'did', 'has', 'have', 'is', 'are'];
+    const aIsDenial = denialWords.some(w => aText.includes(w));
+    const bIsAssertion = assertionWords.some(w => bText.includes(w));
+    const aIsAssertion = assertionWords.some(w => aText.includes(w));
+    const bIsDenial = denialWords.some(w => bText.includes(w));
+    // Customer denial vs agent assertion (or vice versa)
+    const customerDenial = (aSpeaker === 'customer' || aSpeaker === 'CUSTOMER') && aIsDenial;
+    const agentAssertion = (bSpeaker === 'agent' || bSpeaker === 'AGENT') && bIsAssertion;
+    const agentDenial = (aSpeaker === 'agent' || aSpeaker === 'AGENT') && aIsDenial;
+    const customerAssertion = (bSpeaker === 'customer' || bSpeaker === 'CUSTOMER') && bIsAssertion;
+    return (customerDenial && agentAssertion) || (agentDenial && customerAssertion) ||
+        ((aSpeaker === 'customer' || aSpeaker === 'CUSTOMER') && aIsDenial && (bSpeaker === 'agent' || bSpeaker === 'AGENT') && bIsAssertion) ||
+        ((aSpeaker === 'agent' || aSpeaker === 'AGENT') && aIsDenial && (bSpeaker === 'customer' || bSpeaker === 'CUSTOMER') && bIsAssertion);
 }

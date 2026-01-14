@@ -3111,9 +3111,10 @@ app.post("/api/orgs/:orgId/projects/:projectId/api-keys/:keyId/revoke", async (r
   }
 });
 
-// Setup conversation routes (drafts, transcription) BEFORE general /api/conversations routes
+// Setup conversation routes (drafts, transcription) RIGHT BEFORE general /api/conversations route
 // This ensures more specific routes like /api/conversations/drafts/audio are matched first
-console.log("Registering conversation routes...");
+// Registered here (after middleware setup) to avoid initialization issues
+console.log("Registering conversation routes (before /api/conversations)...");
 setupConversationRoutes(app);
 console.log("Conversation routes registered successfully");
 

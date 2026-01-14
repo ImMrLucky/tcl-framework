@@ -4,6 +4,7 @@
  * Config-driven risk scoring and ranking for issues.
  * NO hard-coded thresholds or weights.
  */
+import type { ImpactV2 } from '../types.js';
 export interface RiskRankingConfig {
     ui: {
         maxTopIssues: number;
@@ -47,6 +48,19 @@ export interface RiskRankingConfig {
         TRANSCRIPT_ONLY: number;
         NONE: number;
     };
+    verificationMultiplier?: {
+        EXTERNAL_VERIFIED: number;
+        TRANSCRIPT_ONLY: number;
+        NONE: number;
+    };
+    modeCaps?: {
+        transcript_only: {
+            applyToTypes: string[];
+            maxRisk01: number;
+        };
+    };
+    typeImpactMap?: Record<string, ImpactV2>;
+    categoryWeights?: Record<string, number>;
     categoryNormalization: {
         min: number;
         max: number;

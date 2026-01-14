@@ -24,12 +24,21 @@ import { createHash } from "crypto";
  * 5. If truthState == "Inconclusive" => "needs_review"
  * 6. Else: not an issue (return null)
  */
-export function deriveIssueType(claimId, truthState, topBadContradictions, topBadSupports) {
+export function deriveIssueType(claimId, truthState, topBadContradictions, topBadSupports, claimModality, // NEW: Claim modality (promise, assert, etc.)
+speakerRole // NEW: Speaker role (agent, customer, etc.)
+) {
     // Normalize truth state to uppercase for comparison
     const normalizedState = truthState?.toUpperCase();
     // Rule 1: Contradicted claims (handle both "Contradicted" and "CONTRADICTED")
     if (normalizedState === "CONTRADICTED") {
         return "contradiction";
+    }
+    // Rule 1.5: Risky commitments (agent promises/guarantees that are unverified)
+    // HIGH PRIORITY: These are high-risk even in transcript-only mode
+    const isAgent = speakerRole === 'agent' || speakerRole === 'AGENT';
+    const isPromise = claimModality === 'promise';
+    if (isAgent && isPromise && (normalizedState === "UNVERIFIED" || normalizedState === "UNGROUNDED")) {
+        return "risky_commitment_unverified";
     }
     // Rule 2: Ungrounded claims (NO evidence at all)
     if (normalizedState === "UNGROUNDED") {
@@ -37,8 +46,12 @@ export function deriveIssueType(claimId, truthState, topBadContradictions, topBa
     }
     // Rule 2b: Unverified claims (has transcript evidence but no external verification)
     // IMPORTANT: UNVERIFIED is not inherently an issue - it's expected in transcript-only mode
-    // Only flag as issue if claim is in bad edges
+    // Only flag as issue if claim is in bad edges OR is a risky commitment
     if (normalizedState === "UNVERIFIED") {
+        // Check for risky commitments first (agent promises)
+        if (isAgent && isPromise) {
+            return "risky_commitment_unverified";
+        }
         // Check if claim is in any problematic edges
         const inBadContradictions = topBadContradictions.some(e => e.claimAId === claimId || e.claimBId === claimId);
         const inBadSupports = topBadSupports.some(e => e.claimAId === claimId || e.claimBId === claimId);
@@ -77,35 +90,124 @@ export function deriveIssueType(claimId, truthState, topBadContradictions, topBa
 // SEVERITY SCORING (0-100)
 // =============================================================================
 /**
- * Compute severity score (0-100)
+ * Compute severity score (0-100) from (impact × confidence × verifiability)
+ *
+ * This prevents "everything is high" by requiring all three components.
  *
  * Formula:
- *   base = nodeBlameNorm[i] * 70
- *   edgeContribution = sum(incident bad edge badness) normalized to 0..30
- *   roleBonus = (role=agent && issueType in {contradiction, ungrounded}) ? 5 : 0
- *   final = clamp(base + edgeContribution + roleBonus, 0, 100)
+ *   impact = template-driven impact (compliance/financial harm) -> 0..1
+ *   confidence = edge strength, classification confidence -> 0..1
+ *   verifiability = evidence-backed > transcript-only -> 0..1
+ *   severity = (impact × confidence × verifiability) × 100
+ *
+ * This ensures:
+ * - Transcript-only runs produce mostly medium issues unless contradictions/risky commitments
+ * - High severity requires high impact AND high confidence AND verifiability
  */
-export function computeSeverity(claimId, nodeBlameNorm, issueType, role, topBadContradictions, topBadSupports) {
-    // Base score from node blame (0-70)
-    const base = nodeBlameNorm * 70;
-    // Calculate edge contribution
-    let totalBadness = 0;
+export function computeSeverity(claimId, nodeBlameNorm, issueType, role, topBadContradictions, topBadSupports, verificationLevel = 'TRANSCRIPT_ONLY') {
+    // Step 1: Compute impact (template-driven: compliance/financial harm)
+    const impact = computeImpact(issueType, role, topBadContradictions, topBadSupports);
+    // Step 2: Compute confidence (edge strength, classification confidence)
+    const confidence = computeConfidence(nodeBlameNorm, topBadContradictions, topBadSupports, claimId);
+    // Step 3: Compute verifiability (evidence-backed > transcript-only)
+    const verifiability = computeVerifiability(verificationLevel);
+    // Step 4: Severity = (impact × confidence × verifiability) × 100
+    // This multiplicative formula ensures all three must be high for high severity
+    const severity = (impact * confidence * verifiability) * 100;
+    // Clamp to 0-100
+    return Math.min(100, Math.max(0, Math.round(severity)));
+}
+/**
+ * Compute impact score (0..1) based on template-driven rules
+ * - Compliance flags → high impact (1.0)
+ * - Financial harm (money, refunds, fees) → high impact (0.9)
+ * - Contradictions → medium-high impact (0.7)
+ * - Ungrounded → medium impact (0.5)
+ * - Other → low impact (0.3)
+ */
+function computeImpact(issueType, role, topBadContradictions, topBadSupports) {
+    // Highest impact: risky commitments (agent promises/guarantees that are unverified)
+    if (issueType === 'risky_commitment_unverified') {
+        return 0.95; // Very high impact - these are high-risk even in transcript-only mode
+    }
+    // High impact: contradictions (especially agent contradictions)
+    if (issueType === 'contradiction') {
+        // Agent contradictions are higher impact
+        if (role === 'agent') {
+            return 0.9; // High impact for agent contradictions
+        }
+        return 0.7; // Medium-high for other contradictions
+    }
+    // High impact: ungrounded claims (especially agent)
+    if (issueType === 'ungrounded') {
+        if (role === 'agent') {
+            return 0.8; // High impact for ungrounded agent claims
+        }
+        return 0.5; // Medium for other ungrounded
+    }
+    // Medium impact: inconsistent support
+    if (issueType === 'inconsistent_support' || issueType === 'inconsistent_contradiction') {
+        return 0.6;
+    }
+    // Low impact: needs review
+    if (issueType === 'needs_review') {
+        return 0.3;
+    }
+    // Default: medium
+    return 0.5;
+}
+/**
+ * Compute confidence score (0..1) from edge strength and classification confidence
+ * - nodeBlameNorm: spectral node blame (0..1)
+ * - Edge weights: average of incident edge weights
+ */
+function computeConfidence(nodeBlameNorm, topBadContradictions, topBadSupports, claimId) {
+    // Base confidence from node blame (spectral analysis)
+    let confidence = nodeBlameNorm;
+    // Boost confidence based on edge weights (stronger edges = higher confidence)
+    let totalWeight = 0;
     let edgeCount = 0;
     for (const edge of [...topBadContradictions, ...topBadSupports]) {
         if (edge.claimAId === claimId || edge.claimBId === claimId) {
-            totalBadness += edge.badness ?? edge.weight ?? 0.5;
+            const weight = edge.weight ?? edge.badness ?? 0.5;
+            totalWeight += weight;
             edgeCount++;
         }
     }
-    // Normalize edge contribution to 0-30
-    const avgBadness = edgeCount > 0 ? totalBadness / edgeCount : 0;
-    const edgeContribution = Math.min(30, avgBadness * 30);
-    // Role bonus for agent issues
-    const roleBonus = (role === "agent" &&
-        (issueType === "contradiction" || issueType === "ungrounded")) ? 5 : 0;
-    // Final score, clamped 0-100
-    const final = Math.min(100, Math.max(0, Math.round(base + edgeContribution + roleBonus)));
-    return final;
+    if (edgeCount > 0) {
+        const avgWeight = totalWeight / edgeCount;
+        // Blend node blame (60%) with edge weights (40%)
+        confidence = (nodeBlameNorm * 0.6) + (avgWeight * 0.4);
+    }
+    // Ensure minimum confidence for detected issues
+    if (confidence < 0.3 && (edgeCount > 0 || nodeBlameNorm > 0)) {
+        confidence = 0.3; // Minimum confidence for detected issues
+    }
+    return Math.min(1, Math.max(0, confidence));
+}
+/**
+ * Compute verifiability score (0..1) based on verification level
+ * - EXTERNAL_VERIFIED: 1.0 (fully verified)
+ * - AUDIO_VERIFIED: 0.8 (audio-derived transcript verified)
+ * - TRANSCRIPT_PROVIDED: 0.6 (uploaded transcript, not audio-verified)
+ * - TRANSCRIPT_ONLY: 0.4 (transcript-only, not verified)
+ * - MISMATCH_FLAGGED: 0.3 (mismatch between uploaded and ASR transcript)
+ */
+function computeVerifiability(verificationLevel) {
+    switch (verificationLevel) {
+        case 'EXTERNAL_VERIFIED':
+            return 1.0; // Fully verified with external evidence
+        case 'AUDIO_VERIFIED':
+            return 0.8; // Audio-derived transcript verified
+        case 'TRANSCRIPT_PROVIDED':
+            return 0.6; // Uploaded transcript, not audio-verified
+        case 'TRANSCRIPT_ONLY':
+            return 0.4; // Transcript-only, not verified
+        case 'MISMATCH_FLAGGED':
+            return 0.3; // Mismatch between uploaded and ASR transcript
+        default:
+            return 0.4; // Default to transcript-only
+    }
 }
 /**
  * Get severity label from score
@@ -146,6 +248,8 @@ export function generateWhyExplanation(issueType, claimText, conflicts) {
             return "Part of a contradictory relationship chain.";
         case "needs_review":
             return "Claim could not be fully verified; manual review recommended.";
+        case "risky_commitment_unverified":
+            return "Agent made a promise or guarantee that has not been verified against external evidence or policy.";
         default:
             return "Issue detected during analysis.";
     }
@@ -156,7 +260,7 @@ export function generateWhyExplanation(issueType, claimText, conflicts) {
  * This is the main function that produces the "Top Claim Issues" table data.
  */
 export function buildIssueDTOs(input) {
-    const { claims, spectral, artifactId } = input;
+    const { claims, spectral, artifactId, verificationLevel = 'TRANSCRIPT_ONLY' } = input;
     const truthStates = spectral.truthStates || [];
     const nodeBlameNorm = spectral.nodeBlameNorm || [];
     const topBadContradictions = spectral.topBadContradictions || [];
@@ -168,8 +272,10 @@ export function buildIssueDTOs(input) {
         const claim = claims[i];
         const truthState = truthStates[i] || "Inconclusive";
         const blame = nodeBlameNorm[i] || 0;
-        // Derive issue type
-        const issueType = deriveIssueType(claim.id, truthState, topBadContradictions, topBadSupports);
+        // Derive issue type (pass modality and role for commitment detection)
+        const claimModality = claim.modality; // Claim modality from graph builder
+        const speakerRole = claim.role; // Speaker role (agent, customer, etc.)
+        const issueType = deriveIssueType(claim.id, truthState, topBadContradictions, topBadSupports, claimModality, speakerRole);
         // Skip non-issues
         if (!issueType)
             continue;
@@ -205,8 +311,8 @@ export function buildIssueDTOs(input) {
                 type: e.type,
             };
         });
-        // Compute severity
-        const severity = computeSeverity(claim.id, blame, issueType, claim.role, topBadContradictions, topBadSupports);
+        // Compute severity (using impact × confidence × verifiability formula)
+        const severity = computeSeverity(claim.id, blame, issueType, claim.role, topBadContradictions, topBadSupports, verificationLevel);
         // Generate explanation
         const why = generateWhyExplanation(issueType, claim.text, conflicts);
         const issue = {
@@ -325,6 +431,7 @@ export const ISSUE_TYPE_LABELS = {
     contradiction: "Contradiction",
     ungrounded: "Ungrounded Claim",
     unverified: "Unverified (Transcript Only)",
+    risky_commitment_unverified: "Risky Commitment (Unverified)",
     inconsistent_support: "Inconsistent Support",
     inconsistent_contradiction: "Inconsistent Contradiction",
     needs_review: "Needs Review",

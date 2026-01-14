@@ -163,7 +163,7 @@ const TOPIC_PATTERNS = {
     promise: /\b(promise|guarantee|assured|assure)\b/i,
     account: /\b(account|profile|settings)\b/i,
 };
-function extractTopics(text) {
+export function extractTopics(text) {
     const topics = [];
     for (const [topic, pattern] of Object.entries(TOPIC_PATTERNS)) {
         if (pattern.test(text)) {
@@ -172,10 +172,10 @@ function extractTopics(text) {
     }
     return topics;
 }
-function hasAbsoluteLanguage(text) {
+export function hasAbsoluteLanguage(text) {
     return /\b(always|never|guaranteed|definitely|absolutely|no way|any time|100%)\b/i.test(text);
 }
-function hasMoney(text) {
+export function hasMoney(text) {
     return /\$[\d,]+|\d+\s*(dollars?|cents?)/i.test(text);
 }
 function splitSentences(text) {

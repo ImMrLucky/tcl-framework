@@ -1,5 +1,6 @@
 import { createClient } from '@supabase/supabase-js';
 import * as crypto from 'crypto';
+import { hasPermission, isValidRole } from './permissions.js';
 const supabaseUrl = process.env.SUPABASE_URL;
 const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 const supabaseAnonKey = process.env.SUPABASE_ANON_KEY;
@@ -644,12 +645,25 @@ export async function checkUserPermission(userId, orgId, permission) {
     const role = await getUserRole(userId, orgId);
     if (!role)
         return false;
-    // Import permission utilities
-    const { hasPermission, isValidRole } = await import('./permissions');
-    if (!isValidRole(role)) {
-        return false;
+    // Normalize role to lowercase (database has uppercase, permissions.ts uses lowercase)
+    const normalizedRole = role.toLowerCase();
+    // Use static import (imported at top of file)
+    if (!isValidRole(normalizedRole)) {
+        // If role is not in the matrix, check if it's a valid uppercase role and map it
+        const roleMap = {
+            'OWNER': 'owner',
+            'ADMIN': 'admin',
+            'MANAGER': 'admin', // Manager has admin permissions
+            'ANALYST': 'qa_reviewer', // Analyst has reviewer permissions
+            'VIEWER': 'viewer'
+        };
+        const mappedRole = roleMap[role] || normalizedRole;
+        if (!isValidRole(mappedRole)) {
+            return false;
+        }
+        return hasPermission(mappedRole, permission);
     }
-    return hasPermission(role, permission);
+    return hasPermission(normalizedRole, permission);
 }
 /**
  * Get user's organizations
@@ -657,26 +671,39 @@ export async function checkUserPermission(userId, orgId, permission) {
 export async function getUserOrgs(userId) {
     if (!supabaseAdmin)
         return [];
-    const { data, error } = await supabaseAdmin
-        .from('org_members')
-        .select(`
-      org_id,
-      role,
-      organizations (
-        id,
-        name,
-        slug
-      )
-    `)
-        .eq('user_id', userId);
-    if (error || !data)
+    try {
+        const { data, error } = await supabaseAdmin
+            .from('org_members')
+            .select(`
+        org_id,
+        role,
+        organizations (
+          id,
+          name,
+          slug
+        )
+      `)
+            .eq('user_id', userId);
+        if (error) {
+            console.error('Error fetching user orgs:', error);
+            return [];
+        }
+        if (!data)
+            return [];
+        // Filter out any entries where organizations is null (in case of orphaned memberships)
+        return data
+            .filter((m) => m.organizations && m.organizations.id)
+            .map((m) => ({
+            id: m.org_id,
+            name: m.organizations.name || 'Unknown',
+            slug: m.organizations.slug || '',
+            role: m.role
+        }));
+    }
+    catch (e) {
+        console.error('Exception in getUserOrgs:', e);
         return [];
-    return data.map((m) => ({
-        id: m.org_id,
-        name: m.organizations.name,
-        slug: m.organizations.slug,
-        role: m.role
-    }));
+    }
 }
 /**
  * Get projects for an org

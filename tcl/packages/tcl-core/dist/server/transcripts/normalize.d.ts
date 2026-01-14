@@ -12,6 +12,7 @@ export interface NormalizedTranscript {
     }>;
     language?: string;
     metadata?: Record<string, any>;
+    normalizedConversation?: import('../ingestion/types.js').NormalizedConversation;
 }
 /**
  * Normalize a transcript file to text

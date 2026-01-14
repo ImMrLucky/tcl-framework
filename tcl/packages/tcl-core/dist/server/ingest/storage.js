@@ -9,8 +9,17 @@ import { tmpdir } from 'os';
 import crypto from 'crypto';
 const fsWriteFile = promisify(fs.writeFile);
 const fsUnlink = promisify(fs.unlink);
-const fsExists = promisify(fs.exists);
 const fsMkdir = promisify(fs.mkdir);
+// fs.exists is deprecated, use fs.promises.access instead
+async function fsExists(path) {
+    try {
+        await fs.promises.access(path);
+        return true;
+    }
+    catch {
+        return false;
+    }
+}
 // Storage base directory (can be overridden with env var)
 const STORAGE_BASE = process.env.ASSET_STORAGE_BASE || join(tmpdir(), 'tcl-assets');
 /**
@@ -115,7 +124,13 @@ export async function storeAsset(content, assetType, orgId, jobId, filename, met
  * Read an asset file
  */
 export async function readAsset(storageUrl) {
-    return fs.promises.readFile(storageUrl);
+    try {
+        return await fs.promises.readFile(storageUrl);
+    }
+    catch (error) {
+        console.error(`[Storage] Failed to read asset from ${storageUrl}:`, error);
+        throw new Error(`Failed to read asset: ${error.message}`);
+    }
 }
 /**
  * Delete an asset file

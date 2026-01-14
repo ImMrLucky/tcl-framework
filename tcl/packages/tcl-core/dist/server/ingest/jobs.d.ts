@@ -4,9 +4,11 @@
  */
 import express from 'express';
 export type IngestionMode = 'TRANSCRIPT_ONLY' | 'AUDIO_ONLY' | 'AUDIO_PLUS_TRANSCRIPT';
-export type JobStatus = 'UPLOADED' | 'TRANSCRIBING' | 'ANALYZING' | 'VERIFYING' | 'COMPLETE' | 'FAILED';
+export type JobStatus = 'UPLOADED' | 'READY' | 'TRANSCRIBING' | 'ANALYZING' | 'VERIFYING' | 'COMPLETE' | 'FAILED';
 export interface CreateJobRequest {
     mode: IngestionMode;
+    title?: string;
+    channel?: string;
     options?: {
         analyzeImmediately?: boolean;
     };
@@ -29,15 +31,18 @@ export interface JobStatusResponse {
         code: string;
         message: string;
     };
+    audioAssetId?: string;
+    transcriptAssetId?: string;
 }
 /**
  * Create a new ingestion job
  */
-export declare function createIngestionJob(orgId: string, projectId: string, env: string, userId: string, mode: IngestionMode): Promise<string>;
+export declare function createIngestionJob(orgId: string, projectId: string, env: string, userId: string, mode: IngestionMode, title?: string, channel?: string): Promise<string>;
 /**
  * Upload files for a job
+ * Uses Supabase Storage (streaming, no RAM buffering)
  */
-export declare function uploadJobFiles(jobId: string, orgId: string, audioFile?: Express.Multer.File, transcriptFile?: Express.Multer.File): Promise<void>;
+export declare function uploadJobFiles(jobId: string, orgId: string, uploaderUserId: string | null, audioFile?: Express.Multer.File, transcriptFile?: Express.Multer.File): Promise<void>;
 /**
  * Get job status
  */

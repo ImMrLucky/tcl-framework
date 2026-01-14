@@ -44,6 +44,8 @@ export async function normalizeTranscript(filePath, filename) {
             turnsCount: normalized.turns.length,
             participantsCount: normalized.participants.length,
         },
+        // CRITICAL: Preserve the full normalized conversation so speaker info can be used in analysis
+        normalizedConversation: normalized,
     };
 }
 /**

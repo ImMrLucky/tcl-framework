@@ -7,7 +7,7 @@ export interface ScoringContext {
     templateId?: string;
     isRegulatedTemplate?: boolean;
 }
-export interface ScoredIssue extends IssueV2 {
+export interface ScoredIssue extends Omit<IssueV2, 'scoreBreakdown'> {
     impact: ImpactV2;
     severityDisplay: SeverityDisplayV2;
     score: number;

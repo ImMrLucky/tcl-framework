@@ -1,4 +1,5 @@
 import type { LLMAdapter } from "./adapters/llm_adapter";
+import type { CanonicalCategory, EvidenceCitation } from "./types/evidence.types";
 export type Source = {
     id: string;
     text: string;
@@ -53,6 +54,8 @@ export type Claim = {
     };
     meta?: {
         speaker?: string;
+        speakerType?: "agent" | "customer" | "unknown";
+        speakerLabel?: string;
         turnIndex?: number;
     };
     truthState?: "SUPPORTED" | "CONTRADICTED" | "UNVERIFIED" | "UNGROUNDED" | "Supported" | "Contradicted" | "Ungrounded" | "Inconclusive";
@@ -92,8 +95,8 @@ export type ContradictionPair = {
 };
 /** Support basis for a claim - where is it supported from? */
 export type SupportBasis = 'TRANSCRIPT' | 'EXTERNAL' | 'NONE';
-/** Verification level based on available evidence */
-export type VerificationLevel = 'TRANSCRIPT_ONLY' | 'EXTERNALLY_VERIFIED';
+/** Verification level based on available evidence - for EvalMode */
+export type VerificationLevel = "UNVERIFIED" | "TRANSCRIPT_ONLY" | "TRANSCRIPT_PROVABLE" | "DOC_BACKED" | "SYSTEM_VERIFIED" | "EXTERNALLY_VERIFIED";
 /** Evidence mode for the evaluation run */
 export type EvidenceMode = 'TRANSCRIPT_ONLY' | 'TRANSCRIPT_PLUS_EXTERNAL';
 export type IssueNarrative = {
@@ -144,18 +147,78 @@ export type IssueCategoryV2 = "evidence" | "consistency" | "compliance" | "billi
 export type SeverityV2 = "low" | "medium" | "high" | "critical";
 export type ImpactV2 = "low" | "medium" | "high";
 export type SeverityDisplayV2 = "low" | "medium" | "high";
-export type SpeakerV2 = "AGENT" | "CUSTOMER" | "SYSTEM" | "UNKNOWN";
-export type VerificationLevelV2 = "EXTERNAL_VERIFIED" | "TRANSCRIPT_ONLY" | "NONE";
+export type SpeakerV2 = "AGENT" | "CUSTOMER" | "SYSTEM" | "MIXED" | "UNKNOWN";
+export type VerificationLevelV2 = "TRANSCRIPT_PROVABLE" | "DOC_SUPPORTED" | "SYSTEM_VERIFIED" | "EXTERNAL_VERIFIED" | "TRANSCRIPT_ONLY" | "UNVERIFIED" | "NONE";
+export type IngestionMode = "TRANSCRIPT_ONLY" | "AUDIO_AND_TRANSCRIPT" | "AUDIO_ONLY_TRANSCRIBED" | "DOC_BACKED";
+export type Provenance = {
+    ingestionMode: IngestionMode;
+    transcriptSource: "USER_PROVIDED" | "AUTO_TRANSCRIBED" | "UNKNOWN";
+    hasAudio: boolean;
+    audioFingerprint?: string;
+    transcriptFingerprint?: string;
+    alignmentAvailable: boolean;
+};
+export type TranscriptQuality = {
+    asrConfidence01?: number;
+    diarizationConfidence01?: number;
+    alignmentCoverage01?: number;
+    noisyAudioFlag?: boolean;
+};
+export type AudioMeta = {
+    fingerprint: string;
+    durationMs?: number;
+    codec?: string;
+    sampleRate?: number;
+    channels?: number;
+};
+export type EvidenceDoc = {
+    id: string;
+    kind: "document" | "policy" | "system_fact";
+    content: string;
+    sourceId?: string;
+};
+export type NormalizedTranscript = {
+    turns: Array<{
+        turnIndex: number;
+        speaker: string;
+        text: string;
+        startTimeMs?: number;
+        endTimeMs?: number;
+        timestamp?: string;
+    }>;
+    participants: Array<{
+        id: string;
+        role: string;
+        displayName: string;
+    }>;
+};
+export type AnalysisInput = {
+    transcript: NormalizedTranscript;
+    audio?: AudioMeta;
+    externalEvidence?: EvidenceDoc[];
+    provenance: Provenance;
+    transcriptQuality?: TranscriptQuality;
+};
+export interface EvalMode {
+    verificationLevel: VerificationLevel;
+    hasExternalEvidence: boolean;
+    evidenceCoverage01: number;
+    transcriptOnlyReasonCodes?: string[];
+}
 export type RecommendedActionType = "NEEDS_EXTERNAL_EVIDENCE" | "QA_REVIEW" | "COACH_AGENT" | "LEGAL_ESCALATION" | "BILLING_FOLLOWUP";
 export interface IssueV2 {
     issueId: string;
     issueKey: string;
+    clusterKey?: string;
+    clusterId?: string;
+    topicId?: string;
+    slotKey?: string;
     runId: string;
     conversationId: string;
     type: IssueTypeV2;
     category: IssueCategoryV2;
+    primaryCategory?: CanonicalCategory;
     severity: SeverityV2;
-    severityDisplay: SeverityDisplayV2;
     impact: ImpactV2;
     riskScore: number;
     score: number;
@@ -164,26 +227,34 @@ export interface IssueV2 {
     verification: {
         level: VerificationLevelV2;
         reasonCodes: string[];
-    };
-    scoreBreakdown?: {
-        impactScore: number;
-        verificationScore: number;
-        disputeScore: number;
-        contradictionScore: number;
-        commitmentScore: number;
-        escalationScore: number;
-        templateScore: number;
-        penalties: {
-            transcriptOnlyCapPenalty?: number;
-            [key: string]: number | undefined;
+        provenance?: {
+            transcriptAnchors: Array<{
+                turnIndex: number;
+                claimId: string;
+                excerpt?: string;
+                start?: number;
+                end?: number;
+            }>;
+            evidenceDocRefs: Array<{
+                docId: string;
+                chunkId?: string;
+                snippet: string;
+                score: number;
+                sourceType: string;
+                version: string;
+                sha256: string;
+            }>;
         };
     };
-    scoring?: {
+    scoring: {
         components: {
             impact01: number;
             evidence01: number;
             signal01: number;
             category01: number;
+            verificationMultiplier: number;
+            risk01Raw: number;
+            risk01Final: number;
         };
         weights: {
             impact: number;
@@ -192,6 +263,7 @@ export interface IssueV2 {
             category: number;
         };
         reasons: string[];
+        modeCapsApplied?: string[];
     };
     severityReason?: string[];
     capsApplied?: string[];
@@ -202,6 +274,7 @@ export interface IssueV2 {
     };
     who: {
         speaker: SpeakerV2;
+        speakerLabel?: string;
         turnIndex?: number;
     };
     what: {
@@ -212,20 +285,40 @@ export interface IssueV2 {
         issueDetail: string;
     };
     evidence: {
-        refs: Array<{
+        refs?: Array<{
             sourceType: "TRANSCRIPT" | "POLICY" | "DOC" | "SYSTEM_FACT";
             sourceId: string;
             quote: string;
             weight?: number;
             turnIndex?: number;
         }>;
+        evidenceRefs?: EvidenceCitation[];
         edges?: Array<{
-            kind: "grounding" | "support" | "contradiction";
+            kind: "grounding" | "support" | "contradiction" | "SUPPORT_TRANSCRIPT" | "SUPPORT_EVIDENCE" | "CONTRADICTION_TRANSCRIPT" | "CONTRADICTION_EVIDENCE" | "GROUNDING_TRANSCRIPT" | "GROUNDING_EVIDENCE";
             claimA: string;
             claimB?: string;
             weight: number;
         }>;
+        verification?: {
+            level: VerificationLevelV2;
+            reasonCodes: string[];
+            provenance?: {
+                transcriptAnchors: Array<{
+                    turnIndex: number;
+                    claimId: string;
+                }>;
+                externalDocRefs: string[];
+            };
+        };
     };
+    transcriptSpans?: Array<{
+        turnIndex: number;
+        speaker: SpeakerV2;
+        speakerLabel?: string;
+        excerpt: string;
+        start?: number;
+        end?: number;
+    }>;
     compliance: {
         tags: string[];
         impactedPolicies?: Array<{
@@ -251,6 +344,118 @@ export interface IssueSummaryV2 {
     byCategory: Record<IssueCategoryV2, number>;
     topIssuesCount: number;
     allIssuesCount: number;
+}
+export interface AggregatedIssue {
+    clusterId: string;
+    clusterKey: string;
+    category: string;
+    type: string;
+    title: string;
+    summary: string;
+    severity: SeverityV2;
+    riskScore: number;
+    occurrences: number;
+    firstTurnIndex: number;
+    lastTurnIndex: number;
+    verification: EvalMode;
+    reviewRequired: boolean;
+    evidence: {
+        refs: any[];
+        edges: any[];
+        atomicIssueIds: string[];
+        claimIds: string[];
+    };
+    scoring: {
+        components: {
+            impact01: number;
+            signal01: number;
+            evidence01: number;
+            category01: number;
+            clusterPenalty01: number;
+            verificationMultiplier: number;
+        };
+        reasons: string[];
+    };
+}
+/**
+ * GroupedIssue: Cluster rollup for "Top Issues (Grouped)" table
+ * One row per clusterId, representing all atomic issues in that cluster
+ */
+export interface GroupedIssue {
+    clusterId: string;
+    clusterKey: string;
+    category: string;
+    type: string;
+    topicId?: string;
+    slotKey?: string;
+    severity: "low" | "medium" | "high" | "critical";
+    riskScore: number;
+    score: number;
+    confidence: number;
+    impact?: "low" | "medium" | "high";
+    reviewRequired: boolean;
+    verification: {
+        level: VerificationLevelV2;
+        reasonCodes?: string[];
+    };
+    what: {
+        issueSummary: string;
+        issueDetail?: string;
+        representativeClaimText?: string;
+        primaryClaimId?: string;
+        relatedClaimIds?: string[];
+    };
+    rollup: {
+        atomicIssueCount: number;
+        atomicIssueIds: string[];
+        issueKeys: string[];
+        involvedClaimIds: string[];
+        involvedTurnIndexes: number[];
+        topEdges?: Array<{
+            kind: "contradiction" | "support" | "grounding" | string;
+            claimA?: string;
+            claimB?: string;
+            weight?: number;
+        }>;
+        refs?: Array<{
+            quote?: string;
+            sourceId?: string;
+            sourceType?: string;
+            turnIndex?: number;
+        }>;
+    };
+    audit: {
+        scorerId: string;
+        createdAt: string;
+        engineVersion: string;
+        inputHash?: string;
+        configHash?: string;
+    };
+}
+export interface ExecutiveSummary {
+    overallRiskScore: number;
+    truthScore: number;
+    coherenceScore: number;
+    consistencyScore: number;
+    verificationLevel: VerificationLevel;
+    auditDefensibility: "low" | "medium" | "high";
+    ingestionMode?: string;
+    criticalFindings: number;
+    highFindings: number;
+    mediumFindings: number;
+    lowFindings: number;
+    topRootCauses: Array<{
+        title: string;
+        severity: string;
+        riskScore: number;
+        occurrences: number;
+    }>;
+    recommendedActions: Array<{
+        action: string;
+        reason: string;
+        linkedClusterId?: string;
+    }>;
+    disclaimers: string[];
 }
 export type Violation = {
     type: "MISSING_EVIDENCE";
@@ -492,6 +697,11 @@ export type EnhancedScores = {
     consistency: number | null;
     coherence: number | null;
     overall: number | null;
+    modeAware?: {
+        consistencyScore: number | null;
+        groundingScore: number;
+        evidenceScore: number;
+    };
 };
 /** Summary stats for UI display */
 export type SummaryStats = {

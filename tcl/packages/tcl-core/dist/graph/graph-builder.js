@@ -19,8 +19,9 @@
  * - Contradictions require same subject slot
  * - All thresholds are config-driven
  */
-import { extractEntities, computeSubjectSlot } from './subject-slot.js';
+import { extractEntities, computeSubjectSlot, extractAnchors } from './subject-slot.js';
 import { getTemplateConfig, setTemplateConfig } from './template-config.js';
+import { normalizeTranscript } from './transcript-normalizer.js';
 // Re-export for convenience
 export { setTemplateConfig, getTemplateConfig };
 import { assignTopicIds } from './topic-segmentation.js';
@@ -30,6 +31,7 @@ import { calibrateEdges } from './weight-calibration.js';
 import { deriveTruthStatesFromGraph, computeTruthScores } from './truth-state-derivation.js';
 import { buildRunDiagnostics, validateGraphIntegrity } from './run-diagnostics.js';
 import { createHash } from 'crypto';
+import { logGraph } from '../server/utils/logger.js';
 // =============================================================================
 // MAIN GRAPH BUILDER
 // =============================================================================
@@ -53,31 +55,46 @@ export function buildGraph(input) {
     const step1Start = Date.now();
     const claimNodes = buildClaimNodes(input);
     pipelineSteps['claimNodes'] = Date.now() - step1Start;
-    console.log(`📋 Graph Builder: ${claimNodes.length} claim nodes (${pipelineSteps['claimNodes']}ms)`);
+    logGraph('debug', `Claim nodes: ${claimNodes.length}`, { count: claimNodes.length, duration: pipelineSteps['claimNodes'] });
     // Step 2: Build EvidenceNodes
     const step2Start = Date.now();
     const evidenceNodes = buildEvidenceNodes(input);
     pipelineSteps['evidenceNodes'] = Date.now() - step2Start;
-    console.log(`📄 Graph Builder: ${evidenceNodes.length} evidence nodes (${pipelineSteps['evidenceNodes']}ms)`);
+    logGraph('debug', `Evidence nodes: ${evidenceNodes.length}`, { count: evidenceNodes.length, duration: pipelineSteps['evidenceNodes'] });
     // Step 3: Topic Segmentation
     const step3Start = Date.now();
     const segmentation = assignTopicIds(claimNodes);
     pipelineSteps['topicSegmentation'] = Date.now() - step3Start;
-    console.log(`🏷️ Graph Builder: ${segmentation.clusters.length} topic clusters (${pipelineSteps['topicSegmentation']}ms)`);
+    logGraph('debug', `Topic clusters: ${segmentation.clusters.length}`, { count: segmentation.clusters.length, duration: pipelineSteps['topicSegmentation'] });
     // Step 4: Candidate Generation
     const step4Start = Date.now();
     const transcriptEvidenceCount = evidenceNodes.filter(e => e.evidenceKind === 'transcript').length;
-    console.log(`📊 Graph Builder: ${evidenceNodes.length} evidence nodes (${transcriptEvidenceCount} transcript)`);
+    logGraph('debug', `Evidence nodes breakdown`, { total: evidenceNodes.length, transcript: transcriptEvidenceCount });
     const candidates = generateCandidates(claimNodes, evidenceNodes);
     pipelineSteps['candidateGeneration'] = Date.now() - step4Start;
-    console.log(`🎯 Graph Builder: ${candidates.diagnostics.totalCandidatesGenerated} candidates (${pipelineSteps['candidateGeneration']}ms)`);
-    console.log(`   Breakdown: ${candidates.contradictionCandidates.length} contradiction, ${candidates.supportClaimCandidates.length} support-claim, ${candidates.supportEvidenceCandidates.length} support-evidence, ${candidates.groundingCandidates.length} grounding`);
+    logGraph('debug', `Candidates generated`, {
+        total: candidates.diagnostics.totalCandidatesGenerated,
+        duration: pipelineSteps['candidateGeneration'],
+        breakdown: {
+            contradiction: candidates.contradictionCandidates.length,
+            supportClaim: candidates.supportClaimCandidates.length,
+            supportEvidence: candidates.supportEvidenceCandidates.length,
+            grounding: candidates.groundingCandidates.length
+        }
+    });
     // Step 5: Edge Classification
     const step5Start = Date.now();
     const classified = classifyEdges(candidates.contradictionCandidates, candidates.supportClaimCandidates, candidates.supportEvidenceCandidates, candidates.groundingCandidates);
     pipelineSteps['edgeClassification'] = Date.now() - step5Start;
-    console.log(`🔗 Graph Builder: ${classified.diagnostics.edgesCreated} edges created (${pipelineSteps['edgeClassification']}ms)`);
-    console.log(`   Created: ${classified.contradictions.length} contradictions, ${classified.supports.length} supports, ${classified.groundings.length} groundings`);
+    logGraph('debug', `Edges created`, {
+        total: classified.diagnostics.edgesCreated,
+        duration: pipelineSteps['edgeClassification'],
+        breakdown: {
+            contradictions: classified.contradictions.length,
+            supports: classified.supports.length,
+            groundings: classified.groundings.length
+        }
+    });
     // Step 6: Weight Calibration
     const step6Start = Date.now();
     const claimMap = new Map(claimNodes.map(c => [c.id, c]));
@@ -86,7 +103,7 @@ export function buildGraph(input) {
     const calibratedContradictions = calibrateEdges(classified.contradictions, claimMap, evidenceMap);
     const calibratedGroundings = calibrateEdges(classified.groundings, claimMap, evidenceMap);
     pipelineSteps['weightCalibration'] = Date.now() - step6Start;
-    console.log(`⚖️ Graph Builder: Calibrated weights (${pipelineSteps['weightCalibration']}ms)`);
+    logGraph('debug', `Weight calibration completed`, { duration: pipelineSteps['weightCalibration'] });
     // Step 7: Build ClaimGraph
     const inputHash = createHash('sha256')
         .update(input.transcript || JSON.stringify(input.rawClaims))
@@ -126,9 +143,15 @@ export function buildGraph(input) {
     // Step 8: Truth State Derivation
     const step8Start = Date.now();
     const truthDerivation = deriveTruthStatesFromGraph(graph);
-    const truthScores = computeTruthScores(truthDerivation);
+    // Determine if external evidence exists (non-transcript evidence)
+    const hasExternalEvidence = evidenceNodes.some(e => e.evidenceKind !== 'transcript');
+    const truthScores = computeTruthScores(truthDerivation, hasExternalEvidence);
     pipelineSteps['truthDerivation'] = Date.now() - step8Start;
-    console.log(`✅ Graph Builder: Truth scores computed (${pipelineSteps['truthDerivation']}ms)`);
+    logGraph('debug', `Truth scores computed`, {
+        duration: pipelineSteps['truthDerivation'],
+        mode: hasExternalEvidence ? 'evidence-backed' : 'transcript-only',
+        truth: truthScores.auditTruth
+    });
     // Step 9: Run Diagnostics
     const diagnosticsInput = {
         candidateDiagnostics: candidates.diagnostics,
@@ -138,6 +161,11 @@ export function buildGraph(input) {
         spectralSkipped: false, // Will be set by caller
     };
     graph.diagnostics = buildRunDiagnostics(diagnosticsInput);
+    // Add consistency check warnings from truth derivation
+    if (truthDerivation.diagnostics && truthDerivation.diagnostics.length > 0) {
+        graph.diagnostics.status = 'DEGRADED';
+        graph.diagnostics.reasons.push(...truthDerivation.diagnostics);
+    }
     // Step 10: Validate Graph Integrity
     const integrity = validateGraphIntegrity(graph);
     if (!integrity.isValid) {
@@ -213,6 +241,7 @@ function buildClaimNodes(input) {
         for (const raw of input.rawClaims) {
             const entities = extractEntities(raw.text);
             const slot = computeSubjectSlot(raw.text, entities, raw.modality);
+            const anchors = extractAnchors(entities, raw.text); // 1.2: Extract industry-agnostic anchors
             const node = {
                 id: raw.id,
                 type: 'CLAIM',
@@ -230,6 +259,7 @@ function buildClaimNodes(input) {
                     percentage: entities.find(e => e.type === 'PERCENT')?.normalized,
                 },
                 slot,
+                anchors, // 1.2: Add anchors to claim node
                 confidence: raw.confidence,
                 createdAt: new Date().toISOString(),
                 meta: raw.meta,
@@ -238,38 +268,39 @@ function buildClaimNodes(input) {
         }
     }
     else if (input.transcript) {
-        // Parse transcript into claims (simple line-based extraction)
-        const lines = input.transcript.split('\n').filter(l => l.trim());
-        let turnIndex = 0;
-        for (const line of lines) {
-            const parsed = parseTurn(line, turnIndex);
-            if (!parsed) {
-                turnIndex++;
-                continue;
-            }
-            const entities = extractEntities(parsed.text);
-            const slot = computeSubjectSlot(parsed.text, entities);
+        // B1: Normalize transcript into structured turns with speaker info
+        const normalizedTurns = normalizeTranscript(input.transcript);
+        for (const turn of normalizedTurns) {
+            const entities = extractEntities(turn.text);
+            const slot = computeSubjectSlot(turn.text, entities);
+            const anchors = extractAnchors(entities, turn.text); // 1.2: Extract industry-agnostic anchors
             const node = {
-                id: `c${turnIndex}`,
+                id: `c${turn.turnIndex}`,
                 type: 'CLAIM',
-                text: parsed.text,
-                speakerRole: parsed.speaker,
+                text: turn.text,
+                speakerRole: turn.speakerType === 'agent' ? 'agent' : turn.speakerType === 'customer' ? 'customer' : 'unknown',
                 span: {
-                    turnId: `turn-${turnIndex}`,
+                    turnId: `turn-${turn.turnIndex}`,
                     startChar: 0,
-                    endChar: parsed.text.length,
+                    endChar: turn.text.length,
                 },
-                modality: detectModality(parsed.text),
+                modality: detectModality(turn.text),
                 entities,
                 normalized: {
                     amount: entities.find(e => e.type === 'MONEY')?.normalized,
                     date: entities.find(e => e.type === 'DATE')?.normalized,
                 },
                 slot,
+                anchors, // 1.2: Add anchors to claim node
                 createdAt: new Date().toISOString(),
+                // B2: Attach speaker info to claim
+                meta: {
+                    speakerType: turn.speakerType,
+                    speakerLabel: turn.speakerLabelRaw,
+                    turnIndex: turn.turnIndex,
+                },
             };
             claimNodes.push(node);
-            turnIndex++;
         }
     }
     return claimNodes;
@@ -328,34 +359,123 @@ function buildEvidenceNodes(input) {
 // =============================================================================
 // HELPERS
 // =============================================================================
+/**
+ * Enhanced speaker extraction - handles common transcript formats
+ * Supports patterns used by competitors (Gong, Chorus, CallRail, etc.):
+ * - "Agent: text" / "Customer: text"
+ * - "[Agent] text" / "[Customer] text"
+ * - "Agent - text" / "Customer - text"
+ * - "(Agent) text" / "(Customer) text"
+ * - VTT format: "<v Speaker>text"
+ * - Numbered speakers: "Speaker 1:", "Speaker 2:"
+ * - Common variations: "Rep:", "CSR:", "Caller:", "Client:", etc.
+ */
 function parseTurn(line, turnIndex) {
-    // Common patterns: "Agent: ...", "Customer: ...", "[Agent] ...", etc.
-    const patterns = [
-        /^(?:Agent|AGENT|agent)\s*[:\]]\s*(.+)$/i,
-        /^(?:Customer|CUSTOMER|customer)\s*[:\]]\s*(.+)$/i,
-        /^(?:System|SYSTEM|system)\s*[:\]]\s*(.+)$/i,
-        /^(?:Assistant|ASSISTANT|assistant)\s*[:\]]\s*(.+)$/i,
-    ];
-    for (const pattern of patterns) {
-        const match = line.match(pattern);
-        if (match) {
-            let speaker = 'unknown';
-            if (/agent/i.test(line))
-                speaker = 'agent';
-            else if (/customer/i.test(line))
-                speaker = 'customer';
-            else if (/system/i.test(line))
-                speaker = 'system';
-            else if (/assistant/i.test(line))
-                speaker = 'assistant';
-            return { speaker, text: match[1].trim() };
-        }
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.length < 3)
+        return null;
+    // Pattern 1: "Speaker: text" or "Speaker : text" (most common)
+    // Matches: Agent, Customer, Rep, CSR, Caller, Client, etc.
+    let match = trimmed.match(/^([A-Za-z][A-Za-z0-9_ ]{0,30})\s*:\s*(.+)$/);
+    if (match) {
+        const rawSpeaker = match[1].trim();
+        const text = match[2].trim();
+        const speaker = mapSpeakerLabelToRole(rawSpeaker);
+        return { speaker, text };
     }
-    // If no pattern matches, treat as unknown speaker
-    if (line.trim().length > 10) {
-        return { speaker: 'unknown', text: line.trim() };
+    // Pattern 2: "[Speaker] text"
+    match = trimmed.match(/^\[([A-Za-z][A-Za-z0-9_ ]{0,30})\]\s*(.+)$/);
+    if (match) {
+        const rawSpeaker = match[1].trim();
+        const text = match[2].trim();
+        const speaker = mapSpeakerLabelToRole(rawSpeaker);
+        return { speaker, text };
+    }
+    // Pattern 3: "Speaker - text" or "Speaker — text"
+    match = trimmed.match(/^([A-Za-z][A-Za-z0-9_ ]{0,30})\s*[-–—]\s*(.+)$/);
+    if (match) {
+        const rawSpeaker = match[1].trim();
+        const text = match[2].trim();
+        const speaker = mapSpeakerLabelToRole(rawSpeaker);
+        return { speaker, text };
+    }
+    // Pattern 4: "(Speaker) text"
+    match = trimmed.match(/^\(([A-Za-z][A-Za-z0-9_ ]{0,30})\)\s*(.+)$/);
+    if (match) {
+        const rawSpeaker = match[1].trim();
+        const text = match[2].trim();
+        const speaker = mapSpeakerLabelToRole(rawSpeaker);
+        return { speaker, text };
+    }
+    // Pattern 5: VTT format "<v Speaker>text"
+    match = trimmed.match(/^<v\s+([^>]+)>\s*(.*)$/i);
+    if (match) {
+        const rawSpeaker = match[1].trim();
+        const text = match[2].trim();
+        const speaker = mapSpeakerLabelToRole(rawSpeaker);
+        return { speaker, text };
+    }
+    // Pattern 6: Numbered speakers "Speaker 1:", "Speaker 2:" (alternate pattern)
+    // Try to infer from context if we see alternating patterns
+    // For now, if no pattern matches, treat as unknown but still extract text
+    if (trimmed.length > 10) {
+        return { speaker: 'unknown', text: trimmed };
     }
     return null;
+}
+/**
+ * Map speaker label to canonical role using comprehensive pattern matching
+ * Handles common variations used across different transcript formats
+ */
+function mapSpeakerLabelToRole(rawSpeaker) {
+    const normalized = rawSpeaker.trim().toLowerCase();
+    // Agent patterns (comprehensive list from competitors)
+    const agentPatterns = [
+        /agent/i, /rep/i, /csr/i, /advisor/i, /representative/i,
+        /associate/i, /operator/i, /specialist/i, /consultant/i,
+        /support/i, /service/i, /staff/i, /employee/i, /team\s*member/i,
+        /sales/i, /account\s*manager/i, /account\s*exec/i, /ae/i,
+        /sdr/i, /bdr/i, /inside\s*sales/i
+    ];
+    // Customer patterns
+    const customerPatterns = [
+        /customer/i, /caller/i, /client/i, /member/i, /user/i,
+        /guest/i, /visitor/i, /patient/i, /subscriber/i,
+        /prospect/i, /lead/i, /buyer/i, /purchaser/i
+    ];
+    // System/Bot patterns
+    const systemPatterns = [
+        /bot/i, /ivr/i, /system/i, /auto/i, /virtual/i, /ai/i,
+        /assistant/i, /automated/i, /voice\s*mail/i
+    ];
+    // Supervisor patterns
+    const supervisorPatterns = [
+        /supervisor/i, /manager/i, /lead/i, /senior/i, /director/i,
+        /supervisor/i, /team\s*lead/i
+    ];
+    // Check patterns in order of specificity
+    for (const pattern of agentPatterns) {
+        if (pattern.test(normalized))
+            return 'agent';
+    }
+    for (const pattern of customerPatterns) {
+        if (pattern.test(normalized))
+            return 'customer';
+    }
+    for (const pattern of systemPatterns) {
+        if (pattern.test(normalized))
+            return 'system';
+    }
+    for (const pattern of supervisorPatterns) {
+        if (pattern.test(normalized))
+            return 'agent'; // Supervisor is typically an agent role
+    }
+    // Numbered speakers: "Speaker 1", "Speaker 2" - try to infer from context
+    // For now, default to unknown - could be enhanced with context-aware logic
+    if (/speaker\s*\d+/i.test(normalized)) {
+        return 'unknown'; // Would need conversation context to determine
+    }
+    return 'unknown';
 }
 function detectModality(text) {
     const lowerText = text.toLowerCase();
@@ -363,8 +483,18 @@ function detectModality(text) {
     if (text.includes('?') || /^(what|who|where|when|why|how|is|are|can|could|would|do|does|did)\b/.test(lowerText)) {
         return 'question';
     }
-    // Promises
-    if (/\b(i will|i'll|we will|we'll|i promise|i guarantee|i assure)\b/.test(lowerText)) {
+    // Promises/Commitments - Enhanced detection for risky commitments
+    // Patterns: "will", "guarantee", "promise", "you'll receive", "assure", "commit"
+    const commitmentPatterns = [
+        /\b(i will|i'll|we will|we'll|you will|you'll)\b/i,
+        /\b(i promise|we promise|i guarantee|we guarantee)\b/i,
+        /\b(i assure|we assure|i can assure)\b/i,
+        /\b(you'll receive|you will receive|you'll get|you will get)\b/i,
+        /\b(i commit|we commit|committed to)\b/i,
+        /\b(guaranteed|promised|assured)\b/i,
+        /\b(rest assured|be assured)\b/i,
+    ];
+    if (commitmentPatterns.some(pattern => pattern.test(lowerText))) {
         return 'promise';
     }
     // Denials

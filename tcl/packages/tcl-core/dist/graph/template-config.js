@@ -35,7 +35,7 @@ export const DEFAULT_TEMPLATE_CONFIG = {
     thresholds: {
         support: 0.5,
         contradiction: 0.55,
-        grounding: 0.4,
+        grounding: 0.25, // Lower threshold for high recall - want >80% of claims grounded
         slotMatch: 0.8,
         semanticSimilarity: 0.6,
     },
@@ -74,7 +74,7 @@ export const DEFAULT_TEMPLATE_CONFIG = {
         minClaimsPerTopic: 2,
     },
     truthDerivation: {
-        allowClaimToClaimSupport: false, // Conservative default
+        allowClaimToClaimSupport: true, // B1: Turn on claim-to-claim support edges (default)
         minSupportWeight: 0.5,
         minContradictionWeight: 0.55,
     },
@@ -86,6 +86,10 @@ export const TELCO_TEMPLATE_CONFIG = {
     ...DEFAULT_TEMPLATE_CONFIG,
     templateId: 'telco',
     entityPacks: ['money', 'dates', 'actions', 'telco_plans', 'telco_fees'],
+    thresholds: {
+        ...DEFAULT_TEMPLATE_CONFIG.thresholds,
+        grounding: 0.2, // Even lower for call-center transcripts - high recall critical
+    },
     slotLexicon: {
         // Fees
         'router_fee': { slotType: 'fee', entityKey: 'router_fee', synonyms: ['router charge', 'equipment fee', 'router cost'] },
@@ -177,7 +181,15 @@ const TEMPLATE_REGISTRY = {
 // =============================================================================
 let _activeTemplate = DEFAULT_TEMPLATE_CONFIG;
 export function getTemplateConfig() {
-    return _activeTemplate;
+    const config = _activeTemplate;
+    // SAFEGUARD: Ensure truthDerivation.minContradictionWeight is aligned with edge creation threshold
+    // This prevents configuration drift where calibration could invalidate contradictions
+    if (config.truthDerivation.minContradictionWeight > config.thresholds.contradiction) {
+        // If minContradictionWeight is higher than the creation threshold, align it
+        // (This should never happen in practice, but prevents silent failures)
+        config.truthDerivation.minContradictionWeight = Math.min(config.truthDerivation.minContradictionWeight, config.thresholds.contradiction);
+    }
+    return config;
 }
 export function setTemplateConfig(templateIdOrConfig) {
     if (typeof templateIdOrConfig === 'string') {

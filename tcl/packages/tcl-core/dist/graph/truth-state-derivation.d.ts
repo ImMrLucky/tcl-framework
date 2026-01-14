@@ -29,6 +29,7 @@ export interface TruthDerivationResult {
         ungrounded: number;
         total: number;
     };
+    diagnostics?: string[];
 }
 export declare function deriveTruthStatesFromGraph(graph: ClaimGraph): TruthDerivationResult;
 export interface TruthScores {
@@ -36,10 +37,16 @@ export interface TruthScores {
     transcriptGrounding: number;
     /** Percentage of claims with external verification */
     externalVerification: number;
-    /** Consistency score based on contradictions */
-    consistency: number;
-    /** Overall audit-ready truth score */
-    auditTruth: number;
+    /** Consistency score based on contradictions (null if cannot be computed) */
+    consistency: number | null;
+    /** Overall audit-ready truth score (null if cannot be computed) */
+    auditTruth: number | null;
+    /** Mode-aware scores (separated for clarity) */
+    modeAware?: {
+        consistencyScore: number | null;
+        groundingScore: number;
+        evidenceScore: number;
+    };
 }
-export declare function computeTruthScores(derivation: TruthDerivationResult): TruthScores;
+export declare function computeTruthScores(derivation: TruthDerivationResult, hasExternalEvidence?: boolean): TruthScores;
 export declare function applyTruthStatesToClaims(claims: ClaimNode[], derivation: TruthDerivationResult): void;

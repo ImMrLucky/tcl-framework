@@ -10,7 +10,7 @@
  * - All edges must have rationale and provenance
  */
 import { getTemplateConfig } from './template-config.js';
-import { slotsMatch, valuesContradict } from './subject-slot.js';
+import { slotsMatch, valuesContradict, hasExplicitContradictionPattern, hasStrongAnchorMatch, hasCustomerDenialVsAssertion } from './subject-slot.js';
 // =============================================================================
 // MAIN CLASSIFICATION FUNCTION
 // =============================================================================
@@ -130,28 +130,81 @@ export function classifyEdges(contradictionCandidates, supportClaimCandidates, s
 }
 function classifyContradiction(candidate, config) {
     const { claimA, claimB, signals } = candidate;
-    // GATE 1: Slot compatibility (relaxed - same slotType OR high overlap)
-    // We use a relaxed check: either exact slot match OR same slotType with shared entity references
+    // GATE 1: Slot compatibility (STRICT for contradiction-eligible slots)
+    // Enforce strict slot matching for specific slot types that can contradict
     const exactSlotMatch = slotsMatch(claimA.slot, claimB.slot);
     const sameSlotType = claimA.slot.slotType === claimB.slot.slotType;
-    const hasSharedSubject = hasSharedSubjectReference(claimA, claimB);
+    const sameEntityKey = claimA.slot.entityKey && claimB.slot.entityKey &&
+        claimA.slot.entityKey === claimB.slot.entityKey;
+    // Contradiction-eligible slot types (must match exactly)
+    const contradictionEligibleSlots = [
+        'fee', 'amount', 'price', 'refund_amount',
+        'late_fee_status', 'cancellation_fee',
+        'plan_price', 'recording', 'email_confirmation',
+        'duration', 'term', 'date'
+    ];
+    const isEligibleSlotType = contradictionEligibleSlots.includes(claimA.slot.slotType) ||
+        contradictionEligibleSlots.includes(claimB.slot.slotType);
     if (config.gating.contradictionRequiresSameSlot) {
-        // Relaxed: allow if slotType matches OR there's a shared subject reference
-        if (!exactSlotMatch && !sameSlotType && !hasSharedSubject) {
+        // For eligible slot types, require exact match (slotType + entityKey)
+        if (isEligibleSlotType) {
+            if (!exactSlotMatch && !(sameSlotType && sameEntityKey)) {
+                return { rejected: true, reason: 'slot' };
+            }
+        }
+        else {
+            // For other slot types, allow relaxed matching
+            const hasSharedSubject = hasSharedSubjectReference(claimA, claimB);
+            if (!exactSlotMatch && !sameSlotType && !hasSharedSubject) {
+                return { rejected: true, reason: 'slot' };
+            }
+        }
+    }
+    // Disallow contradictions between unrelated facts
+    // e.g., "address updates" vs "identity verification" vs "generic customer statements"
+    const unrelatedSlotTypes = ['address', 'identity', 'generic'];
+    if (unrelatedSlotTypes.includes(claimA.slot.slotType) ||
+        unrelatedSlotTypes.includes(claimB.slot.slotType)) {
+        // Only allow if both are the same unrelated type (e.g., address vs address)
+        if (claimA.slot.slotType !== claimB.slot.slotType) {
             return { rejected: true, reason: 'slot' };
         }
     }
-    // GATE 2: Topic match (if configured) - but allow adjacent topics
-    if (config.gating.contradictionRequiresSameTopic) {
+    // 4.1: Tighten contradiction edge classification with anchor-based matching
+    // Allow contradiction only if one of these is true:
+    // A) slotsMatch (meaningful slot match)
+    // B) hasStrongAnchorMatch (anchor-based match)
+    // C) Fallback: semanticSimilarity >= SEMANTIC_HIGH AND explicitPolarityFlip
+    const slotOk = slotsMatch(claimA.slot, claimB.slot);
+    const anchorOk = hasStrongAnchorMatch(claimA.anchors ?? [], claimB.anchors ?? []);
+    const polarityFlip = hasOpposingPolarity(claimA, claimB) ||
+        hasCustomerDenialVsAssertion(claimA, claimB) ||
+        valuesContradict(claimA.slot, claimB.slot);
+    const semanticHighThreshold = config.thresholds.semanticHighForFallback ?? 0.88;
+    const highSemantic = signals.semanticSimilarity >= semanticHighThreshold;
+    if (!(slotOk || anchorOk || (polarityFlip && highSemantic))) {
+        return { rejected: true, reason: 'slot' };
+    }
+    // 4.1: Reject contradictions across different topics unless anchor match exists
+    if (claimA.topicId && claimB.topicId && claimA.topicId !== claimB.topicId) {
+        // Allow only if strong anchor match exists (same MONEY, same DATE/TIMEFRAME, etc.)
+        if (!anchorOk) {
+            return { rejected: true, reason: 'topic' };
+        }
+    }
+    // B1: Topic + slot hard-gate for contradiction edges (if enabled and no anchor match)
+    // Do not generate contradiction edges unless topicId AND slotKey match
+    // This prevents "topic drift contradictions" (e.g., device protection vs cancellation)
+    if (config.gating.contradictionRequiresSameTopic && !anchorOk) {
+        // Hard gate: topicId must match (unless anchor match exists)
         if (claimA.topicId && claimB.topicId && claimA.topicId !== claimB.topicId) {
-            // Check if they're temporally close (within 5 turns)
-            const turnA = parseTurnIndex(claimA.span.turnId);
-            const turnB = parseTurnIndex(claimB.span.turnId);
-            const turnDistance = Math.abs(turnA - turnB);
-            // Allow cross-topic if very close in conversation
-            if (turnDistance > 5) {
-                return { rejected: true, reason: 'topic' };
-            }
+            return { rejected: true, reason: 'topic' };
+        }
+        // Hard gate: slotKey must match (slotType + entityKey)
+        const slotKeyA = claimA.slot.slotType + (claimA.slot.entityKey || '');
+        const slotKeyB = claimB.slot.slotType + (claimB.slot.entityKey || '');
+        if (slotKeyA !== slotKeyB) {
+            return { rejected: true, reason: 'slot' };
         }
     }
     // GATE 3: Polarity check (must have opposing polarity)
@@ -160,18 +213,112 @@ function classifyContradiction(candidate, config) {
             return { rejected: true, reason: 'polarity' };
         }
     }
+    // GATE 3.5: Mutual exclusivity check (for numeric/boolean slots)
+    // Even with NLI, require structured check for numeric/boolean slots
+    if (!hasMutualExclusivity(claimA, claimB)) {
+        return { rejected: true, reason: 'mutual_exclusivity' };
+    }
+    // F1: "unknown slot" must not create high-weight contradictions
+    // F2: Require at least one "hard signal" for high contradiction weights
+    const hasUnknownSlot = claimA.slot.entityKey === 'unknown' || claimA.slot.slotType === 'unknown' ||
+        claimB.slot.entityKey === 'unknown' || claimB.slot.slotType === 'unknown';
+    const hasHardSignal = exactSlotMatch &&
+        claimA.slot.entityKey !== 'unknown' &&
+        claimB.slot.entityKey !== 'unknown' &&
+        (polarityFlip || valuesContradict(claimA.slot, claimB.slot));
     // Compute contradiction score (boost for exact slot match)
     let contradictionScore = computeContradictionScore(claimA, claimB, signals);
     if (exactSlotMatch) {
         contradictionScore = Math.min(1.0, contradictionScore + 0.1); // Bonus for exact slot
     }
+    // F1: Clamp weight lower for unknown slots OR require higher semantic similarity
+    if (hasUnknownSlot && !hasHardSignal) {
+        // F1: Unknown slot contradictions allowed only with much lower max weight OR require higher semanticSimilarity threshold
+        const unknownSlotMaxWeight = config.thresholds.contradiction * 0.7; // 70% of normal threshold
+        const unknownSlotSemanticThreshold = config.thresholds.semanticHighForFallback ?? 0.88;
+        if (signals.semanticSimilarity < unknownSlotSemanticThreshold) {
+            // Require very high semantic similarity for unknown slots
+            contradictionScore = Math.min(contradictionScore, unknownSlotMaxWeight);
+        }
+    }
+    // F2: Require at least one "hard signal" for high contradiction weights
+    // To allow weight > X (config): same slotType AND same entityKey (not unknown) AND opposing polarity OR numeric mismatch
+    const highWeightThreshold = config.thresholds.contradiction * 1.2; // 20% above normal threshold
+    if (contradictionScore > highWeightThreshold && !hasHardSignal) {
+        // Clamp contradiction weights lower if no hard signal
+        contradictionScore = Math.min(contradictionScore, highWeightThreshold);
+    }
+    // Store the classification score (before threshold check) for audit transparency
+    const classificationScore = contradictionScore;
     // GATE 4: Threshold check
     if (contradictionScore < config.thresholds.contradiction) {
         return { rejected: true, reason: 'threshold' };
     }
-    // Create the edge
-    const edge = createContradictionEdge(claimA, claimB, contradictionScore, signals);
+    // E3: Determine contradiction class for weight calibration
+    const contradictionClass = classifyContradictionType(claimA, claimB, signals);
+    // Create the edge (with classificationScore and contradictionClass preserved for audit)
+    const edge = createContradictionEdge(claimA, claimB, contradictionScore, signals, classificationScore, contradictionClass);
     return { edge, rejected: false };
+}
+/**
+ * E3: Classify contradiction type for weight calibration
+ * Returns: NUMERIC_MISMATCH, BINARY_REVERSAL, COMMITMENT_REVERSAL, POLICY_ASSERTION, SOFT_INCONSISTENCY
+ */
+function classifyContradictionType(claimA, claimB, signals) {
+    const slotA = claimA.slot;
+    const slotB = claimB.slot;
+    const textA = claimA.text.toLowerCase();
+    const textB = claimB.text.toLowerCase();
+    // NUMERIC_MISMATCH: Different amounts/days
+    if (slotA.valueNorm !== undefined && slotB.valueNorm !== undefined) {
+        if (typeof slotA.valueNorm === 'number' && typeof slotB.valueNorm === 'number') {
+            const diff = Math.abs(slotA.valueNorm - slotB.valueNorm);
+            const avg = (Math.abs(slotA.valueNorm) + Math.abs(slotB.valueNorm)) / 2;
+            // If values differ by more than 5%, it's a numeric mismatch
+            if (diff > avg * 0.05) {
+                return 'NUMERIC_MISMATCH';
+            }
+        }
+    }
+    // BINARY_REVERSAL: yes/no, recorded/not recorded, can/can't
+    const binaryPatterns = [
+        { yes: /\b(yes|can|will|do|does|did|has|have|is|are|was|were)\b/i, no: /\b(no|can't|cannot|won't|don't|doesn't|didn't|hasn't|haven't|isn't|aren't|wasn't|weren't)\b/i },
+        { yes: /\b(recorded|recording|on)\b/i, no: /\b(not\s*recorded|not\s*recording|off)\b/i },
+        { yes: /\b(waived|waive|free|zero|no\s*fee)\b/i, no: /\b(fee|charge|cost|price)\b/i },
+    ];
+    for (const { yes, no } of binaryPatterns) {
+        const aIsYes = yes.test(textA) && !no.test(textA);
+        const bIsNo = no.test(textB) && !yes.test(textB);
+        const aIsNo = no.test(textA) && !yes.test(textA);
+        const bIsYes = yes.test(textB) && !no.test(textB);
+        if ((aIsYes && bIsNo) || (aIsNo && bIsYes)) {
+            return 'BINARY_REVERSAL';
+        }
+    }
+    // COMMITMENT_REVERSAL: guaranteed/never increase → later walkback
+    const commitmentWords = ['guarantee', 'guaranteed', 'never', 'always', 'locked', 'promise', 'promised', 'assure', 'assured'];
+    const reversalWords = ['can\'t', 'cannot', 'won\'t', 'unable', 'impossible', 'not possible', 'can no longer'];
+    const aHasCommitment = commitmentWords.some(w => textA.includes(w));
+    const bHasReversal = reversalWords.some(w => textB.includes(w));
+    const bHasCommitment = commitmentWords.some(w => textB.includes(w));
+    const aHasReversal = reversalWords.some(w => textA.includes(w));
+    if ((aHasCommitment && bHasReversal) || (bHasCommitment && aHasReversal)) {
+        return 'COMMITMENT_REVERSAL';
+    }
+    // POLICY_ASSERTION: store CVV, required fee, can't email (high compliance risk)
+    const policyKeywords = ['cvv', 'cvc', 'security code', 'card code', 'store', 'save', 'required', 'must', 'policy', 'compliance'];
+    const hasPolicyKeyword = policyKeywords.some(k => textA.includes(k) || textB.includes(k));
+    if (hasPolicyKeyword && (valuesContradict(slotA, slotB) || hasOpposingPolarity(claimA, claimB))) {
+        return 'POLICY_ASSERTION';
+    }
+    // SOFT_INCONSISTENCY: uncertain statements, hedges
+    const hedgeWords = ['maybe', 'perhaps', 'might', 'could', 'possibly', 'probably', 'likely', 'unclear', 'uncertain'];
+    const hasHedge = hedgeWords.some(w => textA.includes(w) || textB.includes(w));
+    if (hasHedge || signals.semanticSimilarity < 0.7) {
+        return 'SOFT_INCONSISTENCY';
+    }
+    // Default: treat as soft inconsistency if no strong signal
+    return 'SOFT_INCONSISTENCY';
 }
 // Helper: Parse turn index from turnId string
 function parseTurnIndex(turnId) {
@@ -195,12 +342,24 @@ function hasSharedSubjectReference(a, b) {
     const bHasPronoun = pronounPatterns.some(p => p.test(bText));
     if (aHasPronoun !== bHasPronoun) {
         // One has pronoun, one doesn't - check if they're close in conversation
-        const turnA = parseTurnIndex(a.span.turnId);
-        const turnB = parseTurnIndex(b.span.turnId);
-        const turnDistance = Math.abs(turnA - turnB);
-        // If within 3 turns, likely a reference
-        if (turnDistance <= 3) {
-            return true;
+        // Rule 4: Use timestamps if available (90 seconds), else fallback to turns (2 turns)
+        const aTime = a.meta?.startTimeMs ?? a.meta?.timestampMs;
+        const bTime = b.meta?.startTimeMs ?? b.meta?.timestampMs;
+        if (aTime !== undefined && bTime !== undefined) {
+            // Use time-based distance (90 seconds window)
+            const timeDistanceSec = Math.abs(aTime - bTime) / 1000;
+            if (timeDistanceSec <= 90) {
+                return true; // Within 90 seconds, likely a reference
+            }
+        }
+        else {
+            // Fallback: Use turn IDs (2 turns window)
+            const turnA = parseTurnIndex(a.span.turnId);
+            const turnB = parseTurnIndex(b.span.turnId);
+            const turnDistance = Math.abs(turnA - turnB);
+            if (turnDistance <= 2) {
+                return true; // Within 2 turns, likely a reference
+            }
         }
     }
     // Check for shared keywords (entities) between the claims
@@ -214,6 +373,45 @@ function hasSharedSubjectReference(a, b) {
     }
     // If they share 2+ significant words, consider them related
     return sharedCount >= 2;
+}
+// =============================================================================
+// MUTUAL EXCLUSIVITY CHECK
+// =============================================================================
+/**
+ * Check if two claims have mutually exclusive values (required for contradiction)
+ * For numeric slots: amounts must differ beyond tolerance OR durations differ
+ * For boolean slots: yes/no mismatch
+ * For other slots: use valuesContradict check
+ */
+function hasMutualExclusivity(a, b) {
+    // If slots don't match, they can't be mutually exclusive
+    if (!slotsMatch(a.slot, b.slot) && a.slot.slotType !== b.slot.slotType) {
+        return false;
+    }
+    // Use existing valuesContradict check (handles numeric/boolean/string)
+    if (valuesContradict(a.slot, b.slot)) {
+        return true;
+    }
+    // Additional check: numeric slots with different values
+    if (a.slot.valueNorm !== undefined && b.slot.valueNorm !== undefined) {
+        if (typeof a.slot.valueNorm === 'number' && typeof b.slot.valueNorm === 'number') {
+            // For numeric slots, values must differ significantly
+            // Tolerance: 5% for amounts, 1 unit for counts/durations
+            const diff = Math.abs(a.slot.valueNorm - b.slot.valueNorm);
+            const avg = (Math.abs(a.slot.valueNorm) + Math.abs(b.slot.valueNorm)) / 2;
+            if (a.slot.slotType === 'fee' || a.slot.slotType === 'amount' || a.slot.slotType === 'price') {
+                // For amounts, require >5% difference
+                return diff > (avg * 0.05);
+            }
+            else {
+                // For counts/durations, require >1 unit difference
+                return diff > 1;
+            }
+        }
+    }
+    // If we can't determine mutual exclusivity, allow it (NLI will catch false positives)
+    // But require at least opposing polarity
+    return hasOpposingPolarity(a, b);
 }
 // =============================================================================
 // POLARITY DETECTION
@@ -282,10 +480,10 @@ function hasOpposingPolarity(a, b) {
         // Even without shared verbs, negation asymmetry is significant
         return true;
     }
-    // Check for value contradiction
+    // Check for value contradiction (now includes tolerance and explicit patterns)
     if (valuesContradict(a.slot, b.slot))
         return true;
-    // Check for opposing value words
+    // Check for opposing value words (enhanced list)
     const opposingPairs = [
         ['increase', 'decrease'],
         ['higher', 'lower'],
@@ -306,9 +504,14 @@ function hasOpposingPolarity(a, b) {
         ['always', 'never'],
         ['every', 'no'],
         ['before', 'after'], // Date contradictions
-        ['increase', 'decrease'],
         ['up', 'down'],
         ['started', 'ended'],
+        ['waived', 'charged'], // Fee contradictions
+        ['waived', 'fee'],
+        ['no fee', 'fee'],
+        ['free', 'charge'],
+        ['zero', 'non-zero'],
+        ['$0', '$'], // Money contradictions
     ];
     for (const [word1, word2] of opposingPairs) {
         if ((aText.includes(word1) && bText.includes(word2)) ||
@@ -355,9 +558,14 @@ function computeContradictionScore(a, b, signals) {
     // Polarity confidence
     const polarityConfidence = hasOpposingPolarity(a, b) ? 1.0 : 0.3;
     score += polarityConfidence * weights.polarityMatch;
-    // Value contradiction boost
+    // Value contradiction boost (now includes tolerance and explicit patterns)
     if (valuesContradict(a.slot, b.slot)) {
-        score += 0.3; // Strong signal
+        // Strong boost for value contradictions - these are high-confidence signals
+        score += 0.4; // Increased from 0.3 for better detection
+        // Extra boost for explicit patterns (increase/decrease, waived/fee)
+        if (hasExplicitContradictionPattern(a.slot, b.slot)) {
+            score += 0.2; // Additional boost for clear semantic contradictions
+        }
     }
     // Normalize to 0-1
     return Math.min(1, Math.max(0, score));
@@ -365,7 +573,7 @@ function computeContradictionScore(a, b, signals) {
 // =============================================================================
 // CREATE CONTRADICTION EDGE
 // =============================================================================
-function createContradictionEdge(a, b, weight, signals) {
+function createContradictionEdge(a, b, weight, signals, classificationScore, contradictionClass) {
     return {
         id: `contradiction-${a.id}-${b.id}`,
         type: 'CONTRADICTION',
@@ -380,6 +588,12 @@ function createContradictionEdge(a, b, weight, signals) {
                 semanticSimilarity: signals.semanticSimilarity,
                 hasOpposingPolarity: hasOpposingPolarity(a, b),
                 hasValueContradiction: valuesContradict(a.slot, b.slot),
+                // CRITICAL: Preserve classification score for audit transparency
+                // This is the score used for thresholding, before calibration
+                classificationScore: classificationScore,
+                passedThreshold: true, // This edge passed the threshold check
+                // E3: Add contradiction class for weight calibration
+                contradictionClass: contradictionClass,
             },
         },
         provenance: {
@@ -407,6 +621,27 @@ function classifyClaimSupport(candidate, config) {
     if (!config.truthDerivation.allowClaimToClaimSupport) {
         return { rejected: true, reason: 'threshold' };
     }
+    // B2: Ensure SUPPORT edges don't cross topics unless strict slot match
+    // Keep topic gating rules, but ensure you can still form supports within topic clusters
+    const sameTopic = claimA.topicId && claimB.topicId && claimA.topicId === claimB.topicId;
+    const strictSlotMatch = slotsMatch(claimA.slot, claimB.slot);
+    // B2: Allow cross-topic only if strict slot match (same slotType AND same entityKey)
+    if (!sameTopic && !strictSlotMatch) {
+        return { rejected: true, reason: 'topic' }; // Reject cross-topic without strict slot match
+    }
+    // GATE 1: Require slot/entity match OR shared entity key
+    // Support edges should represent real reinforcement, not just "similar sentences"
+    const hasSlotMatch = signals.slotMatch > 0.3; // Same slot type
+    const hasEntityOverlap = signals.entityOverlap > 0.2; // Shared entities
+    const hasSharedEntityKey = claimA.slot.entityKey === claimB.slot.entityKey &&
+        claimA.slot.entityKey !== 'unknown';
+    if (!hasSlotMatch && !hasEntityOverlap && !hasSharedEntityKey) {
+        return { rejected: true, reason: 'threshold' }; // No meaningful connection
+    }
+    // GATE 2: Modality compatibility - questions shouldn't support assertions
+    if (!areModalitiesCompatible(claimA.modality, claimB.modality)) {
+        return { rejected: true, reason: 'threshold' };
+    }
     // Compute support score
     const supportScore = computeSupportScore(claimA, claimB, signals);
     if (supportScore < config.thresholds.support) {
@@ -420,6 +655,20 @@ function classifyClaimSupport(candidate, config) {
 // =============================================================================
 function classifyEvidenceSupport(candidate, config) {
     const { claim, evidence, signals } = candidate;
+    // GATE 1: Require entity overlap OR definition/policy evidence
+    // Support edges should represent real reinforcement from evidence
+    const hasEntityOverlap = signals.entityOverlap > 0.2;
+    const isDefinitionOrPolicy = evidence.evidenceKind === 'policy' ||
+        evidence.evidenceKind === 'kb' ||
+        evidence.evidenceKind === 'document';
+    if (!hasEntityOverlap && !isDefinitionOrPolicy) {
+        return { rejected: true, reason: 'threshold' }; // No meaningful connection
+    }
+    // GATE 2: Modality compatibility - questions shouldn't be supported by evidence
+    // (Evidence supports assertions, not questions)
+    if (claim.modality === 'question') {
+        return { rejected: true, reason: 'threshold' };
+    }
     // Compute support score with evidence strength multiplier
     const evidenceStrength = config.weights.evidenceStrength[evidence.evidenceKind] || 0.5;
     const supportScore = computeEvidenceSupportScore(claim, evidence, signals) * evidenceStrength;
@@ -440,14 +689,55 @@ function classifyGrounding(candidate, config) {
     }
     // Compute grounding score using text match AND temporal proximity
     // Temporal proximity is key: claims should ground to their source turn
-    const groundingScore = (signals.semanticSimilarity * 0.6) + (signals.temporalProximity * 0.4);
-    // Lower threshold for grounding - we want most claims to be grounded
-    const effectiveThreshold = Math.min(config.thresholds.grounding, 0.4);
+    // For high recall, boost score when temporal proximity is high (same/adjacent turn)
+    let groundingScore = (signals.semanticSimilarity * 0.5) + (signals.temporalProximity * 0.5);
+    // Boost for same turn (perfect temporal match) - should almost always ground
+    if (signals.temporalProximity >= 1.0) {
+        // Same turn: very permissive - ground unless text is completely unrelated
+        // Minimum score of 0.5 for same turn (will pass 0.25 threshold)
+        groundingScore = Math.max(groundingScore, 0.5);
+        // If there's any text similarity, boost further
+        if (signals.semanticSimilarity > 0.1) {
+            groundingScore = Math.max(groundingScore, 0.6 + (signals.semanticSimilarity * 0.3));
+        }
+    }
+    else if (signals.temporalProximity >= 0.8) {
+        // Adjacent turn: moderate boost
+        groundingScore = Math.max(groundingScore, 0.4 + (signals.semanticSimilarity * 0.3));
+    }
+    else if (signals.temporalProximity >= 0.5) {
+        // Within 3 turns: light boost
+        groundingScore = Math.max(groundingScore, 0.3 + (signals.semanticSimilarity * 0.4));
+    }
+    // Use grounding threshold from config (no hard-coded clamp)
+    // Lower threshold for high recall - want >80% of claims grounded
+    const effectiveThreshold = config.thresholds.grounding;
     if (groundingScore < effectiveThreshold) {
         return { rejected: true, reason: 'threshold' };
     }
     const edge = createGroundingEdge(claim, evidence, groundingScore, signals);
     return { edge, rejected: false };
+}
+// =============================================================================
+// MODALITY COMPATIBILITY
+// =============================================================================
+/**
+ * Check if claim modalities are compatible for support relationships
+ * Questions shouldn't support assertions, etc.
+ */
+function areModalitiesCompatible(modalityA, modalityB) {
+    // If either is undefined, allow (conservative)
+    if (!modalityA || !modalityB)
+        return true;
+    // Questions shouldn't support anything (they're asking, not asserting)
+    if (modalityA === 'question' || modalityB === 'question') {
+        return false;
+    }
+    // Hedges can support assertions (weak support)
+    // Denials can support other denials (consistent denial)
+    // Promises can support assertions (commitment supports claim)
+    // Asserts can support anything (except questions)
+    return true;
 }
 // =============================================================================
 // SUPPORT SCORE COMPUTATION

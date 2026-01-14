@@ -29,6 +29,7 @@ export interface TemplateConfig {
         grounding: number;
         slotMatch: number;
         semanticSimilarity: number;
+        semanticHighForFallback?: number;
     };
     /** Weight factors for retrieval and calibration */
     weights: {

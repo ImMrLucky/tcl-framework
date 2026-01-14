@@ -28,15 +28,22 @@ export declare function deriveIssueType(claimId: string, truthState: string, top
 }>, topBadSupports: Array<{
     claimAId?: string;
     claimBId?: string;
-}>): IssueType | null;
+}>, claimModality?: string, // NEW: Claim modality (promise, assert, etc.)
+speakerRole?: string): IssueType | null;
 /**
- * Compute severity score (0-100)
+ * Compute severity score (0-100) from (impact × confidence × verifiability)
+ *
+ * This prevents "everything is high" by requiring all three components.
  *
  * Formula:
- *   base = nodeBlameNorm[i] * 70
- *   edgeContribution = sum(incident bad edge badness) normalized to 0..30
- *   roleBonus = (role=agent && issueType in {contradiction, ungrounded}) ? 5 : 0
- *   final = clamp(base + edgeContribution + roleBonus, 0, 100)
+ *   impact = template-driven impact (compliance/financial harm) -> 0..1
+ *   confidence = edge strength, classification confidence -> 0..1
+ *   verifiability = evidence-backed > transcript-only -> 0..1
+ *   severity = (impact × confidence × verifiability) × 100
+ *
+ * This ensures:
+ * - Transcript-only runs produce mostly medium issues unless contradictions/risky commitments
+ * - High severity requires high impact AND high confidence AND verifiability
  */
 export declare function computeSeverity(claimId: string, nodeBlameNorm: number, issueType: IssueType, role: ParticipantRole, topBadContradictions: Array<{
     claimAId?: string;
@@ -48,7 +55,7 @@ export declare function computeSeverity(claimId: string, nodeBlameNorm: number, 
     claimBId?: string;
     badness?: number;
     weight?: number;
-}>): number;
+}>, verificationLevel?: 'TRANSCRIPT_ONLY' | 'TRANSCRIPT_PROVIDED' | 'AUDIO_VERIFIED' | 'EXTERNAL_VERIFIED' | 'MISMATCH_FLAGGED'): number;
 /**
  * Get severity label from score
  */
@@ -68,6 +75,8 @@ export interface BuildIssueDTOsInput {
     spectral: SpectralReport;
     /** Artifact ID */
     artifactId: string;
+    /** Verification level for verifiability computation */
+    verificationLevel?: 'TRANSCRIPT_ONLY' | 'TRANSCRIPT_PROVIDED' | 'AUDIO_VERIFIED' | 'EXTERNAL_VERIFIED' | 'MISMATCH_FLAGGED';
 }
 /**
  * Build IssueDTO array from spectral outputs and claims

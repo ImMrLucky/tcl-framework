@@ -11,6 +11,30 @@
  */
 import { createHash } from 'crypto';
 import { getRiskRankingConfig } from '../config/risk-ranking.js';
+import { deriveIssueSpeaker, speakerTypeToRole } from '../graph/transcript-normalizer.js';
+/**
+ * Create default scoring object (will be replaced by risk-ranking)
+ */
+function createDefaultScoring() {
+    return {
+        components: {
+            impact01: 0,
+            evidence01: 0,
+            signal01: 0,
+            category01: 0,
+            verificationMultiplier: 1,
+            risk01Raw: 0,
+            risk01Final: 0,
+        },
+        weights: {
+            impact: 0.4,
+            evidence: 0.3,
+            signal: 0.2,
+            category: 0.1,
+        },
+        reasons: [],
+    };
+}
 /**
  * Main entry point: Expand graph edges into issues
  */
@@ -195,23 +219,77 @@ function createContradictionIssue(edge, claimMap, input, evidenceQuotesMax) {
             turnIndex: ref.turnIndex,
         })));
     }
-    // Determine speaker (prioritize agent)
-    const speaker = claimA.meta?.speaker === 'Agent' || claimA.meta?.speaker === 'AGENT' ? 'AGENT' :
-        claimB.meta?.speaker === 'Agent' || claimB.meta?.speaker === 'AGENT' ? 'AGENT' :
-            claimA.meta?.speaker === 'Customer' || claimA.meta?.speaker === 'CUSTOMER' ? 'CUSTOMER' :
-                'UNKNOWN';
+    // B3: Derive issue speaker from claims using new speaker info structure
+    const claimSpeakers = [
+        {
+            speakerType: claimA.meta?.speakerType || (claimA.meta?.speaker === 'Agent' || claimA.meta?.speaker === 'AGENT' ? 'agent' :
+                claimA.meta?.speaker === 'Customer' || claimA.meta?.speaker === 'CUSTOMER' ? 'customer' : 'unknown'),
+            speakerLabel: claimA.meta?.speakerLabel,
+        },
+        {
+            speakerType: claimB.meta?.speakerType || (claimB.meta?.speaker === 'Agent' || claimB.meta?.speaker === 'AGENT' ? 'agent' :
+                claimB.meta?.speaker === 'Customer' || claimB.meta?.speaker === 'CUSTOMER' ? 'customer' : 'unknown'),
+            speakerLabel: claimB.meta?.speakerLabel,
+        },
+    ];
+    const issueSpeaker = deriveIssueSpeaker(claimSpeakers);
+    const speaker = issueSpeaker.speaker;
+    const speakerLabel = issueSpeaker.speakerLabel;
+    // B2: Speaker gating - determine if this is AGENT↔AGENT (normal) vs customer dispute
+    const isAgentAgent = claimSpeakers[0].speakerType === 'agent' && claimSpeakers[1].speakerType === 'agent';
+    const speakerType = isAgentAgent ? 'agent' : 'mixed';
     const turnIndex = claimA.meta?.turnIndex ?? claimB.meta?.turnIndex;
-    // Determine verification level based on evidence mode and actual grounding
-    let verificationLevel = 'NONE';
-    const hasGrounding = input.grounding.some(g => g.claimId === edge.claimA || g.claimId === edge.claimB);
-    if (input.evidenceMode === 'TRANSCRIPT_PLUS_EXTERNAL' && hasGrounding) {
-        verificationLevel = 'EXTERNAL_VERIFIED';
+    // Extract topicId and slotKey for clustering (C1)
+    // Note: topicId and slot are not on Claim type, but may be in edge rationale or claim metadata
+    // For now, use a fallback based on claim text or edge info
+    const topicId = edge.topicId || claimA.topicId || claimB.topicId || 'unknown';
+    const slotType = edge.slotType || claimA.slot?.slotType || claimB.slot?.slotType || 'unknown';
+    const entityKey = edge.entityKey || claimA.slot?.entityKey || claimB.slot?.entityKey || '';
+    const slotKey = `${slotType}:${entityKey}`;
+    // C1: Generate clusterKey for aggregation
+    const clusterKey = `${'consistency'}:${'CONTRADICTION'}:${topicId}:${slotKey}:${speakerType}`;
+    const clusterId = createHash('sha256').update(clusterKey).digest('hex').substring(0, 16);
+    // 3.1: Fix verification logic - distinguish transcript grounding from external support
+    // Compute external verification from SUPPORT edges to non-transcript evidence
+    // A2: Define TRANSCRIPT_ONLY correctly (no more accidental NONE)
+    // TRANSCRIPT_ONLY if any of these are true:
+    // - claim has meta.turnIndex, span, or provenance anchors
+    // - claim has transcript grounding edges
+    // - claim has transcript evidence refs (to transcript EvidenceNodes)
+    // NONE only if:
+    // - claim has no transcript anchors/spans/turnIndex AND no grounding edges AND no evidence refs
+    const hasTranscriptGrounding = input.grounding.some(g => g.claimId === edge.claimA || g.claimId === edge.claimB);
+    const hasTranscriptRefs = evidenceRefs.some(ref => ref.sourceId.startsWith('e-transcript-'));
+    const hasTurnIndex = (claimA.meta?.turnIndex !== undefined) || (claimB.meta?.turnIndex !== undefined);
+    const hasSpan = claimA.span || claimB.span;
+    // Check for external support (support edges to non-transcript evidence)
+    const hasExternalSupport = input.supports.some(s => {
+        const involvesClaim = s.claimA === edge.claimA || s.claimB === edge.claimA ||
+            s.claimA === edge.claimB || s.claimB === edge.claimB;
+        if (!involvesClaim)
+            return false;
+        // Check if support is to external evidence (not transcript)
+        const evidenceId = s.evidenceId || s.targetId;
+        if (evidenceId && !evidenceId.startsWith('e-transcript-')) {
+            return true; // External evidence support
+        }
+        // Also check if support edge has evidenceKind that's not transcript
+        const evidenceKind = s.evidenceKind;
+        if (evidenceKind && evidenceKind !== 'transcript') {
+            return true; // External evidence support
+        }
+        return false;
+    });
+    // A1: Expand verification levels (canonical)
+    let verificationLevel;
+    if (hasExternalSupport) {
+        verificationLevel = 'EXTERNAL_VERIFIED'; // A1: Grounded to org/per-ingestion docs/policies
     }
-    else if (input.evidenceMode === 'TRANSCRIPT_ONLY' && hasGrounding) {
-        verificationLevel = 'TRANSCRIPT_ONLY';
+    else if (hasTranscriptGrounding || hasTranscriptRefs || hasTurnIndex || hasSpan) {
+        verificationLevel = 'TRANSCRIPT_ONLY'; // A2: Grounded to transcript turns/spans (traceable)
     }
     else {
-        verificationLevel = 'NONE';
+        verificationLevel = 'NONE'; // A1: Only when truly cannot trace (should be rare)
     }
     // Compliance tags
     const complianceTags = ['consistency', 'customer_dispute_risk'];
@@ -226,23 +304,39 @@ function createContradictionIssue(edge, claimMap, input, evidenceQuotesMax) {
     return {
         issueId,
         issueKey,
+        clusterKey,
+        clusterId,
+        topicId,
+        slotKey,
         runId: input.runId,
         conversationId: input.conversationId,
         type: 'CONTRADICTION',
         category: 'consistency',
         severity: 'medium', // Will be recomputed by ranking
-        severityDisplay: 'medium', // Will be recomputed by scoring
         impact: 'high', // Contradictions are high impact
         riskScore: 0, // Will be computed by ranking
         score: 0, // Will be computed by scoring
-        confidence: edge.weight || 0.7,
+        // 5.1: Ensure confidence is always populated from real signals
+        // For contradictions: use edge weight (already 0..1)
+        // Fallback to claim confidence metrics if edge weight missing
+        confidence: edge.weight ??
+            claimA.confidenceMetrics?.groundingScore ??
+            claimA.confidence ??
+            0.6, // Last resort: reasonable default (not 0.5 to avoid plateaus)
         reviewRequired: true,
+        // B2: Store speaker gating info for scoring
+        // @ts-ignore - temporary field for speaker gating
+        _speakerGating: {
+            isAgentAgent,
+            speakerType,
+        },
         verification: {
             level: verificationLevel,
             reasonCodes: input.evidenceMode === 'TRANSCRIPT_ONLY' ? ['NO_EXTERNAL_EVIDENCE'] : [],
         },
         who: {
             speaker,
+            speakerLabel: speakerLabel,
             turnIndex,
         },
         what: {
@@ -258,8 +352,20 @@ function createContradictionIssue(edge, claimMap, input, evidenceQuotesMax) {
                     kind: 'contradiction',
                     claimA: edge.claimA,
                     claimB: edge.claimB,
-                    weight: edge.weight || 0.7,
+                    weight: edge.weight, // Use actual edge weight (no fallback - let scoring handle missing)
                 }],
+            // D1: Always populate evidence.verification
+            verification: {
+                level: verificationLevel,
+                reasonCodes: input.evidenceMode === 'TRANSCRIPT_ONLY' ? ['NO_EXTERNAL_EVIDENCE'] : [],
+                provenance: {
+                    transcriptAnchors: [
+                        ...(claimA.meta?.turnIndex !== undefined ? [{ turnIndex: claimA.meta.turnIndex, claimId: edge.claimA }] : []),
+                        ...(claimB.meta?.turnIndex !== undefined ? [{ turnIndex: claimB.meta.turnIndex, claimId: edge.claimB }] : []),
+                    ],
+                    externalDocRefs: hasExternalSupport ? evidenceRefs.filter(r => !r.sourceId.startsWith('e-transcript-')).map(r => r.sourceId) : [],
+                },
+            },
         },
         compliance: {
             tags: complianceTags,
@@ -267,6 +373,7 @@ function createContradictionIssue(edge, claimMap, input, evidenceQuotesMax) {
             legalHoldSuggested: false, // Will be recomputed by ranking
             disclaimers,
         },
+        scoring: createDefaultScoring(),
         audit: {
             createdAt: new Date().toISOString(),
             engineVersion: input.audit.engineVersion,
@@ -304,9 +411,12 @@ function createUnverifiedClaimIssue(claim, input, evidenceQuotesMax) {
             });
         }
     }
-    const speaker = claim.meta?.speaker === 'Agent' || claim.meta?.speaker === 'AGENT' ? 'AGENT' :
-        claim.meta?.speaker === 'Customer' || claim.meta?.speaker === 'CUSTOMER' ? 'CUSTOMER' :
-            'UNKNOWN';
+    // B3: Derive speaker from claim using new speaker info structure
+    const speakerType = claim.meta?.speakerType ||
+        (claim.meta?.speaker === 'Agent' || claim.meta?.speaker === 'AGENT' ? 'agent' :
+            claim.meta?.speaker === 'Customer' || claim.meta?.speaker === 'CUSTOMER' ? 'customer' : 'unknown');
+    const speaker = speakerTypeToRole(speakerType);
+    const speakerLabel = claim.meta?.speakerLabel;
     // Compliance tags
     const complianceTags = [];
     if (claim.claimKind === 'promise') {
@@ -327,6 +437,8 @@ function createUnverifiedClaimIssue(claim, input, evidenceQuotesMax) {
     else {
         verificationLevel = 'NONE';
     }
+    // Store verificationLevel for use in evidence.verification below
+    const finalVerificationLevel = verificationLevel;
     // Disclaimers
     const disclaimers = [];
     if (verificationLevel === 'TRANSCRIPT_ONLY') {
@@ -343,11 +455,13 @@ function createUnverifiedClaimIssue(claim, input, evidenceQuotesMax) {
         type: 'UNVERIFIED_CLAIM',
         category: 'evidence',
         severity: 'low', // Will be recomputed by ranking
-        severityDisplay: 'low', // Will be recomputed by scoring
         impact: 'low', // Unverified claims are low impact
         riskScore: 0, // Will be computed by ranking
         score: 0, // Will be computed by scoring
-        confidence: claim.confidence || 0.7,
+        // 5.1: Ensure confidence is always populated from real signals
+        confidence: claim.confidence ??
+            claim.confidenceMetrics?.groundingScore ??
+            0.6, // Last resort: reasonable default
         reviewRequired: true, // Agent assertions/promises require review
         verification: {
             level: verificationLevel,
@@ -356,6 +470,7 @@ function createUnverifiedClaimIssue(claim, input, evidenceQuotesMax) {
         },
         who: {
             speaker,
+            speakerLabel: speakerLabel,
             turnIndex: claim.meta?.turnIndex,
         },
         what: {
@@ -373,6 +488,16 @@ function createUnverifiedClaimIssue(claim, input, evidenceQuotesMax) {
                 claimA: claim.id,
                 weight: g.weight || 0.7,
             })),
+            // D1: Always populate evidence.verification
+            verification: {
+                level: verificationLevel,
+                reasonCodes: verificationLevel === 'TRANSCRIPT_ONLY' ? ['NO_EXTERNAL_EVIDENCE'] :
+                    verificationLevel === 'NONE' ? ['NO_GROUNDING'] : [],
+                provenance: {
+                    transcriptAnchors: claim.meta?.turnIndex !== undefined ? [{ turnIndex: claim.meta.turnIndex, claimId: claim.id }] : [],
+                    externalDocRefs: [],
+                },
+            },
         },
         compliance: {
             tags: complianceTags,
@@ -380,6 +505,7 @@ function createUnverifiedClaimIssue(claim, input, evidenceQuotesMax) {
             legalHoldSuggested: false,
             disclaimers,
         },
+        scoring: createDefaultScoring(),
         audit: {
             createdAt: new Date().toISOString(),
             engineVersion: input.audit.engineVersion,
@@ -396,9 +522,12 @@ function createUnverifiedClaimIssue(claim, input, evidenceQuotesMax) {
 function createUngroundedClaimIssue(claim, input, evidenceQuotesMax) {
     const issueKey = `ungrounded:${claim.id}`;
     const issueId = generateIssueId(input.runId, issueKey);
-    const speaker = claim.meta?.speaker === 'Agent' || claim.meta?.speaker === 'AGENT' ? 'AGENT' :
-        claim.meta?.speaker === 'Customer' || claim.meta?.speaker === 'CUSTOMER' ? 'CUSTOMER' :
-            'UNKNOWN';
+    // B3: Derive speaker from claim using new speaker info structure
+    const speakerType = claim.meta?.speakerType ||
+        (claim.meta?.speaker === 'Agent' || claim.meta?.speaker === 'AGENT' ? 'agent' :
+            claim.meta?.speaker === 'Customer' || claim.meta?.speaker === 'CUSTOMER' ? 'customer' : 'unknown');
+    const speaker = speakerTypeToRole(speakerType);
+    const speakerLabel = claim.meta?.speakerLabel;
     // Compliance tags
     const complianceTags = ['missing_evidence'];
     if (claim.claimKind === 'promise') {
@@ -416,11 +545,13 @@ function createUngroundedClaimIssue(claim, input, evidenceQuotesMax) {
         type: 'UNGROUNDED',
         category: 'evidence',
         severity: 'medium', // Will be recomputed by ranking
-        severityDisplay: 'medium', // Will be recomputed by scoring
         impact: 'low', // Ungrounded claims are low impact
         riskScore: 0, // Will be computed by ranking
         score: 0, // Will be computed by scoring
-        confidence: claim.confidence || 0.5,
+        // 5.1: Ensure confidence is always populated from real signals
+        confidence: claim.confidence ??
+            claim.confidenceMetrics?.groundingScore ??
+            0.6, // Last resort: reasonable default
         reviewRequired: true,
         verification: {
             level: 'NONE',
@@ -428,6 +559,7 @@ function createUngroundedClaimIssue(claim, input, evidenceQuotesMax) {
         },
         who: {
             speaker,
+            speakerLabel: speakerLabel,
             turnIndex: claim.meta?.turnIndex,
         },
         what: {
@@ -439,6 +571,15 @@ function createUngroundedClaimIssue(claim, input, evidenceQuotesMax) {
         evidence: {
             refs: [], // No evidence refs for ungrounded claims
             edges: [],
+            // D1: Always populate evidence.verification
+            verification: {
+                level: 'NONE',
+                reasonCodes: ['NO_GROUNDING_EVIDENCE'],
+                provenance: {
+                    transcriptAnchors: [],
+                    externalDocRefs: [],
+                },
+            },
         },
         compliance: {
             tags: complianceTags,
@@ -446,6 +587,7 @@ function createUngroundedClaimIssue(claim, input, evidenceQuotesMax) {
             legalHoldSuggested: false,
             disclaimers,
         },
+        scoring: createDefaultScoring(),
         audit: {
             createdAt: new Date().toISOString(),
             engineVersion: input.audit.engineVersion,
@@ -501,9 +643,12 @@ function createRiskSignalIssue(claim, input, riskSignals, evidenceQuotesMax) {
         weight: ref.weight,
         turnIndex: ref.turnIndex,
     }));
-    const speaker = claim.meta?.speaker === 'Agent' || claim.meta?.speaker === 'AGENT' ? 'AGENT' :
-        claim.meta?.speaker === 'Customer' || claim.meta?.speaker === 'CUSTOMER' ? 'CUSTOMER' :
-            'UNKNOWN';
+    // B3: Derive speaker from claim using new speaker info structure
+    const speakerType = claim.meta?.speakerType ||
+        (claim.meta?.speaker === 'Agent' || claim.meta?.speaker === 'AGENT' ? 'agent' :
+            claim.meta?.speaker === 'Customer' || claim.meta?.speaker === 'CUSTOMER' ? 'customer' : 'unknown');
+    const speaker = speakerTypeToRole(speakerType);
+    const speakerLabel = claim.meta?.speakerLabel;
     // Determine category based on signals
     let category = 'compliance';
     if (riskSignals.includes('MONEY_FEES')) {
@@ -517,6 +662,18 @@ function createRiskSignalIssue(claim, input, riskSignals, evidenceQuotesMax) {
     }
     // Compliance tags
     const complianceTags = ['high_impact', ...riskSignals.map(s => s.toLowerCase())];
+    // Determine verification level
+    const hasGrounding = evidenceRefs.length > 0 || input.grounding.some(g => g.claimId === claim.id);
+    let verificationLevel = 'NONE';
+    if (input.evidenceMode === 'TRANSCRIPT_PLUS_EXTERNAL' && hasGrounding) {
+        verificationLevel = 'EXTERNAL_VERIFIED';
+    }
+    else if (input.evidenceMode === 'TRANSCRIPT_ONLY' && hasGrounding) {
+        verificationLevel = 'TRANSCRIPT_ONLY';
+    }
+    else {
+        verificationLevel = 'NONE';
+    }
     // Disclaimers
     const disclaimers = [];
     if (input.evidenceMode === 'TRANSCRIPT_ONLY') {
@@ -530,15 +687,18 @@ function createRiskSignalIssue(claim, input, riskSignals, evidenceQuotesMax) {
         type: 'RISK_SIGNAL',
         category,
         severity: 'high', // Will be recomputed by ranking
-        severityDisplay: 'high', // Will be recomputed by scoring (may be capped)
         impact: 'high', // Risk signals are high impact
         riskScore: 0, // Will be computed by ranking
         score: 0, // Will be computed by scoring
-        confidence: claim.confidence || 0.7,
+        // 5.1: Ensure confidence is always populated from real signals
+        confidence: claim.confidence ??
+            claim.confidenceMetrics?.groundingScore ??
+            0.6, // Last resort: reasonable default
         reviewRequired: true,
         verification: {
-            level: input.evidenceMode === 'TRANSCRIPT_PLUS_EXTERNAL' ? 'EXTERNAL_VERIFIED' : 'TRANSCRIPT_ONLY',
-            reasonCodes: input.evidenceMode === 'TRANSCRIPT_ONLY' ? ['NO_EXTERNAL_EVIDENCE'] : [],
+            level: verificationLevel,
+            reasonCodes: verificationLevel === 'TRANSCRIPT_ONLY' ? ['NO_EXTERNAL_EVIDENCE'] :
+                verificationLevel === 'NONE' ? ['NO_GROUNDING'] : [],
         },
         who: {
             speaker,
@@ -559,6 +719,16 @@ function createRiskSignalIssue(claim, input, riskSignals, evidenceQuotesMax) {
                 claimA: claim.id,
                 weight: g.weight || 0.7,
             })),
+            // D1: Always populate evidence.verification
+            verification: {
+                level: verificationLevel,
+                reasonCodes: verificationLevel === 'TRANSCRIPT_ONLY' ? ['NO_EXTERNAL_EVIDENCE'] :
+                    verificationLevel === 'NONE' ? ['NO_GROUNDING'] : [],
+                provenance: {
+                    transcriptAnchors: claim.meta?.turnIndex !== undefined ? [{ turnIndex: claim.meta.turnIndex, claimId: claim.id }] : [],
+                    externalDocRefs: [],
+                },
+            },
         },
         compliance: {
             tags: complianceTags,
@@ -566,6 +736,7 @@ function createRiskSignalIssue(claim, input, riskSignals, evidenceQuotesMax) {
             legalHoldSuggested: true, // Risk signals suggest legal hold
             disclaimers,
         },
+        scoring: createDefaultScoring(),
         audit: {
             createdAt: new Date().toISOString(),
             engineVersion: input.audit.engineVersion,

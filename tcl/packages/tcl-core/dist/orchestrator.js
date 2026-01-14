@@ -1,4 +1,4 @@
-import { extractClaims, extractClaimsWithTypes } from "./claim_extractor.js";
+import { extractClaims, extractClaimsWithTypes, classifyClaimType, isAuditableClaimType, extractTopics, hasAbsoluteLanguage, hasMoney } from "./claim_extractor.js";
 import { attachEvidenceAndFindViolations } from "./evidence.js";
 import { findLogicViolations } from "./logic.js";
 import { blendScores, assessRunQuality } from "./scoring.js";
@@ -18,8 +18,10 @@ import { runTruthEngine, toLegacyGraph, buildIssuesFromGraph } from "./engine/in
 import { generateReproducibilityMetadata, getEngineVersion } from "./analysis/reproducibility.js";
 import { computeTruthFromGraph } from "./analysis/compute-truth-from-graph.js";
 import { getEngineConfig } from "./config/engine-config.js";
+import { log } from "./server/utils/logger.js";
 // NEW: Unified Graph Builder (3-stage pipeline with subject slots)
 import { buildGraph as buildUnifiedGraph, toSpectralInput, setTemplateConfig } from "./graph/graph-builder.js";
+import { getTemplateConfig } from "./graph/template-config.js";
 // Cache for scorer to avoid re-initialization on every request
 let cachedScorer = null;
 const SCORER_CACHE_TTL = 5 * 60 * 1000; // 5 minutes
@@ -44,8 +46,8 @@ const GRAPH_BUILDER_MODE = getGraphBuilderMode();
 console.log(`📊 Graph Builder Mode: ${GRAPH_BUILDER_MODE}`);
 async function callSpectralService(spectralServiceUrl, claims, supports, contradictions, groundedClaimIds) {
     const url = `${spectralServiceUrl.replace(/\/$/, "")}/spectral/score`;
-    console.log(`Spectral request URL: ${url}`);
-    console.log(`Spectral request payload:`, {
+    log('debug', 'Orchestrator', `Spectral request URL: ${url}`);
+    log('debug', 'Orchestrator', `Spectral request payload`, {
         claimsCount: claims.length,
         supportsCount: supports.length,
         contradictionsCount: contradictions.length,
@@ -58,16 +60,16 @@ async function callSpectralService(spectralServiceUrl, claims, supports, contrad
     });
     if (!res.ok) {
         const errorText = await res.text().catch(() => '');
-        console.error(`Spectral service HTTP error ${res.status}: ${errorText}`);
+        log('error', 'Orchestrator', `Spectral service HTTP error ${res.status}: ${errorText}`);
         throw new Error(`Spectral service error: ${res.status} - ${errorText}`);
     }
     const result = await res.json();
-    console.log(`Spectral response:`, result);
+    log('debug', 'Orchestrator', `Spectral response received`, { coherence: result?.coherenceScore });
     return result;
 }
 async function callSpectralAnalyzeService(spectralServiceUrl, claims, supports, contradictions, groundedClaimIds, options) {
     const url = `${spectralServiceUrl.replace(/\/$/, "")}/spectral/analyze`;
-    console.log(`Spectral analyze request URL: ${url}`);
+    log('debug', 'Orchestrator', `Spectral analyze request URL: ${url}`);
     const payload = {
         claims,
         supports,
@@ -78,7 +80,7 @@ async function callSpectralAnalyzeService(spectralServiceUrl, claims, supports, 
         w_circularity: options?.wCircularity,
         cycle_max_len: options?.cycleMaxLen
     };
-    console.log(`Spectral analyze request payload:`, {
+    log('debug', 'Orchestrator', `Spectral analyze request payload`, {
         claimsCount: claims.length,
         supportsCount: supports.length,
         contradictionsCount: contradictions.length,
@@ -91,11 +93,11 @@ async function callSpectralAnalyzeService(spectralServiceUrl, claims, supports, 
     });
     if (!res.ok) {
         const errorText = await res.text().catch(() => '');
-        console.error(`Spectral analyze service HTTP error ${res.status}: ${errorText}`);
+        log('error', 'Orchestrator', `Spectral analyze service HTTP error ${res.status}: ${errorText}`);
         throw new Error(`Spectral analyze service error: ${res.status} - ${errorText}`);
     }
     const result = await res.json();
-    console.log(`Spectral analyze response received:`, {
+    log('debug', 'Orchestrator', `Spectral analyze response received`, {
         coherenceScore: result.coherenceScore,
         truthVectorLength: result.truthVector?.length || 0,
         truthStatesLength: result.truthStates?.length || 0,
@@ -122,18 +124,67 @@ async function runUnifiedGraphPath(input, timer, validationStartTime, adapter) {
     // Set template based on content or options
     const templateId = options?.template ?? detectTemplate(transcript);
     setTemplateConfig(templateId);
-    console.log(`📋 Template: ${templateId}`);
-    // Extract claims first using the existing extractor
+    log('debug', 'Orchestrator', `Template: ${templateId}`);
+    // Extract claims - use normalized turns if available (preserves speaker info), otherwise fall back to text parsing
     timer.start('claim_extraction');
-    const isCallTranscript = transcript.includes('Agent:') || transcript.includes('Customer:') ||
-        transcript.includes('AGENT:') || transcript.includes('CUSTOMER:');
-    // extractClaimsWithTypes is synchronous and returns { claims, allItems, stats }
-    const extractResult = extractClaimsWithTypes(transcript);
-    const extractedClaims = extractResult.claims;
+    let extractedClaims = [];
+    const normalizedConversation = options?.normalizedConversation;
+    if (normalizedConversation?.turns && Array.isArray(normalizedConversation.turns) && normalizedConversation.turns.length > 0) {
+        // CRITICAL: Use normalized turns directly - they have proper speaker information
+        log('debug', 'Orchestrator', `Using normalized turns (${normalizedConversation.turns.length} turns) with speaker info`);
+        // Extract claims from normalized turns, preserving speaker information
+        let claimIdx = 1;
+        for (const turn of normalizedConversation.turns) {
+            if (!turn.text || turn.text.trim().length < 8)
+                continue;
+            // Get participant info for speaker attribution
+            const participant = normalizedConversation.participants?.find((p) => p.id === turn.participantId);
+            const speakerRole = turn.role || participant?.role || 'unknown';
+            const speakerLabel = turn.speakerLabel || participant?.displayName;
+            // Map role to speaker string format
+            let speaker;
+            if (speakerRole === 'agent' || speakerRole === 'AGENT') {
+                speaker = 'Agent';
+            }
+            else if (speakerRole === 'customer' || speakerRole === 'CUSTOMER' || speakerRole === 'caller') {
+                speaker = 'Customer';
+            }
+            // Extract claim type
+            const claimType = classifyClaimType(turn.text, speaker);
+            const isAuditable = isAuditableClaimType(claimType);
+            if (isAuditable) {
+                extractedClaims.push({
+                    id: `c${claimIdx++}`,
+                    text: turn.text,
+                    confidence: 0, // Will be computed from graph
+                    evidence: [],
+                    meta: {
+                        speaker,
+                        speakerType: speakerRole === 'agent' ? 'agent' : speakerRole === 'customer' ? 'customer' : 'unknown',
+                        speakerLabel,
+                        turnIndex: turn.turnIndex,
+                    },
+                    claimType,
+                    isAuditable: true,
+                    topicTags: extractTopics(turn.text),
+                    hasAbsoluteLanguage: hasAbsoluteLanguage(turn.text),
+                    hasMoney: hasMoney(turn.text),
+                });
+            }
+        }
+        log('debug', 'Orchestrator', `Extracted ${extractedClaims.length} claims from normalized turns`);
+    }
+    else {
+        // Fallback: parse from plain text (loses speaker info)
+        const isCallTranscript = transcript.includes('Agent:') || transcript.includes('Customer:') ||
+            transcript.includes('AGENT:') || transcript.includes('CUSTOMER:');
+        const extractResult = extractClaimsWithTypes(transcript);
+        extractedClaims = extractResult.claims;
+        log('debug', 'Orchestrator', `Extracted ${extractedClaims.length} claims from plain text (no normalized turns available)`);
+    }
     timer.end('claim_extraction');
-    console.log(`📝 Extracted ${extractedClaims.length} claims (${timer.duration('claim_extraction')}ms)`);
     if (extractedClaims.length === 0) {
-        console.warn("⚠️ No claims extracted, returning empty result");
+        log('warn', 'Orchestrator', 'No claims extracted, returning empty result');
         timer.end('unified_graph');
         return createEmptyResult(input, timer, validationStartTime);
     }
@@ -141,14 +192,16 @@ async function runUnifiedGraphPath(input, timer, validationStartTime, adapter) {
     const rawClaims = extractedClaims.map((c, i) => ({
         id: c.id || `c${i}`,
         text: c.text,
-        speakerRole: normalizeSpeaker(c.meta?.speaker),
+        speakerRole: c.meta?.speakerType === 'agent' ? 'agent' :
+            c.meta?.speakerType === 'customer' ? 'customer' :
+                normalizeSpeaker(c.meta?.speaker),
         span: {
             turnId: `turn-${c.meta?.turnIndex ?? i}`,
             startChar: 0,
             endChar: c.text.length
         },
         modality: undefined, // Will be detected by graph builder
-        meta: c.meta,
+        meta: c.meta, // CRITICAL: Preserve all meta including speakerType and speakerLabel
     }));
     // Build the unified graph
     // CRITICAL: Pass transcript so graph-builder can create transcript EvidenceNodes for grounding
@@ -165,11 +218,12 @@ async function runUnifiedGraphPath(input, timer, validationStartTime, adapter) {
         conversationId: options?.conversationId,
     });
     timer.end('graph_build');
-    console.log(`🔗 Graph built: ${graphResult.metrics.totalEdges} edges in ${timer.duration('graph_build')}ms`);
-    console.log(`   Status: ${graphResult.graph.diagnostics.status}`);
-    if (graphResult.graph.diagnostics.reasons.length > 0) {
-        console.log(`   Reasons: ${graphResult.graph.diagnostics.reasons.join(', ')}`);
-    }
+    log('debug', 'Orchestrator', `Graph built`, {
+        totalEdges: graphResult.metrics.totalEdges,
+        duration: timer.duration('graph_build'),
+        status: graphResult.graph.diagnostics.status,
+        reasons: graphResult.graph.diagnostics.reasons
+    });
     // Build grounding lookup: claimId -> grounding edges
     const groundingByClaimId = new Map();
     for (const g of graphResult.legacy.grounding) {
@@ -182,10 +236,22 @@ async function runUnifiedGraphPath(input, timer, validationStartTime, adapter) {
         const claimGrounding = groundingByClaimId.get(c.id) || [];
         // Build evidenceRefs from grounding edges
         const evidenceRefs = claimGrounding.map(g => {
-            // Find the evidence node to get the quote
+            // Find the evidence node to get the quote and anchor
             const evidenceNode = graphResult.graph.nodes.evidence.find(e => e.id === g.sourceId);
-            const turnMatch = g.sourceId.match(/turn-(\d+)/);
-            const turnIndex = turnMatch ? parseInt(turnMatch[1], 10) : undefined;
+            // Extract turn index from evidence node anchor (not from sourceId)
+            // Anchor ref format: "turn-12" (correct)
+            // SourceId format: "e-transcript-12" (for lookup only)
+            let turnIndex;
+            if (evidenceNode?.anchors && evidenceNode.anchors.length > 0) {
+                const anchorRef = evidenceNode.anchors[0].ref;
+                const turnMatch = anchorRef?.match(/turn-(\d+)/);
+                turnIndex = turnMatch ? parseInt(turnMatch[1], 10) : undefined;
+            }
+            // Fallback: try to extract from sourceId if anchor not available
+            if (turnIndex === undefined && g.sourceId) {
+                const fallbackMatch = g.sourceId.match(/e-transcript-(\d+)/);
+                turnIndex = fallbackMatch ? parseInt(fallbackMatch[1], 10) : undefined;
+            }
             return {
                 sourceId: g.sourceId,
                 quote: g.quote || evidenceNode?.content?.substring(0, 200),
@@ -195,6 +261,40 @@ async function runUnifiedGraphPath(input, timer, validationStartTime, adapter) {
         });
         // Get truth state from derivation
         const truthResult = graphResult.truthDerivation.results.find(r => r.claimId === c.id);
+        // Preserve speaker information from graph node meta (which came from original extracted claims)
+        // CRITICAL: Preserve speakerType and speakerLabel so issues can correctly identify speakers
+        // Derive from multiple sources: nodeMeta, speakerRole, or fallback to 'unknown'
+        const nodeMeta = c.meta || {};
+        // Try to get speakerType from meta first, then derive from speakerRole or speaker string
+        let speakerType = nodeMeta.speakerType;
+        if (!speakerType) {
+            if (c.speakerRole === 'agent' || c.speakerRole === 'customer') {
+                speakerType = c.speakerRole;
+            }
+            else if (nodeMeta.speaker) {
+                // Derive from speaker string (e.g., "Agent" -> "agent", "Customer" -> "customer")
+                const speakerLower = nodeMeta.speaker.toLowerCase();
+                if (speakerLower === 'agent' || speakerLower === 'agnt') {
+                    speakerType = 'agent';
+                }
+                else if (speakerLower === 'customer' || speakerLower === 'cust' || speakerLower === 'caller') {
+                    speakerType = 'customer';
+                }
+                else {
+                    speakerType = 'unknown';
+                }
+            }
+            else {
+                speakerType = 'unknown';
+            }
+        }
+        // Preserve speakerLabel from meta, or derive from speaker if available
+        const speakerLabel = nodeMeta.speakerLabel ||
+            (nodeMeta.speaker && nodeMeta.speaker !== 'Agent' && nodeMeta.speaker !== 'Customer' ? nodeMeta.speaker : undefined);
+        // Set speaker in standard format (Agent/Customer/undefined)
+        const speaker = nodeMeta.speaker ||
+            (speakerType === 'agent' ? 'Agent' :
+                speakerType === 'customer' ? 'Customer' : undefined);
         return {
             id: c.id,
             text: c.text,
@@ -203,7 +303,9 @@ async function runUnifiedGraphPath(input, timer, validationStartTime, adapter) {
             evidenceRefs, // NEW: Actual grounding refs
             truthState: truthResult?.truthState,
             meta: {
-                speaker: c.speakerRole === 'agent' ? 'Agent' : c.speakerRole === 'customer' ? 'Customer' : undefined,
+                speaker,
+                speakerType,
+                speakerLabel,
                 turnIndex: parseInt(c.span.turnId.replace(/[^\d]/g, ''), 10) || 0,
             },
             claimKind: c.modality === 'question' ? 'question' :
@@ -247,7 +349,7 @@ async function runUnifiedGraphPath(input, timer, validationStartTime, adapter) {
                 console.warn(`   Run will proceed with degraded quality indicator.`);
             }
             else {
-                console.log(`📌 Spectral: ${groundedForSpectral.length} claims grounded from transcript`);
+                log('debug', 'Orchestrator', `Spectral: ${groundedForSpectral.length} claims grounded from transcript`);
             }
             spectral = await callSpectralAnalyzeService(spectralServiceUrl, spectralInput.claims, spectralInput.supports, spectralInput.contradictions, groundedForSpectral, {});
             coherenceScore = spectral.coherenceScore;
@@ -257,7 +359,7 @@ async function runUnifiedGraphPath(input, timer, validationStartTime, adapter) {
                 spectral.degradedReason = spectralDegradedReason;
             }
             timer.end('spectral');
-            console.log(`✅ Spectral: coherence=${coherenceScore}${spectralDegraded ? ' (DEGRADED)' : ''} (${timer.duration('spectral')}ms)`);
+            log('debug', 'Orchestrator', `Spectral: coherence=${coherenceScore}${spectralDegraded ? ' (DEGRADED)' : ''}`, { duration: timer.duration('spectral') });
         }
         catch (error) {
             timer.end('spectral');
@@ -310,6 +412,8 @@ async function runUnifiedGraphPath(input, timer, validationStartTime, adapter) {
             consistency: consistencyScore,
             coherence: coherenceScore,
             overall,
+            // Mode-aware scores (separated for clarity)
+            modeAware: graphResult.truthScores.modeAware,
         },
         summaryStats: {
             totalClaims: claims.length,
@@ -351,9 +455,9 @@ async function runUnifiedGraphPath(input, timer, validationStartTime, adapter) {
                     graphBuilderMode: 'unified',
                     graphStatus: graphResult.graph.diagnostics.status,
                     graphReasons: graphResult.graph.diagnostics.reasons,
-                    supportThreshold: 0.65, // From template config
-                    contradictionThreshold: 0.70, // From template config
-                    groundingThreshold: 0.60, // From template config
+                    supportThreshold: getTemplateConfig().thresholds.support,
+                    contradictionThreshold: getTemplateConfig().thresholds.contradiction,
+                    groundingThreshold: getTemplateConfig().thresholds.grounding,
                     // Candidate generation stats
                     pairsGenerated: graphResult.metrics.candidateGeneration?.totalCandidatesGenerated ?? 0,
                     claimsWithZeroCandidates: graphResult.metrics.candidateGeneration?.claimsWithZeroCandidates ?? 0,
@@ -511,7 +615,7 @@ async function validateOnce(input, adapter, startTime) {
         // PATH 2: TRUTH ENGINE (Deterministic, rule-based)
         // =========================================================================
         if (graphMode === "truth-engine") {
-            console.log("🚀 Using deterministic Truth Engine (NLI disabled)");
+            log('info', 'Orchestrator', 'Using deterministic Truth Engine (NLI disabled)');
             // Run the Truth Engine
             const transcript = answer && answer.trim().length > 0 ? answer : question;
             const engineResult = runTruthEngine({
@@ -540,13 +644,16 @@ async function validateOnce(input, adapter, startTime) {
             let coherenceScore = null;
             if (spectralEnabled && spectralServiceUrl && claims.length > 0) {
                 try {
-                    console.log(`📡 Calling Spectral with rule-based graph (${legacyGraph.contradictions.length} contradictions, ${legacyGraph.supports.length} supports)`);
+                    log('debug', 'Orchestrator', `Calling Spectral with rule-based graph`, {
+                        contradictions: legacyGraph.contradictions.length,
+                        supports: legacyGraph.supports.length
+                    });
                     spectral = await callSpectralAnalyzeService(spectralServiceUrl, claims.map(c => ({ id: c.id, text: c.text })), legacyGraph.supports, legacyGraph.contradictions, legacyGraph.groundedClaimIds, {});
                     coherenceScore = spectral.coherenceScore;
-                    console.log(`✅ Spectral complete. Coherence: ${coherenceScore}`);
+                    log('debug', 'Orchestrator', `Spectral complete`, { coherence: coherenceScore });
                 }
                 catch (e) {
-                    console.error("❌ Spectral error:", e.message);
+                    log('error', 'Orchestrator', 'Spectral error', { message: e.message });
                     spectral = { spectralSkipped: true, debugReason: `spectral_error: ${e.message}` };
                 }
             }
