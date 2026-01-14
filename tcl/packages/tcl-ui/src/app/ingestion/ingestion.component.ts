@@ -568,6 +568,10 @@ export class IngestionComponent implements OnInit, OnDestroy {
       this.jobProgress = 0;
       this.jobStage = null;
       this.errorMessage = '';
+      
+      // Reset draft state when switching modes
+      this.audioDraftId = null;
+      this.audioDraftStatus = null;
     } catch (error: any) {
       console.error('Error setting ingestion mode:', error);
       this.snackBar.open('Error switching mode: ' + (error.message || 'Unknown error'), 'Close', {

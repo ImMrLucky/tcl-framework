@@ -132,8 +132,8 @@
           <!-- Audio Only Mode -->
           <ng-container *ngIf="selectedMode === 'AUDIO_ONLY'">
             <div class="form-row">
-              <mat-form-field appearance="outline" class="full-width">
-                <mat-label>Audio File</mat-label>
+              <div class="full-width" style="display: flex; flex-direction: column; gap: 8px;">
+                <label style="font-size: 12px; color: rgba(0, 0, 0, 0.6); font-weight: 500;">Audio File</label>
                 <input
                   type="file"
                   #audioOnlyInput
@@ -146,15 +146,19 @@
                   type="button"
                   (click)="audioOnlyInput.click()"
                   [disabled]="loading"
+                  style="width: fit-content;"
                 >
                   <mat-icon>upload</mat-icon>
                   {{ selectedFileName || 'Select Audio File' }}
                 </button>
-                <mat-hint>Upload an audio file (.wav, .mp3, .flac, .m4a, .ogg, .opus)</mat-hint>
-                <mat-hint *ngIf="selectedFile && isAudioFile" class="success-hint">
-                  ✓ Audio file selected: {{ selectedFileName }}
-                </mat-hint>
-              </mat-form-field>
+                <div style="font-size: 12px; color: rgba(0, 0, 0, 0.6);">
+                  Upload an audio file (.wav, .mp3, .flac, .m4a, .ogg, .opus)
+                </div>
+                <div *ngIf="selectedFile && isAudioFile" style="font-size: 12px; color: #4caf50; display: flex; align-items: center; gap: 4px;">
+                  <mat-icon style="font-size: 16px; width: 16px; height: 16px;">check_circle</mat-icon>
+                  Audio file selected: {{ selectedFileName }}
+                </div>
+              </div>
             </div>
           </ng-container>
 
