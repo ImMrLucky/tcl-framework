@@ -113,12 +113,6 @@ export interface EvaluationSearchResult {
         [showBackButton]="true"
         backButtonRoute="/dashboard"
         backButtonText="Back to Dashboard">
-        <div headerActions>
-          <button mat-raised-button color="primary" routerLink="/ingest">
-            <mat-icon>add</mat-icon>
-            New Evaluation
-          </button>
-        </div>
       </app-header>
 
       <div class="container">
@@ -313,6 +307,12 @@ export interface EvaluationSearchResult {
         </mat-card>
 
         <!-- Evaluations Table -->
+        <div style="margin-bottom: 16px;">
+          <button mat-raised-button color="primary" routerLink="/ingest">
+            <mat-icon>add</mat-icon>
+            New Evaluation
+          </button>
+        </div>
         <mat-card *ngIf="!loading" class="table-card">
           <table mat-table [dataSource]="evaluations" matSort (matSortChange)="sortData($event)">
             
