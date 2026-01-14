@@ -25,6 +25,7 @@ import { MemberService } from '../member.service';
 import { MatSnackBar } from '@angular/material/snack-bar';
 import { MatExpansionModule } from '@angular/material/expansion';
 import { MatDialogModule } from '@angular/material/dialog';
+import { MatTooltipModule } from '@angular/material/tooltip';
 import { Subject } from 'rxjs';
 import { takeUntil } from 'rxjs/operators';
 
@@ -100,6 +101,8 @@ export interface EvaluationSearchResult {
     MatSelectModule,
     MatDatepickerModule,
     MatNativeDateModule,
+    MatExpansionModule,
+    MatDialogModule,
     AppHeaderComponent
   ],
   template: `
@@ -749,12 +752,6 @@ export class EvaluationsListComponent implements OnInit {
 
   viewEvaluation(evaluationId: string) {
     this.router.navigate(['/evaluations', evaluationId]);
-  }
-
-  ngOnDestroy() {
-    this.destroy$.next();
-    this.destroy$.complete();
-    this.stopDraftsPolling();
   }
 
   /**

@@ -1226,7 +1226,98 @@ export class IngestionComponent implements OnInit, OnDestroy {
   }
 
   /**
+   * Create draft conversation for audio-only upload
+   */
+  async createAudioDraft(audioAssetId: string) {
+    try {
+      const user = this.authService.getCurrentUser();
+      if (!user?.id) {
+        throw new Error('User not authenticated');
+      }
+
+      // Get orgId
+      let orgId: string | undefined;
+      try {
+        const orgsResponse = await firstValueFrom(this.memberService.getUserOrgs(user.id));
+        const orgs = orgsResponse.orgs;
+        if (orgs && orgs.length > 0) {
+          orgId = orgs[0].id;
+        }
+      } catch (err) {
+        console.error('Failed to get user orgs:', err);
+        throw new Error('Failed to get organization ID');
+      }
+
+      if (!orgId) {
+        throw new Error('Organization ID not found');
+      }
+
+      // Create draft
+      const draftResponse = await firstValueFrom(
+        this.draftsService.createAudioDraft(
+          audioAssetId,
+          this.title || this.selectedFileName || 'Untitled Audio',
+          undefined // projectId - TODO: get from user context
+        )
+      );
+
+      this.audioDraftId = draftResponse.draft.id;
+      this.audioDraftStatus = draftResponse.draft.status as any;
+      
+      console.log('[Ingestion] Draft conversation created:', this.audioDraftId);
+    } catch (error: any) {
+      console.error('Failed to create draft conversation:', error);
+      this.snackBar.open('Failed to create draft: ' + (error.error?.error || error.message), 'Close', {
+        duration: 5000
+      });
+    }
+  }
+
+  /**
+   * Start transcription for audio draft
+   */
+  async startTranscription() {
+    if (!this.audioDraftId) {
+      this.snackBar.open('No draft conversation found', 'Close', { duration: 3000 });
+      return;
+    }
+
+    this.loading = true;
+    try {
+      const result = await firstValueFrom(
+        this.draftsService.transcribeDraft(this.audioDraftId)
+      );
+
+      this.audioDraftStatus = result.status as any;
+      this.snackBar.open('Transcription started. You can leave the app — processing will continue.', 'Close', {
+        duration: 5000
+      });
+
+      // Navigate to evaluations page
+      this.router.navigate(['/evaluations']);
+    } catch (error: any) {
+      console.error('Failed to start transcription:', error);
+      this.snackBar.open('Failed to start transcription: ' + (error.error?.error || error.message), 'Close', {
+        duration: 5000
+      });
+      this.loading = false;
+    }
+  }
+
+  /**
+   * Save draft and navigate to evaluations (Do later)
+   */
+  async saveDraftForLater() {
+    this.snackBar.open('Saved to Drafts. Transcribe any time from Evaluations.', 'Close', {
+      duration: 4000
+    });
+    // Navigate to evaluations page
+    this.router.navigate(['/evaluations']);
+  }
+
+  /**
    * Start processing for Audio Only mode (calls /start endpoint)
+   * @deprecated Use startTranscription() for new draft-based flow
    */
   async startProcessing() {
     if (!this.currentJobId) {
