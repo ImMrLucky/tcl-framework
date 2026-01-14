@@ -29,7 +29,7 @@
       </a>
       <a mat-list-item routerLink="/evidence" routerLinkActive="active" [routerLinkActiveOptions]="{exact: false}">
         <mat-icon matListItemIcon>description</mat-icon>
-        <span *ngIf="sidebarOpen" matListItemTitle>Policies & Evidence</span>
+        <span *ngIf="sidebarOpen" matListItemTitle>Policies & Rules</span>
       </a>
       <mat-divider *ngIf="isSuperuser"></mat-divider>
       <a *ngIf="isSuperuser" mat-list-item routerLink="/admin" routerLinkActive="active" [routerLinkActiveOptions]="{exact: false}">
@@ -142,7 +142,7 @@
                    </button>
                    <button mat-menu-item routerLink="/evidence">
                      <mat-icon>description</mat-icon>
-                     <span>Policies & Evidence</span>
+                     <span>Policies & Rules</span>
                    </button>
                    <button mat-menu-item routerLink="/evidence">
                      <mat-icon>verified</mat-icon>
@@ -275,7 +275,7 @@
                    </button>
                    <button mat-menu-item routerLink="/evidence">
                      <mat-icon>description</mat-icon>
-                     <span>Policies & Evidence</span>
+                     <span>Policies & Rules</span>
                    </button>
                    <button mat-menu-item routerLink="/evidence">
                      <mat-icon>verified</mat-icon>
