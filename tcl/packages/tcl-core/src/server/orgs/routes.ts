@@ -241,25 +241,32 @@ export function setupOrgRoutes(app: express.Application) {
       }
 
       // Get profile info for each member
-      const memberIds = (members || []).map((m: any) => m.user_id);
+      const memberIds = (members || []).map((m: any) => m.user_id).filter(Boolean);
       const profilesMap = new Map<string, { email?: string; full_name?: string }>();
       
       if (memberIds.length > 0) {
-        const { data: profiles, error: profilesError } = await supabaseAdmin
-          .from('profiles')
-          .select('id, email, full_name')
-          .in('id', memberIds);
+        try {
+          const { data: profiles, error: profilesError } = await supabaseAdmin
+            .from('profiles')
+            .select('id, email, full_name')
+            .in('id', memberIds);
 
-        if (profilesError) {
-          console.error('Error fetching profiles:', profilesError);
-          // Continue without profile info
-        } else {
-          (profiles || []).forEach((p: any) => {
-            profilesMap.set(p.id, {
-              email: p.email,
-              full_name: p.full_name
+          if (profilesError) {
+            console.error('Error fetching profiles:', profilesError);
+            // Continue without profile info
+          } else if (profiles && Array.isArray(profiles)) {
+            profiles.forEach((p: any) => {
+              if (p && p.id) {
+                profilesMap.set(p.id, {
+                  email: p.email || '',
+                  full_name: p.full_name || undefined
+                });
+              }
             });
-          });
+          }
+        } catch (e: any) {
+          console.error('Exception fetching profiles:', e);
+          // Continue without profile info
         }
       }
 

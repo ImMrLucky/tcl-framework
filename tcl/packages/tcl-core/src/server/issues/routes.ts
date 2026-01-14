@@ -1131,59 +1131,79 @@ export function setupIssueWorkflowRoutes(app: express.Application) {
       // Extract and transform all issues
       const allIssues: any[] = [];
       for (const eval_ of evaluations) {
-        const report = eval_.report as any;
-        const issues = report?.issues || report?.topIssuesV2 || report?.allIssuesV2 || [];
-        
-        for (const issue of issues) {
-          if (!issue || !issue.issueId) continue;
+        try {
+          const report = eval_.report as any;
+          // Check for new canonical structure first
+          let issues: any[] = [];
+          if (report?.issues?.atomic) {
+            issues = report.issues.atomic;
+          } else if (report?.issues?.grouped) {
+            // Flatten grouped issues
+            issues = report.issues.grouped.flatMap((g: any) => g.issues || []);
+          } else {
+            // Fallback to legacy structure
+            issues = report?.topIssuesV2 || report?.allIssuesV2 || report?.issues || [];
+          }
           
-          // Same transformation as queue endpoint
-          const importance = issue.confidence?.importance ?? 0.5;
-          const nodeBlame = issue.confidence?.nodeBlameNorm ?? 0;
-          const nliScore = issue.confidence?.nliScore ?? 0;
-          const hasContradictions = (issue.conflictsWith && issue.conflictsWith.length > 0);
-          const contradictionBoost = hasContradictions ? 0.15 : 0;
-          const computedRiskScore = Math.min(1.0, 
-            (importance * 0.5) + (nodeBlame * 0.3) + (nliScore * 0.2) + contradictionBoost
-          );
-          const deriveSeverityFromScore = (riskScore: number): 'low' | 'medium' | 'high' | 'critical' => {
-            if (riskScore >= 0.75) return 'high';
-            if (riskScore >= 0.5) return 'medium';
-            return 'low';
-          };
-          const derivedSeverity = deriveSeverityFromScore(computedRiskScore);
-          const deriveImpact = (severity: string, hasContradictions: boolean): 'low' | 'medium' | 'high' => {
-            if (severity === 'high' || (severity === 'medium' && hasContradictions)) return 'high';
-            if (severity === 'medium') return 'medium';
-            return 'low';
-          };
+          if (!Array.isArray(issues)) {
+            console.warn(`Skipping evaluation ${eval_.id} due to non-array issues:`, issues);
+            continue;
+          }
           
-          const transformedIssue: any = {
-            ...issue,
-            evaluationId: eval_.id,
-            evaluationCreatedAt: eval_.created_at,
-            severity: issue.severity || derivedSeverity,
-            severityDisplay: issue.severityDisplay || (derivedSeverity === 'high' ? 'high' : derivedSeverity === 'medium' ? 'medium' : 'low'),
-            category: issue.category || issue.risk?.category || 'evidence',
-            type: issue.type || issue.what?.issueType || 'UNVERIFIED_CLAIM',
-            impact: issue.impact || deriveImpact(derivedSeverity, hasContradictions),
-            score: issue.score ?? Math.round(computedRiskScore * 100),
-            riskScore: issue.riskScore ?? computedRiskScore,
-            what: {
-              ...issue.what,
-              issueSummary: issue.what?.issueSummary || issue.what?.claimSummary || issue.what?.claimText || '',
-              issueDetail: issue.what?.issueDetail || issue.what?.description || issue.what?.claimText || '',
-              primaryClaimId: issue.what?.primaryClaimId || issue.claimId || '',
-              claimText: issue.what?.claimText || issue.what?.claimSummary || '',
-            },
-            verification: issue.verification || { level: 'NONE', reasonCodes: [] },
-            who: issue.who || { speaker: 'UNKNOWN' },
-            evidence: issue.evidence || { refs: [] },
-            compliance: issue.compliance || { tags: [], disclaimers: [] },
-            audit: issue.audit || { createdAt: eval_.created_at, engineVersion: '', scorerId: '' },
-          };
-          
-          allIssues.push(transformedIssue);
+          for (const issue of issues) {
+            if (!issue || !issue.issueId) continue;
+            
+            // Same transformation as queue endpoint
+            const importance = issue.confidence?.importance ?? 0.5;
+            const nodeBlame = issue.confidence?.nodeBlameNorm ?? 0;
+            const nliScore = issue.confidence?.nliScore ?? 0;
+            const hasContradictions = (issue.conflictsWith && issue.conflictsWith.length > 0);
+            const contradictionBoost = hasContradictions ? 0.15 : 0;
+            const computedRiskScore = Math.min(1.0, 
+              (importance * 0.5) + (nodeBlame * 0.3) + (nliScore * 0.2) + contradictionBoost
+            );
+            const deriveSeverityFromScore = (riskScore: number): 'low' | 'medium' | 'high' | 'critical' => {
+              if (riskScore >= 0.75) return 'high';
+              if (riskScore >= 0.5) return 'medium';
+              return 'low';
+            };
+            const derivedSeverity = deriveSeverityFromScore(computedRiskScore);
+            const deriveImpact = (severity: string, hasContradictions: boolean): 'low' | 'medium' | 'high' => {
+              if (severity === 'high' || (severity === 'medium' && hasContradictions)) return 'high';
+              if (severity === 'medium') return 'medium';
+              return 'low';
+            };
+            
+            const transformedIssue: any = {
+              ...issue,
+              evaluationId: eval_.id,
+              evaluationCreatedAt: eval_.created_at,
+              severity: issue.severity || derivedSeverity,
+              severityDisplay: issue.severityDisplay || (derivedSeverity === 'high' ? 'high' : derivedSeverity === 'medium' ? 'medium' : 'low'),
+              category: issue.category || issue.risk?.category || 'evidence',
+              type: issue.type || issue.what?.issueType || 'UNVERIFIED_CLAIM',
+              impact: issue.impact || deriveImpact(derivedSeverity, hasContradictions),
+              score: issue.score ?? Math.round(computedRiskScore * 100),
+              riskScore: issue.riskScore ?? computedRiskScore,
+              what: {
+                ...issue.what,
+                issueSummary: issue.what?.issueSummary || issue.what?.claimSummary || issue.what?.claimText || '',
+                issueDetail: issue.what?.issueDetail || issue.what?.description || issue.what?.claimText || '',
+                primaryClaimId: issue.what?.primaryClaimId || issue.claimId || '',
+                claimText: issue.what?.claimText || issue.what?.claimSummary || '',
+              },
+              verification: issue.verification || { level: 'NONE', reasonCodes: [] },
+              who: issue.who || { speaker: 'UNKNOWN' },
+              evidence: issue.evidence || { refs: [] },
+              compliance: issue.compliance || { tags: [], disclaimers: [] },
+              audit: issue.audit || { createdAt: eval_.created_at, engineVersion: '', scorerId: '' },
+            };
+            
+            allIssues.push(transformedIssue);
+          }
+        } catch (e: any) {
+          console.error(`Error processing evaluation ${eval_.id}:`, e);
+          // Continue with next evaluation
         }
       }
 
