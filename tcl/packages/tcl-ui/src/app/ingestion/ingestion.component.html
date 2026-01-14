@@ -158,6 +158,40 @@
             </div>
           </ng-container>
 
+          <!-- Transcription Card (Audio Only mode, after upload) -->
+          <ng-container *ngIf="selectedMode === 'AUDIO_ONLY' && audioDraftId && audioDraftStatus === 'DRAFT_AUDIO_UPLOADED'">
+            <mat-card class="transcription-card" style="margin-top: 16px; margin-bottom: 16px;">
+              <mat-card-header>
+                <mat-card-title>
+                  <mat-icon>mic</mat-icon>
+                  Transcription
+                </mat-card-title>
+              </mat-card-header>
+              <mat-card-content>
+                <p>Audio uploaded. You can transcribe now or later.</p>
+                <div class="transcription-actions">
+                  <button
+                    mat-raised-button
+                    color="primary"
+                    (click)="startTranscription()"
+                    [disabled]="loading"
+                  >
+                    <mat-icon>play_arrow</mat-icon>
+                    Transcribe now
+                  </button>
+                  <button
+                    mat-stroked-button
+                    (click)="saveDraftForLater()"
+                    [disabled]="loading"
+                  >
+                    <mat-icon>schedule</mat-icon>
+                    Do later
+                  </button>
+                </div>
+              </mat-card-content>
+            </mat-card>
+          </ng-container>
+
           <!-- Audio + Transcript Mode -->
           <ng-container *ngIf="selectedMode === 'AUDIO_PLUS_TRANSCRIPT'">
             <div class="linking-section">

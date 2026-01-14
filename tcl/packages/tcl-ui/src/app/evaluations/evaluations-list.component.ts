@@ -1,4 +1,5 @@
-import { Component, OnInit } from '@angular/core';
+import { Component, OnInit, OnDestroy } from '@angular/core';
+import { firstValueFrom } from 'rxjs';
 import { CommonModule } from '@angular/common';
 import { Router, RouterModule } from '@angular/router';
 import { MatCardModule } from '@angular/material/card';
@@ -18,6 +19,14 @@ import { MatNativeDateModule } from '@angular/material/core';
 import { FormsModule } from '@angular/forms';
 import { AppHeaderComponent } from '../shared/app-header.component';
 import { AuditService } from '../audit.service';
+import { ConversationDraftsService, ConversationDraft } from '../conversation-drafts.service';
+import { AuthService } from '../auth.service';
+import { MemberService } from '../member.service';
+import { MatSnackBar } from '@angular/material/snack-bar';
+import { MatExpansionModule } from '@angular/material/expansion';
+import { MatDialogModule } from '@angular/material/dialog';
+import { Subject } from 'rxjs';
+import { takeUntil } from 'rxjs/operators';
 
 interface EvaluationSummary {
   id: string;
@@ -190,6 +199,110 @@ export interface EvaluationSearchResult {
             </button>
           </div>
         </mat-card>
+
+        <!-- Drafts & Pending Section -->
+        <mat-expansion-panel *ngIf="drafts.length > 0" [expanded]="true" class="drafts-panel" style="margin-bottom: 24px;">
+          <mat-expansion-panel-header>
+            <mat-panel-title>
+              <mat-icon>drafts</mat-icon>
+              Drafts & Pending
+            </mat-panel-title>
+            <mat-panel-description>
+              Audio uploads and transcripts not yet evaluated
+            </mat-panel-description>
+          </mat-expansion-panel-header>
+          
+          <div *ngIf="draftsLoading" class="loading-drafts">
+            <mat-spinner diameter="30"></mat-spinner>
+            <span>Loading drafts...</span>
+          </div>
+          
+          <table mat-table [dataSource]="drafts" *ngIf="!draftsLoading" class="drafts-table">
+            <!-- Title Column -->
+            <ng-container matColumnDef="title">
+              <th mat-header-cell *matHeaderCellDef>Title</th>
+              <td mat-cell *matCellDef="let draft">{{ draft.title }}</td>
+            </ng-container>
+            
+            <!-- Input Column -->
+            <ng-container matColumnDef="input">
+              <th mat-header-cell *matHeaderCellDef>Input</th>
+              <td mat-cell *matCellDef="let draft">Audio</td>
+            </ng-container>
+            
+            <!-- Status Column -->
+            <ng-container matColumnDef="status">
+              <th mat-header-cell *matHeaderCellDef>Status</th>
+              <td mat-cell *matCellDef="let draft">
+                <mat-chip [color]="getDraftStatusColor(draft.draftStatus)">
+                  {{ getDraftStatusLabel(draft.draftStatus) }}
+                </mat-chip>
+              </td>
+            </ng-container>
+            
+            <!-- Updated Column -->
+            <ng-container matColumnDef="updated">
+              <th mat-header-cell *matHeaderCellDef>Updated</th>
+              <td mat-cell *matCellDef="let draft">
+                {{ draft.updatedAt | date:'MMM d, yyyy h:mm a' }}
+              </td>
+            </ng-container>
+            
+            <!-- Actions Column -->
+            <ng-container matColumnDef="actions">
+              <th mat-header-cell *matHeaderCellDef>Actions</th>
+              <td mat-cell *matCellDef="let draft">
+                <!-- DRAFT_AUDIO_UPLOADED -->
+                <ng-container *ngIf="draft.draftStatus === 'DRAFT_AUDIO_UPLOADED'">
+                  <button mat-raised-button color="primary" (click)="onTranscribe(draft)">
+                    <mat-icon>mic</mat-icon>
+                    Transcribe
+                  </button>
+                  <button mat-button (click)="onDelete(draft)">
+                    <mat-icon>delete</mat-icon>
+                    Delete
+                  </button>
+                </ng-container>
+                
+                <!-- TRANSCRIBING -->
+                <ng-container *ngIf="draft.draftStatus === 'TRANSCRIBING' || draft.draftStatus === 'TRANSCRIPTION_QUEUED'">
+                  <span class="in-progress">In progress</span>
+                </ng-container>
+                
+                <!-- TRANSCRIPTION_FAILED -->
+                <ng-container *ngIf="draft.draftStatus === 'TRANSCRIPTION_FAILED'">
+                  <button mat-raised-button color="primary" (click)="onRetry(draft)">
+                    <mat-icon>refresh</mat-icon>
+                    Retry transcription
+                  </button>
+                  <button mat-button (click)="onDelete(draft)">
+                    <mat-icon>delete</mat-icon>
+                    Delete
+                  </button>
+                  <button mat-button *ngIf="draft.transcriptionError" [matTooltip]="draft.transcriptionError">
+                    <mat-icon>info</mat-icon>
+                    Details
+                  </button>
+                </ng-container>
+                
+                <!-- TRANSCRIPT_READY -->
+                <ng-container *ngIf="draft.draftStatus === 'TRANSCRIPT_READY'">
+                  <button mat-raised-button color="primary" (click)="onRunEvaluation(draft)">
+                    <mat-icon>play_arrow</mat-icon>
+                    Run evaluation
+                  </button>
+                  <button mat-button (click)="onDelete(draft)">
+                    <mat-icon>delete</mat-icon>
+                    Delete
+                  </button>
+                </ng-container>
+              </td>
+            </ng-container>
+            
+            <tr mat-header-row *matHeaderRowDef="['title', 'input', 'status', 'updated', 'actions']"></tr>
+            <tr mat-row *matRowDef="let row; columns: ['title', 'input', 'status', 'updated', 'actions']"></tr>
+          </table>
+        </mat-expansion-panel>
 
         <!-- Loading -->
         <mat-card *ngIf="loading" class="loading-card">
@@ -526,13 +639,31 @@ export class EvaluationsListComponent implements OnInit {
   
   displayedColumns = ['evaluationId', 'createdAt', 'agent', 'totalIssues', 'highCritical', 'verifiedPercent', 'topCategories', 'actions'];
 
+  // Drafts
+  drafts: ConversationDraft[] = [];
+  draftsLoading = false;
+  draftsPollingInterval: any = null;
+  private destroy$ = new Subject<void>();
+
   constructor(
     private auditService: AuditService,
-    private router: Router
+    private router: Router,
+    private draftsService: ConversationDraftsService,
+    private authService: AuthService,
+    private memberService: MemberService,
+    private snackBar: MatSnackBar
   ) {}
 
   ngOnInit() {
     this.loadEvaluations();
+    this.loadDrafts();
+    this.startDraftsPolling();
+  }
+
+  ngOnDestroy() {
+    this.destroy$.next();
+    this.destroy$.complete();
+    this.stopDraftsPolling();
   }
 
   async loadEvaluations() {
@@ -618,6 +749,182 @@ export class EvaluationsListComponent implements OnInit {
 
   viewEvaluation(evaluationId: string) {
     this.router.navigate(['/evaluations', evaluationId]);
+  }
+
+  ngOnDestroy() {
+    this.destroy$.next();
+    this.destroy$.complete();
+    this.stopDraftsPolling();
+  }
+
+  /**
+   * Load draft conversations
+   */
+  async loadDrafts() {
+    this.draftsLoading = true;
+    try {
+      const user = this.authService.getCurrentUser();
+      if (!user?.id) {
+        return;
+      }
+
+      // Get projectId from user context (if available)
+      // For now, we'll fetch all drafts for the user's orgs
+      const draftsResponse = await firstValueFrom(
+        this.draftsService.listDrafts(undefined, 100, 0)
+      );
+
+      this.drafts = draftsResponse.drafts || [];
+      
+      // Restart polling if there are active drafts
+      this.stopDraftsPolling();
+      this.startDraftsPolling();
+    } catch (error: any) {
+      console.error('Failed to load drafts:', error);
+      this.drafts = [];
+    } finally {
+      this.draftsLoading = false;
+    }
+  }
+
+  /**
+   * Start polling for draft status updates
+   */
+  startDraftsPolling() {
+    // Check if any drafts are in progress
+    const hasActiveDrafts = this.drafts.some(
+      d => d.draftStatus === 'TRANSCRIPTION_QUEUED' || d.draftStatus === 'TRANSCRIBING'
+    );
+
+    if (hasActiveDrafts) {
+      // Poll every 8 seconds
+      this.draftsPollingInterval = setInterval(() => {
+        this.loadDrafts();
+      }, 8000);
+    }
+  }
+
+  /**
+   * Stop polling for draft status updates
+   */
+  stopDraftsPolling() {
+    if (this.draftsPollingInterval) {
+      clearInterval(this.draftsPollingInterval);
+      this.draftsPollingInterval = null;
+    }
+  }
+
+  /**
+   * Get status chip label for draft
+   */
+  getDraftStatusLabel(status: ConversationDraft['draftStatus']): string {
+    switch (status) {
+      case 'DRAFT_AUDIO_UPLOADED':
+        return 'Audio uploaded';
+      case 'TRANSCRIPTION_QUEUED':
+        return 'Queued';
+      case 'TRANSCRIBING':
+        return 'Transcribing…';
+      case 'TRANSCRIPTION_FAILED':
+        return 'Failed';
+      case 'TRANSCRIPT_READY':
+        return 'Transcript ready';
+      case 'EVALUATED':
+        return 'Evaluated';
+      default:
+        return status || 'Unknown';
+    }
+  }
+
+  /**
+   * Get status chip color for draft
+   */
+  getDraftStatusColor(status: ConversationDraft['draftStatus']): string {
+    switch (status) {
+      case 'DRAFT_AUDIO_UPLOADED':
+        return 'primary';
+      case 'TRANSCRIPTION_QUEUED':
+      case 'TRANSCRIBING':
+        return 'accent';
+      case 'TRANSCRIPTION_FAILED':
+        return 'warn';
+      case 'TRANSCRIPT_READY':
+        return 'primary';
+      case 'EVALUATED':
+        return '';
+      default:
+        return '';
+    }
+  }
+
+  /**
+   * Start transcription for a draft
+   */
+  async onTranscribe(draft: ConversationDraft) {
+    try {
+      const result = await firstValueFrom(
+        this.draftsService.transcribeDraft(draft.id)
+      );
+
+      this.snackBar.open('Transcription started', 'Close', { duration: 3000 });
+      await this.loadDrafts();
+    } catch (error: any) {
+      console.error('Failed to start transcription:', error);
+      this.snackBar.open('Failed to start transcription: ' + (error.error?.error || error.message), 'Close', {
+        duration: 5000
+      });
+    }
+  }
+
+  /**
+   * Retry transcription for a failed draft
+   */
+  async onRetry(draft: ConversationDraft) {
+    await this.onTranscribe(draft);
+  }
+
+  /**
+   * Delete a draft
+   */
+  async onDelete(draft: ConversationDraft) {
+    if (!confirm(`Delete draft "${draft.title}"? This cannot be undone.`)) {
+      return;
+    }
+
+    try {
+      await firstValueFrom(this.draftsService.deleteDraft(draft.id));
+      this.snackBar.open('Draft deleted', 'Close', { duration: 3000 });
+      await this.loadDrafts();
+    } catch (error: any) {
+      console.error('Failed to delete draft:', error);
+      this.snackBar.open('Failed to delete draft: ' + (error.error?.error || error.message), 'Close', {
+        duration: 5000
+      });
+    }
+  }
+
+  /**
+   * Run evaluation for a draft with ready transcript
+   */
+  async onRunEvaluation(draft: ConversationDraft) {
+    if (draft.draftStatus !== 'TRANSCRIPT_READY') {
+      this.snackBar.open('Transcript must be ready before running evaluation', 'Close', { duration: 3000 });
+      return;
+    }
+
+    try {
+      // Navigate to evaluation creation - the backend will handle creating the evaluation
+      // For now, we'll use the existing evaluation endpoint
+      // TODO: Update this to use the proper evaluation creation endpoint
+      this.router.navigate(['/evaluations/new'], { 
+        queryParams: { conversationId: draft.id } 
+      });
+    } catch (error: any) {
+      console.error('Failed to run evaluation:', error);
+      this.snackBar.open('Failed to run evaluation: ' + (error.error?.error || error.message), 'Close', {
+        duration: 5000
+      });
+    }
   }
 
 }

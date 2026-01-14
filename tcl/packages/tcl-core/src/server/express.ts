@@ -38,6 +38,7 @@ import { setupEvidenceRoutes } from "./evidence/routes.js";
 import { setupOrgRoutes } from "./orgs/routes.js";
 import { setupProjectRoutes } from "./projects/routes.js";
 import { setupTemplateRoutes } from "./templates/routes.js";
+import { setupConversationRoutes } from "./conversations/routes.js";
 import { resolveEvidenceSet } from "./evidence/service.js";
 import type { EvidenceSet, EvidenceDiagnostics } from "../types/evidence.types.js";
 import { startIndexingWorker } from "./evidence/indexing-worker.js";
@@ -3425,6 +3426,11 @@ setupAnalyticsRoutes(app);
 console.log("Registering org routes...");
 setupOrgRoutes(app);
 console.log("Org routes registered successfully");
+
+// Setup conversation routes (drafts, transcription)
+console.log("Registering conversation routes...");
+setupConversationRoutes(app);
+console.log("Conversation routes registered successfully");
 
 // Setup project routes
 console.log("Registering project routes...");

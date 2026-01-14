@@ -20,6 +20,7 @@ import { TclService } from '../tcl.service';
 import { AuthService } from '../auth.service';
 import { EvidenceService, EvidenceItem } from '../evidence.service';
 import { MemberService } from '../member.service';
+import { ConversationDraftsService } from '../conversation-drafts.service';
 import { HttpClient } from '@angular/common/http';
 import { firstValueFrom } from 'rxjs';
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
@@ -130,6 +131,10 @@ export class IngestionComponent implements OnInit, OnDestroy {
   templates: Array<{ id: string; name: string; description?: string; isSystemTemplate: boolean; industry?: string; businessFunction?: string }> = [];
   templateGroups: Array<{ label: string; templates: Array<{ id: string; name: string; description?: string; isSystemTemplate: boolean; industry?: string; businessFunction?: string }> }> = [];
   templatesLoading = false;
+
+  // Draft conversation state (for Audio Only mode)
+  audioDraftId: string | null = null;
+  audioDraftStatus: 'DRAFT_AUDIO_UPLOADED' | 'TRANSCRIPTION_QUEUED' | 'TRANSCRIBING' | 'TRANSCRIPT_READY' | 'TRANSCRIPTION_FAILED' | null = null;
   readonly evidenceSourceTypes: Array<{ value: EvidenceItem['sourceType']; label: string }> = [
     { value: 'POLICY', label: 'Policy' },
     { value: 'RULESET', label: 'Ruleset' },
@@ -149,7 +154,8 @@ export class IngestionComponent implements OnInit, OnDestroy {
     private authService: AuthService,
     private evidenceService: EvidenceService,
     private memberService: MemberService,
-    private http: HttpClient
+    private http: HttpClient,
+    private draftsService: ConversationDraftsService
   ) {}
 
   ngOnInit() {
@@ -190,7 +196,12 @@ export class IngestionComponent implements OnInit, OnDestroy {
   onTemplateChange() {
     // When template changes, preview evidence set again
     if (this.templateId) {
-      this.previewEvidenceSet();
+      try {
+        this.previewEvidenceSet();
+      } catch (error: any) {
+        console.error('Error previewing evidence set on template change:', error);
+        // Don't show error to user - this is a background operation
+      }
     }
   }
 
@@ -526,27 +537,42 @@ export class IngestionComponent implements OnInit, OnDestroy {
    * Set ingestion mode
    */
   setMode(mode: 'TRANSCRIPT_ONLY' | 'AUDIO_ONLY' | 'AUDIO_PLUS_TRANSCRIPT') {
-    this.selectedMode = mode;
-    // Clear files when switching modes
-    if (mode !== 'AUDIO_PLUS_TRANSCRIPT') {
-      this.audioFile = null;
-      this.audioFileName = '';
-      this.transcriptFile = null;
-      this.transcriptFileName = '';
-    }
-    if (mode !== 'AUDIO_ONLY') {
-      // Clear audio file selection for non-audio modes
-      if (this.isAudioFile) {
-        this.selectedFile = null;
-        this.selectedFileName = '';
-        this.isAudioFile = false;
+    try {
+      this.selectedMode = mode;
+      // Clear files when switching modes
+      if (mode !== 'AUDIO_PLUS_TRANSCRIPT') {
+        this.audioFile = null;
+        this.audioFileName = '';
+        this.transcriptFile = null;
+        this.transcriptFileName = '';
       }
-    }
-    if (mode !== 'TRANSCRIPT_ONLY') {
-      // Clear transcript text for non-transcript-only modes
-      if (!this.transcriptFile) {
-        this.transcript = '';
+      if (mode !== 'AUDIO_ONLY') {
+        // Clear audio file selection for non-audio modes
+        if (this.isAudioFile) {
+          this.selectedFile = null;
+          this.selectedFileName = '';
+          this.isAudioFile = false;
+        }
       }
+      if (mode !== 'TRANSCRIPT_ONLY') {
+        // Clear transcript text for non-transcript-only modes
+        // Only clear if there's no transcript file (preserve file-based transcripts)
+        if (!this.transcriptFile) {
+          this.transcript = '';
+        }
+      }
+      
+      // Reset job status when switching modes
+      this.currentJobId = null;
+      this.jobStatus = null;
+      this.jobProgress = 0;
+      this.jobStage = null;
+      this.errorMessage = '';
+    } catch (error: any) {
+      console.error('Error setting ingestion mode:', error);
+      this.snackBar.open('Error switching mode: ' + (error.message || 'Unknown error'), 'Close', {
+        duration: 3000
+      });
     }
   }
 
@@ -949,6 +975,11 @@ export class IngestionComponent implements OnInit, OnDestroy {
         const finalizeDuration = Date.now() - finalizeStartTime;
         console.log(`[Upload] Upload finalized in ${finalizeDuration}ms:`, finalizeResult);
         console.log(`[Upload] ✅ Upload completed successfully for ${kind}`);
+        
+        // For AUDIO_ONLY mode, create draft conversation after audio upload
+        if (kind === 'audio' && this.selectedMode === 'AUDIO_ONLY' && finalizeResult.assetId) {
+          await this.createAudioDraft(finalizeResult.assetId);
+        }
       } catch (finalizeError: any) {
         console.error(`[Upload] Finalize upload failed:`, finalizeError);
         throw new Error(`Failed to finalize upload: ${finalizeError.message || finalizeError.error?.message || 'Unknown error'}`);
