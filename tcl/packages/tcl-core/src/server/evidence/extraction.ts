@@ -102,13 +102,15 @@ export async function extractTextFromBuffer(
       // Try to use pdf-parse if available (dynamic import with error handling)
       let pdfParse: any = null;
       try {
-        pdfParse = await import('pdf-parse');
+        // Use require for optional dependency to avoid TypeScript errors
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
+        pdfParse = require('pdf-parse');
       } catch (importError) {
         // pdf-parse not installed - will use fallback
       }
       
-      if (pdfParse && pdfParse.default) {
-        const data = await pdfParse.default(buffer);
+      if (pdfParse) {
+        const data = await pdfParse(buffer);
         return {
           text: data.text,
           metadata: {
@@ -140,7 +142,9 @@ export async function extractTextFromBuffer(
       // Try to use mammoth if available (dynamic import with error handling)
       let mammoth: any = null;
       try {
-        mammoth = await import('mammoth');
+        // Use require for optional dependency to avoid TypeScript errors
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
+        mammoth = require('mammoth');
       } catch (importError) {
         // mammoth not installed - will throw error below
       }

@@ -831,12 +831,19 @@ export function setupEvidenceRoutes(app: express.Application) {
         includeTemplate,
       } = req.query;
 
+      // Normalize simulationMode to boolean
+      const isSimulationMode = 
+        simulationMode === 'true' || 
+        simulationMode === '1' || 
+        (typeof simulationMode === 'boolean' && simulationMode) ||
+        (typeof simulationMode === 'number' && simulationMode === 1);
+
       const evidenceSet = await resolveEvidenceSet(
         context.orgId,
         projectId as string || context.projectId,
         templateId as string,
         conversationId as string,
-        simulationMode === 'true' || simulationMode === true || simulationMode === '1',
+        isSimulationMode,
         includeOrg !== 'false',
         includeProject !== 'false',
         includeTemplate !== 'false'
