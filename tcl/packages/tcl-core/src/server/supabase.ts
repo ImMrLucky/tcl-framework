@@ -723,27 +723,40 @@ export async function checkUserPermission(userId: string, orgId: string, permiss
 export async function getUserOrgs(userId: string): Promise<Array<{ id: string; name: string; slug: string; role: string }>> {
   if (!supabaseAdmin) return [];
   
-  const { data, error } = await supabaseAdmin
-    .from('org_members')
-    .select(`
-      org_id,
-      role,
-      organizations (
-        id,
-        name,
-        slug
-      )
-    `)
-    .eq('user_id', userId);
-  
-  if (error || !data) return [];
-  
-  return data.map((m: any) => ({
-    id: m.org_id,
-    name: m.organizations.name,
-    slug: m.organizations.slug,
-    role: m.role
-  }));
+  try {
+    const { data, error } = await supabaseAdmin
+      .from('org_members')
+      .select(`
+        org_id,
+        role,
+        organizations (
+          id,
+          name,
+          slug
+        )
+      `)
+      .eq('user_id', userId);
+    
+    if (error) {
+      console.error('Error fetching user orgs:', error);
+      return [];
+    }
+    
+    if (!data) return [];
+    
+    // Filter out any entries where organizations is null (in case of orphaned memberships)
+    return data
+      .filter((m: any) => m.organizations && m.organizations.id)
+      .map((m: any) => ({
+        id: m.org_id,
+        name: m.organizations.name || 'Unknown',
+        slug: m.organizations.slug || '',
+        role: m.role
+      }));
+  } catch (e: any) {
+    console.error('Exception in getUserOrgs:', e);
+    return [];
+  }
 }
 
 /**

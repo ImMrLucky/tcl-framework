@@ -84,22 +84,99 @@ export class EvidenceLibraryComponent implements OnInit, OnDestroy {
     // Get current user - use takeUntil to prevent memory leaks
     this.authService.currentUser$
       .pipe(takeUntil(this.destroy$))
-      .subscribe(async user => {
-        this.currentUserId = user?.id || null;
-        if (user?.id) {
-          // Get user's orgs
-          try {
-            const orgsResponse = await firstValueFrom(this.memberService.getUserOrgs(user.id));
-            if (orgsResponse && orgsResponse.orgs && orgsResponse.orgs.length > 0) {
-              this.orgId = orgsResponse.orgs[0].id; // Use first org for now
-              this.loadUserRole();
-              this.loadEvidenceItems();
-              this.checkPoliciesMigration();
-            }
-          } catch (error) {
-            console.error('Failed to load user orgs:', error);
-            // Don't show error to user - just log it
+      .subscribe({
+        next: async (user) => {
+          // Skip if user is null or doesn't have an id
+          if (!user || !user.id) {
+            this.currentUserId = null;
+            this.orgId = null;
+            this.evidenceItems = [];
+            this.loading = false;
+            return;
           }
+
+          try {
+            this.currentUserId = user.id;
+            
+            // Get user's orgs with timeout
+            try {
+              const orgsResponse = await Promise.race([
+                firstValueFrom(this.memberService.getUserOrgs(user.id)),
+                new Promise((_, reject) => 
+                  setTimeout(() => reject(new Error('Request timeout')), 10000)
+                )
+              ]) as { orgs: Array<{ id: string; name: string; slug: string; role: string }> };
+
+              if (orgsResponse && orgsResponse.orgs && orgsResponse.orgs.length > 0) {
+                this.orgId = orgsResponse.orgs[0].id; // Use first org for now
+                
+                // Load data sequentially to avoid race conditions
+                try {
+                  await this.loadUserRole();
+                } catch (err) {
+                  console.error('Failed to load user role:', err);
+                  // Continue even if role load fails
+                }
+
+                try {
+                  await this.loadEvidenceItems();
+                } catch (err) {
+                  console.error('Failed to load evidence items:', err);
+                  this.snackBar.open(
+                    'Failed to load evidence items. Please refresh.',
+                    'Close',
+                    { duration: 5000 }
+                  );
+                }
+
+                // Don't await this - it's a background check
+                this.checkPoliciesMigration().catch(err => {
+                  console.error('Failed to check policies migration:', err);
+                });
+              } else {
+                // No orgs found - show message but don't crash
+                this.orgId = null;
+                this.evidenceItems = [];
+                this.loading = false;
+                this.snackBar.open('No organizations found. Please contact support.', 'Close', {
+                  duration: 5000
+                });
+              }
+            } catch (error: any) {
+              console.error('Failed to load user orgs:', error);
+              this.orgId = null;
+              this.evidenceItems = [];
+              this.loading = false;
+              
+              // Only show error if it's not a timeout (timeout is expected sometimes)
+              if (!error.message?.includes('timeout')) {
+                this.snackBar.open(
+                  'Failed to load organizations: ' + (error.error?.error || error.message || 'Unknown error'),
+                  'Close',
+                  { duration: 5000 }
+                );
+              }
+            }
+          } catch (error: any) {
+            console.error('Unexpected error in user subscription:', error);
+            // Prevent app crash - show error but don't throw
+            this.orgId = null;
+            this.evidenceItems = [];
+            this.loading = false;
+            this.snackBar.open(
+              'An error occurred while loading the page. Please refresh.',
+              'Close',
+              { duration: 5000 }
+            );
+          }
+        },
+        error: (error) => {
+          console.error('Error in currentUser$ observable:', error);
+          // Prevent app crash - reset state
+          this.currentUserId = null;
+          this.orgId = null;
+          this.evidenceItems = [];
+          this.loading = false;
         }
       });
   }
@@ -114,7 +191,11 @@ export class EvidenceLibraryComponent implements OnInit, OnDestroy {
     try {
       const membersResponse = await firstValueFrom(
         this.memberService.listMembers(this.orgId, this.currentUserId)
-      );
+      ).catch(error => {
+        console.error('Failed to load members:', error);
+        // Return empty members array on error
+        return { members: [] };
+      });
       if (membersResponse) {
         const currentMember = membersResponse.members.find(m => m.userId === this.currentUserId);
         this.userRole = currentMember?.role || null;
@@ -125,7 +206,10 @@ export class EvidenceLibraryComponent implements OnInit, OnDestroy {
   }
 
   async loadEvidenceItems() {
-    if (!this.orgId) return;
+    if (!this.orgId) {
+      this.loading = false;
+      return;
+    }
     
     this.loading = true;
     try {
@@ -136,29 +220,37 @@ export class EvidenceLibraryComponent implements OnInit, OnDestroy {
           status: this.statusFilter || undefined,
           sourceType: this.sourceTypeFilter || undefined,
         })
-      );
+      ).catch(error => {
+        console.error('Failed to load evidence items:', error);
+        // Return empty response on error
+        return { items: [], total: 0 };
+      });
       
-      if (response) {
+      if (response && Array.isArray(response.items)) {
         // Apply client-side filters for title, authorityLevel, overridePolicy
         let filtered = response.items;
         
         if (this.titleFilter) {
           const searchLower = this.titleFilter.toLowerCase();
           filtered = filtered.filter(item => 
-            item.title.toLowerCase().includes(searchLower) ||
-            (item.description && item.description.toLowerCase().includes(searchLower))
+            item && item.title && (
+              item.title.toLowerCase().includes(searchLower) ||
+              (item.description && item.description.toLowerCase().includes(searchLower))
+            )
           );
         }
         
         if (this.authorityLevelFilter) {
-          filtered = filtered.filter(item => item.authorityLevel === this.authorityLevelFilter);
+          filtered = filtered.filter(item => item && item.authorityLevel === this.authorityLevelFilter);
         }
         
         if (this.overridePolicyFilter) {
-          filtered = filtered.filter(item => item.overridePolicy === this.overridePolicyFilter);
+          filtered = filtered.filter(item => item && item.overridePolicy === this.overridePolicyFilter);
         }
         
         this.evidenceItems = filtered;
+      } else {
+        this.evidenceItems = [];
       }
     } catch (error: any) {
       console.error('Failed to load evidence items:', error);
