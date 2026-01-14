@@ -217,15 +217,30 @@ export function setupOrgRoutes(app: express.Application) {
 
       // Get members with profile info
       // Use separate queries to avoid join issues
-      const { data: members, error: membersError } = await supabaseAdmin
-        .from('org_members')
-        .select('user_id, role, created_at')
-        .eq('org_id', orgId)
-        .order('created_at', { ascending: true });
+      let members: any[] = [];
+      try {
+        const { data: membersData, error: membersError } = await supabaseAdmin
+          .from('org_members')
+          .select('user_id, role, created_at')
+          .eq('org_id', orgId)
+          .order('created_at', { ascending: true });
 
-      if (membersError) {
-        console.error('Error fetching members:', membersError);
-        return res.status(500).json({ error: `Failed to fetch members: ${membersError.message}` });
+        if (membersError) {
+          console.error('Error fetching members:', membersError);
+          console.error('Error details:', JSON.stringify(membersError, null, 2));
+          return res.status(500).json({ 
+            error: `Failed to fetch members: ${membersError.message}`,
+            code: membersError.code,
+            details: membersError.details
+          });
+        }
+
+        members = membersData || [];
+      } catch (queryError: any) {
+        console.error('Exception fetching members:', queryError);
+        return res.status(500).json({ 
+          error: `Database query failed: ${queryError.message}` 
+        });
       }
 
       // Get org owner
@@ -270,22 +285,49 @@ export function setupOrgRoutes(app: express.Application) {
         }
       }
 
-      res.json({
-        members: (members || []).map((m: any) => {
+      // Ensure members is an array
+      const membersList = Array.isArray(members) ? members : [];
+      
+      const membersResponse = membersList.map((m: any) => {
+        try {
+          if (!m || !m.user_id) {
+            console.warn('Skipping invalid member record:', m);
+            return null;
+          }
+          
           const profile = profilesMap.get(m.user_id) || {};
           return {
             userId: m.user_id,
             email: profile.email || '',
             fullName: profile.full_name || undefined,
-            role: m.role,
+            role: m.role || 'VIEWER',
             isOwner: org?.owner_user_id === m.user_id,
-            createdAt: m.created_at,
+            createdAt: m.created_at || new Date().toISOString(),
           };
-        }),
+        } catch (memberError: any) {
+          console.error('Error mapping member:', memberError, m);
+          // Return a safe default for this member
+          return {
+            userId: m?.user_id || 'unknown',
+            email: '',
+            fullName: undefined,
+            role: m?.role || 'VIEWER',
+            isOwner: false,
+            createdAt: m?.created_at || new Date().toISOString(),
+          };
+        }
+      }).filter(Boolean); // Remove any null entries
+
+      res.json({
+        members: membersResponse,
       });
     } catch (e: any) {
       console.error('List members error:', e);
-      res.status(500).json({ error: e?.message ?? 'unknown error' });
+      console.error('Error stack:', e?.stack);
+      res.status(500).json({ 
+        error: e?.message ?? 'unknown error',
+        details: process.env.NODE_ENV === 'development' ? e?.stack : undefined
+      });
     }
   });
 
