@@ -2,7 +2,7 @@
 <mat-dialog-content>
   <div class="upload-form">
     <!-- Upload Method Tabs -->
-    <mat-tab-group [(selectedIndex)]="uploadMethod" (selectedIndexChange)="uploadMethod = $event === 0 ? 'file' : 'link'">
+    <mat-tab-group [(selectedIndex)]="selectedTabIndex" (selectedIndexChange)="uploadMethod = $event === 0 ? 'file' : 'link'; selectedTabIndex = $event">
       <mat-tab label="Upload File">
         <div class="tab-content">
           <div class="file-upload-section">

@@ -46,6 +46,7 @@ interface DialogData {
 export class EvidenceUploadDialogComponent {
   // Upload method
   uploadMethod: 'file' | 'link' = 'file';
+  selectedTabIndex = 0; // For mat-tab-group selectedIndex binding
   
   // File upload
   selectedFile: File | null = null;

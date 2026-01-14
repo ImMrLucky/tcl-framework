@@ -1894,32 +1894,8 @@ app.post("/api/me/orgs", async (req, res) => {
 // ============================================
 
 // List members of an organization
-app.get("/api/orgs/:orgId/members", async (req, res) => {
-  try {
-    const { orgId } = req.params;
-    const userId = req.body.userId || req.query.userId as string;
-    
-    if (!userId) {
-      return res.status(400).json({ error: "userId required" });
-    }
-    
-    if (!supabaseAdmin) {
-      return res.status(503).json({ error: "Supabase not configured" });
-    }
-    
-    // Check if user has view permission (all members can view)
-    const canView = await checkUserPermission(userId, orgId, 'view');
-    if (!canView) {
-      return res.status(403).json({ error: "Insufficient permissions" });
-    }
-    
-    const members = await listMembers(orgId);
-    res.json({ members });
-  } catch (e: any) {
-    console.error("List members error:", e);
-    res.status(500).json({ error: e?.message ?? "unknown error" });
-  }
-});
+// NOTE: This endpoint is now handled by setupOrgRoutes in orgs/routes.ts
+// Removed duplicate endpoint - use /api/orgs/:orgId/members from orgs/routes.ts instead
 
 // Invite a member to an organization
 app.post("/api/orgs/:orgId/members/invite", async (req, res) => {

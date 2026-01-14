@@ -708,12 +708,29 @@ export async function checkUserPermission(userId: string, orgId: string, permiss
   const role = await getUserRole(userId, orgId);
   if (!role) return false;
   
+  // Normalize role to lowercase (database has uppercase, permissions.ts uses lowercase)
+  const normalizedRole = role.toLowerCase() as any;
+  
   // Use static import (imported at top of file)
-  if (!isValidRole(role)) {
-    return false;
+  if (!isValidRole(normalizedRole)) {
+    // If role is not in the matrix, check if it's a valid uppercase role and map it
+    const roleMap: Record<string, string> = {
+      'OWNER': 'owner',
+      'ADMIN': 'admin',
+      'MANAGER': 'admin', // Manager has admin permissions
+      'ANALYST': 'qa_reviewer', // Analyst has reviewer permissions
+      'VIEWER': 'viewer'
+    };
+    
+    const mappedRole = roleMap[role] || normalizedRole;
+    if (!isValidRole(mappedRole)) {
+      return false;
+    }
+    
+    return hasPermission(mappedRole as any, permission);
   }
   
-  return hasPermission(role as any, permission);
+  return hasPermission(normalizedRole, permission);
 }
 
 /**
