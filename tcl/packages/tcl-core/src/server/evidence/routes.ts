@@ -11,7 +11,7 @@ import { tmpdir } from 'os';
 import { promisify } from 'util';
 import fs from 'fs';
 import crypto from 'crypto';
-import { supabaseAdmin, checkUserPermission } from '../supabase.js';
+import { supabaseAdmin, checkUserPermission, getUserRole } from '../supabase.js';
 import { getOrgContext } from '../auth-context.js';
 import {
   createEvidenceItem,
@@ -872,8 +872,8 @@ export function setupEvidenceRoutes(app: express.Application) {
       }
 
       // Check permission - only OWNER and ADMIN can migrate
-      const hasPermission = await checkUserPermission(context.orgId, context.userId, 'approve_evidence');
-      if (!hasPermission) {
+      const role = await getUserRole(context.userId, context.orgId);
+      if (role !== 'OWNER' && role !== 'ADMIN') {
         return res.status(403).json({ error: 'Permission denied. Only OWNER and ADMIN can migrate policies.' });
       }
 
