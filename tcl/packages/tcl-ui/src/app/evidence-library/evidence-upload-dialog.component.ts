@@ -78,17 +78,24 @@ export class EvidenceUploadDialogComponent {
     try {
       // Validate data
       if (!data || !data.orgId) {
-        console.error('EvidenceUploadDialogComponent: Missing required data');
-        // Don't show error immediately - let component render first
+        console.error('EvidenceUploadDialogComponent: Missing required data', data);
+        // Close dialog immediately if data is invalid
         setTimeout(() => {
+          this.dialogRef.close(false);
           this.snackBar.open('Error: Missing organization data', 'Close', { duration: 3000 });
-        }, 100);
+        }, 0);
+        return;
       }
       
       // Check if user can lock (admin/owner)
-      const user = this.authService.getCurrentUser();
-      // TODO: Check user role - for now, allow if ORG scope
-      this.canLock = data?.scope === 'ORG';
+      try {
+        const user = this.authService.getCurrentUser();
+        // TODO: Check user role - for now, allow if ORG scope
+        this.canLock = data?.scope === 'ORG';
+      } catch (userError) {
+        console.error('Error getting current user:', userError);
+        this.canLock = false;
+      }
       
       // Set default override policy based on authority level
       if (this.authorityLevel === 'BINDING') {
@@ -96,7 +103,11 @@ export class EvidenceUploadDialogComponent {
       }
     } catch (error: any) {
       console.error('Error initializing EvidenceUploadDialogComponent:', error);
-      // Don't crash - just log the error
+      // Close dialog on initialization error
+      setTimeout(() => {
+        this.dialogRef.close(false);
+        this.snackBar.open('Error initializing dialog', 'Close', { duration: 3000 });
+      }, 0);
     }
   }
 

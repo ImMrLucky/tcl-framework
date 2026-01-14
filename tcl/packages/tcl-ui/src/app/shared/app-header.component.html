@@ -27,9 +27,9 @@
         <mat-icon matListItemIcon>folder</mat-icon>
         <span *ngIf="sidebarOpen" matListItemTitle>Audit Packs</span>
       </a>
-      <a mat-list-item routerLink="/policies" routerLinkActive="active" [routerLinkActiveOptions]="{exact: false}">
+      <a mat-list-item routerLink="/evidence" routerLinkActive="active" [routerLinkActiveOptions]="{exact: false}">
         <mat-icon matListItemIcon>description</mat-icon>
-        <span *ngIf="sidebarOpen" matListItemTitle>Policies</span>
+        <span *ngIf="sidebarOpen" matListItemTitle>Policies & Evidence</span>
       </a>
       <a mat-list-item routerLink="/evidence" routerLinkActive="active" [routerLinkActiveOptions]="{exact: false}">
         <mat-icon matListItemIcon>verified</mat-icon>
@@ -144,9 +144,9 @@
                      <mat-icon>folder</mat-icon>
                      <span>Audit Packs</span>
                    </button>
-                   <button mat-menu-item routerLink="/policies">
+                   <button mat-menu-item routerLink="/evidence">
                      <mat-icon>description</mat-icon>
-                     <span>Policies</span>
+                     <span>Policies & Evidence</span>
                    </button>
                    <button mat-menu-item routerLink="/evidence">
                      <mat-icon>verified</mat-icon>
@@ -277,9 +277,9 @@
                      <mat-icon>folder</mat-icon>
                      <span>Audit Packs</span>
                    </button>
-                   <button mat-menu-item routerLink="/policies">
+                   <button mat-menu-item routerLink="/evidence">
                      <mat-icon>description</mat-icon>
-                     <span>Policies</span>
+                     <span>Policies & Evidence</span>
                    </button>
                    <button mat-menu-item routerLink="/evidence">
                      <mat-icon>verified</mat-icon>

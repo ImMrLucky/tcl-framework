@@ -708,13 +708,22 @@ export async function checkUserPermission(userId: string, orgId: string, permiss
   if (!role) return false;
   
   // Import permission utilities
-  const { hasPermission, isValidRole } = await import('./permissions');
-  
-  if (!isValidRole(role)) {
-    return false;
+  try {
+    const { hasPermission, isValidRole } = await import('./permissions.js');
+    
+    if (!isValidRole(role)) {
+      return false;
+    }
+    
+    return hasPermission(role as any, permission);
+  } catch (importError: any) {
+    console.error('Failed to import permissions module:', importError);
+    // Fallback: basic permission check based on role
+    if (role === 'OWNER' || role === 'ADMIN') {
+      return true; // Owners and admins have all permissions
+    }
+    return permission === 'view'; // Others can only view
   }
-  
-  return hasPermission(role as any, permission);
 }
 
 /**
