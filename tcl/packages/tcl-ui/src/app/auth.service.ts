@@ -350,7 +350,7 @@ export class AuthService {
     return { error: null, duplicateAccount: false };
   }
 
-  private getApiBaseUrl(): string {
+  public getApiBaseUrl(): string {
     if (typeof window !== 'undefined') {
       const apiUrl = (window as any).__TCL_API_URL;
       if (apiUrl) {

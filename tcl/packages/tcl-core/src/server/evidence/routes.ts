@@ -11,7 +11,7 @@ import { tmpdir } from 'os';
 import { promisify } from 'util';
 import fs from 'fs';
 import crypto from 'crypto';
-import { supabaseAdmin } from '../supabase.js';
+import { supabaseAdmin, checkUserPermission } from '../supabase.js';
 import { getOrgContext } from '../auth-context.js';
 import {
   createEvidenceItem,

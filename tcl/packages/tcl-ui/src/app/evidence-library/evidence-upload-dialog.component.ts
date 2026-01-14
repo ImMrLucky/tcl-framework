@@ -148,7 +148,7 @@ export class EvidenceUploadDialogComponent {
 
     this.uploading = true;
     try {
-      let result: EvidenceItem;
+      let result: EvidenceItem | undefined;
       
       if (this.uploadMethod === 'file' && this.selectedFile) {
         result = await this.evidenceService.uploadEvidenceFile(
@@ -184,6 +184,11 @@ export class EvidenceUploadDialogComponent {
             snapshotLink: this.snapshotLink,
           }
         ).toPromise();
+      }
+      
+      if (!result) {
+        this.snackBar.open('Failed to upload evidence', 'Close', { duration: 5000 });
+        return;
       }
       
       // Update with authority level and override policy if ORG scope

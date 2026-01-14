@@ -128,7 +128,7 @@ export class IngestionComponent implements OnInit, OnDestroy {
   evidencePreviewLoading = false;
   lockedEvidenceCount = 0; // Count of locked org evidence items
   templates: Array<{ id: string; name: string; description?: string; isSystemTemplate: boolean; industry?: string; businessFunction?: string }> = [];
-  templateGroups: Array<{ label: string; templates: typeof this.templates }> = [];
+  templateGroups: Array<{ label: string; templates: Array<{ id: string; name: string; description?: string; isSystemTemplate: boolean; industry?: string; businessFunction?: string }> }> = [];
   templatesLoading = false;
   readonly evidenceSourceTypes: Array<{ value: EvidenceItem['sourceType']; label: string }> = [
     { value: 'POLICY', label: 'Policy' },

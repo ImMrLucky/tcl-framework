@@ -40,14 +40,13 @@ export class InviteModalComponent implements OnInit {
   errorCount = 0;
   results: Array<{ email: string; success: boolean; message: string }> = [];
 
-  roles: Role[] = ['owner', 'admin', 'qa_reviewer', 'compliance', 'engineer', 'viewer'];
+  roles: Role[] = ['OWNER', 'ADMIN', 'MANAGER', 'ANALYST', 'VIEWER'];
   roleLabels: Record<Role, string> = {
-    owner: 'Owner',
-    admin: 'Admin',
-    qa_reviewer: 'QA Reviewer',
-    compliance: 'Compliance',
-    engineer: 'Engineer',
-    viewer: 'Viewer'
+    OWNER: 'Owner',
+    ADMIN: 'Admin',
+    MANAGER: 'Manager',
+    ANALYST: 'Analyst',
+    VIEWER: 'Viewer'
   };
 
   constructor(
@@ -69,7 +68,7 @@ export class InviteModalComponent implements OnInit {
   createInviteGroup(): FormGroup {
     return this.fb.group({
       email: ['', [Validators.required, Validators.email]],
-      role: ['viewer', Validators.required]
+      role: ['VIEWER', Validators.required]
     });
   }
 
