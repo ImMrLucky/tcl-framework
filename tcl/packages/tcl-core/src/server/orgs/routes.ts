@@ -216,40 +216,65 @@ export function setupOrgRoutes(app: express.Application) {
       }
 
       // Get members with profile info
-      const { data: members, error } = await supabaseAdmin
+      // Use separate queries to avoid join issues
+      const { data: members, error: membersError } = await supabaseAdmin
         .from('org_members')
-        .select(`
-          user_id,
-          role,
-          created_at,
-          profiles (
-            email,
-            full_name
-          )
-        `)
+        .select('user_id, role, created_at')
         .eq('org_id', orgId)
         .order('created_at', { ascending: true });
 
-      if (error) {
-        return res.status(500).json({ error: error.message });
+      if (membersError) {
+        console.error('Error fetching members:', membersError);
+        return res.status(500).json({ error: `Failed to fetch members: ${membersError.message}` });
       }
 
       // Get org owner
-      const { data: org } = await supabaseAdmin
+      const { data: org, error: orgError } = await supabaseAdmin
         .from('organizations')
         .select('owner_user_id')
         .eq('id', orgId)
-        .single();
+        .maybeSingle();
+
+      if (orgError) {
+        console.error('Error fetching org:', orgError);
+        // Continue without owner info
+      }
+
+      // Get profile info for each member
+      const memberIds = (members || []).map((m: any) => m.user_id);
+      const profilesMap = new Map<string, { email?: string; full_name?: string }>();
+      
+      if (memberIds.length > 0) {
+        const { data: profiles, error: profilesError } = await supabaseAdmin
+          .from('profiles')
+          .select('id, email, full_name')
+          .in('id', memberIds);
+
+        if (profilesError) {
+          console.error('Error fetching profiles:', profilesError);
+          // Continue without profile info
+        } else {
+          (profiles || []).forEach((p: any) => {
+            profilesMap.set(p.id, {
+              email: p.email,
+              full_name: p.full_name
+            });
+          });
+        }
+      }
 
       res.json({
-        members: (members || []).map((m: any) => ({
-          userId: m.user_id,
-          email: m.profiles?.email || '',
-          fullName: m.profiles?.full_name || undefined,
-          role: m.role,
-          isOwner: org?.owner_user_id === m.user_id,
-          createdAt: m.created_at,
-        })),
+        members: (members || []).map((m: any) => {
+          const profile = profilesMap.get(m.user_id) || {};
+          return {
+            userId: m.user_id,
+            email: profile.email || '',
+            fullName: profile.full_name || undefined,
+            role: m.role,
+            isOwner: org?.owner_user_id === m.user_id,
+            createdAt: m.created_at,
+          };
+        }),
       });
     } catch (e: any) {
       console.error('List members error:', e);

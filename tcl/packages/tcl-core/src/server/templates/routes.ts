@@ -15,10 +15,8 @@ export function setupTemplateRoutes(app: express.Application) {
   app.get('/api/templates', async (req, res) => {
     try {
       const context = await getOrgContext(req);
-      
-      if (!context || context.error) {
-        return res.status(401).json({ error: context?.error || 'Authorization required' });
-      }
+      const hasAuth = context && !context.error;
+      const orgId = hasAuth ? context.orgId : null;
 
       if (!supabaseAdmin) {
         return res.status(503).json({ error: 'Supabase not configured' });
@@ -26,7 +24,7 @@ export function setupTemplateRoutes(app: express.Application) {
 
       const { industry, businessFunction } = req.query;
 
-      // Get system templates (is_system_template = true)
+      // Get system templates (is_system_template = true) - always available
       let systemTemplatesQuery = supabaseAdmin
         .from('templates')
         .select('id, name, description, industry, business_function, default_lens, guidance_markdown, attached_evidence_ids, is_system_template, created_at, updated_at')
@@ -46,25 +44,30 @@ export function setupTemplateRoutes(app: express.Application) {
         console.error('Error fetching system templates:', systemError);
       }
 
-      // Get org templates (org_id = context.orgId)
-      let orgTemplatesQuery = supabaseAdmin
-        .from('templates')
-        .select('id, name, description, industry, business_function, default_lens, guidance_markdown, attached_evidence_ids, is_system_template, created_at, updated_at')
-        .eq('org_id', context.orgId)
-        .eq('is_system_template', false)
-        .order('name', { ascending: true });
+      // Get org templates (org_id = context.orgId) - only if authenticated
+      let orgTemplates: any[] = [];
+      if (orgId) {
+        let orgTemplatesQuery = supabaseAdmin
+          .from('templates')
+          .select('id, name, description, industry, business_function, default_lens, guidance_markdown, attached_evidence_ids, is_system_template, created_at, updated_at')
+          .eq('org_id', orgId)
+          .eq('is_system_template', false)
+          .order('name', { ascending: true });
 
-      if (industry) {
-        orgTemplatesQuery = orgTemplatesQuery.eq('industry', industry);
-      }
-      if (businessFunction) {
-        orgTemplatesQuery = orgTemplatesQuery.eq('business_function', businessFunction);
-      }
+        if (industry) {
+          orgTemplatesQuery = orgTemplatesQuery.eq('industry', industry);
+        }
+        if (businessFunction) {
+          orgTemplatesQuery = orgTemplatesQuery.eq('business_function', businessFunction);
+        }
 
-      const { data: orgTemplates, error: orgError } = await orgTemplatesQuery;
+        const { data: orgTemplatesData, error: orgError } = await orgTemplatesQuery;
 
-      if (orgError) {
-        console.error('Error fetching org templates:', orgError);
+        if (orgError) {
+          console.error('Error fetching org templates:', orgError);
+        } else {
+          orgTemplates = orgTemplatesData || [];
+        }
       }
 
       res.json({
@@ -82,7 +85,7 @@ export function setupTemplateRoutes(app: express.Application) {
             createdAt: t.created_at,
             updatedAt: t.updated_at,
           })),
-          ...(orgTemplates || []).map((t: any) => ({
+          ...orgTemplates.map((t: any) => ({
             id: t.id,
             name: t.name,
             description: t.description,
