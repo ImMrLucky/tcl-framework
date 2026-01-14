@@ -416,6 +416,7 @@ export class EvaluationResultsComponent implements OnInit {
 
   // Lens-based ordering
   selectedLens: 'regulatory_exposure' | 'financial_exposure' | 'customer_dispute_risk' | 'promise_commitment_risk' | 'privacy_security_risk' | 'operational_process_risk' | 'neutral_engine_order' = 'neutral_engine_order';
+  private originalAllIssuesV2: IssueV2[] = []; // Store original order for re-sorting
   readonly availableLenses = [
     { value: 'neutral_engine_order', label: 'Neutral (Risk Score)' },
     { value: 'regulatory_exposure', label: 'Regulatory Exposure' },
@@ -476,6 +477,7 @@ export class EvaluationResultsComponent implements OnInit {
       if (!this.evaluation?.report) {
         console.warn('Evaluation report is missing');
         // Initialize empty state
+        this.originalAllIssuesV2 = [];
         this.allIssuesV2 = [];
         this.topIssuesV2 = [];
         this.issueSummaryV2 = null;
@@ -506,6 +508,8 @@ export class EvaluationResultsComponent implements OnInit {
       
       if (Array.isArray(atomicIssues) && atomicIssues.length > 0) {
         // G3: Ensure All Issues is sorted by riskScore desc, then severity, then impact, then verification
+        // Store original order for lens-based re-sorting
+        this.originalAllIssuesV2 = [...atomicIssues];
         this.allIssuesV2 = [...atomicIssues].sort((a, b) => {
           // Primary: riskScore DESC
           const riskA = a.riskScore ?? 0;
@@ -635,6 +639,7 @@ export class EvaluationResultsComponent implements OnInit {
         });
       } else {
         // Initialize empty if not present
+        this.originalAllIssuesV2 = [];
         this.allIssuesV2 = [];
         this.topIssuesV2 = [];
         this.paginatedTopIssues = [];
@@ -733,13 +738,18 @@ export class EvaluationResultsComponent implements OnInit {
    * Apply lens-based ordering to allIssuesV2
    */
   applyLensOrdering(): void {
-    if (this.allIssuesV2.length === 0) {
+    // Use original issues if available, otherwise use current allIssuesV2
+    const sourceIssues = this.originalAllIssuesV2.length > 0 
+      ? [...this.originalAllIssuesV2] 
+      : [...this.allIssuesV2];
+    
+    if (sourceIssues.length === 0) {
       return;
     }
 
     // Group issues by primaryCategory
     this.groupedIssuesByCategory.clear();
-    for (const issue of this.allIssuesV2) {
+    for (const issue of sourceIssues) {
       const category = issue.primaryCategory || issue.category || 'other';
       if (!this.groupedIssuesByCategory.has(category)) {
         this.groupedIssuesByCategory.set(category, []);
@@ -756,6 +766,7 @@ export class EvaluationResultsComponent implements OnInit {
     const categoryOrder = this.getCategoryOrderForLens(this.selectedLens);
     const orderedIssues: IssueV2[] = [];
     
+    // Add categories in lens-defined order
     for (const category of categoryOrder) {
       const issues = this.groupedIssuesByCategory.get(category);
       if (issues && issues.length > 0) {
@@ -763,13 +774,14 @@ export class EvaluationResultsComponent implements OnInit {
       }
     }
     
-    // Add any remaining categories not in the lens order
+    // Add any remaining categories not in the lens order (for neutral_engine_order or missing categories)
     for (const [category, issues] of this.groupedIssuesByCategory.entries()) {
       if (!categoryOrder.includes(category)) {
         orderedIssues.push(...issues);
       }
     }
 
+    // Update allIssuesV2 with the reordered list
     this.allIssuesV2 = orderedIssues;
     this.updatePaginatedTopIssues();
   }
@@ -877,6 +889,67 @@ export class EvaluationResultsComponent implements OnInit {
         const sevA3 = sevOrder3[a.severity || 'low'] ?? 1;
         const sevB3 = sevOrder3[b.severity || 'low'] ?? 1;
         return sevB3 - sevA3;
+
+      case 'customer_dispute_risk':
+        // escalation tags boost, severity/confidence, then riskScore
+        const tagsA2 = a.tags || [];
+        const tagsB2 = b.tags || [];
+        const disputeTags = ['escalation', 'chargeback', 'dispute', 'dissatisfaction', 'complaint'];
+        const hasDisputeA = disputeTags.some(tag => tagsA2.includes(tag));
+        const hasDisputeB = disputeTags.some(tag => tagsB2.includes(tag));
+        if (hasDisputeB && !hasDisputeA) return 1;
+        if (hasDisputeA && !hasDisputeB) return -1;
+        
+        const sevOrder4: Record<string, number> = { critical: 4, high: 3, medium: 2, low: 1 };
+        const sevA4 = sevOrder4[a.severity || 'low'] ?? 1;
+        const sevB4 = sevOrder4[b.severity || 'low'] ?? 1;
+        if (sevB4 !== sevA4) return sevB4 - sevA4;
+        
+        const confA4 = a.confidence ?? 0;
+        const confB4 = b.confidence ?? 0;
+        if (confB4 !== confA4) return confB4 - confA4;
+        
+        return (b.riskScore ?? 0) - (a.riskScore ?? 0);
+
+      case 'privacy_security_risk':
+        // legalHoldSuggested, severity, verification, confidence
+        const legalHoldA2 = a.legalHoldSuggested ? 1 : 0;
+        const legalHoldB2 = b.legalHoldSuggested ? 1 : 0;
+        if (legalHoldB2 !== legalHoldA2) return legalHoldB2 - legalHoldA2;
+        
+        const sevOrder5: Record<string, number> = { critical: 4, high: 3, medium: 2, low: 1 };
+        const sevA5 = sevOrder5[a.severity || 'low'] ?? 1;
+        const sevB5 = sevOrder5[b.severity || 'low'] ?? 1;
+        if (sevB5 !== sevA5) return sevB5 - sevA5;
+        
+        const verOrder2: Record<string, number> = { SYSTEM_VERIFIED: 4, DOC_SUPPORTED: 3, TRANSCRIPT_PROVABLE: 2, UNVERIFIED: 1 };
+        const verA2 = verOrder2[a.verification?.level || 'UNVERIFIED'] ?? 1;
+        const verB2 = verOrder2[b.verification?.level || 'UNVERIFIED'] ?? 1;
+        if (verB2 !== verA2) return verB2 - verA2;
+        
+        const confA5 = a.confidence ?? 0;
+        const confB5 = b.confidence ?? 0;
+        return confB5 - confA5;
+
+      case 'operational_process_risk':
+        // policy_process issues prioritized, then severity, verification, confidence
+        const isPolicyA = (a.primaryCategory === 'policy_process' || a.category === 'policy_process') ? 1 : 0;
+        const isPolicyB = (b.primaryCategory === 'policy_process' || b.category === 'policy_process') ? 1 : 0;
+        if (isPolicyB !== isPolicyA) return isPolicyB - isPolicyA;
+        
+        const sevOrder6: Record<string, number> = { critical: 4, high: 3, medium: 2, low: 1 };
+        const sevA6 = sevOrder6[a.severity || 'low'] ?? 1;
+        const sevB6 = sevOrder6[b.severity || 'low'] ?? 1;
+        if (sevB6 !== sevA6) return sevB6 - sevA6;
+        
+        const verOrder3: Record<string, number> = { SYSTEM_VERIFIED: 4, DOC_SUPPORTED: 3, TRANSCRIPT_PROVABLE: 2, UNVERIFIED: 1 };
+        const verA3 = verOrder3[a.verification?.level || 'UNVERIFIED'] ?? 1;
+        const verB3 = verOrder3[b.verification?.level || 'UNVERIFIED'] ?? 1;
+        if (verB3 !== verA3) return verB3 - verA3;
+        
+        const confA6 = a.confidence ?? 0;
+        const confB6 = b.confidence ?? 0;
+        return confB6 - confA6;
 
       default:
         // Default sorting
