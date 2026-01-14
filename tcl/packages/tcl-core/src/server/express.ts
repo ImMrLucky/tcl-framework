@@ -3111,6 +3111,12 @@ app.post("/api/orgs/:orgId/projects/:projectId/api-keys/:keyId/revoke", async (r
   }
 });
 
+// Setup conversation routes (drafts, transcription) BEFORE general /api/conversations routes
+// This ensures more specific routes like /api/conversations/drafts/audio are matched first
+console.log("Registering conversation routes...");
+setupConversationRoutes(app);
+console.log("Conversation routes registered successfully");
+
 // Create conversation (ingest transcript)
 app.post("/api/conversations", async (req, res) => {
   try {
@@ -3426,11 +3432,6 @@ setupAnalyticsRoutes(app);
 console.log("Registering org routes...");
 setupOrgRoutes(app);
 console.log("Org routes registered successfully");
-
-// Setup conversation routes (drafts, transcription)
-console.log("Registering conversation routes...");
-setupConversationRoutes(app);
-console.log("Conversation routes registered successfully");
 
 // Setup project routes
 console.log("Registering project routes...");
