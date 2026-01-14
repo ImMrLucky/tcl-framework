@@ -423,3 +423,12 @@ section {
   }
 }
 
+// Material Menu Overrides
+.mat-mdc-menu-content {
+  min-height: 40px !important;
+}
+
+.mat-mdc-menu-item-text {
+  font-size: 0.85em !important;
+}
+
