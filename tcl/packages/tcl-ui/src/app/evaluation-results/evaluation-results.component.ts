@@ -933,8 +933,8 @@ export class EvaluationResultsComponent implements OnInit {
 
       case 'operational_process_risk':
         // policy_process issues prioritized, then severity, verification, confidence
-        const isPolicyA = (a.primaryCategory === 'policy_process' || a.category === 'policy_process') ? 1 : 0;
-        const isPolicyB = (b.primaryCategory === 'policy_process' || b.category === 'policy_process') ? 1 : 0;
+        const isPolicyA = (a.primaryCategory === 'policy_process') ? 1 : 0;
+        const isPolicyB = (b.primaryCategory === 'policy_process') ? 1 : 0;
         if (isPolicyB !== isPolicyA) return isPolicyB - isPolicyA;
         
         const sevOrder6: Record<string, number> = { critical: 4, high: 3, medium: 2, low: 1 };
