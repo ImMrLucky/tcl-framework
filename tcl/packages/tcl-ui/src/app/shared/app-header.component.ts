@@ -59,10 +59,16 @@ export class AppHeaderComponent implements OnInit, OnDestroy {
 
   ngOnInit() {
     // Initialize with current value synchronously to avoid flicker
-    // Check if user is authenticated using the sync method
+    // Check localStorage directly for session token (more reliable than BehaviorSubject on initial load)
+    const hasSessionToken = typeof window !== 'undefined' && window.localStorage 
+      ? localStorage.getItem('sb-uqwcmkyaskyduxuluqrm-auth-token') !== null
+      : false;
+    
+    // Also check sync method as fallback
     const isAuthSync = this.authService.isAuthenticatedSync && this.authService.isAuthenticatedSync();
-    if (isAuthSync) {
-      // Set authenticated immediately if sync check passes, even if user object isn't loaded yet
+    
+    if (hasSessionToken || isAuthSync) {
+      // Set authenticated immediately if session token exists, even if user object isn't loaded yet
       this.isAuthenticated = true;
       
       // Try to get current user value if accessible
@@ -100,37 +106,44 @@ export class AppHeaderComponent implements OnInit, OnDestroy {
         const wasAuthenticated = this.isAuthenticated;
         this.currentUser = user;
         
+        // CRITICAL: Check localStorage directly for session token to avoid race conditions
+        // This prevents sidebar from disappearing during page load/refresh when currentUser$ hasn't loaded yet
+        const hasSessionToken = typeof window !== 'undefined' && window.localStorage 
+          ? localStorage.getItem('sb-uqwcmkyaskyduxuluqrm-auth-token') !== null
+          : false;
+        
         // Use a more robust check: only set isAuthenticated to false if we're certain
         // Don't set to false on brief null emissions (which can happen during route changes or profile updates)
         if (user !== null) {
           this.isAuthenticated = true;
         } else {
-          // Only set to false if we were previously authenticated and now we're definitely not
-          // This prevents flickering from temporary null emissions during profile updates
-          if (wasAuthenticated) {
-            // Double-check with sync method before removing auth state
-            // Don't change isAuthenticated if sync method says we're still authenticated
-            // This handles cases where the observable emits null but session still exists
-            if (this.authService.isAuthenticatedSync && !this.authService.isAuthenticatedSync()) {
-              this.isAuthenticated = false;
-            } else {
-              // Keep isAuthenticated = true if sync check says we're still authenticated
-              // This prevents sidebar from disappearing during profile updates
-              this.isAuthenticated = true;
-            }
+          // If user is null, check if session token exists in localStorage
+          // This handles the case where currentUser$ hasn't loaded yet but session exists
+          if (hasSessionToken) {
+            // Session exists in localStorage, keep authenticated state even if user object isn't loaded yet
+            this.isAuthenticated = true;
+          } else if (wasAuthenticated) {
+            // Only set to false if we were previously authenticated AND no session token exists
+            // This prevents flickering from temporary null emissions during profile updates
+            this.isAuthenticated = false;
           }
+          // If wasAuthenticated is false and no session token, keep isAuthenticated = false
         }
         
         // Always ensure sidebar visibility matches authentication and navigation state
-        // This handles both initial load and state changes
+        // Use session token check as the source of truth to prevent disappearing during load
+        const shouldShowSidebar = (this.isAuthenticated || hasSessionToken) && this.showNavigation;
         if (typeof document !== 'undefined') {
-          if (this.isAuthenticated && this.showNavigation) {
+          if (shouldShowSidebar) {
             if (!document.body.classList.contains('has-sidebar')) {
               document.body.classList.add('has-sidebar');
             }
             this.updateSidebarClass();
           } else {
-            document.body.classList.remove('has-sidebar', 'sidebar-collapsed');
+            // Only remove sidebar if we're definitely not authenticated (no session token)
+            if (!hasSessionToken) {
+              document.body.classList.remove('has-sidebar', 'sidebar-collapsed');
+            }
           }
         }
         
