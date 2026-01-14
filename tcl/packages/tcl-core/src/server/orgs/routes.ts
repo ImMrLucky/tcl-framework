@@ -200,19 +200,32 @@ export function setupOrgRoutes(app: express.Application) {
     try {
       const context = await getOrgContext(req);
       
-      if (!context || context.error) {
+      if (!context || context.error || !context.userId) {
         return res.status(401).json({ error: context?.error || 'Authorization required' });
       }
 
       const { orgId } = req.params;
 
-      // Verify user has access to this org
-      if (context.orgId !== orgId) {
-        return res.status(403).json({ error: 'Access denied' });
-      }
-
+      // Verify user has access to this org (check membership, not just context orgId)
+      // User might belong to multiple orgs, so we need to check if they're a member of the requested org
       if (!supabaseAdmin) {
         return res.status(503).json({ error: 'Supabase not configured' });
+      }
+
+      const { data: membership, error: membershipError } = await supabaseAdmin
+        .from('org_members')
+        .select('org_id, role')
+        .eq('user_id', context.userId)
+        .eq('org_id', orgId)
+        .maybeSingle();
+
+      if (membershipError) {
+        console.error('Error checking org membership:', membershipError);
+        return res.status(500).json({ error: 'Failed to verify organization access' });
+      }
+
+      if (!membership) {
+        return res.status(403).json({ error: 'Access denied: You are not a member of this organization' });
       }
 
       // Get members with profile info
