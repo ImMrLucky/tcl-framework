@@ -13,6 +13,7 @@ import { MatChipsModule } from '@angular/material/chips';
 import { MatTabsModule } from '@angular/material/tabs';
 import { EvidenceService, EvidenceItem } from '../evidence.service';
 import { AuthService } from '../auth.service';
+import { firstValueFrom } from 'rxjs';
 
 interface DialogData {
   orgId: string;
@@ -151,39 +152,43 @@ export class EvidenceUploadDialogComponent {
       let result: EvidenceItem | undefined;
       
       if (this.uploadMethod === 'file' && this.selectedFile) {
-        result = await this.evidenceService.uploadEvidenceFile(
-          this.selectedFile,
-          this.data.orgId,
-          this.sourceType,
-          this.title,
-          {
-            projectId: this.data.projectId,
-            conversationId: this.data.conversationId,
-            templateId: this.data.templateId,
-            scope: this.data.scope,
-            description: this.description || undefined,
-            tags: this.tags.length > 0 ? this.tags : undefined,
-            regions: this.regions.length > 0 ? this.regions : undefined,
-          }
-        ).toPromise();
+        result = await firstValueFrom(
+          this.evidenceService.uploadEvidenceFile(
+            this.selectedFile,
+            this.data.orgId,
+            this.sourceType,
+            this.title,
+            {
+              projectId: this.data.projectId,
+              conversationId: this.data.conversationId,
+              templateId: this.data.templateId,
+              scope: this.data.scope,
+              description: this.description || undefined,
+              tags: this.tags.length > 0 ? this.tags : undefined,
+              regions: this.regions.length > 0 ? this.regions : undefined,
+            }
+          )
+        );
       } else {
-        // Link upload - need to update service to support authority level and override policy
-        result = await this.evidenceService.addEvidenceLink(
-          this.linkUrl,
-          this.data.orgId,
-          this.sourceType,
-          this.title,
-          {
-            projectId: this.data.projectId,
-            conversationId: this.data.conversationId,
-            templateId: this.data.templateId,
-            scope: this.data.scope,
-            description: this.description || undefined,
-            tags: this.tags.length > 0 ? this.tags : undefined,
-            regions: this.regions.length > 0 ? this.regions : undefined,
-            snapshotLink: this.snapshotLink,
-          }
-        ).toPromise();
+        // Link upload
+        result = await firstValueFrom(
+          this.evidenceService.addEvidenceLink(
+            this.linkUrl,
+            this.data.orgId,
+            this.sourceType,
+            this.title,
+            {
+              projectId: this.data.projectId,
+              conversationId: this.data.conversationId,
+              templateId: this.data.templateId,
+              scope: this.data.scope,
+              description: this.description || undefined,
+              tags: this.tags.length > 0 ? this.tags : undefined,
+              regions: this.regions.length > 0 ? this.regions : undefined,
+              snapshotLink: this.snapshotLink,
+            }
+          )
+        );
       }
       
       if (!result) {
@@ -193,10 +198,12 @@ export class EvidenceUploadDialogComponent {
       
       // Update with authority level and override policy if ORG scope
       if (this.data.scope === 'ORG' && result) {
-        await this.evidenceService.updateEvidenceItem(result.id, {
-          authorityLevel: this.authorityLevel,
-          overridePolicy: this.overridePolicy,
-        }).toPromise();
+        await firstValueFrom(
+          this.evidenceService.updateEvidenceItem(result.id, {
+            authorityLevel: this.authorityLevel,
+            overridePolicy: this.overridePolicy,
+          })
+        );
       }
       
       this.snackBar.open('Evidence uploaded successfully', 'Close', { duration: 3000 });

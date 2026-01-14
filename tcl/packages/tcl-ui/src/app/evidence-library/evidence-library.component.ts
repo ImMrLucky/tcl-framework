@@ -1,4 +1,4 @@
-import { Component, OnInit } from '@angular/core';
+import { Component, OnInit, OnDestroy } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { Router, RouterModule } from '@angular/router';
 import { FormsModule } from '@angular/forms';
@@ -20,6 +20,10 @@ import { EvidenceService, EvidenceItem } from '../evidence.service';
 import { AuthService } from '../auth.service';
 import { MemberService } from '../member.service';
 import { EvidenceUploadDialogComponent } from './evidence-upload-dialog.component';
+import { HttpClient } from '@angular/common/http';
+import { firstValueFrom } from 'rxjs';
+import { takeUntil } from 'rxjs/operators';
+import { Subject } from 'rxjs';
 
 @Component({
   selector: 'app-evidence-library',
@@ -46,7 +50,7 @@ import { EvidenceUploadDialogComponent } from './evidence-upload-dialog.componen
   templateUrl: './evidence-library.component.html',
   styleUrls: ['./evidence-library.component.scss']
 })
-export class EvidenceLibraryComponent implements OnInit {
+export class EvidenceLibraryComponent implements OnInit, OnDestroy {
   evidenceItems: EvidenceItem[] = [];
   loading = false;
   orgId: string | null = null;
@@ -64,6 +68,7 @@ export class EvidenceLibraryComponent implements OnInit {
   
   hasPoliciesToMigrate = false;
   migrationInProgress = false;
+  private destroy$ = new Subject<void>();
 
   constructor(
     private evidenceService: EvidenceService,
@@ -71,34 +76,45 @@ export class EvidenceLibraryComponent implements OnInit {
     private memberService: MemberService,
     private router: Router,
     private dialog: MatDialog,
-    private snackBar: MatSnackBar
+    private snackBar: MatSnackBar,
+    private http: HttpClient
   ) {}
 
   async ngOnInit() {
-    // Get current user
-    this.authService.currentUser$.subscribe(async user => {
-      this.currentUserId = user?.id || null;
-      if (user?.id) {
-        // Get user's orgs
-        try {
-          const orgsResponse = await this.memberService.getUserOrgs(user.id).toPromise();
-          if (orgsResponse && orgsResponse.orgs && orgsResponse.orgs.length > 0) {
-            this.orgId = orgsResponse.orgs[0].id; // Use first org for now
-            this.loadUserRole();
-            this.loadEvidenceItems();
-            this.checkPoliciesMigration();
+    // Get current user - use takeUntil to prevent memory leaks
+    this.authService.currentUser$
+      .pipe(takeUntil(this.destroy$))
+      .subscribe(async user => {
+        this.currentUserId = user?.id || null;
+        if (user?.id) {
+          // Get user's orgs
+          try {
+            const orgsResponse = await firstValueFrom(this.memberService.getUserOrgs(user.id));
+            if (orgsResponse && orgsResponse.orgs && orgsResponse.orgs.length > 0) {
+              this.orgId = orgsResponse.orgs[0].id; // Use first org for now
+              this.loadUserRole();
+              this.loadEvidenceItems();
+              this.checkPoliciesMigration();
+            }
+          } catch (error) {
+            console.error('Failed to load user orgs:', error);
+            // Don't show error to user - just log it
           }
-        } catch (error) {
-          console.error('Failed to load user orgs:', error);
         }
-      }
-    });
+      });
+  }
+
+  ngOnDestroy() {
+    this.destroy$.next();
+    this.destroy$.complete();
   }
 
   async loadUserRole() {
     if (!this.currentUserId || !this.orgId) return;
     try {
-      const membersResponse = await this.memberService.listMembers(this.orgId, this.currentUserId).toPromise();
+      const membersResponse = await firstValueFrom(
+        this.memberService.listMembers(this.orgId, this.currentUserId)
+      );
       if (membersResponse) {
         const currentMember = membersResponse.members.find(m => m.userId === this.currentUserId);
         this.userRole = currentMember?.role || null;
@@ -113,12 +129,14 @@ export class EvidenceLibraryComponent implements OnInit {
     
     this.loading = true;
     try {
-      const response = await this.evidenceService.listEvidenceItems({
-        orgId: this.orgId,
-        scope: 'ORG', // Only show org-level evidence
-        status: this.statusFilter || undefined,
-        sourceType: this.sourceTypeFilter || undefined,
-      }).toPromise();
+      const response = await firstValueFrom(
+        this.evidenceService.listEvidenceItems({
+          orgId: this.orgId,
+          scope: 'ORG', // Only show org-level evidence
+          status: this.statusFilter || undefined,
+          sourceType: this.sourceTypeFilter || undefined,
+        })
+      );
       
       if (response) {
         // Apply client-side filters for title, authorityLevel, overridePolicy
@@ -192,7 +210,7 @@ export class EvidenceLibraryComponent implements OnInit {
 
   async approveEvidence(item: EvidenceItem) {
     try {
-      await this.evidenceService.approveEvidenceItem(item.id).toPromise();
+      await firstValueFrom(this.evidenceService.approveEvidenceItem(item.id));
       this.snackBar.open('Evidence approved successfully', 'Close', { duration: 3000 });
       this.loadEvidenceItems();
     } catch (error: any) {
@@ -209,7 +227,7 @@ export class EvidenceLibraryComponent implements OnInit {
     }
 
     try {
-      await this.evidenceService.deprecateEvidenceItem(item.id).toPromise();
+      await firstValueFrom(this.evidenceService.deprecateEvidenceItem(item.id));
       this.snackBar.open('Evidence deprecated successfully', 'Close', { duration: 3000 });
       this.loadEvidenceItems();
     } catch (error: any) {
@@ -240,15 +258,15 @@ export class EvidenceLibraryComponent implements OnInit {
     if (!this.orgId) return;
     try {
       const apiBase = this.authService.getApiBaseUrl();
-      const response = await fetch(`${apiBase}/policies`);
-      if (response.ok) {
-        const data = await response.json();
-        this.hasPoliciesToMigrate = (data.policies?.length || 0) > 0;
-      }
-    } catch (error) {
+      const response = await firstValueFrom(
+        this.http.get<{ policies?: any[] }>(`${apiBase}/policies`)
+      );
+      this.hasPoliciesToMigrate = (response.policies?.length || 0) > 0;
+    } catch (error: any) {
       console.error('Failed to check policies:', error);
       // If policies endpoint doesn't exist or fails, assume no migration needed
       this.hasPoliciesToMigrate = false;
+      // Don't show error to user - this is a background check
     }
   }
 
@@ -260,17 +278,15 @@ export class EvidenceLibraryComponent implements OnInit {
     this.migrationInProgress = true;
     try {
       const apiBase = this.authService.getApiBaseUrl();
-      const response = await fetch(`${apiBase}/evidence/migrate-policies`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-      });
-
-      const result = await response.json();
+      const result = await firstValueFrom(
+        this.http.post<{ success: boolean; migratedCount?: number; error?: string }>(
+          `${apiBase}/evidence/migrate-policies`,
+          {}
+        )
+      );
       
-      if (response.ok && result.success) {
-        this.snackBar.open(`Successfully migrated ${result.migratedCount} policies to evidence items`, 'Close', { duration: 5000 });
+      if (result.success) {
+        this.snackBar.open(`Successfully migrated ${result.migratedCount || 0} policies to evidence items`, 'Close', { duration: 5000 });
         this.hasPoliciesToMigrate = false;
         this.loadEvidenceItems();
       } else {
@@ -278,7 +294,7 @@ export class EvidenceLibraryComponent implements OnInit {
       }
     } catch (error: any) {
       console.error('Failed to migrate policies:', error);
-      this.snackBar.open('Failed to migrate policies: ' + (error.message || 'Unknown error'), 'Close', { duration: 5000 });
+      this.snackBar.open('Failed to migrate policies: ' + (error.error?.error || error.message || 'Unknown error'), 'Close', { duration: 5000 });
     } finally {
       this.migrationInProgress = false;
     }

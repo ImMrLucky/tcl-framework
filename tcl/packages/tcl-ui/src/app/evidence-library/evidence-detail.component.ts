@@ -9,6 +9,7 @@ import { MatSnackBar, MatSnackBarModule } from '@angular/material/snack-bar';
 import { MatTooltipModule } from '@angular/material/tooltip';
 import { AppHeaderComponent } from '../shared/app-header.component';
 import { EvidenceService, EvidenceItem } from '../evidence.service';
+import { firstValueFrom } from 'rxjs';
 
 @Component({
   selector: 'app-evidence-detail',
@@ -193,7 +194,7 @@ export class EvidenceDetailComponent implements OnInit {
 
     this.loading = true;
     try {
-      this.evidenceItem = await this.evidenceService.getEvidenceItem(id).toPromise() || null;
+      this.evidenceItem = await firstValueFrom(this.evidenceService.getEvidenceItem(id)) || null;
     } catch (error: any) {
       console.error('Failed to load evidence:', error);
       this.snackBar.open('Failed to load evidence: ' + (error.error?.error || error.message), 'Close', {

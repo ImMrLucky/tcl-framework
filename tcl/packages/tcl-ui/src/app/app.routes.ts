@@ -111,12 +111,8 @@ export const routes: Routes = [
   },
   {
     path: 'policies/:id',
-    redirectTo: '/evidence/:id'
-  },
-  {
-    path: 'evidence',
-    loadComponent: () => import('./evidence/evidence-coverage.component').then(m => m.EvidenceCoverageComponent),
-    canActivate: [AuthGuard]
+    redirectTo: '/evidence/:id',
+    pathMatch: 'full'
   },
   {
     path: 'admin',
