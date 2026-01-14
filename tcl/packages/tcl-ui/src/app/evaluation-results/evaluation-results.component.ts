@@ -1,5 +1,6 @@
 import { Component, OnInit } from '@angular/core';
 import { CommonModule } from '@angular/common';
+import { FormsModule } from '@angular/forms';
 import { ActivatedRoute, Router } from '@angular/router';
 import { MatCardModule } from '@angular/material/card';
 import { MatTableModule } from '@angular/material/table';
@@ -84,13 +85,16 @@ interface IssueNarrative {
 }
 
 // IssueV2 type (Enterprise-Grade)
+// Note: This is a local interface for this component
+// Full definition is in evaluation-v2.types.ts
 interface IssueV2 {
   issueId: string;
   issueKey: string;
   runId: string;
   conversationId: string;
   type: 'CONTRADICTION' | 'UNVERIFIED_CLAIM' | 'UNSUPPORTED_CLAIM' | 'NUMERIC_MISMATCH' | 'COMMITMENT_INCONSISTENCY' | 'FEE_DISCLOSURE_RISK' | 'DATA_INTEGRITY' | 'OTHER';
-  category: 'evidence' | 'consistency' | 'compliance' | 'billing' | 'disclosure' | 'data_integrity' | 'other';
+  category: 'evidence' | 'consistency' | 'compliance' | 'billing' | 'disclosure' | 'data_integrity' | 'other'; // Legacy
+  primaryCategory?: 'compliance' | 'privacy_security' | 'billing_financial' | 'promises_consistency' | 'policy_process' | 'customer_dispute'; // NEW: Canonical category
   severity: 'low' | 'medium' | 'high' | 'critical';
   // severity removed - use severity field directly
   impact?: 'low' | 'medium' | 'high'; // How bad if true (not affected by mode)
@@ -99,8 +103,12 @@ interface IssueV2 {
   confidence: number;
   reviewRequired: boolean;
   verification: {
-    level: 'EXTERNAL_VERIFIED' | 'TRANSCRIPT_ONLY' | 'NONE';
+    level: 'TRANSCRIPT_PROVABLE' | 'DOC_SUPPORTED' | 'SYSTEM_VERIFIED' | 'EXTERNAL_VERIFIED' | 'TRANSCRIPT_ONLY' | 'UNVERIFIED' | 'NONE';
     reasonCodes: string[];
+    provenance?: {
+      transcriptAnchors: Array<{ turnIndex: number; claimId: string; excerpt?: string; start?: number; end?: number }>;
+      evidenceDocRefs: Array<{ docId: string; chunkId?: string; snippet: string; score: number; sourceType: string; version: string; sha256: string }>;
+    };
   };
   scoring?: {
     components: {
@@ -130,12 +138,23 @@ interface IssueV2 {
     issueDetail: string;
   };
   evidence: {
-    refs: Array<{
+    refs?: Array<{
       sourceType: 'TRANSCRIPT' | 'POLICY' | 'DOC' | 'SYSTEM_FACT';
       sourceId: string;
       quote: string;
       weight?: number;
       turnIndex?: number;
+    }>;
+    evidenceRefs?: Array<{
+      docId: string;
+      chunkId?: string;
+      snippet: string;
+      offsets?: { start: number; end: number };
+      score: number;
+      sourceType: string;
+      version: string;
+      sha256: string;
+      title?: string;
     }>;
     edges?: Array<{
       kind: 'grounding' | 'support' | 'contradiction';
@@ -144,6 +163,15 @@ interface IssueV2 {
       weight: number;
     }>;
   };
+  
+  transcriptSpans?: Array<{
+    turnIndex: number;
+    speaker: string;
+    speakerLabel?: string;
+    excerpt: string;
+    start?: number;
+    end?: number;
+  }>;
   compliance: {
     tags: string[];
     impactedPolicies?: Array<{ policyId: string; section?: string }>;
@@ -313,6 +341,7 @@ interface IssueSummary {
   standalone: true,
   imports: [
     CommonModule,
+    FormsModule,
     MatCardModule,
     MatTableModule,
     MatButtonModule,
@@ -381,7 +410,32 @@ export class EvaluationResultsComponent implements OnInit {
   groupedPageSizeOptions = [5, 10, 25, 50];
 
   // Pagination for top clusters
-  paginatedTopClusters: AggregatedIssue[] = [];
+  paginatedTopClusters: AggregatedIssue[] = []
+
+  // Lens-based ordering
+  selectedLens: 'regulatory_exposure' | 'financial_exposure' | 'customer_dispute_risk' | 'promise_commitment_risk' | 'privacy_security_risk' | 'operational_process_risk' | 'neutral_engine_order' = 'neutral_engine_order';
+  readonly availableLenses = [
+    { value: 'neutral_engine_order', label: 'Neutral (Risk Score)' },
+    { value: 'regulatory_exposure', label: 'Regulatory Exposure' },
+    { value: 'financial_exposure', label: 'Financial Exposure' },
+    { value: 'customer_dispute_risk', label: 'Customer Dispute Risk' },
+    { value: 'promise_commitment_risk', label: 'Promise/Commitment Risk' },
+    { value: 'privacy_security_risk', label: 'Privacy/Security Risk' },
+    { value: 'operational_process_risk', label: 'Operational/Process Risk' },
+  ];
+  
+  // Canonical categories
+  readonly canonicalCategories = [
+    'compliance',
+    'privacy_security',
+    'billing_financial',
+    'promises_consistency',
+    'policy_process',
+    'customer_dispute',
+  ] as const;
+  
+  // Grouped issues by category (for lens-based display)
+  groupedIssuesByCategory: Map<string, IssueV2[]> = new Map();;
   clusterPageSize = 10;
   clusterPageIndex = 0;
   clusterPageSizeOptions = [5, 10, 25, 50];
@@ -609,6 +663,9 @@ export class EvaluationResultsComponent implements OnInit {
         }
       }
 
+      // Apply lens-based ordering
+      this.applyLensOrdering();
+      
       // Update pagination for grouped issues
       this.updatePaginatedGroupedIssues();
       
@@ -670,6 +727,183 @@ export class EvaluationResultsComponent implements OnInit {
   /**
    * Update paginated top issues based on current page settings
    */
+  /**
+   * Apply lens-based ordering to allIssuesV2
+   */
+  applyLensOrdering(): void {
+    if (this.allIssuesV2.length === 0) {
+      return;
+    }
+
+    // Group issues by primaryCategory
+    this.groupedIssuesByCategory.clear();
+    for (const issue of this.allIssuesV2) {
+      const category = issue.primaryCategory || issue.category || 'other';
+      if (!this.groupedIssuesByCategory.has(category)) {
+        this.groupedIssuesByCategory.set(category, []);
+      }
+      this.groupedIssuesByCategory.get(category)!.push(issue);
+    }
+
+    // Sort within each category based on lens
+    for (const [category, issues] of this.groupedIssuesByCategory.entries()) {
+      issues.sort((a, b) => this.compareIssuesByLens(a, b, this.selectedLens));
+    }
+
+    // Reorder categories based on lens
+    const categoryOrder = this.getCategoryOrderForLens(this.selectedLens);
+    const orderedIssues: IssueV2[] = [];
+    
+    for (const category of categoryOrder) {
+      const issues = this.groupedIssuesByCategory.get(category);
+      if (issues && issues.length > 0) {
+        orderedIssues.push(...issues);
+      }
+    }
+    
+    // Add any remaining categories not in the lens order
+    for (const [category, issues] of this.groupedIssuesByCategory.entries()) {
+      if (!categoryOrder.includes(category)) {
+        orderedIssues.push(...issues);
+      }
+    }
+
+    this.allIssuesV2 = orderedIssues;
+    this.updatePaginatedTopIssues();
+  }
+
+  /**
+   * Get category order for a given lens
+   */
+  getCategoryOrderForLens(lens: string): string[] {
+    const orders: Record<string, string[]> = {
+      regulatory_exposure: ['compliance', 'privacy_security', 'policy_process', 'billing_financial', 'promises_consistency', 'customer_dispute'],
+      financial_exposure: ['billing_financial', 'promises_consistency', 'customer_dispute', 'policy_process', 'compliance', 'privacy_security'],
+      customer_dispute_risk: ['customer_dispute', 'billing_financial', 'promises_consistency', 'policy_process', 'compliance', 'privacy_security'],
+      promise_commitment_risk: ['promises_consistency', 'billing_financial', 'customer_dispute', 'policy_process', 'compliance', 'privacy_security'],
+      privacy_security_risk: ['privacy_security', 'compliance', 'policy_process', 'billing_financial', 'promises_consistency', 'customer_dispute'],
+      operational_process_risk: ['policy_process', 'compliance', 'billing_financial', 'promises_consistency', 'customer_dispute', 'privacy_security'],
+      neutral_engine_order: [], // No reordering, use risk score
+    };
+    return orders[lens] || [];
+  }
+
+  /**
+   * Compare two issues based on lens
+   */
+  compareIssuesByLens(a: IssueV2, b: IssueV2, lens: string): number {
+    if (lens === 'neutral_engine_order') {
+      // Default: riskScore desc, then severity, then impact, then verification
+      const riskA = a.riskScore ?? 0;
+      const riskB = b.riskScore ?? 0;
+      if (riskB !== riskA) return riskB - riskA;
+      
+      const severityOrder: Record<string, number> = { critical: 4, high: 3, medium: 2, low: 1 };
+      const sevA = severityOrder[a.severity || 'low'] ?? 1;
+      const sevB = severityOrder[b.severity || 'low'] ?? 1;
+      if (sevB !== sevA) return sevB - sevA;
+      
+      const impactOrder: Record<string, number> = { high: 3, medium: 2, low: 1 };
+      const impA = impactOrder[a.impact || 'low'] ?? 1;
+      const impB = impactOrder[b.impact || 'low'] ?? 1;
+      if (impB !== impA) return impB - impA;
+      
+      const verifOrder: Record<string, number> = { SYSTEM_VERIFIED: 4, DOC_SUPPORTED: 3, TRANSCRIPT_PROVABLE: 2, UNVERIFIED: 1 };
+      const verA = verifOrder[a.verification?.level || 'UNVERIFIED'] ?? 1;
+      const verB = verifOrder[b.verification?.level || 'UNVERIFIED'] ?? 1;
+      return verB - verA;
+    }
+
+    // Lens-specific sorting
+    switch (lens) {
+      case 'regulatory_exposure':
+        // legalHoldSuggested desc, severity desc, verification.level, confidence desc, riskScore desc
+        const legalHoldA = a.legalHoldSuggested ? 1 : 0;
+        const legalHoldB = b.legalHoldSuggested ? 1 : 0;
+        if (legalHoldB !== legalHoldA) return legalHoldB - legalHoldA;
+        
+        const sevOrder: Record<string, number> = { critical: 4, high: 3, medium: 2, low: 1 };
+        const sevA = sevOrder[a.severity || 'low'] ?? 1;
+        const sevB = sevOrder[b.severity || 'low'] ?? 1;
+        if (sevB !== sevA) return sevB - sevA;
+        
+        const verOrder: Record<string, number> = { SYSTEM_VERIFIED: 4, DOC_SUPPORTED: 3, TRANSCRIPT_PROVABLE: 2, UNVERIFIED: 1 };
+        const verA = verOrder[a.verification?.level || 'UNVERIFIED'] ?? 1;
+        const verB = verOrder[b.verification?.level || 'UNVERIFIED'] ?? 1;
+        if (verB !== verA) return verB - verA;
+        
+        const confA = a.confidence ?? 0;
+        const confB = b.confidence ?? 0;
+        if (confB !== confA) return confB - confA;
+        
+        return (b.riskScore ?? 0) - (a.riskScore ?? 0);
+
+      case 'financial_exposure':
+        // tags includes refund/fee/chargeback boost, then severity/impact/confidence, then riskScore
+        const tagsA = a.tags || [];
+        const tagsB = b.tags || [];
+        const financialTags = ['refund', 'fee', 'chargeback', 'billing', 'payment'];
+        const hasFinancialA = financialTags.some(tag => tagsA.includes(tag));
+        const hasFinancialB = financialTags.some(tag => tagsB.includes(tag));
+        if (hasFinancialB && !hasFinancialA) return 1;
+        if (hasFinancialA && !hasFinancialB) return -1;
+        
+        const sevOrder2: Record<string, number> = { critical: 4, high: 3, medium: 2, low: 1 };
+        const sevA2 = sevOrder2[a.severity || 'low'] ?? 1;
+        const sevB2 = sevOrder2[b.severity || 'low'] ?? 1;
+        if (sevB2 !== sevA2) return sevB2 - sevA2;
+        
+        const impOrder: Record<string, number> = { high: 3, medium: 2, low: 1 };
+        const impA = impOrder[a.impact || 'low'] ?? 1;
+        const impB = impOrder[b.impact || 'low'] ?? 1;
+        if (impB !== impA) return impB - impA;
+        
+        const confA2 = a.confidence ?? 0;
+        const confB2 = b.confidence ?? 0;
+        if (confB2 !== confA2) return confB2 - confA2;
+        
+        return (b.riskScore ?? 0) - (a.riskScore ?? 0);
+
+      case 'promise_commitment_risk':
+        // cluster size desc (more repeated contradictions), confidence desc, severity desc
+        // Note: cluster size would need to be computed from grouped issues
+        const confA3 = a.confidence ?? 0;
+        const confB3 = b.confidence ?? 0;
+        if (confB3 !== confA3) return confB3 - confA3;
+        
+        const sevOrder3: Record<string, number> = { critical: 4, high: 3, medium: 2, low: 1 };
+        const sevA3 = sevOrder3[a.severity || 'low'] ?? 1;
+        const sevB3 = sevOrder3[b.severity || 'low'] ?? 1;
+        return sevB3 - sevA3;
+
+      default:
+        // Default sorting
+        return (b.riskScore ?? 0) - (a.riskScore ?? 0);
+    }
+  }
+
+  /**
+   * Handle lens change
+   */
+  onLensChange(): void {
+    this.applyLensOrdering();
+  }
+
+  /**
+   * Get category display label
+   */
+  getCategoryDisplayLabel(category: string): string {
+    const labels: Record<string, string> = {
+      compliance: 'Compliance',
+      privacy_security: 'Privacy & Security',
+      billing_financial: 'Billing & Financial',
+      promises_consistency: 'Promises & Consistency',
+      policy_process: 'Policy & Process',
+      customer_dispute: 'Customer Dispute',
+    };
+    return labels[category] || category;
+  }
+
   updatePaginatedTopIssues(): void {
     const startIndex = this.pageIndex * this.pageSize;
     const endIndex = startIndex + this.pageSize;

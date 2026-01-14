@@ -271,6 +271,124 @@
             <span>Transcribing audio file...</span>
           </div>
 
+          <!-- Evidence Panel -->
+          <div class="evidence-section" style="margin-top: 24px; margin-bottom: 24px;">
+            <button
+              mat-stroked-button
+              type="button"
+              (click)="toggleEvidencePanel()"
+              style="width: 100%; margin-bottom: 16px;"
+            >
+              <mat-icon>{{ showEvidencePanel ? 'expand_less' : 'expand_more' }}</mat-icon>
+              <span>Evidence & Policy Documents (Optional)</span>
+            </button>
+
+            <div *ngIf="showEvidencePanel" class="evidence-panel">
+              <div class="evidence-inclusion-toggles" style="margin-bottom: 16px;">
+                <h4 style="margin-bottom: 8px;">Evidence Inclusion</h4>
+                <div style="display: flex; flex-direction: column; gap: 8px;">
+                  <label style="display: flex; align-items: center; gap: 8px;">
+                    <input type="checkbox" [(ngModel)]="includeOrgEvidence" name="includeOrgEvidence" />
+                    <span>Include organization-level evidence</span>
+                  </label>
+                  <label style="display: flex; align-items: center; gap: 8px;">
+                    <input type="checkbox" [(ngModel)]="includeProjectEvidence" name="includeProjectEvidence" />
+                    <span>Include project-level evidence</span>
+                  </label>
+                  <label style="display: flex; align-items: center; gap: 8px;">
+                    <input type="checkbox" [(ngModel)]="includeTemplateEvidence" name="includeTemplateEvidence" />
+                    <span>Include template-level evidence</span>
+                  </label>
+                </div>
+              </div>
+
+              <div class="evidence-attachments" style="margin-bottom: 16px;">
+                <h4 style="margin-bottom: 8px;">Attach Evidence Files</h4>
+                <input
+                  type="file"
+                  #evidenceFileInput
+                  (change)="onEvidenceFileSelected($event)"
+                  [accept]="evidenceFileExtensions.join(',')"
+                  multiple
+                  style="display: none"
+                />
+                <button
+                  mat-stroked-button
+                  type="button"
+                  (click)="evidenceFileInput.click()"
+                  style="margin-right: 8px;"
+                >
+                  <mat-icon>upload_file</mat-icon>
+                  Upload Files
+                </button>
+                <button
+                  mat-stroked-button
+                  type="button"
+                  (click)="addEvidenceLink()"
+                >
+                  <mat-icon>link</mat-icon>
+                  Add Link
+                </button>
+                <div class="file-formats-hint" style="margin-top: 8px;">
+                  <strong>Supported:</strong> {{ evidenceFileExtensions.join(', ') }}
+                </div>
+
+                <!-- Attached Files -->
+                <div *ngIf="evidenceFiles.length > 0" style="margin-top: 12px;">
+                  <div *ngFor="let file of evidenceFiles; let i = index" class="evidence-file-item" style="display: flex; align-items: center; gap: 8px; padding: 8px; background: #f5f5f5; border-radius: 4px; margin-bottom: 4px;">
+                    <mat-icon>insert_drive_file</mat-icon>
+                    <span style="flex: 1;">{{ file.name }}</span>
+                    <button mat-icon-button type="button" (click)="removeEvidenceFile(i)" style="width: 32px; height: 32px;">
+                      <mat-icon style="font-size: 18px;">close</mat-icon>
+                    </button>
+                  </div>
+                </div>
+
+                <!-- Attached Links -->
+                <div *ngIf="evidenceLinks.length > 0" style="margin-top: 12px;">
+                  <div *ngFor="let link of evidenceLinks; let i = index" class="evidence-link-item" style="display: flex; align-items: center; gap: 8px; padding: 8px; background: #f5f5f5; border-radius: 4px; margin-bottom: 4px;">
+                    <mat-icon>link</mat-icon>
+                    <span style="flex: 1;">
+                      <strong>{{ link.title }}</strong><br>
+                      <small style="color: #666;">{{ link.url }}</small>
+                    </span>
+                    <button mat-icon-button type="button" (click)="removeEvidenceLink(i)" style="width: 32px; height: 32px;">
+                      <mat-icon style="font-size: 18px;">close</mat-icon>
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Evidence Preview -->
+              <div class="evidence-preview" style="padding: 12px; background: #f9f9f9; border-radius: 4px;">
+                <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px;">
+                  <h4 style="margin: 0;">Evidence Preview</h4>
+                  <button
+                    mat-icon-button
+                    type="button"
+                    (click)="previewEvidenceSet()"
+                    [disabled]="evidencePreviewLoading"
+                    style="width: 32px; height: 32px;"
+                  >
+                    <mat-icon style="font-size: 18px;">refresh</mat-icon>
+                  </button>
+                </div>
+                <div *ngIf="evidencePreviewLoading" style="display: flex; align-items: center; gap: 8px;">
+                  <mat-spinner diameter="20"></mat-spinner>
+                  <span>Loading...</span>
+                </div>
+                <div *ngIf="!evidencePreviewLoading && resolvedEvidenceSet">
+                  <p style="margin: 0;">
+                    <strong>This run will use:</strong> {{ getEvidenceCount() }}
+                  </p>
+                  <p *ngIf="resolvedEvidenceSet.resolvedEvidenceIds.length === 0" style="margin: 8px 0 0 0; color: #666; font-size: 0.9em;">
+                    No evidence will be included in this evaluation.
+                  </p>
+                </div>
+              </div>
+            </div>
+          </div>
+
           <!-- Job Progress Section -->
           <div *ngIf="jobStatus" class="job-progress-section">
             <h4>

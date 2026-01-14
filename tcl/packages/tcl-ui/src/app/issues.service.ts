@@ -2,6 +2,9 @@ import { Injectable } from '@angular/core';
 import { HttpClient, HttpParams } from '@angular/common/http';
 import { Observable } from 'rxjs';
 
+// IssueV2 interface - matches evaluation-v2.types.ts
+// Note: This is a simplified version for the issues list view
+// Full definition is in evaluation-v2.types.ts
 export interface IssueV2 {
   issueId: string;
   issueKey: string;

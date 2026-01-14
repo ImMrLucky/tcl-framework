@@ -123,6 +123,23 @@ export interface Evaluation {
   latency_ms: number;
   report: any;
   created_at: string;
+  // Evidence system fields
+  evidence_set?: {
+    orgEvidenceIds?: string[];
+    projectEvidenceIds?: string[];
+    conversationEvidenceIds?: string[];
+    templateEvidenceIds?: string[];
+    resolvedEvidenceIds?: string[];
+  };
+  evidence_diagnostics?: {
+    indexingFailures?: Array<{ evidenceItemId: string; error: string }>;
+    missingApprovals?: string[];
+    staleDocsUsed?: string[];
+    snapshotStatus?: Array<{ evidenceItemId: string; status: string }>;
+    error?: string;
+  };
+  template_id?: string;
+  simulation_mode?: boolean;
 }
 
 export interface Issue {

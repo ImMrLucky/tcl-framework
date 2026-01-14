@@ -74,8 +74,10 @@ export interface IssueV2 {
   conversationId: string;
   
   type: string;
-  category: string;
+  category: string; // Legacy category
+  primaryCategory?: 'compliance' | 'privacy_security' | 'billing_financial' | 'promises_consistency' | 'policy_process' | 'customer_dispute'; // NEW: Canonical category
   severity: 'low' | 'medium' | 'high' | 'critical';
+  severityDisplay?: 'low' | 'medium' | 'high' | 'critical'; // Display version
   impact: 'low' | 'medium' | 'high';
   riskScore: number;
   score: number;
@@ -83,8 +85,26 @@ export interface IssueV2 {
   reviewRequired: boolean;
   
   verification: {
-    level: string;
+    level: 'TRANSCRIPT_PROVABLE' | 'DOC_SUPPORTED' | 'SYSTEM_VERIFIED' | 'EXTERNAL_VERIFIED' | 'TRANSCRIPT_ONLY' | 'UNVERIFIED' | 'NONE';
     reasonCodes: string[];
+    provenance?: {
+      transcriptAnchors: Array<{
+        turnIndex: number;
+        claimId: string;
+        excerpt?: string;
+        start?: number;
+        end?: number;
+      }>;
+      evidenceDocRefs: Array<{
+        docId: string;
+        chunkId?: string;
+        snippet: string;
+        score: number;
+        sourceType: string;
+        version: string;
+        sha256: string;
+      }>;
+    };
   };
   
   scoring: {
@@ -122,12 +142,25 @@ export interface IssueV2 {
   };
   
   evidence: {
-    refs: Array<{
+    // Legacy refs (for backward compatibility)
+    refs?: Array<{
       sourceType: string;
       sourceId: string;
       quote: string;
       weight?: number;
       turnIndex?: number;
+    }>;
+    // NEW: Evidence citations
+    evidenceRefs?: Array<{
+      docId: string;
+      chunkId?: string;
+      snippet: string;
+      offsets?: { start: number; end: number };
+      score: number;
+      sourceType: string;
+      version: string;
+      sha256: string;
+      title?: string;
     }>;
     edges?: Array<{
       kind: string;
@@ -144,6 +177,16 @@ export interface IssueV2 {
       };
     };
   };
+  
+  // NEW: Transcript spans for traceability
+  transcriptSpans?: Array<{
+    turnIndex: number;
+    speaker: string;
+    speakerLabel?: string;
+    excerpt: string;
+    start?: number;
+    end?: number;
+  }>;
   
   compliance: {
     tags: string[];

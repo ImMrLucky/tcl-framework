@@ -81,6 +81,59 @@
       </button>
     </div>
 
+    <!-- Evidence Summary Card -->
+    <mat-card class="audit-summary-card evidence-summary" *ngIf="evaluation?.evidence_set">
+      <mat-card-header>
+        <mat-card-title>
+          <mat-icon>folder_special</mat-icon>
+          Evidence Summary
+        </mat-card-title>
+        <mat-card-subtitle>Evidence documents used in this evaluation</mat-card-subtitle>
+      </mat-card-header>
+      <mat-card-content>
+        <div class="evidence-summary-content">
+          <div class="evidence-counts">
+            <div class="evidence-count-item" *ngIf="(evaluation.evidence_set.orgEvidenceIds?.length || 0) > 0">
+              <mat-icon>business</mat-icon>
+              <div>
+                <strong>{{ evaluation.evidence_set.orgEvidenceIds.length }}</strong>
+                <span>Organization Evidence</span>
+              </div>
+            </div>
+            <div class="evidence-count-item" *ngIf="(evaluation.evidence_set.projectEvidenceIds?.length || 0) > 0">
+              <mat-icon>folder</mat-icon>
+              <div>
+                <strong>{{ evaluation.evidence_set.projectEvidenceIds.length }}</strong>
+                <span>Project Evidence</span>
+              </div>
+            </div>
+            <div class="evidence-count-item" *ngIf="(evaluation.evidence_set.templateEvidenceIds?.length || 0) > 0">
+              <mat-icon>description</mat-icon>
+              <div>
+                <strong>{{ evaluation.evidence_set.templateEvidenceIds.length }}</strong>
+                <span>Template Evidence</span>
+              </div>
+            </div>
+            <div class="evidence-count-item" *ngIf="(evaluation.evidence_set.conversationEvidenceIds?.length || 0) > 0">
+              <mat-icon>chat</mat-icon>
+              <div>
+                <strong>{{ evaluation.evidence_set.conversationEvidenceIds.length }}</strong>
+                <span>Conversation Evidence</span>
+              </div>
+            </div>
+          </div>
+          <div class="evidence-total">
+            <strong>Total: {{ (evaluation.evidence_set.resolvedEvidenceIds?.length || 0) }}</strong>
+            <span>evidence items used</span>
+          </div>
+          <div class="evidence-diagnostics" *ngIf="evaluation?.evidence_diagnostics?.indexingFailures?.length > 0">
+            <mat-icon color="warn">warning</mat-icon>
+            <span>{{ evaluation.evidence_diagnostics.indexingFailures.length }} evidence item(s) had indexing failures</span>
+          </div>
+        </div>
+      </mat-card-content>
+    </mat-card>
+
     <!-- A) Executive Summary (Manager-grade) -->
     <mat-card class="audit-summary-card executive-summary">
       <mat-card-header>
@@ -390,7 +443,17 @@
           <mat-card-content>
             <!-- All Findings Summary with Pagination -->
             <div class="top-issues-summary" *ngIf="allIssuesV2.length > 0">
-              <h3>All Findings ({{ allIssuesV2.length }}) - Ranked by Risk Score</h3>
+              <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+                <h3 style="margin: 0;">All Findings ({{ allIssuesV2.length }})</h3>
+                <mat-form-field appearance="outline" style="width: 250px;">
+                  <mat-label>View By</mat-label>
+                  <mat-select [(ngModel)]="selectedLens" (selectionChange)="onLensChange()">
+                    <mat-option *ngFor="let lens of availableLenses" [value]="lens.value">
+                      {{ lens.label }}
+                    </mat-option>
+                  </mat-select>
+                </mat-form-field>
+              </div>
               <div class="issue-v2-list">
                 <div class="issue-v2-item" *ngFor="let issue of paginatedTopIssues; let i = index" 
                      [class.critical]="issue.severity === 'critical'"
@@ -427,7 +490,9 @@
                     <div class="issue-summary">{{ issue.what?.issueSummary || 'No summary available' }}</div>
                     <div class="issue-meta">
                       <span class="speaker-badge">{{ getSpeakerDisplayLabel(issue) }}</span>
-                      <span class="category-badge">{{ issue.category || 'other' }}</span>
+                      <span class="category-badge" [title]="getCategoryDisplayLabel(issue.primaryCategory || issue.category || 'other')">
+                        {{ getCategoryDisplayLabel(issue.primaryCategory || issue.category || 'other') }}
+                      </span>
                       <span *ngIf="issue.reviewRequired" class="review-required">Review Required</span>
                     </div>
                   </div>

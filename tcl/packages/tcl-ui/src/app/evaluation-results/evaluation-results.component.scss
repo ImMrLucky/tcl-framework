@@ -570,6 +570,100 @@
    EXECUTIVE SUMMARY & CLUSTERED ISSUES (Manager-grade UI)
    ============================================================================ */
 
+.evidence-summary {
+  background: linear-gradient(135deg, #2d5a27 0%, #1e3a1a 100%);
+  color: white;
+  margin-bottom: 24px;
+}
+
+.evidence-summary mat-card-title,
+.evidence-summary mat-card-subtitle {
+  color: white !important;
+}
+
+.evidence-summary mat-card-subtitle {
+  opacity: 0.8;
+}
+
+.evidence-summary-content {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.evidence-counts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 16px;
+}
+
+.evidence-count-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px;
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 8px;
+}
+
+.evidence-count-item mat-icon {
+  font-size: 24px;
+  width: 24px;
+  height: 24px;
+  color: #4caf50;
+}
+
+.evidence-count-item div {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.evidence-count-item strong {
+  font-size: 20px;
+  font-weight: 600;
+}
+
+.evidence-count-item span {
+  font-size: 12px;
+  opacity: 0.9;
+}
+
+.evidence-total {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 12px;
+  background: rgba(255, 255, 255, 0.15);
+  border-radius: 8px;
+}
+
+.evidence-total strong {
+  font-size: 24px;
+  font-weight: 600;
+}
+
+.evidence-total span {
+  font-size: 14px;
+  opacity: 0.9;
+}
+
+.evidence-diagnostics {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px;
+  background: rgba(255, 193, 7, 0.2);
+  border-radius: 8px;
+  color: #ffc107;
+}
+
+.evidence-diagnostics mat-icon {
+  font-size: 20px;
+  width: 20px;
+  height: 20px;
+}
+
 .executive-summary {
   background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
   color: white;

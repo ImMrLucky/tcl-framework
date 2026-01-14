@@ -35,6 +35,11 @@ import { setupExportRoutes } from "./exports/routes.js";
 import { setupEvaluationSearchRoutes } from "./evaluations/search.js";
 import { setupPolicyRoutes } from "./policies/routes.js";
 import { setupEvidenceRoutes } from "./evidence/routes.js";
+import { setupOrgRoutes } from "./orgs/routes.js";
+import { setupProjectRoutes } from "./projects/routes.js";
+import { resolveEvidenceSet } from "./evidence/service.js";
+import type { EvidenceSet, EvidenceDiagnostics } from "../types/evidence.types.js";
+import { startIndexingWorker } from "./evidence/indexing-worker.js";
 import { setupScoringProfilesRoutes } from "./admin/scoring-profiles.js";
 import { setupApiKeyRoutes } from "./api-keys/routes.js";
 import { setupAnalyzeEndpoint } from "./api-keys/analyze-endpoint.js";
@@ -1200,6 +1205,62 @@ app.post("/validate", requireCapability(Capability.ANALYZE_MANUAL_UPLOAD), async
         // Check if conversation_id is provided in request body
         const conversationId = (req.body as any).conversation_id;
         
+        // ============================================================================
+        // EVIDENCE SYSTEM: Resolve evidence set for this evaluation
+        // ============================================================================
+        const evidenceParams = (req.body as any).evidence || {};
+        let evidenceSet: EvidenceSet | null = null;
+        let evidenceDiagnostics: EvidenceDiagnostics = {};
+        
+        try {
+          evidenceSet = await resolveEvidenceSet(
+            context.orgId,
+            context.projectId,
+            evidenceParams.templateId,
+            conversationId,
+            evidenceParams.simulationMode || false,
+            evidenceParams.includeOrgEvidence !== false, // Default: true
+            evidenceParams.includeProjectEvidence !== false, // Default: true
+            evidenceParams.includeTemplateEvidence !== false // Default: true
+          );
+          
+          // Add conversation-level evidence IDs if provided
+          if (evidenceParams.conversationEvidenceIds && Array.isArray(evidenceParams.conversationEvidenceIds)) {
+            evidenceSet.conversationEvidenceIds = evidenceParams.conversationEvidenceIds;
+            // Add to resolvedEvidenceIds
+            evidenceSet.resolvedEvidenceIds = [
+              ...(evidenceSet.resolvedEvidenceIds || []),
+              ...evidenceParams.conversationEvidenceIds,
+            ];
+          }
+          
+          // Collect diagnostics
+          try {
+            const { data: failedIndexing } = await supabaseAdmin
+              .from('evidence_items')
+              .select('id, title, index_error')
+              .eq('org_id', context.orgId)
+              .eq('index_status', 'FAILED')
+              .in('id', evidenceSet.resolvedEvidenceIds || []);
+            
+            if (failedIndexing && failedIndexing.length > 0) {
+              evidenceDiagnostics.indexingFailures = failedIndexing.map(item => ({
+                evidenceItemId: item.id,
+                error: item.index_error || 'Unknown indexing error',
+              }));
+            }
+          } catch (diagError) {
+            console.warn('Failed to collect evidence diagnostics:', diagError);
+          }
+        } catch (evidenceError: any) {
+          console.warn('Failed to resolve evidence set:', evidenceError);
+          // Continue without evidence - evaluation can still run
+          evidenceDiagnostics = {
+            indexingFailures: [],
+            error: evidenceError.message,
+          };
+        }
+        
         // Build proper scores structure that frontend expects
         const spectralReport = out.report?.spectral || {};
         const spectralSkipped = spectralReport.spectralSkipped === true;
@@ -1293,7 +1354,18 @@ app.post("/validate", requireCapability(Capability.ANALYZE_MANUAL_UPLOAD), async
             scorer_id: out.scorerId || null,
             engine_version: process.env.ENGINE_VERSION || '0.2.0',
             latency_ms: latency,
-            report: reportWithIssues
+            report: reportWithIssues,
+            // Evidence system fields
+            template_id: evidenceParams.templateId || null,
+            simulation_mode: evidenceParams.simulationMode || false,
+            evidence_set: evidenceSet || {
+              orgEvidenceIds: [],
+              projectEvidenceIds: [],
+              conversationEvidenceIds: [],
+              templateEvidenceIds: [],
+              resolvedEvidenceIds: [],
+            },
+            evidence_diagnostics: evidenceDiagnostics,
           })
           .select('id')
           .single();
@@ -3370,6 +3442,16 @@ console.log("Issue workflow routes registered successfully");
 // Setup analytics routes
 console.log("Registering analytics routes...");
 setupAnalyticsRoutes(app);
+
+// Setup org routes
+console.log("Registering org routes...");
+setupOrgRoutes(app);
+console.log("Org routes registered successfully");
+
+// Setup project routes
+console.log("Registering project routes...");
+setupProjectRoutes(app);
+console.log("Project routes registered successfully");
 console.log("Analytics routes registered successfully");
 
 // Setup export routes
@@ -3480,6 +3562,14 @@ try {
     const address = server.address();
     if (address && typeof address === 'object') {
       console.log(`Server bound to ${address.address}:${address.port}`);
+    }
+    
+    // Start evidence indexing worker
+    try {
+      startIndexingWorker();
+      console.log('✅ Evidence indexing worker started');
+    } catch (err: any) {
+      console.warn('⚠️ Failed to start evidence indexing worker:', err.message);
     }
     
     // Try to load modules after server starts

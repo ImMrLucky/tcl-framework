@@ -10,6 +10,8 @@ import { normalizeTranscriptBuffer } from '../transcripts/normalize.js';
 import { transcribeAudio, type TranscriptionResult } from '../transcription.js';
 import { computeVerificationDiff } from '../verify/diff.js';
 import { withTranscriptionSlot } from '../asr/limit.js';
+import { resolveEvidenceSet } from '../evidence/service.js';
+import type { EvidenceSet, EvidenceDiagnostics } from '../../types/evidence.types.js';
 
 /**
  * Read asset content (from Supabase Storage or local filesystem for backward compatibility)
@@ -200,6 +202,24 @@ async function processTranscriptOnly(job: any, transcriptAsset: any): Promise<vo
     job.created_by_user_id
   );
 
+  // Get conversation-level evidence items (attached to this job/conversation)
+  let conversationEvidenceIds: string[] = [];
+  try {
+    const { data: evidenceItems } = await supabaseAdmin!
+      .from('evidence_items')
+      .select('id')
+      .eq('org_id', job.org_id)
+      .eq('conversation_id', job.id) // Evidence attached to this job
+      .eq('scope', 'CONVERSATION')
+      .eq('status', 'APPROVED'); // Only approved evidence
+    
+    if (evidenceItems) {
+      conversationEvidenceIds = evidenceItems.map(item => item.id);
+    }
+  } catch (evidenceError) {
+    console.warn(`[Worker] Failed to fetch conversation evidence for job ${job.id}:`, evidenceError);
+  }
+
   // Run analysis
   await updateJobProgress(job.id, 'ANALYZING', 50);
 
@@ -225,6 +245,7 @@ async function processTranscriptOnly(job: any, transcriptAsset: any): Promise<vo
     jobId: job.id,
     ingestionMode: 'TRANSCRIPT_ONLY',
     provenance,
+    conversationEvidenceIds, // Pass conversation-level evidence
   });
 
   // Store normalized transcript asset
@@ -336,6 +357,24 @@ async function processAudioOnly(job: any, audioAsset: any): Promise<void> {
     noisyAudioFlag: (transcriptionResult.vadStats as any)?.noiseRatio && (transcriptionResult.vadStats as any).noiseRatio > 0.3,
   };
 
+  // Get conversation-level evidence items (attached to this job/conversation)
+  let conversationEvidenceIds: string[] = [];
+  try {
+    const { data: evidenceItems } = await supabaseAdmin!
+      .from('evidence_items')
+      .select('id')
+      .eq('org_id', job.org_id)
+      .eq('conversation_id', job.id) // Evidence attached to this job
+      .eq('scope', 'CONVERSATION')
+      .eq('status', 'APPROVED'); // Only approved evidence
+    
+    if (evidenceItems) {
+      conversationEvidenceIds = evidenceItems.map(item => item.id);
+    }
+  } catch (evidenceError) {
+    console.warn(`[Worker] Failed to fetch conversation evidence for job ${job.id}:`, evidenceError);
+  }
+
   // Run analysis
   const evaluationId = await runAnalysis({
     orgId: job.org_id,
@@ -352,6 +391,7 @@ async function processAudioOnly(job: any, audioAsset: any): Promise<void> {
       ...provenance,
       transcriptQuality,
     },
+    conversationEvidenceIds, // Pass conversation-level evidence
   });
 
   // Update job as complete
@@ -380,6 +420,24 @@ async function processAudioPlusTranscript(job: any, audioAsset: any, transcriptA
     job.created_by_user_id
   );
 
+  // Get conversation-level evidence items (attached to this job/conversation)
+  let conversationEvidenceIds: string[] = [];
+  try {
+    const { data: evidenceItems } = await supabaseAdmin!
+      .from('evidence_items')
+      .select('id')
+      .eq('org_id', job.org_id)
+      .eq('conversation_id', job.id) // Evidence attached to this job
+      .eq('scope', 'CONVERSATION')
+      .eq('status', 'APPROVED'); // Only approved evidence
+    
+    if (evidenceItems) {
+      conversationEvidenceIds = evidenceItems.map(item => item.id);
+    }
+  } catch (evidenceError) {
+    console.warn(`[Worker] Failed to fetch conversation evidence for job ${job.id}:`, evidenceError);
+  }
+
   // Rule 0: Build provenance for AUDIO_AND_TRANSCRIPT mode
   const provenance = {
     ingestionMode: 'AUDIO_AND_TRANSCRIPT' as const,
@@ -404,6 +462,7 @@ async function processAudioPlusTranscript(job: any, audioAsset: any, transcriptA
     jobId: job.id,
     ingestionMode: 'AUDIO_AND_TRANSCRIPT',
     provenance,
+    conversationEvidenceIds, // Pass conversation-level evidence
   });
 
   // Step 2: Transcribe audio in background (optional - don't block on failure)
@@ -528,6 +587,13 @@ async function runAnalysis(input: {
   jobId: string;
   ingestionMode?: string; // Rule 0: Ingestion mode
   provenance?: any; // Rule 0: Provenance metadata
+  // Evidence system parameters
+  conversationEvidenceIds?: string[]; // Evidence items attached to this conversation
+  includeOrgEvidence?: boolean; // Include org-level evidence (default: true)
+  includeProjectEvidence?: boolean; // Include project-level evidence (default: true)
+  includeTemplateEvidence?: boolean; // Include template-level evidence (default: true)
+  templateId?: string; // Template ID if using a template
+  simulationMode?: boolean; // Allow DRAFT evidence (admin-only, default: false)
 }): Promise<string> {
   // Use the existing validate function to run the full pipeline
   // This ensures consistency with the /validate endpoint
@@ -563,6 +629,64 @@ async function runAnalysis(input: {
   
   // TODO: Fetch per-conversation attachments/documents from assets table
   // For now, conversationSources is empty, but structure is ready
+  
+  // ============================================================================
+  // EVIDENCE SYSTEM: Resolve evidence set for this evaluation
+  // ============================================================================
+  let evidenceSet: EvidenceSet | null = null;
+  let evidenceDiagnostics: EvidenceDiagnostics = {};
+  
+  try {
+    evidenceSet = await resolveEvidenceSet(
+      input.orgId,
+      input.projectId,
+      input.templateId,
+      input.conversationId,
+      input.simulationMode || false,
+      input.includeOrgEvidence !== false, // Default: true
+      input.includeProjectEvidence !== false, // Default: true
+      input.includeTemplateEvidence !== false // Default: true
+    );
+    
+    // Add conversation-level evidence IDs if provided
+    if (input.conversationEvidenceIds && input.conversationEvidenceIds.length > 0) {
+      evidenceSet.conversationEvidenceIds = input.conversationEvidenceIds;
+      // Add to resolvedEvidenceIds
+      evidenceSet.resolvedEvidenceIds = [
+        ...(evidenceSet.resolvedEvidenceIds || []),
+        ...input.conversationEvidenceIds,
+      ];
+    }
+    
+    // Collect diagnostics (check for indexing failures, missing approvals, etc.)
+    if (supabaseAdmin) {
+      try {
+        // Check for evidence items with indexing failures
+        const { data: failedIndexing } = await supabaseAdmin
+          .from('evidence_items')
+          .select('id, title, index_error')
+          .eq('org_id', input.orgId)
+          .eq('index_status', 'FAILED')
+          .in('id', evidenceSet.resolvedEvidenceIds || []);
+        
+        if (failedIndexing && failedIndexing.length > 0) {
+          evidenceDiagnostics.indexingFailures = failedIndexing.map(item => ({
+            evidenceItemId: item.id,
+            error: item.index_error || 'Unknown indexing error',
+          }));
+        }
+      } catch (diagError) {
+        console.warn(`[Worker] Failed to collect evidence diagnostics:`, diagError);
+      }
+    }
+  } catch (evidenceError: any) {
+    console.warn(`[Worker] Failed to resolve evidence set for job ${input.jobId}:`, evidenceError);
+    // Continue without evidence - evaluation can still run
+    evidenceDiagnostics = {
+      indexingFailures: [],
+      error: evidenceError.message,
+    };
+  }
   
   const allSources = [
     ...conversationSources,
@@ -762,6 +886,17 @@ async function runAnalysis(input: {
       job_id: input.jobId,
       transcript_asset_id: input.transcriptAssetId,
       verification_level: input.verificationLevel,
+      // Evidence system fields
+      template_id: input.templateId || null,
+      simulation_mode: input.simulationMode || false,
+      evidence_set: evidenceSet || {
+        orgEvidenceIds: [],
+        projectEvidenceIds: [],
+        conversationEvidenceIds: [],
+        templateEvidenceIds: [],
+        resolvedEvidenceIds: [],
+      },
+      evidence_diagnostics: evidenceDiagnostics,
     })
     .select('id')
     .single();

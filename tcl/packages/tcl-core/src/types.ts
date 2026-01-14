@@ -1,4 +1,8 @@
 import type { LLMAdapter } from "./adapters/llm_adapter";
+import type { 
+  CanonicalCategory, 
+  EvidenceCitation 
+} from "./types/evidence.types";
 
 export type Source = { id: string; text: string };
 
@@ -197,6 +201,7 @@ export type IssueTypeV2 =
   | "DATA_INTEGRITY"
   | "OTHER";
 
+// Legacy categories (for backward compatibility)
 export type IssueCategoryV2 =
   | "evidence"
   | "consistency"
@@ -206,6 +211,9 @@ export type IssueCategoryV2 =
   | "data_integrity"
   | "other";
 
+// Canonical categories (new stable taxonomy)
+// Imported from evidence.types.ts - see CanonicalCategory type
+
 export type SeverityV2 = "low" | "medium" | "high" | "critical";
 
 export type ImpactV2 = "low" | "medium" | "high";
@@ -214,8 +222,14 @@ export type SeverityDisplayV2 = "low" | "medium" | "high";
 
 export type SpeakerV2 = "AGENT" | "CUSTOMER" | "SYSTEM" | "MIXED" | "UNKNOWN";
 
-export type VerificationLevelV2 = "EXTERNAL_VERIFIED" | "TRANSCRIPT_ONLY" | "TRANSCRIPT_PROVABLE" | "NONE";
-// VerificationLevel is already defined elsewhere, using that definition
+export type VerificationLevelV2 = 
+  | "TRANSCRIPT_PROVABLE"  // High confidence transcript-only contradictions
+  | "DOC_SUPPORTED"        // Document-backed support
+  | "SYSTEM_VERIFIED"      // System export match (ledger/CRM)
+  | "EXTERNAL_VERIFIED"    // Legacy: externally verified
+  | "TRANSCRIPT_ONLY"      // Legacy: transcript-only
+  | "UNVERIFIED"           // No evidence found
+  | "NONE";                // Legacy: no verification
 
 // ============================================================================
 // INGESTION MODE & PROVENANCE
@@ -307,7 +321,8 @@ export interface IssueV2 {
   conversationId: string;
 
   type: IssueTypeV2;
-  category: IssueCategoryV2;
+  category: IssueCategoryV2;       // Legacy category (for backward compatibility)
+  primaryCategory?: CanonicalCategory; // NEW: Canonical category (compliance, privacy_security, billing_financial, etc.)
   severity: SeverityV2;            // Canonical severity (high/medium/low)
   impact: ImpactV2;                // How bad if true (not affected by mode)
   riskScore: number;               // 0..1 normalized (computed)
@@ -317,7 +332,25 @@ export interface IssueV2 {
 
   verification: {
     level: VerificationLevelV2;
-    reasonCodes: string[];         // e.g. ["NO_EXTERNAL_EVIDENCE"]
+    reasonCodes: string[];         // e.g. ["NO_EXTERNAL_EVIDENCE", "DOC_SUPPORTED"]
+    provenance?: {                  // NEW: Traceability for audit
+      transcriptAnchors: Array<{ 
+        turnIndex: number; 
+        claimId: string;
+        excerpt?: string;           // Transcript excerpt for this anchor
+        start?: number;              // Character offset start (if available)
+        end?: number;                // Character offset end (if available)
+      }>;
+      evidenceDocRefs: Array<{      // Evidence citations
+        docId: string;              // evidence_item.id
+        chunkId?: string;           // evidence_chunk.id
+        snippet: string;             // <= ~240 chars excerpt
+        score: number;               // Retrieval score (0..1)
+        sourceType: string;          // EvidenceSourceType
+        version: string;             // evidence_item.version
+        sha256: string;              // evidence_item.file.sha256 or link.sha256
+      }>;
+    };
   };
   
   scoring: {
@@ -364,15 +397,18 @@ export interface IssueV2 {
   };
 
   evidence: {
-    refs: Array<{
+    // Legacy refs (for backward compatibility)
+    refs?: Array<{
       sourceType: "TRANSCRIPT" | "POLICY" | "DOC" | "SYSTEM_FACT";
       sourceId: string;            // e-transcript-#
       quote: string;
       weight?: number;             // grounding/support score
       turnIndex?: number;
     }>;
+    // NEW: Evidence citations using EvidenceCitation structure
+    evidenceRefs?: EvidenceCitation[];
     edges?: Array<{
-      kind: "grounding" | "support" | "contradiction";
+      kind: "grounding" | "support" | "contradiction" | "SUPPORT_TRANSCRIPT" | "SUPPORT_EVIDENCE" | "CONTRADICTION_TRANSCRIPT" | "CONTRADICTION_EVIDENCE" | "GROUNDING_TRANSCRIPT" | "GROUNDING_EVIDENCE";
       claimA: string;
       claimB?: string;
       weight: number;
@@ -381,15 +417,25 @@ export interface IssueV2 {
     verification?: {
       level: VerificationLevelV2;
       reasonCodes: string[];
-      provenance: {
+      provenance?: {
         transcriptAnchors: Array<{ turnIndex: number; claimId: string }>;
         externalDocRefs: string[];
       };
     };
   };
+  
+  // NEW: Transcript spans for traceability
+  transcriptSpans?: Array<{
+    turnIndex: number;
+    speaker: SpeakerV2;
+    speakerLabel?: string;
+    excerpt: string;               // Transcript excerpt
+    start?: number;                 // Character offset start (if available)
+    end?: number;                   // Character offset end (if available)
+  }>;
 
   compliance: {
-    tags: string[];                // e.g. ["billing", "fee_disclosure", "misrepresentation_risk"]
+    tags: string[];                // e.g. ["billing", "fee_disclosure", "misrepresentation_risk", "pci", "cvv", "hipaa"]
     impactedPolicies?: Array<{ policyId: string; section?: string }>; // empty in transcript-only
     legalHoldSuggested?: boolean;  // config-driven for high severity
     disclaimers: string[];         // required in transcript-only: "Not externally verified"

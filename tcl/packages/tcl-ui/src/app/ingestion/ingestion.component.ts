@@ -18,6 +18,7 @@ import { AppHeaderComponent } from '../shared/app-header.component';
 import { AuditService } from '../audit.service';
 import { TclService } from '../tcl.service';
 import { AuthService } from '../auth.service';
+import { EvidenceService, EvidenceItem } from '../evidence.service';
 import { HttpClient } from '@angular/common/http';
 import { firstValueFrom } from 'rxjs';
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
@@ -113,13 +114,36 @@ export class IngestionComponent implements OnInit, OnDestroy {
   readonly subtitleExtensions = ['.vtt', '.srt'];
   readonly textExtensions = ['.txt', '.csv', '.json', '.vtt', '.srt'];
 
+  // Evidence system state
+  showEvidencePanel = false;
+  evidenceFiles: File[] = [];
+  evidenceLinks: Array<{ url: string; title: string; sourceType: EvidenceItem['sourceType'] }> = [];
+  includeOrgEvidence = true;
+  includeProjectEvidence = true;
+  includeTemplateEvidence = true;
+  templateId?: string;
+  simulationMode = false;
+  resolvedEvidenceSet: { orgEvidenceIds: string[]; projectEvidenceIds: string[]; conversationEvidenceIds: string[]; templateEvidenceIds: string[]; resolvedEvidenceIds: string[] } | null = null;
+  evidencePreviewLoading = false;
+  readonly evidenceSourceTypes: Array<{ value: EvidenceItem['sourceType']; label: string }> = [
+    { value: 'POLICY', label: 'Policy' },
+    { value: 'RULESET', label: 'Ruleset' },
+    { value: 'KNOWLEDGE', label: 'Knowledge Base' },
+    { value: 'ACCOUNT_FACTS', label: 'Account Facts' },
+    { value: 'LEGAL', label: 'Legal Document' },
+    { value: 'URL_LINK', label: 'URL Link' },
+    { value: 'SYSTEM_EXPORT', label: 'System Export' },
+  ];
+  readonly evidenceFileExtensions = ['.pdf', '.docx', '.txt', '.csv', '.json', '.html', '.md'];
+
   constructor(
     private auditService: AuditService,
     private tclService: TclService,
     private router: Router,
     private snackBar: MatSnackBar,
     private authService: AuthService,
-    private http: HttpClient
+    private http: HttpClient,
+    private evidenceService: EvidenceService
   ) {}
 
   ngOnInit() {
@@ -129,6 +153,127 @@ export class IngestionComponent implements OnInit, OnDestroy {
   ngOnDestroy() {
     // Clean up polling interval
     this.stopJobPolling();
+  }
+
+  // ============================================================================
+  // EVIDENCE SYSTEM METHODS
+  // ============================================================================
+
+  /**
+   * Toggle evidence panel visibility
+   */
+  toggleEvidencePanel() {
+    this.showEvidencePanel = !this.showEvidencePanel;
+    if (this.showEvidencePanel && !this.resolvedEvidenceSet) {
+      this.previewEvidenceSet();
+    }
+  }
+
+  /**
+   * Handle evidence file selection
+   */
+  onEvidenceFileSelected(event: Event) {
+    const input = event.target as HTMLInputElement;
+    if (input.files && input.files.length > 0) {
+      for (let i = 0; i < input.files.length; i++) {
+        const file = input.files[i];
+        // Check if file extension is supported
+        const ext = '.' + file.name.split('.').pop()?.toLowerCase();
+        if (this.evidenceFileExtensions.includes(ext)) {
+          this.evidenceFiles.push(file);
+        } else {
+          this.snackBar.open(`Unsupported file type: ${ext}. Supported: ${this.evidenceFileExtensions.join(', ')}`, 'Close', { duration: 3000 });
+        }
+      }
+      input.value = ''; // Reset input
+    }
+  }
+
+  /**
+   * Remove evidence file
+   */
+  removeEvidenceFile(index: number) {
+    this.evidenceFiles.splice(index, 1);
+  }
+
+  /**
+   * Add evidence link
+   */
+  addEvidenceLink() {
+    const url = prompt('Enter URL:');
+    if (url && url.trim()) {
+      const title = prompt('Enter title (optional):') || url;
+      this.evidenceLinks.push({
+        url: url.trim(),
+        title: title.trim(),
+        sourceType: 'URL_LINK',
+      });
+    }
+  }
+
+  /**
+   * Remove evidence link
+   */
+  removeEvidenceLink(index: number) {
+    this.evidenceLinks.splice(index, 1);
+  }
+
+  /**
+   * Preview resolved evidence set
+   */
+  async previewEvidenceSet() {
+    const user = this.authService.getCurrentUser();
+    const orgId = user?.orgId;
+    const projectId = user?.projectId;
+    
+    if (!orgId) {
+      return;
+    }
+
+    this.evidencePreviewLoading = true;
+    try {
+      // Get conversation evidence IDs from uploaded files/links
+      // For preview, we'll just show org/project/template evidence
+      const evidenceSet = await firstValueFrom(
+        this.evidenceService.resolveEvidenceSet({
+          orgId,
+          projectId,
+          templateId: this.templateId,
+          includeOrgEvidence: this.includeOrgEvidence,
+          includeProjectEvidence: this.includeProjectEvidence,
+          includeTemplateEvidence: this.includeTemplateEvidence,
+          simulationMode: this.simulationMode,
+        })
+      );
+      this.resolvedEvidenceSet = evidenceSet;
+    } catch (error: any) {
+      console.error('Failed to preview evidence set:', error);
+      this.snackBar.open('Failed to preview evidence set', 'Close', { duration: 3000 });
+    } finally {
+      this.evidencePreviewLoading = false;
+    }
+  }
+
+  /**
+   * Get evidence count for preview
+   */
+  getEvidenceCount(): string {
+    if (!this.resolvedEvidenceSet) {
+      return '0';
+    }
+    const total = this.resolvedEvidenceSet.resolvedEvidenceIds.length;
+    const org = this.resolvedEvidenceSet.orgEvidenceIds.length;
+    const project = this.resolvedEvidenceSet.projectEvidenceIds.length;
+    const template = this.resolvedEvidenceSet.templateEvidenceIds.length;
+    const conversation = this.evidenceFiles.length + this.evidenceLinks.length;
+    
+    const parts: string[] = [];
+    if (org > 0) parts.push(`${org} org`);
+    if (project > 0) parts.push(`${project} project`);
+    if (template > 0) parts.push(`${template} template`);
+    if (conversation > 0) parts.push(`${conversation} attached`);
+    
+    return parts.length > 0 ? parts.join(' + ') : '0';
   }
 
   /**
@@ -404,7 +549,69 @@ export class IngestionComponent implements OnInit, OnDestroy {
         }
       }
 
-      // Step 3: Handle post-upload behavior based on mode
+      // Step 3: Upload evidence files if any
+      const conversationEvidenceIds: string[] = [];
+      if (this.evidenceFiles.length > 0 || this.evidenceLinks.length > 0) {
+        try {
+          const user = this.authService.getCurrentUser();
+          const orgId = user?.orgId;
+          if (!orgId) {
+            throw new Error('Organization ID not found');
+          }
+
+          // Upload evidence files
+          for (const file of this.evidenceFiles) {
+            try {
+              const evidenceItem = await firstValueFrom(
+                this.evidenceService.uploadEvidenceFile(
+                  file,
+                  orgId,
+                  'POLICY', // Default source type, can be made configurable
+                  file.name,
+                  {
+                    conversationId: jobResponse.jobId, // Use jobId as conversationId for now
+                    scope: 'CONVERSATION',
+                  }
+                )
+              );
+              conversationEvidenceIds.push(evidenceItem.id);
+              console.log('[Ingestion] Evidence file uploaded:', evidenceItem.id);
+            } catch (evidenceError: any) {
+              console.warn('[Ingestion] Failed to upload evidence file:', evidenceError);
+              // Continue with other files
+            }
+          }
+
+          // Add evidence links
+          for (const link of this.evidenceLinks) {
+            try {
+              const evidenceItem = await firstValueFrom(
+                this.evidenceService.addEvidenceLink(
+                  link.url,
+                  orgId,
+                  link.sourceType,
+                  link.title,
+                  {
+                    conversationId: jobResponse.jobId,
+                    scope: 'CONVERSATION',
+                    snapshotLink: true,
+                  }
+                )
+              );
+              conversationEvidenceIds.push(evidenceItem.id);
+              console.log('[Ingestion] Evidence link added:', evidenceItem.id);
+            } catch (evidenceError: any) {
+              console.warn('[Ingestion] Failed to add evidence link:', evidenceError);
+              // Continue with other links
+            }
+          }
+        } catch (evidenceError: any) {
+          console.warn('[Ingestion] Evidence upload failed, continuing without evidence:', evidenceError);
+          // Continue without evidence - evaluation can still run
+        }
+      }
+
+      // Step 4: Handle post-upload behavior based on mode
       if (mode === 'AUDIO_ONLY') {
         // For Audio Only: Upload is complete, show "Transcribe & Analyze" button
         // Don't start polling yet - wait for user to click "Transcribe & Analyze"
@@ -413,6 +620,7 @@ export class IngestionComponent implements OnInit, OnDestroy {
         console.log('[Ingestion] Audio uploaded successfully. Ready for transcription.');
       } else {
         // For other modes: Start polling immediately (processing starts automatically)
+        // Note: Evidence parameters will be passed when the job is processed
         console.log('[Ingestion] Starting job status polling...');
         console.log('[Ingestion] Job ID:', jobResponse.jobId);
         this.startJobPolling(jobResponse.jobId);
