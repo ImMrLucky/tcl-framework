@@ -68,6 +68,17 @@ export class EvidenceUploadDialogComponent {
   
   uploading = false;
   canLock = false; // Admin/owner only
+  
+  // Cache source type options to avoid calling method repeatedly in template
+  sourceTypeOptions: Array<{ value: EvidenceItem['sourceType']; label: string }> = [
+    { value: 'POLICY', label: 'Policy' },
+    { value: 'RULESET', label: 'Ruleset' },
+    { value: 'KNOWLEDGE', label: 'Knowledge' },
+    { value: 'ACCOUNT_FACTS', label: 'Account Facts' },
+    { value: 'LEGAL', label: 'Legal' },
+    { value: 'URL_LINK', label: 'URL Link' },
+    { value: 'SYSTEM_EXPORT', label: 'System Export' }
+  ];
 
   constructor(
     public dialogRef: MatDialogRef<EvidenceUploadDialogComponent>,
@@ -271,16 +282,7 @@ export class EvidenceUploadDialogComponent {
     }
   }
 
-  getSourceTypeOptions(): Array<{ value: EvidenceItem['sourceType']; label: string }> {
-    return [
-      { value: 'POLICY', label: 'Policy' },
-      { value: 'RULESET', label: 'Ruleset' },
-      { value: 'KNOWLEDGE', label: 'Knowledge' },
-      { value: 'ACCOUNT_FACTS', label: 'Account Facts' },
-      { value: 'LEGAL', label: 'Legal' },
-      { value: 'URL_LINK', label: 'URL Link' },
-      { value: 'SYSTEM_EXPORT', label: 'System Export' }
-    ];
-  }
+  // Removed getSourceTypeOptions() method - using sourceTypeOptions property instead
+  // to avoid calling method repeatedly during change detection cycles
 }
 

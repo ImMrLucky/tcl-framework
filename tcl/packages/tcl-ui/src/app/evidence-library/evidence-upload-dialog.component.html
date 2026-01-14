@@ -51,7 +51,7 @@
     <mat-form-field appearance="outline" class="full-width">
       <mat-label>Source Type *</mat-label>
       <mat-select [(ngModel)]="sourceType" required>
-        <mat-option *ngFor="let option of getSourceTypeOptions()" [value]="option.value">
+        <mat-option *ngFor="let option of sourceTypeOptions" [value]="option.value">
           {{ option.label }}
         </mat-option>
       </mat-select>
