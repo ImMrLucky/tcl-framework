@@ -836,7 +836,7 @@ export function setupEvidenceRoutes(app: express.Application) {
         projectId as string || context.projectId,
         templateId as string,
         conversationId as string,
-        simulationMode === 'true' || simulationMode === true,
+        simulationMode === 'true' || simulationMode === true || simulationMode === '1',
         includeOrg !== 'false',
         includeProject !== 'false',
         includeTemplate !== 'false'

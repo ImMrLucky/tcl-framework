@@ -83,6 +83,8 @@ export interface IssueV2 {
   score: number;
   confidence: number;
   reviewRequired: boolean;
+  legalHoldSuggested?: boolean; // For regulatory exposure lens sorting
+  tags?: string[]; // Additional tags for filtering and lens-based sorting
   
   verification: {
     level: 'TRANSCRIPT_PROVABLE' | 'DOC_SUPPORTED' | 'SYSTEM_VERIFIED' | 'EXTERNAL_VERIFIED' | 'TRANSCRIPT_ONLY' | 'UNVERIFIED' | 'NONE';

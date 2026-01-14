@@ -96,6 +96,8 @@ interface IssueV2 {
   category: 'evidence' | 'consistency' | 'compliance' | 'billing' | 'disclosure' | 'data_integrity' | 'other'; // Legacy
   primaryCategory?: 'compliance' | 'privacy_security' | 'billing_financial' | 'promises_consistency' | 'policy_process' | 'customer_dispute'; // NEW: Canonical category
   severity: 'low' | 'medium' | 'high' | 'critical';
+  legalHoldSuggested?: boolean; // For regulatory exposure lens sorting
+  tags?: string[]; // Additional tags for filtering and lens-based sorting
   // severity removed - use severity field directly
   impact?: 'low' | 'medium' | 'high'; // How bad if true (not affected by mode)
   riskScore: number;

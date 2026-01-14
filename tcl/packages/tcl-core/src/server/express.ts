@@ -1225,7 +1225,7 @@ app.post("/validate", requireCapability(Capability.ANALYZE_MANUAL_UPLOAD), async
           );
           
           // Add conversation-level evidence IDs if provided
-          if (evidenceParams.conversationEvidenceIds && Array.isArray(evidenceParams.conversationEvidenceIds)) {
+          if (evidenceSet && evidenceParams.conversationEvidenceIds && Array.isArray(evidenceParams.conversationEvidenceIds)) {
             evidenceSet.conversationEvidenceIds = evidenceParams.conversationEvidenceIds;
             // Add to resolvedEvidenceIds
             evidenceSet.resolvedEvidenceIds = [
@@ -1235,29 +1235,30 @@ app.post("/validate", requireCapability(Capability.ANALYZE_MANUAL_UPLOAD), async
           }
           
           // Collect diagnostics
-          try {
-            const { data: failedIndexing } = await supabaseAdmin
-              .from('evidence_items')
-              .select('id, title, index_error')
-              .eq('org_id', context.orgId)
-              .eq('index_status', 'FAILED')
-              .in('id', evidenceSet.resolvedEvidenceIds || []);
-            
-            if (failedIndexing && failedIndexing.length > 0) {
-              evidenceDiagnostics.indexingFailures = failedIndexing.map(item => ({
-                evidenceItemId: item.id,
-                error: item.index_error || 'Unknown indexing error',
-              }));
+          if (evidenceSet) {
+            try {
+              const { data: failedIndexing } = await supabaseAdmin
+                .from('evidence_items')
+                .select('id, title, index_error')
+                .eq('org_id', context.orgId)
+                .eq('index_status', 'FAILED')
+                .in('id', evidenceSet.resolvedEvidenceIds || []);
+              
+              if (failedIndexing && failedIndexing.length > 0) {
+                evidenceDiagnostics.indexingFailures = failedIndexing.map(item => ({
+                  evidenceItemId: item.id,
+                  error: item.index_error || 'Unknown indexing error',
+                }));
+              }
+            } catch (diagError) {
+              console.warn('Failed to collect evidence diagnostics:', diagError);
             }
-          } catch (diagError) {
-            console.warn('Failed to collect evidence diagnostics:', diagError);
           }
         } catch (evidenceError: any) {
           console.warn('Failed to resolve evidence set:', evidenceError);
           // Continue without evidence - evaluation can still run
           evidenceDiagnostics = {
             indexingFailures: [],
-            error: evidenceError.message,
           };
         }
         

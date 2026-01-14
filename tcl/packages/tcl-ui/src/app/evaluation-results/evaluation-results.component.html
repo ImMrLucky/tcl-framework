@@ -93,42 +93,42 @@
       <mat-card-content>
         <div class="evidence-summary-content">
           <div class="evidence-counts">
-            <div class="evidence-count-item" *ngIf="(evaluation.evidence_set.orgEvidenceIds?.length || 0) > 0">
+            <div class="evidence-count-item" *ngIf="(evaluation.evidence_set?.orgEvidenceIds?.length || 0) > 0">
               <mat-icon>business</mat-icon>
               <div>
-                <strong>{{ evaluation.evidence_set.orgEvidenceIds.length }}</strong>
+                <strong>{{ evaluation.evidence_set?.orgEvidenceIds?.length || 0 }}</strong>
                 <span>Organization Evidence</span>
               </div>
             </div>
-            <div class="evidence-count-item" *ngIf="(evaluation.evidence_set.projectEvidenceIds?.length || 0) > 0">
+            <div class="evidence-count-item" *ngIf="(evaluation.evidence_set?.projectEvidenceIds?.length || 0) > 0">
               <mat-icon>folder</mat-icon>
               <div>
-                <strong>{{ evaluation.evidence_set.projectEvidenceIds.length }}</strong>
+                <strong>{{ evaluation.evidence_set?.projectEvidenceIds?.length || 0 }}</strong>
                 <span>Project Evidence</span>
               </div>
             </div>
-            <div class="evidence-count-item" *ngIf="(evaluation.evidence_set.templateEvidenceIds?.length || 0) > 0">
+            <div class="evidence-count-item" *ngIf="(evaluation.evidence_set?.templateEvidenceIds?.length || 0) > 0">
               <mat-icon>description</mat-icon>
               <div>
-                <strong>{{ evaluation.evidence_set.templateEvidenceIds.length }}</strong>
+                <strong>{{ evaluation.evidence_set?.templateEvidenceIds?.length || 0 }}</strong>
                 <span>Template Evidence</span>
               </div>
             </div>
-            <div class="evidence-count-item" *ngIf="(evaluation.evidence_set.conversationEvidenceIds?.length || 0) > 0">
+            <div class="evidence-count-item" *ngIf="(evaluation.evidence_set?.conversationEvidenceIds?.length || 0) > 0">
               <mat-icon>chat</mat-icon>
               <div>
-                <strong>{{ evaluation.evidence_set.conversationEvidenceIds.length }}</strong>
+                <strong>{{ evaluation.evidence_set?.conversationEvidenceIds?.length || 0 }}</strong>
                 <span>Conversation Evidence</span>
               </div>
             </div>
           </div>
           <div class="evidence-total">
-            <strong>Total: {{ (evaluation.evidence_set.resolvedEvidenceIds?.length || 0) }}</strong>
+            <strong>Total: {{ (evaluation.evidence_set?.resolvedEvidenceIds?.length || 0) }}</strong>
             <span>evidence items used</span>
           </div>
-          <div class="evidence-diagnostics" *ngIf="evaluation?.evidence_diagnostics?.indexingFailures?.length > 0">
+          <div class="evidence-diagnostics" *ngIf="(evaluation?.evidence_diagnostics?.indexingFailures?.length || 0) > 0">
             <mat-icon color="warn">warning</mat-icon>
-            <span>{{ evaluation.evidence_diagnostics.indexingFailures.length }} evidence item(s) had indexing failures</span>
+            <span>{{ evaluation?.evidence_diagnostics?.indexingFailures?.length || 0 }} evidence item(s) had indexing failures</span>
           </div>
         </div>
       </mat-card-content>

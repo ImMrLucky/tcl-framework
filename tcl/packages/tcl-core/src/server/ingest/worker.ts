@@ -649,7 +649,7 @@ async function runAnalysis(input: {
     );
     
     // Add conversation-level evidence IDs if provided
-    if (input.conversationEvidenceIds && input.conversationEvidenceIds.length > 0) {
+    if (evidenceSet && input.conversationEvidenceIds && input.conversationEvidenceIds.length > 0) {
       evidenceSet.conversationEvidenceIds = input.conversationEvidenceIds;
       // Add to resolvedEvidenceIds
       evidenceSet.resolvedEvidenceIds = [
@@ -659,7 +659,7 @@ async function runAnalysis(input: {
     }
     
     // Collect diagnostics (check for indexing failures, missing approvals, etc.)
-    if (supabaseAdmin) {
+    if (evidenceSet && supabaseAdmin) {
       try {
         // Check for evidence items with indexing failures
         const { data: failedIndexing } = await supabaseAdmin
@@ -684,7 +684,6 @@ async function runAnalysis(input: {
     // Continue without evidence - evaluation can still run
     evidenceDiagnostics = {
       indexingFailures: [],
-      error: evidenceError.message,
     };
   }
   

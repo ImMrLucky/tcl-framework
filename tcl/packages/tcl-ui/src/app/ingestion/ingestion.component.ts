@@ -142,6 +142,8 @@ export class IngestionComponent implements OnInit, OnDestroy {
     private router: Router,
     private snackBar: MatSnackBar,
     private authService: AuthService,
+    private evidenceService: EvidenceService,
+    private memberService: MemberService,
     private http: HttpClient,
     private evidenceService: EvidenceService
   ) {}
@@ -223,12 +225,28 @@ export class IngestionComponent implements OnInit, OnDestroy {
    */
   async previewEvidenceSet() {
     const user = this.authService.getCurrentUser();
-    const orgId = user?.orgId;
-    const projectId = user?.projectId;
+    if (!user?.id) {
+      return;
+    }
+    
+    // Get orgId from user's organizations (first org for now)
+    // TODO: Support multi-org selection
+    let orgId: string | undefined;
+    try {
+      const orgs = await firstValueFrom(this.auditService.getUserOrgs(user.id));
+      if (orgs && orgs.length > 0) {
+        orgId = orgs[0].id;
+      }
+    } catch (err) {
+      console.error('Failed to get user orgs:', err);
+      return;
+    }
     
     if (!orgId) {
       return;
     }
+    
+    const projectId: string | undefined = undefined; // TODO: Get from user context or selection
 
     this.evidencePreviewLoading = true;
     try {
@@ -554,9 +572,26 @@ export class IngestionComponent implements OnInit, OnDestroy {
       if (this.evidenceFiles.length > 0 || this.evidenceLinks.length > 0) {
         try {
           const user = this.authService.getCurrentUser();
-          const orgId = user?.orgId;
+          if (!user?.id) {
+            throw new Error('User not authenticated');
+          }
+          
+          // Get orgId from user's organizations (first org for now)
+          // TODO: Support multi-org selection
+          let orgId: string | undefined;
+          try {
+            const orgsResponse = await firstValueFrom(this.memberService.getUserOrgs(user.id));
+            const orgs = orgsResponse.orgs;
+            if (orgs && orgs.length > 0) {
+              orgId = orgs[0].id;
+            }
+          } catch (err) {
+            console.error('Failed to get user orgs:', err);
+            throw new Error('Failed to get organization ID');
+          }
+          
           if (!orgId) {
-            throw new Error('Organization ID not found');
+            throw new Error('Organization ID not found - user must be a member of at least one organization');
           }
 
           // Upload evidence files

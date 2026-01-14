@@ -12,7 +12,20 @@ import { MatInputModule } from '@angular/material/input';
 import { MatChipsModule } from '@angular/material/chips';
 import { MatSnackBar, MatSnackBarModule } from '@angular/material/snack-bar';
 import { AppHeaderComponent } from '../shared/app-header.component';
-import { EvidenceService, EvidenceCoverage, EvidenceGap } from '../evidence.service';
+import { EvidenceService } from '../evidence.service';
+
+// Types for evidence coverage (not yet implemented in service)
+interface EvidenceCoverage {
+  totalClaims: number;
+  docSupported: number;
+  systemVerified: number;
+  transcriptOnly: number;
+}
+
+interface EvidenceGap {
+  category: string;
+  missingEvidence: string[];
+}
 
 @Component({
   selector: 'app-evidence-coverage',
@@ -95,10 +108,10 @@ export class EvidenceCoverageComponent implements OnInit {
   }
 
   getCategoryPercent(category: string): number {
-    if (!this.coverage || !this.coverage.byCategory[category]) {
+    if (!this.coverage || !(this.coverage as any).byCategory || !(this.coverage as any).byCategory[category]) {
       return 0;
     }
-    const cat = this.coverage.byCategory[category];
+    const cat = (this.coverage as any).byCategory[category];
     const total = cat.total || 1;
     return Math.round((cat.externalVerified / total) * 100);
   }
@@ -107,10 +120,10 @@ export class EvidenceCoverageComponent implements OnInit {
   Object = Object;
 
   getCategoryKeys(): string[] {
-    if (!this.coverage || !this.coverage.byCategory) {
+    if (!this.coverage || !(this.coverage as any).byCategory) {
       return [];
     }
-    return Object.keys(this.coverage.byCategory);
+    return Object.keys((this.coverage as any).byCategory);
   }
 }
 

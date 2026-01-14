@@ -13,7 +13,7 @@ import type {
   EvidenceIndexStatus,
   EvidenceSet,
   EvidenceDiagnostics
-} from '../../../types/evidence.types.js';
+} from '../../types/evidence.types.js';
 
 export interface CreateEvidenceItemInput {
   orgId: string;
@@ -306,18 +306,35 @@ export async function approveEvidenceItem(
     throw new Error(`Failed to approve evidence item: ${error.message}`);
   }
 
-  // Log approval in audit table
-  await supabaseAdmin
-    .from('evidence_approvals')
-    .insert({
-      evidence_item_id: evidenceItemId,
-      org_id: orgId,
-      action: 'APPROVED',
-      actor_user_id: approvedBy,
-    })
-    .catch(err => {
-      console.warn('Failed to log approval audit:', err);
-    });
+  // Log approval in audit table (fire and forget - don't block on this)
+  try {
+    await supabaseAdmin
+      .from('evidence_approvals')
+      .insert({
+        evidence_item_id: evidenceItemId,
+        org_id: orgId,
+        action: 'APPROVED',
+        actor_user_id: approvedBy,
+      });
+  } catch (err: any) {
+    console.warn('Failed to log approval in evidence_approvals:', err);
+  }
+  
+  // Log audit event (fire and forget - don't block on this)
+  try {
+    await supabaseAdmin
+      .from('audit_log')
+      .insert({
+        org_id: data.org_id,
+        actor_user_id: approvedBy,
+        action: 'evidence.approve',
+        target_type: 'evidence_item',
+        target_id: evidenceItemId,
+        meta: { evidenceItemId },
+      });
+  } catch (err: any) {
+    console.warn('Failed to log approval audit:', err);
+  }
 
   return mapDbRowToEvidenceItem(data);
 }
@@ -349,19 +366,36 @@ export async function deprecateEvidenceItem(
     throw new Error(`Failed to deprecate evidence item: ${error.message}`);
   }
 
-  // Log deprecation in audit table
-  await supabaseAdmin
-    .from('evidence_approvals')
-    .insert({
-      evidence_item_id: evidenceItemId,
-      org_id: orgId,
-      action: 'DEPRECATED',
-      actor_user_id: deprecatedBy,
-      notes: notes || null,
-    })
-    .catch(err => {
-      console.warn('Failed to log deprecation audit:', err);
-    });
+  // Log deprecation in audit table (fire and forget - don't block on this)
+  try {
+    await supabaseAdmin
+      .from('evidence_approvals')
+      .insert({
+        evidence_item_id: evidenceItemId,
+        org_id: orgId,
+        action: 'DEPRECATED',
+        actor_user_id: deprecatedBy,
+        notes: notes || null,
+      });
+  } catch (err: any) {
+    console.warn('Failed to log deprecation in evidence_approvals:', err);
+  }
+  
+  // Log audit event (fire and forget - don't block on this)
+  try {
+    await supabaseAdmin
+      .from('audit_log')
+      .insert({
+        org_id: data.org_id,
+        actor_user_id: deprecatedBy,
+        action: 'evidence.deprecate',
+        target_type: 'evidence_item',
+        target_id: evidenceItemId,
+        meta: { evidenceItemId, notes: notes || null },
+      });
+  } catch (err: any) {
+    console.warn('Failed to log deprecation audit:', err);
+  }
 
   return mapDbRowToEvidenceItem(data);
 }

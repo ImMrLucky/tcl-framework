@@ -99,9 +99,15 @@ export async function extractTextFromBuffer(
   // Handle PDF (optional: requires pdf-parse package)
   if (mimeType === 'application/pdf' || ext === 'pdf') {
     try {
-      // Try to use pdf-parse if available
-      const pdfParse = await import('pdf-parse').catch(() => null);
-      if (pdfParse) {
+      // Try to use pdf-parse if available (dynamic import with error handling)
+      let pdfParse: any = null;
+      try {
+        pdfParse = await import('pdf-parse');
+      } catch (importError) {
+        // pdf-parse not installed - will use fallback
+      }
+      
+      if (pdfParse && pdfParse.default) {
         const data = await pdfParse.default(buffer);
         return {
           text: data.text,
@@ -131,9 +137,15 @@ export async function extractTextFromBuffer(
     ext === 'docx'
   ) {
     try {
-      // Try to use mammoth if available
-      const mammoth = await import('mammoth').catch(() => null);
-      if (mammoth) {
+      // Try to use mammoth if available (dynamic import with error handling)
+      let mammoth: any = null;
+      try {
+        mammoth = await import('mammoth');
+      } catch (importError) {
+        // mammoth not installed - will throw error below
+      }
+      
+      if (mammoth && mammoth.extractRawText) {
         const result = await mammoth.extractRawText({ buffer });
         return {
           text: result.value,

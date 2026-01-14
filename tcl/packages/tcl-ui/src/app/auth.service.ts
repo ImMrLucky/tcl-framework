@@ -13,6 +13,8 @@ export interface User {
   callOperation?: string;
   primaryUseCase?: string;
   onboardingCompleted?: boolean;
+  orgId?: string; // Organization ID (from org_members or profile)
+  projectId?: string; // Current project ID (from user context)
 }
 
 @Injectable({

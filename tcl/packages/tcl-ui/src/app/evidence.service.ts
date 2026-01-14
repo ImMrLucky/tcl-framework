@@ -84,8 +84,14 @@ export interface EvidenceDiagnostics {
 })
 export class EvidenceService {
   private get apiBase(): string {
-    const apiUrl = this.authService.getApiUrl();
-    return apiUrl ? `${apiUrl}/api` : '/api';
+    // Use the same API base URL logic as AuditService
+    if (typeof window !== 'undefined') {
+      const apiUrl = (window as any).__TCL_API_URL;
+      if (apiUrl) {
+        return `${apiUrl}/api`;
+      }
+    }
+    return '/api';
   }
 
   constructor(

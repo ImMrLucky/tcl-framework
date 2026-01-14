@@ -84,7 +84,7 @@ async function getFileSize(filePath: string): Promise<number> {
 /**
  * Get MIME type from filename
  */
-function getMimeType(filename: string): string {
+export function getMimeType(filename: string): string {
   const ext = filename.toLowerCase().split('.').pop() || '';
   const mimeTypes: Record<string, string> = {
     // Audio
