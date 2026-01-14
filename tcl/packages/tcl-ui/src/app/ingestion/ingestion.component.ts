@@ -19,6 +19,7 @@ import { AuditService } from '../audit.service';
 import { TclService } from '../tcl.service';
 import { AuthService } from '../auth.service';
 import { EvidenceService, EvidenceItem } from '../evidence.service';
+import { MemberService } from '../member.service';
 import { HttpClient } from '@angular/common/http';
 import { firstValueFrom } from 'rxjs';
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
@@ -144,8 +145,7 @@ export class IngestionComponent implements OnInit, OnDestroy {
     private authService: AuthService,
     private evidenceService: EvidenceService,
     private memberService: MemberService,
-    private http: HttpClient,
-    private evidenceService: EvidenceService
+    private http: HttpClient
   ) {}
 
   ngOnInit() {
@@ -233,7 +233,8 @@ export class IngestionComponent implements OnInit, OnDestroy {
     // TODO: Support multi-org selection
     let orgId: string | undefined;
     try {
-      const orgs = await firstValueFrom(this.auditService.getUserOrgs(user.id));
+      const orgsResponse = await firstValueFrom(this.memberService.getUserOrgs(user.id));
+      const orgs = orgsResponse?.orgs || [];
       if (orgs && orgs.length > 0) {
         orgId = orgs[0].id;
       }
