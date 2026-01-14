@@ -35,6 +35,7 @@ export class DashboardComponent implements OnInit {
   userOrgs: Array<{ id: string; name: string; slug: string; role: string }> = [];
   canInviteMembers: boolean = false;
   primaryOrgId: string = '';
+  private onboardingModalShown = false; // Track if modal has been shown to prevent duplicates
 
   constructor(
     private authService: AuthService,
@@ -65,6 +66,11 @@ export class DashboardComponent implements OnInit {
   }
 
   checkAndShowOnboarding(user: User) {
+    // Don't show if we've already shown the modal in this session
+    if (this.onboardingModalShown) {
+      return;
+    }
+    
     // Only show onboarding modal if:
     // 1. User hasn't completed onboarding (onboardingCompleted === false)
     // 2. User hasn't filled in required fields
@@ -76,6 +82,9 @@ export class DashboardComponent implements OnInit {
       return;
     }
     
+    // Mark that we're showing the modal to prevent duplicates
+    this.onboardingModalShown = true;
+    
     // Show modal for new users who haven't completed onboarding
     setTimeout(() => {
       const dialogRef = this.dialog.open(OnboardingModalComponent, {
@@ -84,15 +93,25 @@ export class DashboardComponent implements OnInit {
         autoFocus: true
       });
 
-      dialogRef.afterClosed().subscribe((result: boolean) => {
-        if (result) {
-          // User completed onboarding, refresh user data
-          const currentUser = this.authService.getCurrentUser();
-          if (currentUser) {
-            this.currentUser = currentUser;
+      dialogRef.afterClosed().subscribe(async (result: boolean) => {
+        // Always refresh user data after modal closes (whether dismissed or submitted)
+        // The auth service's updateProfile/markOnboardingCompleted already calls loadUserProfile
+        // which updates the currentUser$ observable, so the subscription above should handle it.
+        // However, we add a small delay to ensure the profile update has completed and the
+        // observable has emitted the new value before we check again.
+        await new Promise(resolve => setTimeout(resolve, 200));
+        
+        // Get the updated user (should be updated via the currentUser$ subscription)
+        const updatedUser = this.authService.getCurrentUser();
+        if (updatedUser) {
+          this.currentUser = updatedUser;
+          // If onboarding is now completed, we can reset the flag for future sessions
+          // but for this session, we keep it true to prevent showing again
+          if (updatedUser.onboardingCompleted) {
+            // User has completed onboarding, modal won't show again
+            this.onboardingModalShown = true;
           }
         }
-        // If result is false, user dismissed - onboarding_completed is already set to true
       });
     }, 500);
   }

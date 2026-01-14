@@ -61,12 +61,21 @@ export class OnboardingModalComponent implements OnInit {
   async onDismiss() {
     // Mark onboarding as completed even if dismissed
     // This prevents the modal from showing again
+    this.loading = true;
     try {
-      await this.authService.markOnboardingCompleted();
+      const result = await this.authService.markOnboardingCompleted();
+      if (result.error) {
+        console.error('Error marking onboarding as completed:', result.error);
+        // Still close the dialog even if there's an error
+        // The user has explicitly dismissed it
+      }
     } catch (err) {
       console.error('Error marking onboarding as completed:', err);
+      // Still close the dialog even if there's an error
+    } finally {
+      this.loading = false;
+      this.dialogRef.close(false);
     }
-    this.dialogRef.close(false);
   }
 
   async onSubmit() {
