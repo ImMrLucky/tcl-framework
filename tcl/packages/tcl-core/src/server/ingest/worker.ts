@@ -681,7 +681,19 @@ async function runAnalysis(input: {
     const rankedResult = rankIssuesV2(allAtomicIssues, undefined, scoringContext);
     
     // C2-C3: Aggregate issues into clusters
-    const { aggregateIssues } = await import('../../analysis/issue-clustering.js');
+    // Use collapseIssuesToClusters which returns GroupedIssue[] with rollup structure
+    const { collapseIssuesToClusters } = await import('../../analysis/issue-cluster-collapse.js');
+    const groupedIssues = collapseIssuesToClusters(rankedResult.allIssues);
+
+    allIssuesV2 = rankedResult.allIssues;
+    // Use grouped issues for topIssuesV2 (they have the rollup structure the UI expects)
+    topIssuesV2 = groupedIssues.slice(0, 10); // Top 10 grouped issues
+    issueSummaryV2 = rankedResult.summary;
+    
+    // C4: Keep all grouped issues for the report
+    const allGroupedIssues = groupedIssues;
+    
+    // Set evalMode for report
     const evalMode: any = {
       verificationLevel: evidenceMode === 'TRANSCRIPT_ONLY' ? 'TRANSCRIPT_ONLY' : 
                           'DOC_BACKED' as const,
@@ -689,39 +701,20 @@ async function runAnalysis(input: {
       evidenceCoverage01: 0, // TODO: compute from actual evidence coverage
       transcriptOnlyReasonCodes: evidenceMode === 'TRANSCRIPT_ONLY' ? ['NO_EXTERNAL_EVIDENCE'] : [],
     };
-    const clusteringResult = aggregateIssues(rankedResult.allIssues, evalMode);
-
-    allIssuesV2 = rankedResult.allIssues;
-    topIssuesV2 = rankedResult.topIssues;
-    issueSummaryV2 = rankedResult.summary;
-    
-    // C4: Add aggregated issues to report (topAggregatedIssues replaces topIssuesV2 for UI)
-    const topAggregatedIssues = clusteringResult.aggregatedIssues.slice(0, 10); // Top 10 clusters
-    
-    // E1-E3: Compute executive summary from aggregated issues
-    const { computeExecutiveSummary } = await import('../../analysis/executive-summary.js');
-    const executiveSummary = computeExecutiveSummary({
-      aggregatedIssues: clusteringResult.aggregatedIssues,
-      truthScore: validateOutput.scores.truth,
-      coherenceScore: validateOutput.scores.coherence,
-      consistencyScore: validateOutput.scores.consistency,
-      evalMode,
-      provenance: input.provenance ? {
-        ingestionMode: input.ingestionMode || input.provenance.ingestionMode || 'TRANSCRIPT_ONLY',
-        transcriptSource: input.provenance.transcriptSource || 'UNKNOWN',
-        hasAudio: input.provenance.hasAudio || false,
-      } : undefined,
-    });
     
     // Build report with issues (similar to /validate endpoint)
+    // CRITICAL: Use canonical structure with issues.atomic and issues.grouped
     reportWithIssues = {
       ...validateOutput.report,
+      // Canonical structure: issues.atomic and issues.grouped
+      issues: {
+        atomic: allIssuesV2,
+        grouped: allGroupedIssues, // Grouped/clustered issues with rollup structure for UI
+      },
+      // Legacy fields for backwards compatibility
       allIssuesV2,
-      topIssuesV2, // Keep for backwards compatibility / debugging
-      topAggregatedIssues, // C4: New aggregated issues for UI
-      aggregatedIssues: clusteringResult.aggregatedIssues, // All aggregated issues
+      topIssuesV2, // Top grouped issues (has rollup structure)
       issueSummaryV2,
-      executiveSummary, // E1-E3: Root-cause driven executive summary
       // A1: Add EvalMode to report
       evalMode,
       // Rule 0: Add provenance to report

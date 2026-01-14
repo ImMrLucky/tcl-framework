@@ -302,79 +302,79 @@
       <div class="main-content">
         
         <!-- Top Issues (Grouped) - Manager-grade view -->
-        <mat-card class="issues-card issue-grouped" *ngIf="topIssuesV2 && topIssuesV2.length > 0">
-          <mat-card-header>
-            <mat-card-title>
-              <mat-icon>group_work</mat-icon>
-              Top Issues (Grouped) - {{ topIssuesV2.length }} Clustered Findings
-            </mat-card-title>
-            <mat-card-subtitle>
-              Clustered findings ranked by risk (recommended) | 
-              Total atomic issues: {{ getTotalAtomicIssuesInGrouped() }}
-            </mat-card-subtitle>
-          </mat-card-header>
-          <mat-card-content>
-            <div class="grouped-issues-summary">
-              <h3>Top Issues (Grouped) - {{ topIssuesV2.length }} Clustered Findings</h3>
-              <p class="info-text">
-                Issues are grouped by root cause to reduce duplication. Each cluster represents multiple occurrences of the same underlying problem.
-              </p>
-              <div class="cluster-v2-list">
-                <div class="cluster-v2-item" *ngFor="let cluster of paginatedGroupedIssues; let i = index"
-                     [class.critical]="cluster.severity === 'critical'"
-                     [class.high]="cluster.severity === 'high'"
-                     [class.medium]="cluster.severity === 'medium'"
-                     [class.low]="cluster.severity === 'low'"
-                     (click)="openGroupedIssueDetail(cluster)">
-                  <div class="cluster-v2-header">
-                    <span class="cluster-rank">#{{ groupedPageIndex * groupedPageSize + i + 1 }}</span>
-                    <span class="cluster-type">{{ cluster.type }}</span>
-                    <span class="cluster-category">{{ cluster.category }}</span>
-                    <span class="cluster-severity" [class]="'severity-' + (cluster.severity || 'unknown')"
-                          [matTooltip]="getGroupedVerificationTooltip(cluster)"
-                          matTooltipPosition="above">
-                      {{ getGroupedSeverityDisplay(cluster) }}
-                    </span>
-                    <span class="verification-badge"
-                          [class.transcript-only]="cluster.verification?.level === 'TRANSCRIPT_ONLY'"
-                          [matTooltip]="getGroupedVerificationTooltip(cluster)"
-                          [class.verified]="cluster.verification?.level === 'EXTERNAL_VERIFIED'">
-                      {{ getGroupedVerificationLabel(cluster) }}
-                    </span>
-                    <span class="cluster-occurrences" *ngIf="hasMultipleAtomicIssues(cluster)">
-                      {{ getGroupedAtomicIssueCount(cluster) }} atomic findings
-                    </span>
-                    <span class="cluster-risk-score"
-                          [matTooltip]="'Risk Score: ' + (cluster.riskScore * 100).toFixed(0) + '%'"
-                          matTooltipPosition="above">Score: {{ (cluster.riskScore * 100).toFixed(0) }}</span>
-                  </div>
-                  <div class="cluster-v2-body">
-                    <div class="cluster-title">{{ cluster.what.issueSummary }}</div>
-                    <div class="cluster-summary">{{ cluster.what.issueDetail }}</div>
-                    <div class="cluster-meta">
-                      <span class="turn-range" *ngIf="hasInvolvedTurnIndexes(cluster)">
-                        <mat-icon class="meta-icon">chat</mat-icon> Turns {{ getGroupedTurnRange(cluster) }}
-                      </span>
-                      <span *ngIf="cluster.reviewRequired" class="review-required">Review Required</span>
-                    </div>
-                  </div>
-                </div>
-              </div>
+<!--        <mat-card class="issues-card issue-grouped" *ngIf="topIssuesV2 && topIssuesV2.length > 0">-->
+<!--          <mat-card-header>-->
+<!--            <mat-card-title>-->
+<!--              <mat-icon>group_work</mat-icon>-->
+<!--              Top Issues (Grouped) - {{ topIssuesV2.length }} Clustered Findings-->
+<!--            </mat-card-title>-->
+<!--            <mat-card-subtitle>-->
+<!--              Clustered findings ranked by risk (recommended) | -->
+<!--              Total atomic issues: {{ getTotalAtomicIssuesInGrouped() }}-->
+<!--            </mat-card-subtitle>-->
+<!--          </mat-card-header>-->
+<!--          <mat-card-content>-->
+<!--            <div class="grouped-issues-summary">-->
+<!--              <h3>Top Issues (Grouped) - {{ topIssuesV2.length }} Clustered Findings</h3>-->
+<!--              <p class="info-text">-->
+<!--                Issues are grouped by root cause to reduce duplication. Each cluster represents multiple occurrences of the same underlying problem.-->
+<!--              </p>-->
+<!--              <div class="cluster-v2-list">-->
+<!--                <div class="cluster-v2-item" *ngFor="let cluster of paginatedGroupedIssues; let i = index"-->
+<!--                     [class.critical]="cluster.severity === 'critical'"-->
+<!--                     [class.high]="cluster.severity === 'high'"-->
+<!--                     [class.medium]="cluster.severity === 'medium'"-->
+<!--                     [class.low]="cluster.severity === 'low'"-->
+<!--                     (click)="openGroupedIssueDetail(cluster)">-->
+<!--                  <div class="cluster-v2-header">-->
+<!--                    <span class="cluster-rank">#{{ groupedPageIndex * groupedPageSize + i + 1 }}</span>-->
+<!--                    <span class="cluster-type">{{ cluster.type }}</span>-->
+<!--                    <span class="cluster-category">{{ cluster.category }}</span>-->
+<!--                    <span class="cluster-severity" [class]="'severity-' + (cluster.severity || 'unknown')"-->
+<!--                          [matTooltip]="getGroupedVerificationTooltip(cluster)"-->
+<!--                          matTooltipPosition="above">-->
+<!--                      {{ getGroupedSeverityDisplay(cluster) }}-->
+<!--                    </span>-->
+<!--                    <span class="verification-badge"-->
+<!--                          [class.transcript-only]="cluster.verification?.level === 'TRANSCRIPT_ONLY'"-->
+<!--                          [matTooltip]="getGroupedVerificationTooltip(cluster)"-->
+<!--                          [class.verified]="cluster.verification?.level === 'EXTERNAL_VERIFIED'">-->
+<!--                      {{ getGroupedVerificationLabel(cluster) }}-->
+<!--                    </span>-->
+<!--                    <span class="cluster-occurrences" *ngIf="hasMultipleAtomicIssues(cluster)">-->
+<!--                      {{ getGroupedAtomicIssueCount(cluster) }} atomic findings-->
+<!--                    </span>-->
+<!--                    <span class="cluster-risk-score"-->
+<!--                          [matTooltip]="'Risk Score: ' + (cluster.riskScore * 100).toFixed(0) + '%'"-->
+<!--                          matTooltipPosition="above">Score: {{ (cluster.riskScore * 100).toFixed(0) }}</span>-->
+<!--                  </div>-->
+<!--                  <div class="cluster-v2-body">-->
+<!--                    <div class="cluster-title">{{ cluster.what.issueSummary }}</div>-->
+<!--                    <div class="cluster-summary">{{ cluster.what.issueDetail }}</div>-->
+<!--                    <div class="cluster-meta">-->
+<!--                      <span class="turn-range" *ngIf="hasInvolvedTurnIndexes(cluster)">-->
+<!--                        <mat-icon class="meta-icon">chat</mat-icon> Turns {{ getGroupedTurnRange(cluster) }}-->
+<!--                      </span>-->
+<!--                      <span *ngIf="cluster.reviewRequired" class="review-required">Review Required</span>-->
+<!--                    </div>-->
+<!--                  </div>-->
+<!--                </div>-->
+<!--              </div>-->
 
-              <!-- Pagination for Grouped Issues -->
-              <mat-paginator
-                *ngIf="topIssuesV2"
-                [length]="topIssuesV2.length"
-                [pageSize]="groupedPageSize"
-                [pageIndex]="groupedPageIndex"
-                [pageSizeOptions]="groupedPageSizeOptions"
-                [showFirstLastButtons]="true"
-                (page)="onGroupedPageChange($event)"
-                aria-label="Select page of grouped issues">
-              </mat-paginator>
-            </div>
-          </mat-card-content>
-        </mat-card>
+<!--              &lt;!&ndash; Pagination for Grouped Issues &ndash;&gt;-->
+<!--              <mat-paginator-->
+<!--                *ngIf="topIssuesV2"-->
+<!--                [length]="topIssuesV2.length"-->
+<!--                [pageSize]="groupedPageSize"-->
+<!--                [pageIndex]="groupedPageIndex"-->
+<!--                [pageSizeOptions]="groupedPageSizeOptions"-->
+<!--                [showFirstLastButtons]="true"-->
+<!--                (page)="onGroupedPageChange($event)"-->
+<!--                aria-label="Select page of grouped issues">-->
+<!--              </mat-paginator>-->
+<!--            </div>-->
+<!--          </mat-card-content>-->
+<!--        </mat-card>-->
         
         <!-- All Findings (Atomic) - Auditor-grade view -->
         <mat-card class="issues-card issue-v2" *ngIf="allIssuesV2.length > 0">
