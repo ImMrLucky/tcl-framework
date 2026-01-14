@@ -504,12 +504,12 @@ export class AuthService {
       // Continue even if Supabase signOut fails
     }
     
-    // STEP 5: Redirect to homepage with full page reload
+    // STEP 5: Redirect to login page with full page reload
     // This ensures all components re-initialize and check auth state fresh
     if (typeof window !== 'undefined') {
       // Use window.location.href for a full page reload (not router navigation)
       // This ensures all components re-initialize and check auth state fresh
-      window.location.href = '/home';
+      window.location.href = '/login';
     }
   }
 
