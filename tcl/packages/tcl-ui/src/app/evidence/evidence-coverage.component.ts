@@ -137,8 +137,55 @@ export class EvidenceCoverageComponent implements OnInit {
     this.loadData();
   }
 
-  getPriorityClass(priority: string): string {
-    return `priority-${priority}`;
+  getPriorityClass(priority: string | undefined): string {
+    return `priority-${priority || 'unknown'}`;
+  }
+  
+  getCategoryData(category: string): { total: number; externalVerified: number; transcriptOnly: number; none: number } | null {
+    if (!this.coverage || !this.coverage.byCategory || !this.coverage.byCategory[category]) {
+      return null;
+    }
+    return this.coverage.byCategory[category];
+  }
+  
+  getCategoryTotal(category: string): number {
+    const data = this.getCategoryData(category);
+    return data?.total || 0;
+  }
+  
+  getCategoryExternalVerified(category: string): number {
+    const data = this.getCategoryData(category);
+    return data?.externalVerified || 0;
+  }
+  
+  getCategoryTranscriptOnly(category: string): number {
+    const data = this.getCategoryData(category);
+    return data?.transcriptOnly || 0;
+  }
+  
+  getCategoryNone(category: string): number {
+    const data = this.getCategoryData(category);
+    return data?.none || 0;
+  }
+  
+  getGapPriority(gap: EvidenceGap): string {
+    return gap.priority || 'unknown';
+  }
+  
+  getGapExamples(gap: EvidenceGap): string[] {
+    return gap.examples || [];
+  }
+  
+  getGapCategories(gap: EvidenceGap): string[] {
+    return gap.categories || [];
+  }
+  
+  getGapTypes(gap: EvidenceGap): string[] {
+    return gap.types || [];
+  }
+  
+  getGapCount(gap: EvidenceGap): number {
+    return gap.count || 0;
   }
 
   getCategoryPercent(category: string): number {
