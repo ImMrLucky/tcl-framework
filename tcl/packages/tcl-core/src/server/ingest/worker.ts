@@ -574,7 +574,7 @@ async function createConversation(
  * Helper: Run analysis from transcript
  * Extracts claims and runs the full analysis pipeline
  */
-async function runAnalysis(input: {
+export async function runAnalysis(input: {
   orgId: string;
   projectId: string;
   env: string;
