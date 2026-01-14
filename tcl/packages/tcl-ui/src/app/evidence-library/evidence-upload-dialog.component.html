@@ -1,6 +1,6 @@
 <h2 mat-dialog-title>Add Evidence</h2>
 <mat-dialog-content>
-  <div class="upload-form">
+  <div class="upload-form" *ngIf="data && data.orgId; else errorTemplate">
     <!-- Upload Method Tabs -->
     <mat-tab-group [(selectedIndex)]="selectedTabIndex" (selectedIndexChange)="uploadMethod = $event === 0 ? 'file' : 'link'; selectedTabIndex = $event">
       <mat-tab label="Upload File">
@@ -58,7 +58,7 @@
     </mat-form-field>
 
     <!-- Authority & Override (ORG scope only) -->
-    <div *ngIf="data.scope === 'ORG'" class="org-fields">
+    <div *ngIf="data && data.scope === 'ORG'" class="org-fields">
       <mat-form-field appearance="outline" class="full-width">
         <mat-label>Authority Level *</mat-label>
         <mat-select [(ngModel)]="authorityLevel" (selectionChange)="onAuthorityLevelChange()" required>
@@ -104,8 +104,15 @@
       </mat-chip>
     </div>
   </div>
+  
+  <ng-template #errorTemplate>
+    <div style="padding: 24px; text-align: center;">
+      <mat-icon color="warn" style="font-size: 48px; width: 48px; height: 48px;">error</mat-icon>
+      <p style="margin-top: 16px; color: #d32f2f;">Error: Missing required data. Please close this dialog and try again.</p>
+    </div>
+  </ng-template>
 </mat-dialog-content>
-<mat-dialog-actions align="end">
+<mat-dialog-actions align="end" *ngIf="data && data.orgId">
   <button mat-button (click)="cancel()" [disabled]="uploading">Cancel</button>
   <button mat-raised-button color="primary" (click)="upload()" [disabled]="uploading || !title || (uploadMethod === 'file' && !selectedFile) || (uploadMethod === 'link' && !linkUrl)">
     <mat-icon *ngIf="!uploading">upload</mat-icon>

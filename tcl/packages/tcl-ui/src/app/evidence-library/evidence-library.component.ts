@@ -281,19 +281,31 @@ export class EvidenceLibraryComponent implements OnInit, OnDestroy {
       return;
     }
 
-    const dialogRef = this.dialog.open(EvidenceUploadDialogComponent, {
-      width: '700px',
-      data: {
-        orgId: this.orgId,
-        scope: 'ORG' as const
-      }
-    });
+    try {
+      const dialogRef = this.dialog.open(EvidenceUploadDialogComponent, {
+        width: '700px',
+        maxWidth: '95vw',
+        data: {
+          orgId: this.orgId,
+          scope: 'ORG' as const
+        },
+        disableClose: false,
+        autoFocus: true
+      });
 
-    dialogRef.afterClosed().subscribe((result) => {
-      if (result) {
-        this.loadEvidenceItems();
-      }
-    });
+      dialogRef.afterClosed()
+        .pipe(takeUntil(this.destroy$))
+        .subscribe((result) => {
+          if (result) {
+            this.loadEvidenceItems();
+          }
+        });
+    } catch (error: any) {
+      console.error('Error opening upload dialog:', error);
+      this.snackBar.open('Failed to open upload dialog: ' + (error.message || 'Unknown error'), 'Close', {
+        duration: 5000
+      });
+    }
   }
 
   viewEvidence(item: EvidenceItem) {
