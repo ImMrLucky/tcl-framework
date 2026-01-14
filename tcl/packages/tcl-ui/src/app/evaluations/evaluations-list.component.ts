@@ -443,6 +443,7 @@ export interface EvaluationSearchResult {
     
     .filters-card {
       margin-bottom: 24px;
+      padding: 20px;
     }
     
     .filters-card h3 {
