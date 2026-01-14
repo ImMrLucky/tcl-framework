@@ -1,4 +1,4 @@
-import { Component, OnInit, ViewChild, OnDestroy } from '@angular/core';
+import { Component, OnInit, AfterViewInit, ViewChild, OnDestroy } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { Router, RouterModule } from '@angular/router';
 import { MatCardModule } from '@angular/material/card';
@@ -9,7 +9,7 @@ import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
 import { MatChipsModule } from '@angular/material/chips';
 import { MatTooltipModule } from '@angular/material/tooltip';
 import { MatPaginatorModule, PageEvent, MatPaginator } from '@angular/material/paginator';
-import { MatSortModule, Sort } from '@angular/material/sort';
+import { MatSortModule, Sort, MatSort } from '@angular/material/sort';
 import { MatInputModule } from '@angular/material/input';
 import { MatFormFieldModule } from '@angular/material/form-field';
 import { MatSelectModule } from '@angular/material/select';
@@ -63,8 +63,9 @@ import { PatternDetailModalComponent, PatternDetailModalData } from './pattern-d
   templateUrl: './issues-list.component.html',
   styleUrls: ['./issues-list.component.scss']
 })
-export class IssuesListComponent implements OnInit, OnDestroy {
+export class IssuesListComponent implements OnInit, AfterViewInit, OnDestroy {
   @ViewChild(MatPaginator) paginator!: MatPaginator;
+  @ViewChild(MatSort) sort!: MatSort;
   
   private destroy$ = new Subject<void>();
   
@@ -182,6 +183,31 @@ export class IssuesListComponent implements OnInit, OnDestroy {
     });
   }
   
+  ngAfterViewInit() {
+    // Connect MatSort to dataSource for client-side sorting
+    this.dataSource.sort = this.sort;
+    
+    // Set up custom sorting for complex fields
+    this.dataSource.sortingDataAccessor = (data: IssuePatternRow, sortHeaderId: string) => {
+      switch (sortHeaderId) {
+        case 'priorityScore':
+          return data.priorityScore ?? 0;
+        case 'occurrences':
+          return data.occurrences ?? 0;
+        case 'severityDisplay':
+          const severityOrder: Record<string, number> = { critical: 4, high: 3, medium: 2, low: 1 };
+          return severityOrder[data.severityDisplay?.toLowerCase() || 'low'] ?? 1;
+        case 'lastSeen':
+          return new Date(data.lastSeenAt || 0).getTime();
+        case 'status':
+          const statusOrder: Record<string, number> = { OPEN: 4, ACKNOWLEDGED: 3, RESOLVED: 2, FALSE_POSITIVE: 1 };
+          return statusOrder[data.status || 'OPEN'] ?? 1;
+        default:
+          return (data as any)[sortHeaderId] ?? '';
+      }
+    };
+  }
+  
   updateQueryParams() {
     const filterValues = this.filters.value;
     const params: Params = {};
@@ -274,6 +300,11 @@ export class IssuesListComponent implements OnInit, OnDestroy {
       if (response) {
         this.dataSource.data = response.rows;
         this.total = response.total;
+        
+        // Ensure sort connection is maintained after data load
+        if (this.sort && !this.dataSource.sort) {
+          this.dataSource.sort = this.sort;
+        }
         
         // Extract unique categories and types for filter options
         const categories = new Set<string>();
