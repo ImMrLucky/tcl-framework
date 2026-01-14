@@ -1,4 +1,4 @@
-import { Component, OnInit, Input } from '@angular/core';
+import { Component, OnInit, Input, OnDestroy } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { RouterModule } from '@angular/router';
 import { MatButtonModule } from '@angular/material/button';
@@ -12,6 +12,8 @@ import { AuthService, User } from '../auth.service';
 import { PlanService, PlanTier } from '../plan.service';
 import { Router } from '@angular/router';
 import { MatChipsModule } from '@angular/material/chips';
+import { Subject } from 'rxjs';
+import { takeUntil, distinctUntilChanged, debounceTime } from 'rxjs/operators';
 
 @Component({
   selector: 'app-header',
@@ -31,7 +33,7 @@ import { MatChipsModule } from '@angular/material/chips';
   templateUrl: './app-header.component.html',
   styleUrls: ['./app-header.component.scss']
 })
-export class AppHeaderComponent implements OnInit {
+export class AppHeaderComponent implements OnInit, OnDestroy {
   @Input() pageTitle?: string;
   @Input() pageSubtitle?: string;
   @Input() showNavigation = true;
@@ -46,6 +48,8 @@ export class AppHeaderComponent implements OnInit {
   
   planTier: PlanTier | null = null;
   planContext$ = this.planService.planContext$;
+  
+  private destroy$ = new Subject<void>();
 
   constructor(
     private authService: AuthService,
@@ -70,30 +74,62 @@ export class AppHeaderComponent implements OnInit {
       }
     }
     
-    this.authService.currentUser$.subscribe(user => {
-      const wasAuthenticated = this.isAuthenticated;
-      this.currentUser = user;
-      this.isAuthenticated = user !== null;
-      
-      // Only update sidebar visibility if authentication state actually changed
-      // This prevents flickering during route changes or brief null emissions
-      if (wasAuthenticated !== this.isAuthenticated) {
-        // Add/remove body class for sidebar
-        if (typeof document !== 'undefined') {
-          if (this.isAuthenticated && this.showNavigation) {
-            document.body.classList.add('has-sidebar');
-            this.updateSidebarClass();
-          } else {
-            document.body.classList.remove('has-sidebar', 'sidebar-collapsed');
+    // Subscribe to user changes with debouncing and distinctUntilChanged to prevent flickering
+    this.authService.currentUser$
+      .pipe(
+        distinctUntilChanged((prev, curr) => {
+          // Consider it the same if both are null or both have the same id
+          if (prev === null && curr === null) return true;
+          if (prev?.id === curr?.id) return true;
+          return false;
+        }),
+        debounceTime(50), // Small debounce to prevent rapid state changes
+        takeUntil(this.destroy$)
+      )
+      .subscribe(user => {
+        const wasAuthenticated = this.isAuthenticated;
+        this.currentUser = user;
+        
+        // Use a more robust check: only set isAuthenticated to false if we're certain
+        // Don't set to false on brief null emissions (which can happen during route changes or profile updates)
+        if (user !== null) {
+          this.isAuthenticated = true;
+        } else {
+          // Only set to false if we were previously authenticated and now we're definitely not
+          // This prevents flickering from temporary null emissions during profile updates
+          if (wasAuthenticated) {
+            // Double-check with sync method before removing auth state
+            // Don't change isAuthenticated if sync method says we're still authenticated
+            // This handles cases where the observable emits null but session still exists
+            if (this.authService.isAuthenticatedSync && !this.authService.isAuthenticatedSync()) {
+              this.isAuthenticated = false;
+            } else {
+              // Keep isAuthenticated = true if sync check says we're still authenticated
+              // This prevents sidebar from disappearing during profile updates
+              this.isAuthenticated = true;
+            }
           }
         }
-      }
-      
-      // Load plan context when user is authenticated
-      if (user) {
-        this.planService.loadPlanContext();
-      }
-    });
+        
+        // Only update sidebar visibility if authentication state actually changed
+        // This prevents flickering during route changes or brief null emissions
+        if (wasAuthenticated !== this.isAuthenticated) {
+          // Add/remove body class for sidebar
+          if (typeof document !== 'undefined') {
+            if (this.isAuthenticated && this.showNavigation) {
+              document.body.classList.add('has-sidebar');
+              this.updateSidebarClass();
+            } else {
+              document.body.classList.remove('has-sidebar', 'sidebar-collapsed');
+            }
+          }
+        }
+        
+        // Load plan context when user is authenticated
+        if (user) {
+          this.planService.loadPlanContext();
+        }
+      });
     
     // Subscribe to plan context changes
     this.planContext$.subscribe(context => {
@@ -101,9 +137,16 @@ export class AppHeaderComponent implements OnInit {
     });
 
     // Subscribe to superuser status
-    this.planService.isSuperuser$.subscribe(isSuperuser => {
-      this.isSuperuser = isSuperuser;
-    });
+    this.planService.isSuperuser$
+      .pipe(takeUntil(this.destroy$))
+      .subscribe(isSuperuser => {
+        this.isSuperuser = isSuperuser;
+      });
+  }
+  
+  ngOnDestroy() {
+    this.destroy$.next();
+    this.destroy$.complete();
   }
 
   updateSidebarClass() {

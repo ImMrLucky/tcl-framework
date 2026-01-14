@@ -63,18 +63,21 @@ export class OnboardingModalComponent implements OnInit {
     // This prevents the modal from showing again
     this.loading = true;
     try {
+      // Close the dialog immediately, then update in the background
+      // This prevents the modal from blocking and ensures it closes
+      this.dialogRef.close(false);
+      
+      // Update onboarding status in the background
       const result = await this.authService.markOnboardingCompleted();
       if (result.error) {
         console.error('Error marking onboarding as completed:', result.error);
-        // Still close the dialog even if there's an error
-        // The user has explicitly dismissed it
+        // Error is logged but modal is already closed
       }
     } catch (err) {
       console.error('Error marking onboarding as completed:', err);
-      // Still close the dialog even if there's an error
+      // Error is logged but modal is already closed
     } finally {
       this.loading = false;
-      this.dialogRef.close(false);
     }
   }
 
