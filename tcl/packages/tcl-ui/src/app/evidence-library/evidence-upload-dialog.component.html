@@ -1,0 +1,116 @@
+<h2 mat-dialog-title>Add Evidence</h2>
+<mat-dialog-content>
+  <div class="upload-form">
+    <!-- Upload Method Tabs -->
+    <mat-tab-group [(selectedIndex)]="uploadMethod" (selectedIndexChange)="uploadMethod = $event === 0 ? 'file' : 'link'">
+      <mat-tab label="Upload File">
+        <div class="tab-content">
+          <div class="file-upload-section">
+            <input type="file" #fileInput (change)="onFileSelected($event)" accept=".pdf,.doc,.docx,.txt,.csv,.json,.html,.md" style="display: none;">
+            <button mat-raised-button type="button" (click)="fileInput.click()">
+              <mat-icon>upload</mat-icon>
+              Choose File
+            </button>
+            <span class="file-hint">Supported: PDF, DOC, DOCX, TXT, CSV, JSON, HTML, MD</span>
+          </div>
+          <div *ngIf="selectedFile" class="file-info">
+            <mat-icon>description</mat-icon>
+            <span>{{ selectedFile.name }} ({{ (selectedFile.size / 1024).toFixed(2) }} KB)</span>
+          </div>
+        </div>
+      </mat-tab>
+      <mat-tab label="Add Link">
+        <div class="tab-content">
+          <mat-form-field appearance="outline" class="full-width">
+            <mat-label>URL</mat-label>
+            <input matInput [(ngModel)]="linkUrl" placeholder="https://example.com/policy">
+          </mat-form-field>
+          <mat-form-field appearance="outline" class="full-width">
+            <mat-label>Snapshot Link</mat-label>
+            <mat-select [(ngModel)]="snapshotLink">
+              <mat-option [value]="true">Yes - Create snapshot</mat-option>
+              <mat-option [value]="false">No - Store link only</mat-option>
+            </mat-select>
+            <mat-hint>Creating a snapshot stores the page content for offline access</mat-hint>
+          </mat-form-field>
+        </div>
+      </mat-tab>
+    </mat-tab-group>
+
+    <!-- Common Fields -->
+    <mat-form-field appearance="outline" class="full-width">
+      <mat-label>Title *</mat-label>
+      <input matInput [(ngModel)]="title" required>
+    </mat-form-field>
+
+    <mat-form-field appearance="outline" class="full-width">
+      <mat-label>Description</mat-label>
+      <textarea matInput [(ngModel)]="description" rows="3"></textarea>
+    </mat-form-field>
+
+    <mat-form-field appearance="outline" class="full-width">
+      <mat-label>Source Type *</mat-label>
+      <mat-select [(ngModel)]="sourceType" required>
+        <mat-option *ngFor="let option of getSourceTypeOptions()" [value]="option.value">
+          {{ option.label }}
+        </mat-option>
+      </mat-select>
+    </mat-form-field>
+
+    <!-- Authority & Override (ORG scope only) -->
+    <div *ngIf="data.scope === 'ORG'" class="org-fields">
+      <mat-form-field appearance="outline" class="full-width">
+        <mat-label>Authority Level *</mat-label>
+        <mat-select [(ngModel)]="authorityLevel" (selectionChange)="onAuthorityLevelChange()" required>
+          <mat-option value="BINDING">Binding - Must be followed</mat-option>
+          <mat-option value="INFORMATIONAL">Informational - Guidance only</mat-option>
+        </mat-select>
+      </mat-form-field>
+
+      <mat-form-field appearance="outline" class="full-width" *ngIf="canLock">
+        <mat-label>Override Policy *</mat-label>
+        <mat-select [(ngModel)]="overridePolicy" required [disabled]="authorityLevel === 'BINDING'">
+          <mat-option value="LOCKED">Locked - Always included, cannot be disabled</mat-option>
+          <mat-option value="ALLOW_SUPPLEMENT">Allow Supplement - Can add more evidence</mat-option>
+          <mat-option value="ALLOW_OVERRIDE">Allow Override - Can disable (admin only)</mat-option>
+        </mat-select>
+        <mat-hint *ngIf="authorityLevel === 'BINDING'">Binding evidence defaults to Locked</mat-hint>
+      </mat-form-field>
+    </div>
+
+    <!-- Tags -->
+    <mat-form-field appearance="outline" class="full-width">
+      <mat-label>Tags</mat-label>
+      <input matInput [(ngModel)]="newTag" (keyup.enter)="addTag()" placeholder="Add tag and press Enter">
+      <mat-hint>Press Enter to add a tag</mat-hint>
+    </mat-form-field>
+    <div *ngIf="tags.length > 0" class="chips-container">
+      <mat-chip *ngFor="let tag of tags" (removed)="removeTag(tag)">
+        {{ tag }}
+        <mat-icon matChipRemove>cancel</mat-icon>
+      </mat-chip>
+    </div>
+
+    <!-- Regions -->
+    <mat-form-field appearance="outline" class="full-width">
+      <mat-label>Regions</mat-label>
+      <input matInput [(ngModel)]="newRegion" (keyup.enter)="addRegion()" placeholder="Add region (e.g., US, CA, EU)">
+      <mat-hint>Press Enter to add a region</mat-hint>
+    </mat-form-field>
+    <div *ngIf="regions.length > 0" class="chips-container">
+      <mat-chip *ngFor="let region of regions" (removed)="removeRegion(region)">
+        {{ region }}
+        <mat-icon matChipRemove>cancel</mat-icon>
+      </mat-chip>
+    </div>
+  </div>
+</mat-dialog-content>
+<mat-dialog-actions align="end">
+  <button mat-button (click)="cancel()" [disabled]="uploading">Cancel</button>
+  <button mat-raised-button color="primary" (click)="upload()" [disabled]="uploading || !title || (uploadMethod === 'file' && !selectedFile) || (uploadMethod === 'link' && !linkUrl)">
+    <mat-icon *ngIf="!uploading">upload</mat-icon>
+    <mat-spinner *ngIf="uploading" diameter="20"></mat-spinner>
+    {{ uploading ? 'Uploading...' : 'Upload' }}
+  </button>
+</mat-dialog-actions>
+

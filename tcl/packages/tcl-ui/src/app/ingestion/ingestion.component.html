@@ -67,6 +67,22 @@
             </mat-form-field>
           </div>
 
+          <div class="form-row">
+            <mat-form-field appearance="outline" class="full-width">
+              <mat-label>Template (Optional)</mat-label>
+              <mat-select [(ngModel)]="templateId" name="templateId" (selectionChange)="onTemplateChange()">
+                <mat-option [value]="undefined">None</mat-option>
+                <mat-optgroup *ngFor="let group of templateGroups" [label]="group.label">
+                  <mat-option *ngFor="let template of group.templates" [value]="template.id">
+                    {{ template.name }}
+                    <span *ngIf="template.description" class="template-description"> - {{ template.description }}</span>
+                  </mat-option>
+                </mat-optgroup>
+              </mat-select>
+              <mat-hint>Select a template to use default lens and attached evidence</mat-hint>
+            </mat-form-field>
+          </div>
+
           <!-- Transcript Only Mode -->
           <ng-container *ngIf="selectedMode === 'TRANSCRIPT_ONLY'">
             <div class="file-upload-section" style="margin-bottom: 16px;">
@@ -381,7 +397,19 @@
                   <p style="margin: 0;">
                     <strong>This run will use:</strong> {{ getEvidenceCount() }}
                   </p>
-                  <p *ngIf="resolvedEvidenceSet.resolvedEvidenceIds.length === 0" style="margin: 8px 0 0 0; color: #666; font-size: 0.9em;">
+                  <div *ngIf="lockedEvidenceCount > 0 && !includeOrgEvidence" 
+                       style="margin: 12px 0 0 0; padding: 12px; background: #fff3cd; border-left: 4px solid #ff9800; border-radius: 4px;">
+                    <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 4px;">
+                      <mat-icon style="color: #ff9800; font-size: 20px; width: 20px; height: 20px;">lock</mat-icon>
+                      <strong style="color: #856404;">Locked org rules still apply</strong>
+                    </div>
+                    <p style="margin: 0; color: #856404; font-size: 0.9em;">
+                      {{ lockedEvidenceCount }} locked organization rule(s) will be included in this evaluation, 
+                      even though "Include Org Evidence" is disabled. Locked rules cannot be bypassed.
+                    </p>
+                  </div>
+                  <p *ngIf="resolvedEvidenceSet.resolvedEvidenceIds.length === 0 && lockedEvidenceCount === 0" 
+                     style="margin: 8px 0 0 0; color: #666; font-size: 0.9em;">
                     No evidence will be included in this evaluation.
                   </p>
                 </div>

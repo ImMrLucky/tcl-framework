@@ -31,6 +31,8 @@ export interface EvidenceItem {
   version: string;
   effectiveFrom?: string;
   effectiveTo?: string;
+  authorityLevel?: 'BINDING' | 'INFORMATIONAL';
+  overridePolicy?: 'LOCKED' | 'ALLOW_SUPPLEMENT' | 'ALLOW_OVERRIDE';
   createdBy?: string;
   createdAt: string;
   updatedAt: string;
@@ -218,6 +220,8 @@ export class EvidenceService {
       version?: string;
       effectiveFrom?: string;
       effectiveTo?: string;
+      authorityLevel?: 'BINDING' | 'INFORMATIONAL';
+      overridePolicy?: 'LOCKED' | 'ALLOW_SUPPLEMENT' | 'ALLOW_OVERRIDE';
     }
   ): Observable<EvidenceItem> {
     return this.http.patch<EvidenceItem>(`${this.apiBase}/evidence/${id}`, updates);

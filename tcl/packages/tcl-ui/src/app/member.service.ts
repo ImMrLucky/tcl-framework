@@ -2,7 +2,7 @@ import { Injectable } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
 import { Observable } from 'rxjs';
 
-export type Role = 'owner' | 'admin' | 'qa_reviewer' | 'compliance' | 'engineer' | 'viewer';
+export type Role = 'OWNER' | 'ADMIN' | 'MANAGER' | 'ANALYST' | 'VIEWER';
 
 export interface Member {
   userId: string;

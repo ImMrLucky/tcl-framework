@@ -172,32 +172,27 @@
       font-weight: 500;
       display: inline-block;
 
-      &.role-owner {
+      &.role-OWNER {
         background: #ff6b35;
         color: white;
       }
 
-      &.role-admin {
+      &.role-ADMIN {
         background: #1976d2;
         color: white;
       }
 
-      &.role-qa_reviewer {
+      &.role-MANAGER {
         background: #4caf50;
         color: white;
       }
 
-      &.role-compliance {
+      &.role-ANALYST {
         background: #9c27b0;
         color: white;
       }
 
-      &.role-engineer {
-        background: #ff9800;
-        color: white;
-      }
-
-      &.role-viewer {
+      &.role-VIEWER {
         background: #757575;
         color: white;
       }

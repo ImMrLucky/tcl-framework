@@ -11,6 +11,32 @@
       <p class="subtitle">Manage who has access to your organization</p>
     </div>
 
+    <!-- Admin Recovery Warning -->
+    <mat-card *ngIf="!hasAdmins" class="recovery-warning-card" style="margin-bottom: 24px; background: #fff3cd; border-left: 4px solid #ff9800;">
+      <mat-card-content>
+        <div style="display: flex; align-items: center; gap: 16px;">
+          <mat-icon style="color: #ff9800; font-size: 40px; width: 40px; height: 40px;">warning</mat-icon>
+          <div style="flex: 1;">
+            <h3 style="margin: 0 0 8px; color: #d32f2f;">No Administrators Found</h3>
+            <p style="margin: 0 0 12px; color: #333;">
+              Your organization has no administrators. This is a security-critical situation.
+              <span *ngIf="recoveryRequestStatus">
+                <br><strong>Status:</strong> {{ recoveryRequestStatus.message }}
+              </span>
+            </p>
+            <button 
+              mat-raised-button 
+              color="warn" 
+              (click)="openAdminRecoveryDialog()"
+              [disabled]="loading">
+              <mat-icon>security</mat-icon>
+              Request Admin Recovery
+            </button>
+          </div>
+        </div>
+      </mat-card-content>
+    </mat-card>
+
     <mat-card class="members-card">
       <mat-card-header>
         <mat-card-title>Members</mat-card-title>
@@ -123,10 +149,19 @@
               <td mat-cell *matCellDef="let member">
                 <div class="actions-cell">
                   <button 
+                    *ngIf="canTransferOwnership() && member.role === 'ADMIN' && member.userId !== currentUserId"
+                    mat-icon-button 
+                    color="primary"
+                    (click)="transferOwnership(member); $event.stopPropagation()"
+                    [disabled]="loading"
+                    matTooltip="Transfer ownership to this member">
+                    <mat-icon>swap_horiz</mat-icon>
+                  </button>
+                  <button 
                     *ngIf="canManageMembers() && member.userId !== currentUserId"
                     mat-icon-button 
                     color="warn"
-                    (click)="removeMember(member)"
+                    (click)="removeMember(member); $event.stopPropagation()"
                     [disabled]="loading"
                     matTooltip="Remove member">
                     <mat-icon>delete</mat-icon>

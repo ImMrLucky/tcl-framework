@@ -126,6 +126,10 @@ export class IngestionComponent implements OnInit, OnDestroy {
   simulationMode = false;
   resolvedEvidenceSet: { orgEvidenceIds: string[]; projectEvidenceIds: string[]; conversationEvidenceIds: string[]; templateEvidenceIds: string[]; resolvedEvidenceIds: string[] } | null = null;
   evidencePreviewLoading = false;
+  lockedEvidenceCount = 0; // Count of locked org evidence items
+  templates: Array<{ id: string; name: string; description?: string; isSystemTemplate: boolean; industry?: string; businessFunction?: string }> = [];
+  templateGroups: Array<{ label: string; templates: typeof this.templates }> = [];
+  templatesLoading = false;
   readonly evidenceSourceTypes: Array<{ value: EvidenceItem['sourceType']; label: string }> = [
     { value: 'POLICY', label: 'Policy' },
     { value: 'RULESET', label: 'Ruleset' },
@@ -150,6 +154,44 @@ export class IngestionComponent implements OnInit, OnDestroy {
 
   ngOnInit() {
     // Component initialization
+    this.loadTemplates();
+  }
+
+  async loadTemplates() {
+    this.templatesLoading = true;
+    try {
+      const apiBase = this.authService.getApiBaseUrl();
+      const response = await fetch(`${apiBase}/templates`);
+      if (response.ok) {
+        const data = await response.json();
+        this.templates = data.templates || [];
+        this.groupTemplates();
+      }
+    } catch (error) {
+      console.error('Failed to load templates:', error);
+    } finally {
+      this.templatesLoading = false;
+    }
+  }
+
+  groupTemplates() {
+    const systemTemplates = this.templates.filter(t => t.isSystemTemplate);
+    const orgTemplates = this.templates.filter(t => !t.isSystemTemplate);
+    
+    this.templateGroups = [];
+    if (systemTemplates.length > 0) {
+      this.templateGroups.push({ label: 'System Templates', templates: systemTemplates });
+    }
+    if (orgTemplates.length > 0) {
+      this.templateGroups.push({ label: 'Organization Templates', templates: orgTemplates });
+    }
+  }
+
+  onTemplateChange() {
+    // When template changes, preview evidence set again
+    if (this.templateId) {
+      this.previewEvidenceSet();
+    }
   }
 
   ngOnDestroy() {
@@ -265,11 +307,61 @@ export class IngestionComponent implements OnInit, OnDestroy {
         })
       );
       this.resolvedEvidenceSet = evidenceSet;
+      
+      // Check for locked evidence (always included even if includeOrgEvidence is false)
+      // We need to check if there are locked org evidence items
+      // For now, we'll check if orgEvidenceIds includes items even when includeOrgEvidence is false
+      // Actually, we should fetch locked evidence separately
+      await this.checkLockedEvidence(orgId);
     } catch (error: any) {
       console.error('Failed to preview evidence set:', error);
       this.snackBar.open('Failed to preview evidence set', 'Close', { duration: 3000 });
     } finally {
       this.evidencePreviewLoading = false;
+    }
+  }
+
+  /**
+   * Check for locked evidence items
+   * Locked evidence is included even when includeOrgEvidence is false
+   */
+  async checkLockedEvidence(orgId: string) {
+    if (!this.resolvedEvidenceSet) {
+      this.lockedEvidenceCount = 0;
+      return;
+    }
+
+    try {
+      // If includeOrgEvidence is false but we still have org evidence, those are locked
+      if (!this.includeOrgEvidence) {
+        this.lockedEvidenceCount = this.resolvedEvidenceSet.orgEvidenceIds.length;
+      } else {
+        // If includeOrgEvidence is true, we need to check which items are locked
+        // Fetch org evidence items to check overridePolicy
+        const response = await firstValueFrom(
+          this.evidenceService.listEvidenceItems({
+            orgId,
+            scope: 'ORG',
+            status: 'APPROVED',
+          })
+        );
+        
+        // Count items with overridePolicy = 'LOCKED'
+        // Note: This requires the API to return overridePolicy in the response
+        // For now, we'll set to 0 if includeOrgEvidence is true (warning not needed)
+        this.lockedEvidenceCount = 0;
+        
+        // TODO: Once API returns overridePolicy, count locked items:
+        // this.lockedEvidenceCount = response.items.filter(item => item.overridePolicy === 'LOCKED').length;
+      }
+    } catch (error) {
+      console.error('Failed to check locked evidence:', error);
+      // Fallback: if includeOrgEvidence is false and we have org evidence, assume they're locked
+      if (!this.includeOrgEvidence && this.resolvedEvidenceSet) {
+        this.lockedEvidenceCount = this.resolvedEvidenceSet.orgEvidenceIds.length;
+      } else {
+        this.lockedEvidenceCount = 0;
+      }
     }
   }
 

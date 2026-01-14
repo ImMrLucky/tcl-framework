@@ -84,14 +84,34 @@ export const routes: Routes = [
     canActivate: [AuthGuard]
   },
   {
-    path: 'policies',
-    loadComponent: () => import('./policies/policies-list.component').then(m => m.PoliciesListComponent),
+    path: 'evidence',
+    loadComponent: () => import('./evidence-library/evidence-library.component').then(m => m.EvidenceLibraryComponent),
     canActivate: [AuthGuard]
   },
   {
-    path: 'policies/:id',
-    loadComponent: () => import('./policies/policy-detail.component').then(m => m.PolicyDetailComponent),
+    path: 'evidence/:id',
+    loadComponent: () => import('./evidence-library/evidence-detail.component').then(m => m.EvidenceDetailComponent),
     canActivate: [AuthGuard]
+  },
+  {
+    path: 'projects/:projectId/evidence',
+    loadComponent: () => import('./project-evidence-library/project-evidence-library.component').then(m => m.ProjectEvidenceLibraryComponent),
+    canActivate: [AuthGuard]
+  },
+  {
+    path: 'templates',
+    loadComponent: () => import('./templates/templates-library.component').then(m => m.TemplatesLibraryComponent),
+    canActivate: [AuthGuard]
+  },
+  // Legacy policies routes - redirect to evidence
+  {
+    path: 'policies',
+    redirectTo: '/evidence',
+    pathMatch: 'full'
+  },
+  {
+    path: 'policies/:id',
+    redirectTo: '/evidence/:id'
   },
   {
     path: 'evidence',

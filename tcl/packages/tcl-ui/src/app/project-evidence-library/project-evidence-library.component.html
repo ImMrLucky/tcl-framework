@@ -1,0 +1,191 @@
+<div class="project-evidence-library-container">
+  <app-header 
+    [pageTitle]="project ? 'Project Evidence: ' + project.name : 'Project Evidence Library'" 
+    pageSubtitle="Manage project-level evidence documents and rulesets"
+    [showNavigation]="true"
+    [showBackButton]="true"
+    [backButtonRoute]="project ? '/projects/' + project.id : '/dashboard'"
+    backButtonText="Back to Project">
+    <div headerActions>
+      <button mat-raised-button color="primary" (click)="openUploadDialog()" [disabled]="!orgId || !projectId">
+        <mat-icon>upload</mat-icon>
+        Add Evidence
+      </button>
+    </div>
+  </app-header>
+
+  <div class="container">
+    <!-- Filters -->
+    <mat-card class="filters-card">
+      <div class="filters-row">
+        <mat-form-field appearance="outline" class="search-field">
+          <mat-label>Search by title</mat-label>
+          <input matInput [(ngModel)]="titleFilter" placeholder="Evidence title..." (keyup.enter)="applyFilters()">
+          <mat-icon matSuffix>search</mat-icon>
+        </mat-form-field>
+        
+        <mat-form-field appearance="outline" class="filter-field">
+          <mat-label>Status</mat-label>
+          <mat-select [(ngModel)]="statusFilter" (selectionChange)="applyFilters()">
+            <mat-option value="">All</mat-option>
+            <mat-option value="DRAFT">Draft</mat-option>
+            <mat-option value="APPROVED">Approved</mat-option>
+            <mat-option value="DEPRECATED">Deprecated</mat-option>
+          </mat-select>
+        </mat-form-field>
+
+        <mat-form-field appearance="outline" class="filter-field">
+          <mat-label>Source Type</mat-label>
+          <mat-select [(ngModel)]="sourceTypeFilter" (selectionChange)="applyFilters()">
+            <mat-option value="">All</mat-option>
+            <mat-option value="POLICY">Policy</mat-option>
+            <mat-option value="RULESET">Ruleset</mat-option>
+            <mat-option value="KNOWLEDGE">Knowledge</mat-option>
+            <mat-option value="ACCOUNT_FACTS">Account Facts</mat-option>
+            <mat-option value="LEGAL">Legal</mat-option>
+            <mat-option value="URL_LINK">URL Link</mat-option>
+            <mat-option value="SYSTEM_EXPORT">System Export</mat-option>
+          </mat-select>
+        </mat-form-field>
+        
+        <button mat-button (click)="clearFilters()">
+          <mat-icon>clear</mat-icon>
+          Clear
+        </button>
+      </div>
+    </mat-card>
+
+    <!-- Loading -->
+    <mat-card *ngIf="loading" class="loading-card">
+      <mat-spinner diameter="40"></mat-spinner>
+      <p>Loading evidence...</p>
+    </mat-card>
+
+    <!-- Evidence Table -->
+    <mat-card *ngIf="!loading" class="table-card">
+      <table mat-table [dataSource]="evidenceItems">
+        
+        <!-- Title Column -->
+        <ng-container matColumnDef="title">
+          <th mat-header-cell *matHeaderCellDef>Title</th>
+          <td mat-cell *matCellDef="let item">
+            <div class="title-cell">
+              <div class="title-row">
+                <span class="title-primary">{{ item.title }}</span>
+              </div>
+              <span *ngIf="item.description" class="title-secondary">{{ item.description }}</span>
+              <div *ngIf="item.tags && item.tags.length > 0" class="tags-row">
+                <mat-chip *ngFor="let tag of item.tags.slice(0, 3)" class="tag-chip">{{ tag }}</mat-chip>
+                <span *ngIf="item.tags.length > 3" class="more-tags">+{{ item.tags.length - 3 }} more</span>
+              </div>
+            </div>
+          </td>
+        </ng-container>
+
+        <!-- Source Type Column -->
+        <ng-container matColumnDef="sourceType">
+          <th mat-header-cell *matHeaderCellDef>Source Type</th>
+          <td mat-cell *matCellDef="let item">
+            {{ getSourceTypeLabel(item.sourceType) }}
+          </td>
+        </ng-container>
+
+        <!-- Status Column -->
+        <ng-container matColumnDef="status">
+          <th mat-header-cell *matHeaderCellDef>Status</th>
+          <td mat-cell *matCellDef="let item">
+            <mat-chip [class]="getStatusClass(item.status)">
+              {{ item.status | titlecase }}
+            </mat-chip>
+          </td>
+        </ng-container>
+
+        <!-- Index Status Column -->
+        <ng-container matColumnDef="indexStatus">
+          <th mat-header-cell *matHeaderCellDef>Index Status</th>
+          <td mat-cell *matCellDef="let item">
+            <mat-chip [class]="getIndexStatusClass(item.indexStatus)">
+              {{ item.indexStatus | titlecase }}
+            </mat-chip>
+            <span *ngIf="item.indexStatus === 'INDEXED' && item.chunkCount" class="chunk-count">
+              ({{ item.chunkCount }} chunks)
+            </span>
+            <span *ngIf="item.indexStatus === 'FAILED' && item.indexError" 
+                  matTooltip="{{ item.indexError }}"
+                  class="error-indicator">
+              <mat-icon>error</mat-icon>
+            </span>
+          </td>
+        </ng-container>
+
+        <!-- Version Column -->
+        <ng-container matColumnDef="version">
+          <th mat-header-cell *matHeaderCellDef>Version</th>
+          <td mat-cell *matCellDef="let item">
+            {{ item.version }}
+          </td>
+        </ng-container>
+
+        <!-- Created At Column -->
+        <ng-container matColumnDef="createdAt">
+          <th mat-header-cell *matHeaderCellDef>Created</th>
+          <td mat-cell *matCellDef="let item">
+            <div class="date-cell">
+              <span class="date-primary">{{ item.createdAt | date:'MMM d, yyyy' }}</span>
+              <span class="date-secondary">{{ item.createdAt | date:'h:mm a' }}</span>
+            </div>
+          </td>
+        </ng-container>
+
+        <!-- Actions Column -->
+        <ng-container matColumnDef="actions">
+          <th mat-header-cell *matHeaderCellDef>Actions</th>
+          <td mat-cell *matCellDef="let item">
+            <div class="actions-cell">
+              <button mat-icon-button [matMenuTriggerFor]="menu" (click)="$event.stopPropagation()">
+                <mat-icon>more_vert</mat-icon>
+              </button>
+              <mat-menu #menu="matMenu">
+                <button mat-menu-item (click)="viewEvidence(item)">
+                  <mat-icon>visibility</mat-icon>
+                  <span>View</span>
+                </button>
+                <button 
+                  *ngIf="item.status === 'DRAFT' && canApprove()" 
+                  mat-menu-item 
+                  (click)="approveEvidence(item)">
+                  <mat-icon>check_circle</mat-icon>
+                  <span>Approve</span>
+                </button>
+                <button 
+                  *ngIf="item.status !== 'DEPRECATED'" 
+                  mat-menu-item 
+                  (click)="deprecateEvidence(item)">
+                  <mat-icon>archive</mat-icon>
+                  <span>Deprecate</span>
+                </button>
+              </mat-menu>
+            </div>
+          </td>
+        </ng-container>
+
+        <tr mat-header-row *matHeaderRowDef="displayedColumns"></tr>
+        <tr mat-row *matRowDef="let row; columns: displayedColumns" 
+            class="evidence-row"
+            (click)="viewEvidence(row)"></tr>
+      </table>
+
+      <!-- Empty State -->
+      <div *ngIf="evidenceItems.length === 0" class="empty-state">
+        <mat-icon>description</mat-icon>
+        <h3>No evidence found</h3>
+        <p>Upload your first evidence document for this project to get started.</p>
+        <button mat-raised-button color="primary" (click)="openUploadDialog()" [disabled]="!orgId || !projectId">
+          <mat-icon>upload</mat-icon>
+          Add Evidence
+        </button>
+      </div>
+    </mat-card>
+  </div>
+</div>
+

@@ -192,5 +192,357 @@ export function setupOrgRoutes(app: express.Application) {
       res.status(500).json({ error: e?.message ?? 'unknown error' });
     }
   });
+
+  // ============================================================================
+  // GET /api/orgs/:orgId/members - List organization members
+  // ============================================================================
+  app.get('/api/orgs/:orgId/members', async (req, res) => {
+    try {
+      const context = await getOrgContext(req);
+      
+      if (!context || context.error) {
+        return res.status(401).json({ error: context?.error || 'Authorization required' });
+      }
+
+      const { orgId } = req.params;
+
+      // Verify user has access to this org
+      if (context.orgId !== orgId) {
+        return res.status(403).json({ error: 'Access denied' });
+      }
+
+      if (!supabaseAdmin) {
+        return res.status(503).json({ error: 'Supabase not configured' });
+      }
+
+      // Get members with profile info
+      const { data: members, error } = await supabaseAdmin
+        .from('org_members')
+        .select(`
+          user_id,
+          role,
+          created_at,
+          profiles (
+            email,
+            full_name
+          )
+        `)
+        .eq('org_id', orgId)
+        .order('created_at', { ascending: true });
+
+      if (error) {
+        return res.status(500).json({ error: error.message });
+      }
+
+      // Get org owner
+      const { data: org } = await supabaseAdmin
+        .from('organizations')
+        .select('owner_user_id')
+        .eq('id', orgId)
+        .single();
+
+      res.json({
+        members: (members || []).map((m: any) => ({
+          userId: m.user_id,
+          email: m.profiles?.email || '',
+          fullName: m.profiles?.full_name || undefined,
+          role: m.role,
+          isOwner: org?.owner_user_id === m.user_id,
+          createdAt: m.created_at,
+        })),
+      });
+    } catch (e: any) {
+      console.error('List members error:', e);
+      res.status(500).json({ error: e?.message ?? 'unknown error' });
+    }
+  });
+
+  // ============================================================================
+  // POST /api/orgs/:orgId/transfer-ownership - Transfer org ownership
+  // ============================================================================
+  app.post('/api/orgs/:orgId/transfer-ownership', async (req, res) => {
+    try {
+      const context = await getOrgContext(req);
+      
+      if (!context || context.error) {
+        return res.status(401).json({ error: context?.error || 'Authorization required' });
+      }
+
+      if (!context.userId) {
+        return res.status(401).json({ error: 'User authentication required' });
+      }
+
+      const { orgId } = req.params;
+      const { newOwnerUserId } = req.body;
+
+      if (!newOwnerUserId) {
+        return res.status(400).json({ error: 'newOwnerUserId is required' });
+      }
+
+      // Verify user has access to this org
+      if (context.orgId !== orgId) {
+        return res.status(403).json({ error: 'Access denied' });
+      }
+
+      if (!supabaseAdmin) {
+        return res.status(503).json({ error: 'Supabase not configured' });
+      }
+
+      // Check if current user is OWNER
+      const { data: currentMembership } = await supabaseAdmin
+        .from('org_members')
+        .select('role')
+        .eq('org_id', orgId)
+        .eq('user_id', context.userId)
+        .single();
+
+      if (currentMembership?.role !== 'OWNER') {
+        return res.status(403).json({ error: 'Only the current owner can transfer ownership' });
+      }
+
+      // Verify new owner exists and is an ADMIN
+      const { data: newOwnerMembership } = await supabaseAdmin
+        .from('org_members')
+        .select('role')
+        .eq('org_id', orgId)
+        .eq('user_id', newOwnerUserId)
+        .single();
+
+      if (!newOwnerMembership) {
+        return res.status(404).json({ error: 'New owner is not a member of this organization' });
+      }
+
+      if (newOwnerMembership.role !== 'ADMIN') {
+        return res.status(400).json({ error: 'New owner must be an ADMIN before ownership transfer' });
+      }
+
+      // Check if org has at least one other ADMIN (besides the new owner)
+      const { data: otherAdmins } = await supabaseAdmin
+        .from('org_members')
+        .select('user_id')
+        .eq('org_id', orgId)
+        .in('role', ['OWNER', 'ADMIN'])
+        .neq('user_id', newOwnerUserId);
+
+      if (!otherAdmins || otherAdmins.length === 0) {
+        return res.status(400).json({ error: 'Organization must have at least one other ADMIN before ownership transfer' });
+      }
+
+      // Perform transfer in a transaction-like manner
+      // 1. Update old owner to ADMIN
+      const { error: updateOldOwnerError } = await supabaseAdmin
+        .from('org_members')
+        .update({ role: 'ADMIN' })
+        .eq('org_id', orgId)
+        .eq('user_id', context.userId);
+
+      if (updateOldOwnerError) {
+        return res.status(500).json({ error: `Failed to update old owner: ${updateOldOwnerError.message}` });
+      }
+
+      // 2. Update new owner to OWNER
+      const { error: updateNewOwnerError } = await supabaseAdmin
+        .from('org_members')
+        .update({ role: 'OWNER' })
+        .eq('org_id', orgId)
+        .eq('user_id', newOwnerUserId);
+
+      if (updateNewOwnerError) {
+        // Rollback: restore old owner
+        await supabaseAdmin
+          .from('org_members')
+          .update({ role: 'OWNER' })
+          .eq('org_id', orgId)
+          .eq('user_id', context.userId);
+        return res.status(500).json({ error: `Failed to update new owner: ${updateNewOwnerError.message}` });
+      }
+
+      // 3. Update org.owner_user_id
+      const { error: updateOrgError } = await supabaseAdmin
+        .from('organizations')
+        .update({ owner_user_id: newOwnerUserId })
+        .eq('id', orgId);
+
+      if (updateOrgError) {
+        // Rollback: restore roles
+        await supabaseAdmin
+          .from('org_members')
+          .update({ role: 'OWNER' })
+          .eq('org_id', orgId)
+          .eq('user_id', context.userId);
+        await supabaseAdmin
+          .from('org_members')
+          .update({ role: 'ADMIN' })
+          .eq('org_id', orgId)
+          .eq('user_id', newOwnerUserId);
+        return res.status(500).json({ error: `Failed to update organization: ${updateOrgError.message}` });
+      }
+
+      // Log audit
+      await logAudit({
+        orgId,
+        actorUserId: context.userId,
+        action: 'org.transfer_ownership',
+        targetType: 'organization',
+        targetId: orgId,
+        meta: {
+          oldOwnerUserId: context.userId,
+          newOwnerUserId,
+        },
+      });
+
+      res.json({
+        success: true,
+        message: 'Ownership transferred successfully',
+        oldOwnerUserId: context.userId,
+        newOwnerUserId,
+      });
+    } catch (e: any) {
+      console.error('Transfer ownership error:', e);
+      res.status(500).json({ error: e?.message ?? 'unknown error' });
+    }
+  });
+
+  // ============================================================================
+  // POST /api/orgs/:orgId/admin-recovery - Request admin recovery
+  // ============================================================================
+  app.post('/api/orgs/:orgId/admin-recovery', async (req, res) => {
+    try {
+      const context = await getOrgContext(req);
+      
+      if (!context || context.error) {
+        return res.status(401).json({ error: context?.error || 'Authorization required' });
+      }
+
+      if (!context.userId) {
+        return res.status(401).json({ error: 'User authentication required' });
+      }
+
+      const { orgId } = req.params;
+      const { reason } = req.body;
+
+      // Verify user has access to this org (must be a member)
+      if (context.orgId !== orgId) {
+        return res.status(403).json({ error: 'Access denied' });
+      }
+
+      if (!supabaseAdmin) {
+        return res.status(503).json({ error: 'Supabase not configured' });
+      }
+
+      // Check if org has at least one ADMIN/OWNER
+      const { data: admins } = await supabaseAdmin
+        .from('org_members')
+        .select('user_id')
+        .eq('org_id', orgId)
+        .in('role', ['OWNER', 'ADMIN']);
+
+      if (admins && admins.length > 0) {
+        return res.status(400).json({ error: 'Organization already has administrators. No recovery needed.' });
+      }
+
+      // Get user profile for request details
+      const { data: profile } = await supabaseAdmin
+        .from('profiles')
+        .select('email, full_name')
+        .eq('id', context.userId)
+        .single();
+
+      // Create recovery request
+      const { data: request, error: createError } = await supabaseAdmin
+        .from('org_admin_recovery_requests')
+        .insert({
+          org_id: orgId,
+          requested_by_user_id: context.userId,
+          reason: reason || null,
+          user_email: profile?.email || null,
+          user_name: profile?.full_name || null,
+          status: 'PENDING',
+        })
+        .select()
+        .single();
+
+      if (createError) {
+        return res.status(500).json({ error: `Failed to create recovery request: ${createError.message}` });
+      }
+
+      // Log audit
+      await logAudit({
+        orgId,
+        actorUserId: context.userId,
+        action: 'org.admin_recovery_request',
+        targetType: 'organization',
+        targetId: orgId,
+        meta: {
+          requestId: request.id,
+          reason,
+        },
+      });
+
+      res.json({
+        success: true,
+        message: 'Admin recovery request submitted successfully. Support will review your request.',
+        requestId: request.id,
+      });
+    } catch (e: any) {
+      console.error('Admin recovery request error:', e);
+      res.status(500).json({ error: e?.message ?? 'unknown error' });
+    }
+  });
+
+  // ============================================================================
+  // GET /api/orgs/:orgId/admin-recovery - Get recovery request status
+  // ============================================================================
+  app.get('/api/orgs/:orgId/admin-recovery', async (req, res) => {
+    try {
+      const context = await getOrgContext(req);
+      
+      if (!context || context.error) {
+        return res.status(401).json({ error: context?.error || 'Authorization required' });
+      }
+
+      const { orgId } = req.params;
+
+      // Verify user has access to this org
+      if (context.orgId !== orgId) {
+        return res.status(403).json({ error: 'Access denied' });
+      }
+
+      if (!supabaseAdmin) {
+        return res.status(503).json({ error: 'Supabase not configured' });
+      }
+
+      // Get most recent recovery request for this org
+      const { data: request, error } = await supabaseAdmin
+        .from('org_admin_recovery_requests')
+        .select('*')
+        .eq('org_id', orgId)
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      if (error) {
+        return res.status(500).json({ error: error.message });
+      }
+
+      if (!request) {
+        return res.json({ request: null });
+      }
+
+      res.json({
+        request: {
+          id: request.id,
+          status: request.status,
+          reason: request.reason,
+          resolutionNotes: request.resolution_notes,
+          createdAt: request.created_at,
+          resolvedAt: request.resolved_at,
+        },
+      });
+    } catch (e: any) {
+      console.error('Get recovery request error:', e);
+      res.status(500).json({ error: e?.message ?? 'unknown error' });
+    }
+  });
 }
 

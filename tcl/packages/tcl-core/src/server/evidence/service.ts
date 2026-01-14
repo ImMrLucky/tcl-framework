@@ -47,6 +47,9 @@ export interface CreateEvidenceItemInput {
   effectiveFrom?: string;
   effectiveTo?: string;
   createdBy: string;
+  // Authority & Override (ORG scope only)
+  authorityLevel?: 'BINDING' | 'INFORMATIONAL';
+  overridePolicy?: 'LOCKED' | 'ALLOW_SUPPLEMENT' | 'ALLOW_OVERRIDE';
   ruleMeta?: {
     mustSay?: string[];
     mustNotSay?: string[];
@@ -66,6 +69,9 @@ export interface UpdateEvidenceItemInput {
   version?: string;
   effectiveFrom?: string;
   effectiveTo?: string;
+  // Authority & Override (ORG scope only, admin/owner only)
+  authorityLevel?: 'BINDING' | 'INFORMATIONAL';
+  overridePolicy?: 'LOCKED' | 'ALLOW_SUPPLEMENT' | 'ALLOW_OVERRIDE';
   ruleMeta?: {
     mustSay?: string[];
     mustNotSay?: string[];
@@ -103,6 +109,9 @@ export async function createEvidenceItem(input: CreateEvidenceItemInput): Promis
     created_by: input.createdBy,
     index_status: 'PENDING',
     rule_meta: input.ruleMeta || {},
+    // Authority & Override (only for ORG scope)
+    authority_level: input.scope === 'ORG' ? (input.authorityLevel || 'INFORMATIONAL') : null,
+    override_policy: input.scope === 'ORG' ? (input.overridePolicy || (input.authorityLevel === 'BINDING' ? 'LOCKED' : 'ALLOW_SUPPLEMENT')) : null,
   };
 
   // Add file fields if storageKind is FILE
@@ -251,6 +260,18 @@ export async function updateEvidenceItem(
     throw new Error('Supabase not configured');
   }
 
+  // First, get the current evidence item to check scope
+  const { data: currentItem } = await supabaseAdmin
+    .from('evidence_items')
+    .select('scope')
+    .eq('id', evidenceItemId)
+    .eq('org_id', orgId)
+    .single();
+
+  if (!currentItem) {
+    throw new Error('Evidence item not found');
+  }
+
   const updateData: any = {};
 
   if (input.title !== undefined) updateData.title = input.title;
@@ -262,6 +283,16 @@ export async function updateEvidenceItem(
   if (input.effectiveFrom !== undefined) updateData.effective_from = input.effectiveFrom || null;
   if (input.effectiveTo !== undefined) updateData.effective_to = input.effectiveTo || null;
   if (input.ruleMeta !== undefined) updateData.rule_meta = input.ruleMeta;
+  
+  // Authority & Override (only for ORG scope)
+  if (currentItem.scope === 'ORG') {
+    if (input.authorityLevel !== undefined) {
+      updateData.authority_level = input.authorityLevel;
+    }
+    if (input.overridePolicy !== undefined) {
+      updateData.override_policy = input.overridePolicy;
+    }
+  }
 
   const { data, error } = await supabaseAdmin
     .from('evidence_items')
@@ -503,6 +534,8 @@ function mapDbRowToEvidenceItem(row: any): EvidenceItem {
     version: row.version,
     effectiveFrom: row.effective_from || undefined,
     effectiveTo: row.effective_to || undefined,
+    authorityLevel: row.authority_level || undefined,
+    overridePolicy: row.override_policy || undefined,
     createdBy: row.created_by,
     createdAt: row.created_at,
     updatedAt: row.updated_at,

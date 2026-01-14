@@ -37,6 +37,7 @@ import { setupPolicyRoutes } from "./policies/routes.js";
 import { setupEvidenceRoutes } from "./evidence/routes.js";
 import { setupOrgRoutes } from "./orgs/routes.js";
 import { setupProjectRoutes } from "./projects/routes.js";
+import { setupTemplateRoutes } from "./templates/routes.js";
 import { resolveEvidenceSet } from "./evidence/service.js";
 import type { EvidenceSet, EvidenceDiagnostics } from "../types/evidence.types.js";
 import { startIndexingWorker } from "./evidence/indexing-worker.js";
@@ -3453,6 +3454,9 @@ console.log("Org routes registered successfully");
 console.log("Registering project routes...");
 setupProjectRoutes(app);
 console.log("Project routes registered successfully");
+
+setupTemplateRoutes(app);
+console.log("Template routes registered successfully");
 console.log("Analytics routes registered successfully");
 
 // Setup export routes

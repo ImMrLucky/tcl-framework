@@ -84,6 +84,10 @@ export interface EvidenceItem {
   effectiveFrom?: string; // ISO timestamp
   effectiveTo?: string; // ISO timestamp
   
+  // Authority & Override Policy (ORG scope only)
+  authorityLevel?: 'BINDING' | 'INFORMATIONAL'; // BINDING = must be followed, INFORMATIONAL = guidance only
+  overridePolicy?: 'LOCKED' | 'ALLOW_SUPPLEMENT' | 'ALLOW_OVERRIDE'; // LOCKED = always included, cannot be disabled
+  
   // Audit
   createdBy: string;
   createdAt: string; // ISO timestamp

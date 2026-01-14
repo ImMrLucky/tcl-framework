@@ -855,5 +855,146 @@ export function setupEvidenceRoutes(app: express.Application) {
       res.status(500).json({ error: e?.message ?? 'unknown error' });
     }
   });
+
+  // ============================================================================
+  // POST /api/evidence/migrate-policies - Migrate policies to evidence items
+  // ============================================================================
+  app.post('/api/evidence/migrate-policies', async (req, res) => {
+    try {
+      const context = await getOrgContext(req);
+      
+      if (!context || context.error) {
+        return res.status(401).json({ error: context?.error || 'Authorization required' });
+      }
+
+      if (!context.userId) {
+        return res.status(401).json({ error: 'User authentication required' });
+      }
+
+      // Check permission - only OWNER and ADMIN can migrate
+      const hasPermission = await checkUserPermission(context.orgId, context.userId, 'approve_evidence');
+      if (!hasPermission) {
+        return res.status(403).json({ error: 'Permission denied. Only OWNER and ADMIN can migrate policies.' });
+      }
+
+      if (!supabaseAdmin) {
+        return res.status(503).json({ error: 'Supabase not configured' });
+      }
+
+      // Check if there are any policies to migrate
+      const { data: policies, error: policiesError } = await supabaseAdmin
+        .from('policies')
+        .select('id, org_id')
+        .eq('org_id', context.orgId);
+
+      if (policiesError) {
+        return res.status(500).json({ error: `Failed to check policies: ${policiesError.message}` });
+      }
+
+      if (!policies || policies.length === 0) {
+        return res.json({
+          success: true,
+          message: 'No policies found to migrate',
+          migratedCount: 0,
+        });
+      }
+
+      // Check if policies have already been migrated (check for evidence items with same org_id and source_type='POLICY')
+      const { data: existingEvidence, error: existingError } = await supabaseAdmin
+        .from('evidence_items')
+        .select('id')
+        .eq('org_id', context.orgId)
+        .eq('source_type', 'POLICY')
+        .limit(1);
+
+      if (existingError) {
+        return res.status(500).json({ error: `Failed to check existing evidence: ${existingError.message}` });
+      }
+
+      if (existingEvidence && existingEvidence.length > 0) {
+        return res.status(400).json({
+          error: 'Policies have already been migrated. Evidence items with source_type=POLICY already exist.',
+          migratedCount: 0,
+        });
+      }
+
+      // Execute migration SQL
+      // Note: This runs the migration logic inline rather than calling the SQL file
+      // We'll insert evidence_items from policies
+      const { data: policiesToMigrate, error: fetchError } = await supabaseAdmin
+        .from('policies')
+        .select('*')
+        .eq('org_id', context.orgId);
+
+      if (fetchError) {
+        return res.status(500).json({ error: `Failed to fetch policies: ${fetchError.message}` });
+      }
+
+      if (!policiesToMigrate || policiesToMigrate.length === 0) {
+        return res.json({
+          success: true,
+          message: 'No policies found to migrate',
+          migratedCount: 0,
+        });
+      }
+
+      // Migrate each policy to evidence_item
+      const evidenceItems = policiesToMigrate.map((policy: any) => ({
+        org_id: policy.org_id,
+        scope: 'ORG',
+        source_type: 'POLICY',
+        title: policy.name || 'Untitled Policy',
+        description: policy.content || policy.description || '',
+        storage_kind: 'LINK', // Policies stored as text, use LINK for now
+        link_url: `policy://${policy.id}`, // Placeholder URL
+        status: policy.status === 'active' ? 'APPROVED' : 'DRAFT',
+        version: '1.0.0',
+        authority_level: 'INFORMATIONAL',
+        override_policy: 'ALLOW_SUPPLEMENT',
+        index_status: 'PENDING',
+        tags: policy.tags || [],
+        created_by: context.userId,
+        created_at: policy.created_at || new Date().toISOString(),
+        updated_at: policy.updated_at || new Date().toISOString(),
+      }));
+
+      // Insert evidence items
+      const { data: insertedEvidence, error: insertError } = await supabaseAdmin
+        .from('evidence_items')
+        .insert(evidenceItems)
+        .select();
+
+      if (insertError) {
+        // Check if it's a duplicate key error (already migrated)
+        if (insertError.code === '23505') {
+          return res.status(400).json({
+            error: 'Policies have already been migrated. Some evidence items already exist.',
+            migratedCount: 0,
+          });
+        }
+        return res.status(500).json({ error: `Failed to migrate policies: ${insertError.message}` });
+      }
+
+      // Log audit
+      await logAudit({
+        orgId: context.orgId,
+        actorUserId: context.userId,
+        action: 'evidence.migrate_policies',
+        targetType: 'evidence',
+        meta: {
+          migratedCount: insertedEvidence?.length || 0,
+        },
+      });
+
+      res.json({
+        success: true,
+        message: `Successfully migrated ${insertedEvidence?.length || 0} policies to evidence items`,
+        migratedCount: insertedEvidence?.length || 0,
+      });
+    } catch (e: any) {
+      console.error('Migrate policies error:', e);
+      res.status(500).json({ error: e?.message ?? 'unknown error' });
+    }
+  });
 }
 

@@ -1,0 +1,199 @@
+<div class="templates-library-container">
+  <app-header 
+    pageTitle="Templates Library" 
+    pageSubtitle="View and manage evaluation templates"
+    [showNavigation]="true"
+    [showBackButton]="true"
+    backButtonRoute="/dashboard"
+    backButtonText="Back to Dashboard">
+  </app-header>
+
+  <div class="container">
+    <!-- Filters -->
+    <mat-card class="filters-card">
+      <div class="filters-row">
+        <mat-form-field appearance="outline" class="search-field">
+          <mat-label>Search by name</mat-label>
+          <input matInput [(ngModel)]="nameFilter" placeholder="Template name..." (keyup.enter)="applyFilters()">
+          <mat-icon matSuffix>search</mat-icon>
+        </mat-form-field>
+        
+        <mat-form-field appearance="outline" class="filter-field">
+          <mat-label>Industry</mat-label>
+          <mat-select [(ngModel)]="industryFilter" (selectionChange)="loadTemplates()">
+            <mat-option value="">All</mat-option>
+            <mat-option value="FINANCE">Finance</mat-option>
+            <mat-option value="TELECOM">Telecom</mat-option>
+            <mat-option value="HEALTHCARE">Healthcare</mat-option>
+            <mat-option value="INSURANCE">Insurance</mat-option>
+            <mat-option value="SAAS">SaaS</mat-option>
+            <mat-option value="RETAIL">Retail</mat-option>
+            <mat-option value="GOV">Government</mat-option>
+            <mat-option value="OTHER">Other</mat-option>
+          </mat-select>
+        </mat-form-field>
+
+        <mat-form-field appearance="outline" class="filter-field">
+          <mat-label>Business Function</mat-label>
+          <mat-select [(ngModel)]="businessFunctionFilter" (selectionChange)="loadTemplates()">
+            <mat-option value="">All</mat-option>
+            <mat-option value="BILLING_SUPPORT">Billing Support</mat-option>
+            <mat-option value="CUSTOMER_SUPPORT_RETENTION">Customer Support/Retention</mat-option>
+            <mat-option value="SALES_ONBOARDING">Sales/Onboarding</mat-option>
+            <mat-option value="REGULATED_OPERATIONS">Regulated Operations</mat-option>
+            <mat-option value="MIXED">Mixed</mat-option>
+          </mat-select>
+        </mat-form-field>
+        
+        <button mat-button (click)="clearFilters()">
+          <mat-icon>clear</mat-icon>
+          Clear
+        </button>
+      </div>
+    </mat-card>
+
+    <!-- Tabs -->
+    <mat-card class="tabs-card">
+      <mat-tab-group [(selectedIndex)]="selectedTab">
+        <mat-tab label="All Templates">
+          <ng-template matTabContent>
+            <div class="tab-content">
+              <div *ngIf="loading" class="loading-state">
+                <mat-spinner diameter="40"></mat-spinner>
+                <p>Loading templates...</p>
+              </div>
+
+              <div *ngIf="!loading" class="templates-grid">
+                <mat-card *ngFor="let template of getFilteredTemplates()" class="template-card">
+                  <mat-card-header>
+                    <mat-card-title>
+                      {{ template.name }}
+                      <mat-chip *ngIf="template.isSystemTemplate" class="system-chip">System</mat-chip>
+                    </mat-card-title>
+                  </mat-card-header>
+                  <mat-card-content>
+                    <p *ngIf="template.description" class="description">{{ template.description }}</p>
+                    <div class="template-meta">
+                      <div class="meta-item" *ngIf="template.industry">
+                        <mat-icon>business</mat-icon>
+                        <span>{{ getIndustryLabel(template.industry) }}</span>
+                      </div>
+                      <div class="meta-item" *ngIf="template.businessFunction">
+                        <mat-icon>work</mat-icon>
+                        <span>{{ getBusinessFunctionLabel(template.businessFunction) }}</span>
+                      </div>
+                      <div class="meta-item" *ngIf="template.defaultLens">
+                        <mat-icon>view_list</mat-icon>
+                        <span>{{ getLensLabel(template.defaultLens) }}</span>
+                      </div>
+                      <div class="meta-item" *ngIf="template.attachedEvidenceIds.length > 0">
+                        <mat-icon>description</mat-icon>
+                        <span>{{ template.attachedEvidenceIds.length }} evidence item(s)</span>
+                      </div>
+                    </div>
+                  </mat-card-content>
+                </mat-card>
+
+                <div *ngIf="getFilteredTemplates().length === 0" class="empty-state">
+                  <mat-icon>description</mat-icon>
+                  <h3>No templates found</h3>
+                  <p>No templates match your current filters.</p>
+                </div>
+              </div>
+            </div>
+          </ng-template>
+        </mat-tab>
+        <mat-tab label="System Templates">
+          <ng-template matTabContent>
+            <div class="tab-content">
+              <div *ngIf="loading" class="loading-state">
+                <mat-spinner diameter="40"></mat-spinner>
+                <p>Loading templates...</p>
+              </div>
+
+              <div *ngIf="!loading" class="templates-grid">
+                <mat-card *ngFor="let template of getFilteredTemplates()" class="template-card">
+                  <mat-card-header>
+                    <mat-card-title>{{ template.name }}</mat-card-title>
+                  </mat-card-header>
+                  <mat-card-content>
+                    <p *ngIf="template.description" class="description">{{ template.description }}</p>
+                    <div class="template-meta">
+                      <div class="meta-item" *ngIf="template.industry">
+                        <mat-icon>business</mat-icon>
+                        <span>{{ getIndustryLabel(template.industry) }}</span>
+                      </div>
+                      <div class="meta-item" *ngIf="template.businessFunction">
+                        <mat-icon>work</mat-icon>
+                        <span>{{ getBusinessFunctionLabel(template.businessFunction) }}</span>
+                      </div>
+                      <div class="meta-item" *ngIf="template.defaultLens">
+                        <mat-icon>view_list</mat-icon>
+                        <span>{{ getLensLabel(template.defaultLens) }}</span>
+                      </div>
+                      <div class="meta-item" *ngIf="template.attachedEvidenceIds.length > 0">
+                        <mat-icon>description</mat-icon>
+                        <span>{{ template.attachedEvidenceIds.length }} evidence item(s)</span>
+                      </div>
+                    </div>
+                  </mat-card-content>
+                </mat-card>
+
+                <div *ngIf="getFilteredTemplates().length === 0" class="empty-state">
+                  <mat-icon>description</mat-icon>
+                  <h3>No system templates found</h3>
+                </div>
+              </div>
+            </div>
+          </ng-template>
+        </mat-tab>
+        <mat-tab label="Organization Templates">
+          <ng-template matTabContent>
+            <div class="tab-content">
+              <div *ngIf="loading" class="loading-state">
+                <mat-spinner diameter="40"></mat-spinner>
+                <p>Loading templates...</p>
+              </div>
+
+              <div *ngIf="!loading" class="templates-grid">
+                <mat-card *ngFor="let template of getFilteredTemplates()" class="template-card">
+                  <mat-card-header>
+                    <mat-card-title>{{ template.name }}</mat-card-title>
+                  </mat-card-header>
+                  <mat-card-content>
+                    <p *ngIf="template.description" class="description">{{ template.description }}</p>
+                    <div class="template-meta">
+                      <div class="meta-item" *ngIf="template.industry">
+                        <mat-icon>business</mat-icon>
+                        <span>{{ getIndustryLabel(template.industry) }}</span>
+                      </div>
+                      <div class="meta-item" *ngIf="template.businessFunction">
+                        <mat-icon>work</mat-icon>
+                        <span>{{ getBusinessFunctionLabel(template.businessFunction) }}</span>
+                      </div>
+                      <div class="meta-item" *ngIf="template.defaultLens">
+                        <mat-icon>view_list</mat-icon>
+                        <span>{{ getLensLabel(template.defaultLens) }}</span>
+                      </div>
+                      <div class="meta-item" *ngIf="template.attachedEvidenceIds.length > 0">
+                        <mat-icon>description</mat-icon>
+                        <span>{{ template.attachedEvidenceIds.length }} evidence item(s)</span>
+                      </div>
+                    </div>
+                  </mat-card-content>
+                </mat-card>
+
+                <div *ngIf="getFilteredTemplates().length === 0" class="empty-state">
+                  <mat-icon>description</mat-icon>
+                  <h3>No organization templates found</h3>
+                  <p>Create custom templates for your organization.</p>
+                </div>
+              </div>
+            </div>
+          </ng-template>
+        </mat-tab>
+      </mat-tab-group>
+    </mat-card>
+  </div>
+</div>
+
