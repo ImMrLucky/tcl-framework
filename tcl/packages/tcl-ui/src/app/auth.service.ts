@@ -623,27 +623,84 @@ export class AuthService {
       dbUpdates.onboarding_completed = updates.onboardingCompleted;
     }
 
-    const { error } = await this.supabase
-      .from('profiles')
-      .update(dbUpdates)
-      .eq('id', user.id);
+    // Try to update with retry logic for network errors
+    let error: any = null;
+    let retries = 2;
+    
+    while (retries >= 0) {
+      try {
+        const result = await this.supabase
+          .from('profiles')
+          .update(dbUpdates)
+          .eq('id', user.id);
+        
+        error = result.error;
+        
+        // If successful or non-network error, break
+        if (!error || (error.message && !error.message.includes('Failed to fetch'))) {
+          break;
+        }
+        
+        // If it's a network error and we have retries left, wait and retry
+        if (retries > 0 && error.message && error.message.includes('Failed to fetch')) {
+          console.warn(`Profile update failed, retrying... (${retries} retries left)`);
+          await new Promise(resolve => setTimeout(resolve, 1000)); // Wait 1 second
+          retries--;
+          continue;
+        }
+        
+        break;
+      } catch (e: any) {
+        // Handle exceptions (like network errors)
+        if (retries > 0 && (e.message?.includes('Failed to fetch') || e.message?.includes('NetworkError'))) {
+          console.warn(`Profile update exception, retrying... (${retries} retries left):`, e.message);
+          await new Promise(resolve => setTimeout(resolve, 1000)); // Wait 1 second
+          retries--;
+          error = e;
+          continue;
+        }
+        error = e;
+        break;
+      }
+    }
 
-    // If error is about missing column, try again without onboarding_completed
-    if (error && error.code === 'PGRST204' && updates.onboardingCompleted !== undefined) {
-      const dbUpdatesWithoutOnboarding = { ...dbUpdates };
-      delete dbUpdatesWithoutOnboarding.onboarding_completed;
-      
-      const { error: retryError } = await this.supabase
-        .from('profiles')
-        .update(dbUpdatesWithoutOnboarding)
-        .eq('id', user.id);
-      
-      if (!retryError) {
-        await this.loadUserProfile(user.id);
+    // Handle specific error cases
+    if (error) {
+      // If error is about missing column, try again without onboarding_completed
+      if (error.code === 'PGRST204' && updates.onboardingCompleted !== undefined) {
+        const dbUpdatesWithoutOnboarding = { ...dbUpdates };
+        delete dbUpdatesWithoutOnboarding.onboarding_completed;
+        
+        const { error: retryError } = await this.supabase
+          .from('profiles')
+          .update(dbUpdatesWithoutOnboarding)
+          .eq('id', user.id);
+        
+        if (!retryError) {
+          await this.loadUserProfile(user.id);
+        }
+        
+        // Return a warning but not an error - the update succeeded for other fields
+        return { error: { message: 'onboarding_completed column not available. Please refresh Supabase schema cache.' } };
       }
       
-      // Return a warning but not an error - the update succeeded for other fields
-      return { error: { message: 'onboarding_completed column not available. Please refresh Supabase schema cache.' } };
+      // Handle network errors more gracefully
+      if (error.message && (error.message.includes('Failed to fetch') || error.message.includes('NetworkError'))) {
+        // Check if session is still valid
+        const { data: { session } } = await this.supabase.auth.getSession();
+        if (!session) {
+          return { error: { message: 'Session expired. Please log in again.' } };
+        }
+        
+        // Return a more user-friendly error message
+        return { 
+          error: { 
+            message: 'Network error. Please check your connection and try again.',
+            details: error.message,
+            code: 'NETWORK_ERROR'
+          } 
+        };
+      }
     }
 
     if (!error) {

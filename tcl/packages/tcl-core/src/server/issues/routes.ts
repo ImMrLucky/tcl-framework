@@ -695,25 +695,35 @@ export function setupIssueWorkflowRoutes(app: express.Application) {
    * Hash of: type + category + normalized claim text + speaker role
    */
   function generatePatternKey(issue: any): string {
-    const type = issue.type || issue.what?.issueType || 'UNVERIFIED_CLAIM';
-    const category = issue.category || issue.risk?.category || 'evidence';
-    
-    // Normalize claim text: lowercase, remove extra whitespace, remove quotes
-    const claimText = issue.what?.claimText || issue.what?.claimSummary || issue.what?.issueSummary || '';
-    const normalizedClaim = claimText
-      .toLowerCase()
-      .trim()
-      .replace(/["'`]/g, '')
-      .replace(/\s+/g, ' ')
-      .substring(0, 200); // Limit length for consistency
-    
-    // Normalize speaker role (AGENT, CUSTOMER, SYSTEM, UNKNOWN)
-    const speaker = issue.who?.speaker || 'UNKNOWN';
-    const normalizedRole = speaker.toUpperCase();
-    
-    // Create deterministic hash
-    const input = `${type}|${category}|${normalizedClaim}|${normalizedRole}`;
-    return createHash('sha256').update(input).digest('hex').substring(0, 16);
+    try {
+      const type = issue?.type || issue?.what?.issueType || 'UNVERIFIED_CLAIM';
+      const category = issue?.category || issue?.risk?.category || 'evidence';
+      
+      // Normalize claim text: lowercase, remove extra whitespace, remove quotes
+      const claimText = issue?.what?.claimText || issue?.what?.claimSummary || issue?.what?.issueSummary || '';
+      const normalizedClaim = (claimText || '')
+        .toString()
+        .toLowerCase()
+        .trim()
+        .replace(/["'`]/g, '')
+        .replace(/\s+/g, ' ')
+        .substring(0, 200); // Limit length for consistency
+      
+      // Normalize speaker role (AGENT, CUSTOMER, SYSTEM, UNKNOWN)
+      const speaker = issue?.who?.speaker || issue?.who?.speakerType || 'UNKNOWN';
+      const normalizedRole = (speaker || 'UNKNOWN').toString().toUpperCase();
+      
+      // Create deterministic hash
+      const input = `${type}|${category}|${normalizedClaim}|${normalizedRole}`;
+      return createHash('sha256').update(input).digest('hex').substring(0, 16);
+    } catch (error: any) {
+      console.error('Error generating pattern key:', error);
+      // Fallback to a simple hash based on category and type
+      const category = issue?.category || 'unknown';
+      const type = issue?.type || 'UNKNOWN';
+      const fallbackInput = `${category}:${type}:${Date.now()}`;
+      return createHash('sha256').update(fallbackInput).digest('hex').substring(0, 16);
+    }
   }
 
   // ============================================================================
@@ -774,59 +784,81 @@ export function setupIssueWorkflowRoutes(app: express.Application) {
       // Extract all issues and transform to IssueV2 format
       const allIssues: any[] = [];
       for (const eval_ of evaluations) {
-        const report = eval_.report as any;
-        const issues = report?.issues || report?.topIssuesV2 || report?.allIssuesV2 || [];
-        
-        for (const issue of issues) {
-          if (!issue || !issue.issueId) continue;
+        try {
+          const report = eval_.report as any;
+          if (!report) continue;
           
-          // Transform to IssueV2 format (same logic as /api/issues-v2)
-          const importance = issue.confidence?.importance ?? 0.5;
-          const nodeBlame = issue.confidence?.nodeBlameNorm ?? 0;
-          const nliScore = issue.confidence?.nliScore ?? 0;
-          const hasContradictions = (issue.conflictsWith && issue.conflictsWith.length > 0);
-          const contradictionBoost = hasContradictions ? 0.15 : 0;
-          const computedRiskScore = Math.min(1.0, 
-            (importance * 0.5) + (nodeBlame * 0.3) + (nliScore * 0.2) + contradictionBoost
-          );
-          const deriveSeverityFromScore = (riskScore: number): 'low' | 'medium' | 'high' | 'critical' => {
-            if (riskScore >= 0.75) return 'high';
-            if (riskScore >= 0.5) return 'medium';
-            return 'low';
-          };
-          const derivedSeverity = deriveSeverityFromScore(computedRiskScore);
-          const deriveImpact = (severity: string, hasContradictions: boolean): 'low' | 'medium' | 'high' => {
-            if (severity === 'high' || (severity === 'medium' && hasContradictions)) return 'high';
-            if (severity === 'medium') return 'medium';
-            return 'low';
-          };
+          // Try to get issues from various possible locations in the report
+          const issues = report?.issues?.atomic || 
+                        report?.issues?.grouped || 
+                        report?.topIssuesV2 || 
+                        report?.allIssuesV2 || 
+                        report?.issues || 
+                        [];
           
-          const transformedIssue: any = {
-            ...issue,
-            evaluationId: eval_.id,
-            evaluationCreatedAt: eval_.created_at,
-            severity: issue.severity || derivedSeverity,
-            severityDisplay: issue.severityDisplay || (derivedSeverity === 'high' ? 'high' : derivedSeverity === 'medium' ? 'medium' : 'low'),
-            category: issue.category || issue.risk?.category || 'evidence',
-            type: issue.type || issue.what?.issueType || 'UNVERIFIED_CLAIM',
-            impact: issue.impact || deriveImpact(derivedSeverity, hasContradictions),
-            score: issue.score ?? Math.round(computedRiskScore * 100),
-            riskScore: issue.riskScore ?? computedRiskScore,
-            what: {
-              ...issue.what,
-              issueSummary: issue.what?.issueSummary || issue.what?.claimSummary || issue.what?.claimText || '',
-              issueDetail: issue.what?.issueDetail || issue.what?.description || issue.what?.claimText || '',
-              primaryClaimId: issue.what?.primaryClaimId || issue.claimId || '',
-              claimText: issue.what?.claimText || issue.what?.claimSummary || '',
-            },
-            verification: issue.verification || { level: 'NONE', reasonCodes: [] },
-            who: issue.who || { speaker: 'UNKNOWN' },
-            evidence: issue.evidence || { refs: [] },
-            compliance: issue.compliance || { tags: [], disclaimers: [] },
-            audit: issue.audit || { createdAt: eval_.created_at, engineVersion: '', scorerId: '' },
-          };
+          if (!Array.isArray(issues)) continue;
           
-          allIssues.push(transformedIssue);
+          for (const issue of issues) {
+            if (!issue || !issue.issueId) continue;
+            
+            try {
+              // Transform to IssueV2 format (same logic as /api/issues-v2)
+              const importance = issue.confidence?.importance ?? 0.5;
+              const nodeBlame = issue.confidence?.nodeBlameNorm ?? 0;
+              const nliScore = issue.confidence?.nliScore ?? 0;
+              const hasContradictions = (issue.conflictsWith && issue.conflictsWith.length > 0);
+              const contradictionBoost = hasContradictions ? 0.15 : 0;
+              const computedRiskScore = Math.min(1.0, 
+                (importance * 0.5) + (nodeBlame * 0.3) + (nliScore * 0.2) + contradictionBoost
+              );
+              const deriveSeverityFromScore = (riskScore: number): 'low' | 'medium' | 'high' | 'critical' => {
+                if (riskScore >= 0.75) return 'high';
+                if (riskScore >= 0.5) return 'medium';
+                return 'low';
+              };
+              const derivedSeverity = deriveSeverityFromScore(computedRiskScore);
+              const deriveImpact = (severity: string, hasContradictions: boolean): 'low' | 'medium' | 'high' => {
+                if (severity === 'high' || (severity === 'medium' && hasContradictions)) return 'high';
+                if (severity === 'medium') return 'medium';
+                return 'low';
+              };
+              
+              const transformedIssue: any = {
+                ...issue,
+                evaluationId: eval_.id,
+                evaluationCreatedAt: eval_.created_at,
+                severity: issue.severity || derivedSeverity,
+                severityDisplay: issue.severityDisplay || (derivedSeverity === 'high' ? 'high' : derivedSeverity === 'medium' ? 'medium' : 'low'),
+                category: issue.category || issue.risk?.category || 'evidence',
+                type: issue.type || issue.what?.issueType || 'UNVERIFIED_CLAIM',
+                impact: issue.impact || deriveImpact(derivedSeverity, hasContradictions),
+                score: issue.score ?? Math.round(computedRiskScore * 100),
+                riskScore: issue.riskScore ?? computedRiskScore,
+                what: {
+                  ...issue.what,
+                  issueSummary: issue.what?.issueSummary || issue.what?.claimSummary || issue.what?.claimText || '',
+                  issueDetail: issue.what?.issueDetail || issue.what?.description || issue.what?.claimText || '',
+                  primaryClaimId: issue.what?.primaryClaimId || issue.claimId || '',
+                  claimText: issue.what?.claimText || issue.what?.claimSummary || '',
+                },
+                verification: issue.verification || { level: 'NONE', reasonCodes: [] },
+                who: issue.who || { speaker: 'UNKNOWN' },
+                evidence: issue.evidence || { refs: [] },
+                compliance: issue.compliance || { tags: [], disclaimers: [] },
+                audit: issue.audit || { createdAt: eval_.created_at, engineVersion: '', scorerId: '' },
+              };
+              
+              allIssues.push(transformedIssue);
+            } catch (issueError: any) {
+              console.warn(`Failed to transform issue ${issue?.issueId || 'unknown'} from evaluation ${eval_.id}:`, issueError?.message || issueError);
+              // Continue processing other issues
+              continue;
+            }
+          }
+        } catch (evalError: any) {
+          console.warn(`Failed to process evaluation ${eval_?.id || 'unknown'}:`, evalError?.message || evalError);
+          // Continue processing other evaluations
+          continue;
         }
       }
 
@@ -1052,7 +1084,11 @@ export function setupIssueWorkflowRoutes(app: express.Application) {
       });
     } catch (e: any) {
       console.error('Get issue queue error:', e);
-      res.status(500).json({ error: e?.message ?? 'unknown error' });
+      console.error('Error stack:', e?.stack);
+      res.status(500).json({ 
+        error: e?.message ?? 'unknown error',
+        details: process.env.NODE_ENV === 'development' ? e?.stack : undefined
+      });
     }
   });
 
