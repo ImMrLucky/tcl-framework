@@ -149,6 +149,12 @@ export class EvidenceUploadDialogComponent {
   }
 
   async upload() {
+    // Validate data exists
+    if (!this.data || !this.data.orgId) {
+      this.snackBar.open('Error: Missing organization data', 'Close', { duration: 3000 });
+      return;
+    }
+
     if (this.uploadMethod === 'file' && !this.selectedFile) {
       this.snackBar.open('Please select a file', 'Close', { duration: 3000 });
       return;
@@ -165,72 +171,102 @@ export class EvidenceUploadDialogComponent {
     }
 
     this.uploading = true;
+    let uploadCompleted = false;
+    
     try {
       let result: EvidenceItem | undefined;
       
+      // Add timeout to prevent hanging requests
+      const timeoutMs = 60000; // 60 seconds
+      const timeoutPromise = new Promise<never>((_, reject) => {
+        setTimeout(() => reject(new Error('Upload request timed out after 60 seconds')), timeoutMs);
+      });
+      
       if (this.uploadMethod === 'file' && this.selectedFile) {
-        result = await firstValueFrom(
-          this.evidenceService.uploadEvidenceFile(
-            this.selectedFile,
-            this.data.orgId,
-            this.sourceType,
-            this.title,
-            {
-              projectId: this.data.projectId,
-              conversationId: this.data.conversationId,
-              templateId: this.data.templateId,
-              scope: this.data.scope,
-              description: this.description || undefined,
-              tags: this.tags.length > 0 ? this.tags : undefined,
-              regions: this.regions.length > 0 ? this.regions : undefined,
-            }
-          )
+        const uploadObservable = this.evidenceService.uploadEvidenceFile(
+          this.selectedFile,
+          this.data.orgId,
+          this.sourceType,
+          this.title,
+          {
+            projectId: this.data.projectId,
+            conversationId: this.data.conversationId,
+            templateId: this.data.templateId,
+            scope: this.data.scope,
+            description: this.description || undefined,
+            tags: this.tags.length > 0 ? this.tags : undefined,
+            regions: this.regions.length > 0 ? this.regions : undefined,
+          }
         );
+        
+        result = await Promise.race([
+          firstValueFrom(uploadObservable),
+          timeoutPromise
+        ]);
+      } else if (this.uploadMethod === 'link') {
+        const linkObservable = this.evidenceService.addEvidenceLink(
+          this.linkUrl,
+          this.data.orgId,
+          this.sourceType,
+          this.title,
+          {
+            projectId: this.data.projectId,
+            conversationId: this.data.conversationId,
+            templateId: this.data.templateId,
+            scope: this.data.scope,
+            description: this.description || undefined,
+            tags: this.tags.length > 0 ? this.tags : undefined,
+            regions: this.regions.length > 0 ? this.regions : undefined,
+            snapshotLink: this.snapshotLink,
+          }
+        );
+        
+        result = await Promise.race([
+          firstValueFrom(linkObservable),
+          timeoutPromise
+        ]);
       } else {
-        // Link upload
-        result = await firstValueFrom(
-          this.evidenceService.addEvidenceLink(
-            this.linkUrl,
-            this.data.orgId,
-            this.sourceType,
-            this.title,
-            {
-              projectId: this.data.projectId,
-              conversationId: this.data.conversationId,
-              templateId: this.data.templateId,
-              scope: this.data.scope,
-              description: this.description || undefined,
-              tags: this.tags.length > 0 ? this.tags : undefined,
-              regions: this.regions.length > 0 ? this.regions : undefined,
-              snapshotLink: this.snapshotLink,
-            }
-          )
-        );
+        throw new Error('Invalid upload method');
       }
       
       if (!result) {
-        this.snackBar.open('Failed to upload evidence', 'Close', { duration: 5000 });
+        this.snackBar.open('Failed to upload evidence: No response from server', 'Close', { duration: 5000 });
         return;
       }
       
+      uploadCompleted = true;
+      
       // Update with authority level and override policy if ORG scope
       if (this.data.scope === 'ORG' && result) {
-        await firstValueFrom(
-          this.evidenceService.updateEvidenceItem(result.id, {
-            authorityLevel: this.authorityLevel,
-            overridePolicy: this.overridePolicy,
-          })
-        );
+        try {
+          await Promise.race([
+            firstValueFrom(
+              this.evidenceService.updateEvidenceItem(result.id, {
+                authorityLevel: this.authorityLevel,
+                overridePolicy: this.overridePolicy,
+              })
+            ),
+            timeoutPromise
+          ]);
+        } catch (updateError: any) {
+          // Log but don't fail the upload if the update fails
+          console.warn('Failed to update authority level/override policy:', updateError);
+          this.snackBar.open('Evidence uploaded but failed to update settings: ' + (updateError.error?.error || updateError.message), 'Close', {
+            duration: 5000
+          });
+        }
       }
       
       this.snackBar.open('Evidence uploaded successfully', 'Close', { duration: 3000 });
       this.dialogRef.close(true);
     } catch (error: any) {
       console.error('Failed to upload evidence:', error);
-      this.snackBar.open('Failed to upload evidence: ' + (error.error?.error || error.message), 'Close', {
+      const errorMessage = error.error?.error || error.message || 'Unknown error';
+      this.snackBar.open('Failed to upload evidence: ' + errorMessage, 'Close', {
         duration: 5000
       });
     } finally {
+      // Always reset uploading state, even if there was an error
       this.uploading = false;
     }
   }
