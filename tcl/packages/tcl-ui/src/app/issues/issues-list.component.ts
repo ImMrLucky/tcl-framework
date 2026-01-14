@@ -1,4 +1,4 @@
-import { Component, OnInit, AfterViewInit, ViewChild, OnDestroy } from '@angular/core';
+import { Component, OnInit, AfterViewInit, ViewChild, OnDestroy, ChangeDetectorRef } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { Router, RouterModule } from '@angular/router';
 import { MatCardModule } from '@angular/material/card';
@@ -65,7 +65,7 @@ import { PatternDetailModalComponent, PatternDetailModalData } from './pattern-d
 })
 export class IssuesListComponent implements OnInit, AfterViewInit, OnDestroy {
   @ViewChild(MatPaginator) paginator!: MatPaginator;
-  @ViewChild(MatSort) sort!: MatSort;
+  @ViewChild(MatSort, { static: false }) sort!: MatSort;
   
   private destroy$ = new Subject<void>();
   
@@ -112,7 +112,8 @@ export class IssuesListComponent implements OnInit, AfterViewInit, OnDestroy {
     private router: Router,
     private route: ActivatedRoute,
     private dialog: MatDialog,
-    private snackBar: MatSnackBar
+    private snackBar: MatSnackBar,
+    private cdr: ChangeDetectorRef
   ) {}
   
   ngOnInit() {
@@ -184,9 +185,6 @@ export class IssuesListComponent implements OnInit, AfterViewInit, OnDestroy {
   }
   
   ngAfterViewInit() {
-    // Connect MatSort to dataSource for client-side sorting
-    this.dataSource.sort = this.sort;
-    
     // Set up custom sorting for complex fields
     this.dataSource.sortingDataAccessor = (data: IssuePatternRow, sortHeaderId: string) => {
       switch (sortHeaderId) {
@@ -206,6 +204,22 @@ export class IssuesListComponent implements OnInit, AfterViewInit, OnDestroy {
           return (data as any)[sortHeaderId] ?? '';
       }
     };
+    
+    // Connect sort after view init - will be reconnected after data loads
+    this.connectSort();
+  }
+  
+  private connectSort() {
+    // Connect MatSort to dataSource
+    // Use change detection to ensure view is updated first
+    this.cdr.detectChanges();
+    
+    // Wait a tick for the view to be fully rendered
+    setTimeout(() => {
+      if (this.sort && this.dataSource) {
+        this.dataSource.sort = this.sort;
+      }
+    }, 0);
   }
   
   updateQueryParams() {
@@ -301,10 +315,11 @@ export class IssuesListComponent implements OnInit, AfterViewInit, OnDestroy {
         this.dataSource.data = response.rows;
         this.total = response.total;
         
-        // Ensure sort connection is maintained after data load
-        if (this.sort && !this.dataSource.sort) {
-          this.dataSource.sort = this.sort;
-        }
+        // Reconnect sort after data loads (table is now rendered)
+        // Use setTimeout to ensure Angular change detection has completed
+        setTimeout(() => {
+          this.connectSort();
+        }, 0);
         
         // Extract unique categories and types for filter options
         const categories = new Set<string>();
