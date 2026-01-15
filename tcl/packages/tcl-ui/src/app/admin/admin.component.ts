@@ -60,26 +60,28 @@ export class AdminComponent implements OnInit {
   ) {}
 
   async ngOnInit() {
+    // Load plan context first to ensure active org is set
+    this.planService.loadPlanContext();
+    
     await this.loadOrgs();
     await this.loadAllOrgs();
-    // Get current org from plan context
-    const planContext = this.planService.getPlanContext();
+    
+    // Get current org from plan context or localStorage
+    this.loadCurrentOrg();
+    
     // Check if emulation is active from plan context
+    const planContext = this.planService.getPlanContext();
     if (planContext && (planContext as any).emulated) {
       this.emulationEnabled = true;
       this.emulationTier = (planContext as any).effectivePlanTier || 'SANDBOX';
     }
-    // We'll need to get this from /api/me response
-    this.loadCurrentOrg();
   }
 
   async loadOrgs() {
     this.loadingOrgs = true;
     try {
       this.orgs = await this.adminService.getOrgs().toPromise() || [];
-      if (this.orgs.length > 0 && !this.selectedOrgId) {
-        this.selectedOrgId = this.orgs[0].id;
-      }
+      // Don't auto-select first org - let loadCurrentOrg handle it
     } catch (error: any) {
       console.error('Failed to load orgs:', error);
       const snackBarRef = this.snackBar.open('Failed to load organizations: ' + (error.error?.error || error.message), 'Close', {
@@ -113,10 +115,57 @@ export class AdminComponent implements OnInit {
     }
   }
 
-  loadCurrentOrg() {
-    // This would ideally come from /api/me, but for now we'll use the first org
+  async loadCurrentOrg() {
+    // First check localStorage for active org ID
+    const activeOrgId = typeof window !== 'undefined' ? localStorage.getItem('activeOrgId') : null;
+    
+    if (activeOrgId) {
+      // Verify this org is in the user's org list
+      const org = this.orgs.find(o => o.id === activeOrgId);
+      if (org) {
+        this.currentOrgId = activeOrgId;
+        this.selectedOrgId = activeOrgId;
+        return;
+      }
+    }
+    
+    // If no active org in localStorage or not found in orgs, try to get from /api/me
+    try {
+      const apiUrl = (window as any).__TCL_API_URL || 'https://protectqa.com';
+      const response = await fetch(`${apiUrl}/api/me`, {
+        headers: {
+          'Authorization': `Bearer ${await this.getAccessToken()}`
+        }
+      }).then(r => r.json());
+      
+      if (response?.org?.id) {
+        const orgId = response.org.id;
+        const org = this.orgs.find(o => o.id === orgId);
+        if (org) {
+          this.currentOrgId = orgId;
+          this.selectedOrgId = orgId;
+          // Store in localStorage for consistency
+          localStorage.setItem('activeOrgId', orgId);
+          return;
+        }
+      }
+    } catch (error) {
+      console.warn('Failed to get current org from /api/me:', error);
+    }
+    
+    // Fallback to first org
     if (this.orgs.length > 0) {
       this.currentOrgId = this.orgs[0].id;
+      this.selectedOrgId = this.orgs[0].id;
+    }
+  }
+  
+  private async getAccessToken(): Promise<string | null> {
+    try {
+      return await this.authService.getAccessToken();
+    } catch (e) {
+      console.warn('Failed to get access token:', e);
+      return null;
     }
   }
 

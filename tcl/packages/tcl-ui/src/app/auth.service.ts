@@ -607,8 +607,27 @@ export class AuthService {
     primaryUseCase?: string;
     onboardingCompleted?: boolean;
   }): Promise<{ error: any }> {
-    const user = this.currentUserSubject.value;
+    // Try to get user from currentUserSubject first
+    let user = this.currentUserSubject.value;
+    
+    // If not available, try to get from session
     if (!user) {
+      try {
+        const { data: { user: authUser }, error: authError } = await this.supabase.auth.getUser();
+        if (authUser && !authError) {
+          // Create a basic user object from auth user
+          user = {
+            id: authUser.id,
+            email: authUser.email,
+            fullName: authUser.user_metadata?.['full_name']
+          };
+        }
+      } catch (e) {
+        console.warn('Failed to get user from session:', e);
+      }
+    }
+    
+    if (!user || !user.id) {
       return { error: { message: 'No user logged in' } };
     }
 
