@@ -65,8 +65,9 @@ export async function getOrgContext(req: express.Request): Promise<OrgContext | 
     // Check for active org ID in header (set by admin org switch)
     const activeOrgId = req.headers['x-active-org-id'] as string | undefined;
     
-    let targetOrgId: string | undefined;
+    let targetOrgId: string;
     
+    // First, try to use the active org ID from header if provided
     if (activeOrgId) {
       // Verify user has access to the requested org
       const { data: membershipCheck } = await supabaseAdmin
@@ -79,12 +80,29 @@ export async function getOrgContext(req: express.Request): Promise<OrgContext | 
       if (membershipCheck) {
         // User has access to the requested org, use it
         targetOrgId = activeOrgId;
+      } else {
+        // User doesn't have access to requested org, fall through to default
+        // Get user's org membership (use maybeSingle to handle no membership gracefully)
+        const { data: membership, error: memberError } = await supabaseAdmin
+          .from('org_members')
+          .select('org_id, role')
+          .eq('user_id', user.id)
+          .limit(1)
+          .maybeSingle();
+        
+        if (memberError) {
+          return { error: `Error fetching org membership: ${memberError.message}` } as any;
+        }
+        
+        if (!membership) {
+          // User exists but has no org membership - this is a provisioning issue
+          return { error: 'User has no organization. Please contact support or re-register.' } as any;
+        }
+        
+        targetOrgId = membership.org_id;
       }
-      // If no access, fall through to default behavior (first org)
-    }
-    
-    // If no active org ID in header or user doesn't have access, use default (first org)
-    if (!targetOrgId) {
+    } else {
+      // No active org ID in header, use default (first org)
       // Get user's org membership (use maybeSingle to handle no membership gracefully)
       const { data: membership, error: memberError } = await supabaseAdmin
         .from('org_members')
