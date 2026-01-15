@@ -584,7 +584,7 @@ export async function runAnalysis(input: {
   userId: string;
   verificationLevel: string;
   transcriptAssetId: string;
-  jobId: string;
+  jobId: string | null;
   ingestionMode?: string; // Rule 0: Ingestion mode
   provenance?: any; // Rule 0: Provenance metadata
   // Evidence system parameters
