@@ -126,14 +126,23 @@ export class AdminComponent implements OnInit {
     this.loading = true;
     try {
       const result = await this.adminService.switchOrg(this.selectedOrgId).toPromise();
-      if (result?.success) {
-        const snackBarRef = this.snackBar.open('Organization switched successfully. Please refresh the page.', 'Close', {
-          duration: 5000
+      if (result?.activeOrgId) {
+        // Store active org ID in localStorage so it persists across requests
+        localStorage.setItem('activeOrgId', result.activeOrgId);
+        
+        const snackBarRef = this.snackBar.open('Organization switched successfully. Reloading...', 'Close', {
+          duration: 3000
         });
         snackBarRef.onAction().subscribe(() => snackBarRef.dismiss());
         this.currentOrgId = this.selectedOrgId;
+        
         // Reload plan context
         this.planService.loadPlanContext();
+        
+        // Reload the page after a short delay to ensure all components pick up the new org
+        setTimeout(() => {
+          window.location.reload();
+        }, 1000);
       }
     } catch (error: any) {
       const snackBarRef = this.snackBar.open('Failed to switch organization: ' + (error.error?.error || error.message), 'Close', {

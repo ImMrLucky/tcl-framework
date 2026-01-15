@@ -122,7 +122,7 @@ begin
     values (
       v_sandbox_org_id,
       v_first_superuser_id,
-      'owner',
+      'OWNER',
       now()
     )
     on conflict (org_id, user_id) do nothing;
@@ -137,7 +137,7 @@ begin
     values (
       v_team_org_id,
       v_first_superuser_id,
-      'owner',
+      'OWNER',
       now()
     )
     on conflict (org_id, user_id) do nothing;
@@ -152,7 +152,7 @@ begin
     values (
       v_enterprise_org_id,
       v_first_superuser_id,
-      'owner',
+      'OWNER',
       now()
     )
     on conflict (org_id, user_id) do nothing;

@@ -50,15 +50,28 @@ export class AuthInterceptor implements HttpInterceptor {
         // Clone the request
         let authReq = req;
         
+        // Get active org ID from localStorage (set by admin org switch)
+        const activeOrgId = typeof window !== 'undefined' ? localStorage.getItem('activeOrgId') : null;
+        
+        // Build headers object
+        const headers: { [key: string]: string } = {};
+        
         // If we have a valid token, add the Authorization header
         if (token && typeof token === 'string' && token.trim().length > 0) {
+          headers['Authorization'] = `Bearer ${token}`;
+        }
+        
+        // If we have an active org ID, add it as a header
+        if (activeOrgId) {
+          headers['X-Active-Org-Id'] = activeOrgId;
+        }
+        
+        // Clone request with headers if we have any
+        if (Object.keys(headers).length > 0) {
           authReq = req.clone({
-            setHeaders: {
-              Authorization: `Bearer ${token}`
-            }
+            setHeaders: headers
           });
         }
-        // If no token, still proceed - backend will return error if needed
         
         // Return the actual HTTP request - let HTTP errors propagate naturally
         return next.handle(authReq);

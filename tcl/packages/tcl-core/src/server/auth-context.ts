@@ -62,21 +62,59 @@ export async function getOrgContext(req: express.Request): Promise<OrgContext | 
       return { error: 'Token valid but no user found' } as any;
     }
 
-    // Get user's org membership (use maybeSingle to handle no membership gracefully)
+    // Check for active org ID in header (set by admin org switch)
+    const activeOrgId = req.headers['x-active-org-id'] as string | undefined;
+    
+    let targetOrgId: string | undefined;
+    
+    if (activeOrgId) {
+      // Verify user has access to the requested org
+      const { data: membershipCheck } = await supabaseAdmin
+        .from('org_members')
+        .select('org_id, role')
+        .eq('org_id', activeOrgId)
+        .eq('user_id', user.id)
+        .maybeSingle();
+      
+      if (membershipCheck) {
+        // User has access to the requested org, use it
+        targetOrgId = activeOrgId;
+      }
+      // If no access, fall through to default behavior (first org)
+    }
+    
+    // If no active org ID in header or user doesn't have access, use default (first org)
+    if (!targetOrgId) {
+      // Get user's org membership (use maybeSingle to handle no membership gracefully)
+      const { data: membership, error: memberError } = await supabaseAdmin
+        .from('org_members')
+        .select('org_id, role')
+        .eq('user_id', user.id)
+        .limit(1)
+        .maybeSingle();
+      
+      if (memberError) {
+        return { error: `Error fetching org membership: ${memberError.message}` } as any;
+      }
+      
+      if (!membership) {
+        // User exists but has no org membership - this is a provisioning issue
+        return { error: 'User has no organization. Please contact support or re-register.' } as any;
+      }
+      
+      targetOrgId = membership.org_id;
+    }
+    
+    // Get the membership for the target org to get the role
     const { data: membership, error: memberError } = await supabaseAdmin
       .from('org_members')
       .select('org_id, role')
+      .eq('org_id', targetOrgId)
       .eq('user_id', user.id)
-      .limit(1)
-      .maybeSingle();
+      .single();
     
-    if (memberError) {
-      return { error: `Error fetching org membership: ${memberError.message}` } as any;
-    }
-    
-    if (!membership) {
-      // User exists but has no org membership - this is a provisioning issue
-      return { error: 'User has no organization. Please contact support or re-register.' } as any;
+    if (memberError || !membership) {
+      return { error: `Error fetching org membership: ${memberError?.message || 'Not found'}` } as any;
     }
 
     // Get default project for the org
@@ -85,7 +123,7 @@ export async function getOrgContext(req: express.Request): Promise<OrgContext | 
     const { data: defaultProject, error: defaultProjectError } = await supabaseAdmin
       .from('projects')
       .select('id')
-      .eq('org_id', membership.org_id)
+      .eq('org_id', targetOrgId)
       .eq('is_default', true)
       .maybeSingle();
     
@@ -96,7 +134,7 @@ export async function getOrgContext(req: express.Request): Promise<OrgContext | 
       const { data: anyProject, error: anyProjectError } = await supabaseAdmin
         .from('projects')
         .select('id')
-        .eq('org_id', membership.org_id)
+        .eq('org_id', targetOrgId)
         .limit(1)
         .maybeSingle();
       
@@ -121,7 +159,7 @@ export async function getOrgContext(req: express.Request): Promise<OrgContext | 
     }
 
     return {
-      orgId: membership.org_id,
+      orgId: targetOrgId,
       projectId: project?.id || '',
       env,
       userId: user.id,

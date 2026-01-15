@@ -53,8 +53,8 @@ export class AdminService {
   /**
    * Switch active organization
    */
-  switchOrg(orgId: string): Observable<{ success: boolean; message?: string }> {
-    return this.http.post<{ success: boolean; message?: string }>(
+  switchOrg(orgId: string): Observable<{ activeOrgId: string; org: any }> {
+    return this.http.post<{ activeOrgId: string; org: any }>(
       `${this.apiUrl}/api/admin/switch-org`,
       { orgId }
     );
