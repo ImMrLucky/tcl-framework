@@ -136,13 +136,13 @@ export class AdminComponent implements OnInit {
         snackBarRef.onAction().subscribe(() => snackBarRef.dismiss());
         this.currentOrgId = this.selectedOrgId;
         
-        // Reload plan context
+        // Reload plan context immediately (before page reload)
         this.planService.loadPlanContext();
         
         // Reload the page after a short delay to ensure all components pick up the new org
         setTimeout(() => {
           window.location.reload();
-        }, 1000);
+        }, 500);
       }
     } catch (error: any) {
       const snackBarRef = this.snackBar.open('Failed to switch organization: ' + (error.error?.error || error.message), 'Close', {

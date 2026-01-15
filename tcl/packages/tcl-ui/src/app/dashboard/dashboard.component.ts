@@ -10,6 +10,7 @@ import { MatDialog, MatDialogModule } from '@angular/material/dialog';
 import { AppHeaderComponent } from '../shared/app-header.component';
 import { AuthService, User } from '../auth.service';
 import { MemberService } from '../member.service';
+import { PlanService } from '../plan.service';
 import { OnboardingModalComponent } from '../onboarding-modal/onboarding-modal.component';
 import { InviteModalComponent } from '../invite-modal/invite-modal.component';
 
@@ -40,6 +41,7 @@ export class DashboardComponent implements OnInit {
   constructor(
     private authService: AuthService,
     private memberService: MemberService,
+    private planService: PlanService,
     private dialog: MatDialog,
     private router: Router
   ) {}
@@ -52,6 +54,9 @@ export class DashboardComponent implements OnInit {
       this.router.navigate(['/login']);
       return;
     }
+
+    // Reload plan context to ensure it uses the active org from localStorage
+    this.planService.loadPlanContext();
 
     // Subscribe to user changes
     this.authService.currentUser$.subscribe(user => {
