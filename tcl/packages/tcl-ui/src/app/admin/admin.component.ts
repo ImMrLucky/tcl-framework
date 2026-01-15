@@ -15,6 +15,7 @@ import { MatSnackBar, MatSnackBarModule } from '@angular/material/snack-bar';
 import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
 import { AdminService, Org, EmulationState } from './admin.service';
 import { PlanService } from '../plan.service';
+import { AuthService } from '../auth.service';
 
 @Component({
   selector: 'app-admin',
@@ -56,7 +57,8 @@ export class AdminComponent implements OnInit {
   constructor(
     private adminService: AdminService,
     private planService: PlanService,
-    private snackBar: MatSnackBar
+    private snackBar: MatSnackBar,
+    private authService: AuthService
   ) {}
 
   async ngOnInit() {
