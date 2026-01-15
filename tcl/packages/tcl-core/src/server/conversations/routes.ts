@@ -35,16 +35,58 @@ export function setupConversationRoutes(app: express.Application) {
         return res.status(400).json({ error: 'audioAssetId is required' });
       }
 
-      // Verify audio asset exists and belongs to org
-      const { data: asset, error: assetError } = await supabaseAdmin
-        .from('assets')
-        .select('id, org_id, project_id, filename, file_size_bytes')
-        .eq('id', audioAssetId)
-        .eq('org_id', context.orgId)
-        .maybeSingle();
+      console.log('[Draft] Looking up asset:', { audioAssetId, orgId: context.orgId, projectId });
 
-      if (assetError || !asset) {
-        return res.status(404).json({ error: 'Audio asset not found or access denied' });
+      // Verify audio asset exists and belongs to org
+      // Retry up to 3 times with exponential backoff (in case of timing issues)
+      let asset: any = null;
+      let lastError: any = null;
+      
+      for (let attempt = 0; attempt < 3; attempt++) {
+        if (attempt > 0) {
+          // Wait before retry: 100ms, 200ms, 400ms
+          await new Promise(resolve => setTimeout(resolve, 100 * Math.pow(2, attempt - 1)));
+        }
+
+        const { data: assetCheck, error: checkError } = await supabaseAdmin
+          .from('assets')
+          .select('id, org_id, object_path, size_bytes, bucket')
+          .eq('id', audioAssetId)
+          .maybeSingle();
+
+        if (checkError) {
+          lastError = checkError;
+          console.error(`[Draft] Error checking asset (attempt ${attempt + 1}):`, checkError);
+          if (attempt === 2) {
+            return res.status(500).json({ error: `Database error: ${checkError.message}` });
+          }
+          continue;
+        }
+
+        if (!assetCheck) {
+          console.warn(`[Draft] Asset not found (attempt ${attempt + 1}):`, { audioAssetId, orgId: context.orgId });
+          if (attempt === 2) {
+            return res.status(404).json({ error: 'Audio asset not found. Please ensure the upload completed successfully.' });
+          }
+          continue;
+        }
+
+        // Verify org_id matches
+        if (assetCheck.org_id !== context.orgId) {
+          console.error('Asset org_id mismatch:', {
+            assetOrgId: assetCheck.org_id,
+            contextOrgId: context.orgId,
+            audioAssetId,
+          });
+          return res.status(403).json({ error: 'Access denied: asset belongs to different organization' });
+        }
+
+        asset = assetCheck;
+        break;
+      }
+
+      if (!asset) {
+        return res.status(404).json({ error: 'Audio asset not found after retries' });
       }
 
       // Create draft conversation
@@ -54,7 +96,7 @@ export function setupConversationRoutes(app: express.Application) {
           org_id: context.orgId,
           project_id: projectId || context.projectId || null,
           env: context.env || 'sandbox',
-          title: title || asset.filename || 'Untitled Audio',
+          title: title || (asset.object_path ? asset.object_path.split('/').pop() || 'Untitled Audio' : 'Untitled Audio'),
           content: null, // No content yet for audio-only drafts
           draft_status: 'DRAFT_AUDIO_UPLOADED',
           audio_asset_id: audioAssetId,
