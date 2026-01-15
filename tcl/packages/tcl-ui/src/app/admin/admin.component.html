@@ -1,6 +1,14 @@
 <div class="admin-container">
-  <h1>Admin Dashboard</h1>
-  <p class="subtitle">Superuser controls for testing and management</p>
+  <div class="admin-header">
+    <div class="header-content">
+      <h1>Admin Dashboard</h1>
+      <p class="subtitle">Superuser controls for testing and management</p>
+    </div>
+    <button mat-raised-button color="primary" routerLink="/dashboard" class="back-button">
+      <mat-icon>arrow_back</mat-icon>
+      <span>Back to Dashboard</span>
+    </button>
+  </div>
 
   <mat-tab-group>
     <!-- Org Switch Tab -->

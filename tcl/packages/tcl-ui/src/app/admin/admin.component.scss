@@ -5,13 +5,34 @@
   min-height: 400px;
 }
 
+.admin-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: 24px;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.header-content {
+  flex: 1;
+  min-width: 200px;
+}
+
 h1 {
   margin-bottom: 8px;
 }
 
 .subtitle {
   color: #666;
-  margin-bottom: 24px;
+  margin-bottom: 0;
+}
+
+.back-button {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  white-space: nowrap;
 }
 
 .tab-content {
