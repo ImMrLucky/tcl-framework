@@ -41,6 +41,8 @@ export function setupEvaluationSearchRoutes(app: express.Application) {
       // Build base query - we need 'report' for filtering, but we'll only load what we need
       // For large datasets, we should paginate the database query first
       // Join with conversations to get audio and transcript asset IDs
+      // Use !conversation_id to specify which foreign key relationship to use
+      // (there are two relationships: evaluations.conversation_id and conversations.evaluation_id)
       let query = supabaseAdmin
         .from('evaluations')
         .select(`
@@ -55,7 +57,7 @@ export function setupEvaluationSearchRoutes(app: express.Application) {
           report, 
           created_at,
           transcript_asset_id,
-          conversations(audio_asset_id, transcript_asset_id)
+          conversations!conversation_id(audio_asset_id, transcript_asset_id)
         `, { count: 'exact' })
         .eq('org_id', context.orgId)
         .order('created_at', { ascending: false })
