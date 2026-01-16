@@ -40,6 +40,10 @@ export interface PlanContext {
   capabilities: Capability[];
   limits: PlanLimits;
   remainingToday: PlanRemaining;
+  // Emulation metadata (only present when emulation is active)
+  emulated?: boolean;
+  realPlanTier?: PlanTier;
+  effectivePlanTier?: PlanTier;
 }
 
 export interface MeResponse {
@@ -95,12 +99,21 @@ export class PlanService {
   }
 
   /**
+   * Clear plan context (useful when switching orgs)
+   */
+  clearPlanContext(): void {
+    this.planContextSubject.next(null);
+  }
+
+  /**
    * Load plan context from /api/me endpoint
    */
   loadPlanContext(): void {
     this.loadingSubject.next(true);
     
-    this.http.get<MeResponse>(`${this.apiUrl}/api/me`)
+    // Add cache-busting query parameter to ensure fresh data
+    const cacheBuster = new Date().getTime();
+    this.http.get<MeResponse>(`${this.apiUrl}/api/me?t=${cacheBuster}`)
       .pipe(
         tap(response => {
           if (response.planContext) {

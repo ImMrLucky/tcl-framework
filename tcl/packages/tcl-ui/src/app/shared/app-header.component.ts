@@ -153,10 +153,17 @@ export class AppHeaderComponent implements OnInit, OnDestroy {
         }
       });
     
+    // Load plan context on initialization if authenticated
+    if (this.isAuthenticated) {
+      this.planService.loadPlanContext();
+    }
+    
     // Subscribe to plan context changes
-    this.planContext$.subscribe(context => {
-      this.planTier = context?.tier ?? null;
-    });
+    this.planContext$
+      .pipe(takeUntil(this.destroy$))
+      .subscribe(context => {
+        this.planTier = context?.tier ?? null;
+      });
 
     // Subscribe to superuser status
     this.planService.isSuperuser$

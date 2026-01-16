@@ -1,4 +1,4 @@
-import { Component, OnInit } from '@angular/core';
+import { Component, OnInit, OnDestroy } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { RouterModule } from '@angular/router';
 import { FormsModule } from '@angular/forms';
@@ -13,6 +13,8 @@ import { MatChipsModule } from '@angular/material/chips';
 import { MatIconModule } from '@angular/material/icon';
 import { MatSnackBar, MatSnackBarModule } from '@angular/material/snack-bar';
 import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
+import { Subject } from 'rxjs';
+import { takeUntil } from 'rxjs/operators';
 import { AdminService, Org, EmulationState } from './admin.service';
 import { PlanService } from '../plan.service';
 import { AuthService } from '../auth.service';
@@ -39,7 +41,7 @@ import { AuthService } from '../auth.service';
   templateUrl: './admin.component.html',
   styleUrls: ['./admin.component.scss']
 })
-export class AdminComponent implements OnInit {
+export class AdminComponent implements OnInit, OnDestroy {
   orgs: Org[] = [];
   allOrgs: Org[] = [];
   selectedOrgId: string = '';
@@ -53,6 +55,8 @@ export class AdminComponent implements OnInit {
   displayedColumns = ['name', 'planTier', 'planStatus', 'isInternalTest', 'actions'];
   
   currentOrgId: string = '';
+  
+  private destroy$ = new Subject<void>();
 
   constructor(
     private adminService: AdminService,
@@ -65,18 +69,28 @@ export class AdminComponent implements OnInit {
     // Load plan context first to ensure active org is set
     this.planService.loadPlanContext();
     
+    // Subscribe to plan context changes to update emulation state
+    this.planService.planContext$
+      .pipe(takeUntil(this.destroy$))
+      .subscribe(context => {
+        if (context && (context as any).emulated) {
+          this.emulationEnabled = true;
+          this.emulationTier = (context as any).effectivePlanTier || 'SANDBOX';
+        } else {
+          this.emulationEnabled = false;
+        }
+      });
+    
     await this.loadOrgs();
     await this.loadAllOrgs();
     
     // Get current org from plan context or localStorage
     this.loadCurrentOrg();
-    
-    // Check if emulation is active from plan context
-    const planContext = this.planService.getPlanContext();
-    if (planContext && (planContext as any).emulated) {
-      this.emulationEnabled = true;
-      this.emulationTier = (planContext as any).effectivePlanTier || 'SANDBOX';
-    }
+  }
+  
+  ngOnDestroy() {
+    this.destroy$.next();
+    this.destroy$.complete();
   }
 
   async loadOrgs() {
@@ -181,19 +195,18 @@ export class AdminComponent implements OnInit {
         // Store active org ID in localStorage so it persists across requests
         localStorage.setItem('activeOrgId', result.activeOrgId);
         
+        // Clear plan context to force reload with new org
+        this.planService.clearPlanContext();
+        
         const snackBarRef = this.snackBar.open('Organization switched successfully. Reloading...', 'Close', {
           duration: 3000
         });
         snackBarRef.onAction().subscribe(() => snackBarRef.dismiss());
         this.currentOrgId = this.selectedOrgId;
         
-        // Reload plan context immediately (before page reload)
-        this.planService.loadPlanContext();
-        
-        // Reload the page after a short delay to ensure all components pick up the new org
-        setTimeout(() => {
-          window.location.reload();
-        }, 500);
+        // Reload the page immediately to ensure all components pick up the new org
+        // The plan context will be reloaded automatically when components initialize
+        window.location.reload();
       }
     } catch (error: any) {
       const snackBarRef = this.snackBar.open('Failed to switch organization: ' + (error.error?.error || error.message), 'Close', {
