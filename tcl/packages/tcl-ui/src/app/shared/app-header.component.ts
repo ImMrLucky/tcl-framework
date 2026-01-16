@@ -181,7 +181,7 @@ export class AppHeaderComponent implements OnInit, OnDestroy {
           // Calculate used amounts
           // Frontend PlanLimits uses analysisRunsPerDay, backend may use analysesPerDay
           const analysesLimit = (limits as any).analysisRunsPerDay ?? (limits as any).analysesPerDay ?? 0;
-          const analysesRemaining = remaining.analysisRuns ?? remaining.analyses ?? 0;
+          const analysesRemaining = remaining.analysisRuns ?? 0;
           const analysesUsed = analysesLimit === -1 
             ? 0 
             : analysesLimit - analysesRemaining;

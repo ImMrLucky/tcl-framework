@@ -13,6 +13,7 @@ import { IntegrationsService, IntegrationType } from './integrations.service';
 import { PlanService, PlanTier } from '../plan.service';
 import { firstValueFrom } from 'rxjs';
 import { EntitlementsService } from '../entitlements.service';
+import { FeatureService } from '../features/feature.service';
 
 @Component({
   selector: 'app-integrations',

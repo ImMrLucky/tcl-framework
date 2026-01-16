@@ -175,7 +175,7 @@
                     <th mat-header-cell *matHeaderCellDef>
                       <mat-checkbox 
                         [checked]="selectedObjects.size === connectorObjects.length && connectorObjects.length > 0"
-                        (change)="$event.checked ? selectedObjects = new Set(connectorObjects.map(o => o.id)) : selectedObjects.clear()">
+                        (change)="selectAllObjects($event.checked)">
                       </mat-checkbox>
                     </th>
                     <td mat-cell *matCellDef="let object">

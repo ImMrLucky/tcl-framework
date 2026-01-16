@@ -222,6 +222,14 @@ export class BatchIngestionComponent implements OnInit, OnDestroy {
     }
   }
   
+  selectAllObjects(checked: boolean) {
+    if (checked) {
+      this.selectedObjects = new Set(this.connectorObjects.map(o => o.id));
+    } else {
+      this.selectedObjects.clear();
+    }
+  }
+  
   async createBatchFromSelection() {
     if (this.selectedObjects.size === 0) {
       this.snackBar.open('Please select at least one file', 'Close', { duration: 3000 });
