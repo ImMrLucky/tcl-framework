@@ -132,8 +132,13 @@ export class PlanService {
     }
     
     // Add cache-busting query parameter to ensure fresh data
+    // Also add active org ID as query parameter (fallback if header is stripped by proxy)
     const cacheBuster = new Date().getTime();
-    const request$ = this.http.get<MeResponse>(`${this.apiUrl}/api/me?t=${cacheBuster}`)
+    const activeOrgId = typeof window !== 'undefined' ? localStorage.getItem('activeOrgId') : null;
+    const queryParams = activeOrgId 
+      ? `?t=${cacheBuster}&activeOrgId=${encodeURIComponent(activeOrgId)}`
+      : `?t=${cacheBuster}`;
+    const request$ = this.http.get<MeResponse>(`${this.apiUrl}/api/me${queryParams}`)
       .pipe(
         tap(response => {
           console.log('[PlanService] Plan context loaded:', {

@@ -105,6 +105,8 @@ app.use((req, res, next) => {
   
   // Handle preflight requests
   if (req.method === 'OPTIONS') {
+    // Log preflight request to debug CORS
+    console.log('[CORS] Preflight request received. Requested headers:', req.headers['access-control-request-headers']);
     return res.status(200).end();
   }
   
@@ -1801,10 +1803,20 @@ console.log("Admin routes registered successfully");
 
 app.get("/api/me", async (req, res) => {
   try {
+    // Check for active org ID in query parameter (fallback if header is stripped by proxy/CDN)
+    const activeOrgIdFromQuery = req.query.activeOrgId as string | undefined;
+    
+    // If we have it in query, temporarily add it to headers so getOrgContext can use it
+    if (activeOrgIdFromQuery && !req.headers['x-active-org-id']) {
+      req.headers['x-active-org-id'] = activeOrgIdFromQuery;
+      console.log('[API/me] Using activeOrgId from query parameter (header was stripped):', activeOrgIdFromQuery);
+    }
+    
     // Debug: Log headers for /api/me requests
     console.log('[API/me] Request headers:', {
       'x-active-org-id': req.headers['x-active-org-id'],
       'X-Active-Org-Id': (req.headers as any)['X-Active-Org-Id'],
+      'activeOrgId (query)': activeOrgIdFromQuery,
       'all-header-keys': Object.keys(req.headers)
     });
     

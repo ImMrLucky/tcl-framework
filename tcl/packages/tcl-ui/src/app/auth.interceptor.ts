@@ -47,13 +47,10 @@ export class AuthInterceptor implements HttpInterceptor {
       // Add timeout to prevent hanging if getAccessToken takes too long
       timeout(5000),
       switchMap(token => {
-        // Clone the request
-        let authReq = req;
-        
         // Get active org ID from localStorage (set by admin org switch)
         const activeOrgId = typeof window !== 'undefined' ? localStorage.getItem('activeOrgId') : null;
         
-        // Build headers object
+        // Build headers object - always clone the request to add headers
         const headers: { [key: string]: string } = {};
         
         // If we have a valid token, add the Authorization header
@@ -67,16 +64,22 @@ export class AuthInterceptor implements HttpInterceptor {
           // Debug logging
           if (req.url.includes('/api/me')) {
             console.log('[AuthInterceptor] Sending X-Active-Org-Id header:', activeOrgId, 'for request:', req.url);
+            console.log('[AuthInterceptor] Headers being set:', headers);
           }
         } else if (req.url.includes('/api/me')) {
           console.log('[AuthInterceptor] No activeOrgId in localStorage for /api/me request');
         }
         
-        // Clone request with headers if we have any
-        if (Object.keys(headers).length > 0) {
-          authReq = req.clone({
-            setHeaders: headers
-          });
+        // Always clone the request to ensure headers are set
+        // Even if we only have Authorization, we need to clone to preserve the original request
+        const authReq = req.clone({
+          setHeaders: headers
+        });
+        
+        // Debug: Log what headers are actually being sent
+        if (req.url.includes('/api/me') && activeOrgId) {
+          console.log('[AuthInterceptor] Cloned request headers:', authReq.headers.keys());
+          console.log('[AuthInterceptor] X-Active-Org-Id in cloned request:', authReq.headers.get('X-Active-Org-Id'));
         }
         
         // Return the actual HTTP request - let HTTP errors propagate naturally
