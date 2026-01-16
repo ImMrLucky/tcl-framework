@@ -4,7 +4,7 @@
       <h1>Admin Dashboard</h1>
       <p class="subtitle">Superuser controls for testing and management</p>
     </div>
-    <button mat-raised-button color="primary" routerLink="/dashboard" class="back-button">
+    <button mat-raised-button color="primary" (click)="navigateToDashboard()" class="back-button">
       <mat-icon>arrow_back</mat-icon>
       <span>Back to Dashboard</span>
     </button>

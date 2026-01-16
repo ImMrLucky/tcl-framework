@@ -55,7 +55,9 @@ export class DashboardComponent implements OnInit {
       return;
     }
 
-    // Reload plan context to ensure it uses the active org from localStorage
+    // Clear and reload plan context to ensure it uses the active org from localStorage
+    // This is important when navigating from admin page after switching orgs
+    this.planService.clearPlanContext();
     this.planService.loadPlanContext();
 
     // Subscribe to user changes

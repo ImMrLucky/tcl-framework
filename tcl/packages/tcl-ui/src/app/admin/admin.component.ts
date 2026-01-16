@@ -18,6 +18,7 @@ import { takeUntil } from 'rxjs/operators';
 import { AdminService, Org, EmulationState } from './admin.service';
 import { PlanService } from '../plan.service';
 import { AuthService } from '../auth.service';
+import { Router } from '@angular/router';
 
 @Component({
   selector: 'app-admin',
@@ -62,7 +63,8 @@ export class AdminComponent implements OnInit, OnDestroy {
     private adminService: AdminService,
     private planService: PlanService,
     private snackBar: MatSnackBar,
-    private authService: AuthService
+    private authService: AuthService,
+    private router: Router
   ) {}
 
   async ngOnInit() {
@@ -216,6 +218,20 @@ export class AdminComponent implements OnInit, OnDestroy {
     } finally {
       this.loading = false;
     }
+  }
+
+  navigateToDashboard() {
+    // Clear plan context to force reload with new org
+    this.planService.clearPlanContext();
+    
+    // Navigate to dashboard
+    this.router.navigate(['/dashboard']).then(() => {
+      // Reload plan context after navigation to ensure header updates
+      // Use a small delay to ensure navigation completes
+      setTimeout(() => {
+        this.planService.loadPlanContext();
+      }, 100);
+    });
   }
 
   async toggleEmulation() {
