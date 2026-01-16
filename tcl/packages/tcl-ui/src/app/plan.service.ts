@@ -1,6 +1,6 @@
 import { Injectable } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
-import { BehaviorSubject, Observable, of } from 'rxjs';
+import { BehaviorSubject, Observable, of, firstValueFrom } from 'rxjs';
 import { catchError, tap } from 'rxjs/operators';
 
 export type PlanTier = 'SANDBOX' | 'TEAM' | 'ENTERPRISE';
@@ -88,6 +88,8 @@ export class PlanService {
 
   private isSuperuserSubject = new BehaviorSubject<boolean>(false);
   public isSuperuser$ = this.isSuperuserSubject.asObservable();
+  
+  private loadingPromise: Promise<void> | null = null;
 
   private get apiUrl(): string {
     // Use same pattern as other services
@@ -112,8 +114,15 @@ export class PlanService {
 
   /**
    * Load plan context from /api/me endpoint
+   * Prevents duplicate concurrent calls by reusing an in-flight request
    */
   loadPlanContext(): void {
+    // If already loading, return the existing promise instead of making a new request
+    if (this.loadingPromise) {
+      console.log('[PlanService] Plan context already loading, reusing existing request');
+      return;
+    }
+    
     this.loadingSubject.next(true);
     
     // Check for active org ID in localStorage
@@ -124,7 +133,7 @@ export class PlanService {
     
     // Add cache-busting query parameter to ensure fresh data
     const cacheBuster = new Date().getTime();
-    this.http.get<MeResponse>(`${this.apiUrl}/api/me?t=${cacheBuster}`)
+    const request$ = this.http.get<MeResponse>(`${this.apiUrl}/api/me?t=${cacheBuster}`)
       .pipe(
         tap(response => {
           console.log('[PlanService] Plan context loaded:', {
@@ -143,9 +152,16 @@ export class PlanService {
           console.error('Failed to load plan context:', error);
           return of(null);
         })
-      )
-      .subscribe(() => {
+      );
+    
+    this.loadingPromise = firstValueFrom(request$)
+      .then(() => {
         this.loadingSubject.next(false);
+        this.loadingPromise = null;
+      })
+      .catch(() => {
+        this.loadingSubject.next(false);
+        this.loadingPromise = null;
       });
   }
 

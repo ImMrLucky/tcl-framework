@@ -167,10 +167,8 @@ export class AppHeaderComponent implements OnInit, OnDestroy {
         }
       });
     
-    // Load plan context on initialization if authenticated
-    if (this.isAuthenticated) {
-      this.planService.loadPlanContext();
-    }
+    // Don't load plan context here if user subscription already loaded it
+    // The user subscription above will handle loading when user is authenticated
     
     // Reload plan context on navigation to ensure it's fresh
     // This is especially important when navigating from admin page after switching orgs
