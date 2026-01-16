@@ -112,9 +112,9 @@
     </mat-card>
 
     <!-- Plan Comparison -->
-    <mat-card class="plan-comparison-card" *ngIf="planContext && planContext.tier === 'SANDBOX'">
+    <mat-card class="plan-comparison-card" *ngIf="planContext">
       <mat-card-header>
-        <mat-card-title>Plan Comparison</mat-card-title>
+        <mat-card-title>Compare Plans</mat-card-title>
       </mat-card-header>
       <mat-card-content>
         <table class="comparison-table">
@@ -127,156 +127,37 @@
             </tr>
           </thead>
           <tbody>
-            <!-- Usage Limits -->
-            <tr class="section-header">
-              <td colspan="4"><strong>Usage Limits</strong></td>
-            </tr>
-            <tr>
-              <td>Evaluations per Day</td>
-              <td>10</td>
-              <td>500</td>
-              <td>Unlimited</td>
-            </tr>
-            <tr>
-              <td>API Calls per Day</td>
-              <td>3</td>
-              <td>5,000</td>
-              <td>Unlimited</td>
-            </tr>
-            <tr>
-              <td>File Uploads per Day</td>
-              <td>10</td>
-              <td>500</td>
-              <td>Unlimited</td>
-            </tr>
-            <tr>
-              <td>Max Files per Analysis</td>
-              <td>3</td>
-              <td>10</td>
-              <td>Unlimited</td>
-            </tr>
-            <tr>
-              <td>Max File Size</td>
-              <td>20 MB</td>
-              <td>100 MB</td>
-              <td>Unlimited</td>
-            </tr>
-            
-            <!-- Core Features -->
-            <tr class="section-header">
-              <td colspan="4"><strong>Core Features</strong></td>
-            </tr>
-            <tr>
-              <td>Manual Analysis</td>
-              <td>✅</td>
-              <td>✅</td>
-              <td>✅</td>
-            </tr>
-            <tr>
-              <td>API Access (Sandbox)</td>
-              <td>✅</td>
-              <td>✅</td>
-              <td>✅</td>
-            </tr>
-            <tr>
-              <td>API Access (Production)</td>
-              <td>❌</td>
-              <td>✅</td>
-              <td>✅</td>
-            </tr>
-            <tr>
-              <td>Webhooks (Test)</td>
-              <td>✅</td>
-              <td>✅</td>
-              <td>✅</td>
-            </tr>
-            <tr>
-              <td>Webhooks (Production)</td>
-              <td>❌</td>
-              <td>✅</td>
-              <td>✅</td>
-            </tr>
-            <tr>
-              <td>Usage Dashboard</td>
-              <td>❌</td>
-              <td>✅</td>
-              <td>✅</td>
-            </tr>
-            
-            <!-- Advanced Features -->
-            <tr class="section-header">
-              <td colspan="4"><strong>Advanced Features</strong></td>
-            </tr>
-            <tr>
-              <td>Batch Ingestion</td>
-              <td>❌</td>
-              <td>✅</td>
-              <td>✅</td>
-            </tr>
-            <tr>
-              <td>Issue Decisions</td>
-              <td>❌</td>
-              <td>✅</td>
-              <td>✅</td>
-            </tr>
-            <tr>
-              <td>Cloud Connectors (S3/Dropbox/GDrive)</td>
-              <td>❌</td>
-              <td>❌</td>
-              <td>✅</td>
-            </tr>
-            <tr>
-              <td>Template Customization</td>
-              <td>❌</td>
-              <td>❌</td>
-              <td>✅</td>
-            </tr>
-            
-            <!-- Enterprise Features -->
-            <tr class="section-header">
-              <td colspan="4"><strong>Enterprise Features</strong></td>
-            </tr>
-            <tr>
-              <td>Case Management</td>
-              <td>❌</td>
-              <td>❌</td>
-              <td>✅</td>
-            </tr>
-            <tr>
-              <td>Integrations (Jira/Webhooks)</td>
-              <td>❌</td>
-              <td>❌</td>
-              <td>✅</td>
-            </tr>
-            <tr>
-              <td>Legal Hold / Snapshots</td>
-              <td>❌</td>
-              <td>❌</td>
-              <td>✅</td>
-            </tr>
-            <tr>
-              <td>Reviewer Signoffs</td>
-              <td>❌</td>
-              <td>❌</td>
-              <td>✅</td>
-            </tr>
-            <tr>
-              <td>Advanced Audit Packs</td>
-              <td>❌</td>
-              <td>❌</td>
-              <td>✅</td>
-            </tr>
-            <tr>
-              <td>Enterprise Governance</td>
-              <td>❌</td>
-              <td>❌</td>
-              <td>✅</td>
-            </tr>
+            <ng-container *ngFor="let category of allFeatures">
+              <tr class="category-row">
+                <td colspan="4"><strong>{{ category.category }}</strong></td>
+              </tr>
+              <tr *ngFor="let feature of category.features">
+                <td>
+                  {{ feature.name }}
+                  <p class="feature-description">{{ feature.description }}</p>
+                </td>
+                <td>
+                  <mat-icon *ngIf="hasFeatureForTier(feature.key, 'SANDBOX')" color="primary">check_circle</mat-icon>
+                  <span *ngIf="!hasFeatureForTier(feature.key, 'SANDBOX')">❌</span>
+                </td>
+                <td>
+                  <mat-icon *ngIf="hasFeatureForTier(feature.key, 'TEAM')" color="primary">check_circle</mat-icon>
+                  <span *ngIf="!hasFeatureForTier(feature.key, 'TEAM')">❌</span>
+                </td>
+                <td>
+                  <mat-icon *ngIf="hasFeatureForTier(feature.key, 'ENTERPRISE')" color="primary">check_circle</mat-icon>
+                  <span *ngIf="!hasFeatureForTier(feature.key, 'ENTERPRISE')">❌</span>
+                </td>
+              </tr>
+            </ng-container>
           </tbody>
         </table>
         <div class="comparison-actions">
           <button mat-raised-button color="primary" (click)="onUpgradeClick()">
             Upgrade to Team
+          </button>
+          <button mat-stroked-button color="accent" (click)="onContactAdminClick()">
+            Contact Sales
           </button>
         </div>
       </mat-card-content>

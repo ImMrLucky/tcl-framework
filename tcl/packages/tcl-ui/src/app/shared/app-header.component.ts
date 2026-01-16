@@ -13,8 +13,11 @@ import { PlanService, PlanTier } from '../plan.service';
 import { Router } from '@angular/router';
 import { MatChipsModule } from '@angular/material/chips';
 import { MatProgressBarModule } from '@angular/material/progress-bar';
+import { MatTooltipModule } from '@angular/material/tooltip';
 import { Subject } from 'rxjs';
 import { takeUntil, distinctUntilChanged, debounceTime } from 'rxjs/operators';
+import { FeatureService } from '../features/feature.service';
+import { UpgradeService } from './upgrade.service';
 
 @Component({
   selector: 'app-header',
@@ -63,7 +66,9 @@ export class AppHeaderComponent implements OnInit, OnDestroy {
   constructor(
     private authService: AuthService,
     private planService: PlanService,
-    private router: Router
+    private router: Router,
+    private featureService: FeatureService,
+    private upgradeService: UpgradeService
   ) {}
 
   ngOnInit() {
@@ -252,9 +257,10 @@ export class AppHeaderComponent implements OnInit, OnDestroy {
   onPlanBadgeClick(): void {
     if (!this.planTier) return;
     
+    // Use UpgradeService to show upgrade prompt or navigate
     switch (this.planTier) {
       case 'SANDBOX':
-        this.router.navigate(['/account'], { queryParams: { upgrade: '1' } });
+        this.upgradeService.showUpgradePrompt('TEAM');
         break;
       case 'TEAM':
         this.router.navigate(['/account'], { queryParams: { manage: '1' } });

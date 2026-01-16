@@ -272,5 +272,20 @@ export class FeatureService {
       return currentIndex >= requiredIndex && this.hasFeature(feature.key);
     });
   }
+
+  /**
+   * Check if a specific tier has access to a feature (for comparison tables)
+   */
+  hasFeatureForTier(featureKey: FeatureKey, tier: PlanTier): boolean {
+    const feature = FEATURE_DEFINITIONS[featureKey];
+    if (!feature) return false;
+
+    const tierHierarchy: ('SANDBOX' | 'TEAM' | 'ENTERPRISE')[] = ['SANDBOX', 'TEAM', 'ENTERPRISE'];
+    const tierIndex = tierHierarchy.indexOf(tier);
+    const requiredIndex = tierHierarchy.indexOf(feature.requiredTier);
+
+    // Tier must be at or above required tier
+    return tierIndex >= requiredIndex;
+  }
 }
 

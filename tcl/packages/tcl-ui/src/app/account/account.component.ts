@@ -12,7 +12,7 @@ import { AppHeaderComponent } from '../shared/app-header.component';
 import { PlanService, PlanContext, PlanTier } from '../plan.service';
 import { BillingService } from '../billing.service';
 import { MatSnackBar, MatSnackBarModule } from '@angular/material/snack-bar';
-import { FeatureService } from '../features/feature.service';
+import { FeatureService, FEATURE_DEFINITIONS, FeatureInfo } from '../features/feature.service';
 import { EntitlementsService } from '../entitlements.service';
 
 @Component({
@@ -38,6 +38,7 @@ export class AccountComponent implements OnInit {
   planContext: PlanContext | null = null;
   loading = false;
   showUpgrade = false;
+  allFeatures: { category: string; features: FeatureInfo[] }[] = [];
 
   constructor(
     public planService: PlanService, // Public for template access
@@ -87,6 +88,39 @@ export class AccountComponent implements OnInit {
     if (!this.planContext) {
       this.planService.loadPlanContext();
     }
+
+    // Populate features for comparison table
+    this.populateFeatures();
+  }
+
+  populateFeatures() {
+    const coreFeatures: FeatureInfo[] = [];
+    const advancedFeatures: FeatureInfo[] = [];
+    const enterpriseFeatures: FeatureInfo[] = [];
+
+    Object.values(FEATURE_DEFINITIONS).forEach(feature => {
+      if (feature.requiredTier === 'SANDBOX' || feature.requiredTier === 'TEAM') {
+        if (feature.key.startsWith('API_ACCESS') || feature.key.startsWith('WEBHOOKS')) {
+          coreFeatures.push(feature);
+        } else if (feature.key === 'BATCH_INGEST' || feature.key === 'USAGE_DASHBOARD' || feature.key === 'TEMPLATE_CUSTOMIZATION') {
+          advancedFeatures.push(feature);
+        } else {
+          coreFeatures.push(feature);
+        }
+      } else if (feature.requiredTier === 'ENTERPRISE') {
+        enterpriseFeatures.push(feature);
+      }
+    });
+
+    this.allFeatures = [
+      { category: 'Core Platform Features', features: coreFeatures },
+      { category: 'Advanced Features', features: advancedFeatures },
+      { category: 'Enterprise Governance & Compliance', features: enterpriseFeatures },
+    ];
+  }
+
+  hasFeatureForTier(featureKey: string, tier: PlanTier): boolean {
+    return this.featureService.hasFeatureForTier(featureKey as any, tier);
   }
 
   getPlanTierDisplay(tier: PlanTier): string {
