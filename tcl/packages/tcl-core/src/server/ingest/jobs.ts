@@ -551,14 +551,79 @@ export function registerIngestionJobRoutes(app: express.Express) {
           return res.status(401).json({ error: 'User ID not found in context' });
         }
 
-        if (!context.projectId) {
-          console.error('[CreateJob] Missing projectId in context');
-          return res.status(400).json({ error: 'Project ID not found in context' });
+        // Ensure project exists - create default if missing
+        let projectId = context.projectId;
+        if (!projectId || projectId.trim() === '') {
+          console.log('[CreateJob] No projectId in context, checking for existing projects...');
+          
+          if (!supabaseAdmin) {
+            return res.status(503).json({ error: 'Database not configured' });
+          }
+          
+          // Check if org has any projects
+          const { data: existingProjects, error: projectsError } = await supabaseAdmin
+            .from('projects')
+            .select('id')
+            .eq('org_id', context.orgId)
+            .limit(1);
+          
+          if (projectsError) {
+            console.error('[CreateJob] Error checking for existing projects:', projectsError);
+            return res.status(500).json({ 
+              error: 'Failed to check for existing projects',
+              details: projectsError.message 
+            });
+          }
+          
+          if (existingProjects && existingProjects.length > 0) {
+            projectId = existingProjects[0].id;
+            console.log('[CreateJob] Using existing project:', projectId);
+          } else {
+            // Create default project
+            console.log('[CreateJob] Creating default project for org:', context.orgId);
+            const { data: newProject, error: projectError } = await supabaseAdmin
+              .from('projects')
+              .insert({
+                org_id: context.orgId,
+                name: 'Default Project',
+                slug: 'default',
+                is_default: true,
+                description: 'Default project created automatically'
+              })
+              .select('id')
+              .single();
+            
+            if (projectError || !newProject) {
+              console.error('[CreateJob] Failed to create default project:', projectError);
+              return res.status(500).json({ 
+                error: 'Failed to create default project',
+                details: projectError?.message || 'Unknown error'
+              });
+            }
+            
+            projectId = newProject.id;
+            console.log('[CreateJob] Created default project:', projectId);
+            
+            // Create default environment for the project
+            const { error: envError } = await supabaseAdmin
+              .from('project_envs')
+              .insert({
+                project_id: projectId,
+                env: 'sandbox',
+                is_default: true,
+                limits: { evaluations_per_month: 1000, conversations_per_month: 500 }
+              });
+            
+            if (envError) {
+              console.error('[CreateJob] Failed to create default environment:', envError);
+              // Don't fail the request - project was created successfully
+            }
+          }
         }
 
         console.log('[CreateJob] Context:', {
           orgId: context.orgId,
-          projectId: context.projectId,
+          projectId: projectId,
           env: context.env,
           userId: context.userId,
         });
@@ -573,7 +638,7 @@ export function registerIngestionJobRoutes(app: express.Express) {
 
         const jobId = await createIngestionJob(
           context.orgId,
-          context.projectId,
+          projectId,
           context.env || 'sandbox',
           context.userId,
           body.mode,
