@@ -552,7 +552,7 @@ export function registerIngestionJobRoutes(app: express.Express) {
         }
 
         // Ensure project exists - create default if missing
-        let projectId = context.projectId;
+        let projectId: string = context.projectId || '';
         if (!projectId || projectId.trim() === '') {
           console.log('[CreateJob] No projectId in context, checking for existing projects...');
           

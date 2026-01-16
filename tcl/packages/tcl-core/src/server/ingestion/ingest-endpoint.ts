@@ -112,7 +112,7 @@ export function registerIngestEndpoints(app: express.Express) {
       }
       
       // Ensure project exists - create default if missing
-      let projectId = context.projectId;
+      let projectId: string = context.projectId || '';
       if (!projectId || projectId.trim() === '') {
         // Check if org has any projects
         const { data: existingProjects } = await supabaseAdmin
