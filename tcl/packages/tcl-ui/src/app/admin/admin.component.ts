@@ -150,10 +150,21 @@ export class AdminComponent implements OnInit, OnDestroy {
     // If no active org in localStorage or not found in orgs, try to get from /api/me
     try {
       const apiUrl = (window as any).__TCL_API_URL || 'https://protectqa.com';
+      const token = await this.getAccessToken();
+      const headers: { [key: string]: string } = {};
+      
+      if (token) {
+        headers['Authorization'] = `Bearer ${token}`;
+      }
+      
+      // Include active org ID header if present (for consistency with interceptor)
+      const activeOrgId = typeof window !== 'undefined' ? localStorage.getItem('activeOrgId') : null;
+      if (activeOrgId) {
+        headers['X-Active-Org-Id'] = activeOrgId;
+      }
+      
       const response = await fetch(`${apiUrl}/api/me`, {
-        headers: {
-          'Authorization': `Bearer ${await this.getAccessToken()}`
-        }
+        headers
       }).then(r => r.json());
       
       if (response?.org?.id) {
@@ -200,15 +211,18 @@ export class AdminComponent implements OnInit, OnDestroy {
         
         // Update current org display
         this.currentOrgId = this.selectedOrgId;
+        this.selectedOrgId = result.activeOrgId; // Ensure selectedOrgId matches
         
         // Clear plan context to force reload with new org
         this.planService.clearPlanContext();
         
         // Reload plan context immediately with new org
-        // This will update all components that subscribe to planContext$
+        // Use a small delay to ensure localStorage is set before the HTTP request
         setTimeout(() => {
+          const verifyOrgId = localStorage.getItem('activeOrgId');
+          console.log('[Admin] About to reload plan context, verifying localStorage:', verifyOrgId);
           this.planService.loadPlanContext();
-        }, 100);
+        }, 50);
         
         const snackBarRef = this.snackBar.open('Organization switched successfully', 'Close', {
           duration: 3000

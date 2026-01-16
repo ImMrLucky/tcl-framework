@@ -63,7 +63,13 @@ export async function getOrgContext(req: express.Request): Promise<OrgContext | 
     }
 
     // Check for active org ID in header (set by admin org switch)
-    const activeOrgId = req.headers['x-active-org-id'] as string | undefined;
+    // HTTP headers are case-insensitive, but Express normalizes them to lowercase
+    const activeOrgId = (req.headers['x-active-org-id'] || req.headers['X-Active-Org-Id']) as string | undefined;
+    
+    // Debug logging for org switching
+    if (activeOrgId) {
+      console.log('[AuthContext] Active org ID from header:', activeOrgId);
+    }
     
     let targetOrgId: string;
     

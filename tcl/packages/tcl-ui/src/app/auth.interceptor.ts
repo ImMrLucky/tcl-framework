@@ -64,6 +64,12 @@ export class AuthInterceptor implements HttpInterceptor {
         // If we have an active org ID, add it as a header
         if (activeOrgId) {
           headers['X-Active-Org-Id'] = activeOrgId;
+          // Debug logging
+          if (req.url.includes('/api/me')) {
+            console.log('[AuthInterceptor] Sending X-Active-Org-Id header:', activeOrgId, 'for request:', req.url);
+          }
+        } else if (req.url.includes('/api/me')) {
+          console.log('[AuthInterceptor] No activeOrgId in localStorage for /api/me request');
         }
         
         // Clone request with headers if we have any
