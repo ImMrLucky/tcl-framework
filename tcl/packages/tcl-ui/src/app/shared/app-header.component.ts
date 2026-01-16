@@ -195,12 +195,21 @@ export class AppHeaderComponent implements OnInit, OnDestroy {
     this.planContext$
       .pipe(takeUntil(this.destroy$))
       .subscribe(context => {
+        const previousTier = this.planTier;
+        const newTier = context?.tier ?? null;
         console.log('[Header] Plan context changed:', {
-          tier: context?.tier,
+          previousTier,
+          newTier,
           status: context?.status,
-          hasContext: !!context
+          hasContext: !!context,
+          orgId: context ? 'loaded' : 'null'
         });
-        this.planTier = context?.tier ?? null;
+        this.planTier = newTier;
+        
+        // Force change detection if tier changed
+        if (previousTier !== newTier) {
+          console.log('[Header] Plan tier changed from', previousTier, 'to', newTier);
+        }
         
         // Update usage info
         if (context) {

@@ -64,35 +64,42 @@ export async function getOrgContext(req: express.Request): Promise<OrgContext | 
 
     // Check for active org ID in header (set by admin org switch)
     // HTTP headers are case-insensitive, but Express normalizes them to lowercase
-    // Check both lowercase (Express normalized) and original case
-    const activeOrgId = (req.headers['x-active-org-id'] || 
-                         req.headers['X-Active-Org-Id'] ||
-                         (req.headers as any)['x-active-org-id']) as string | undefined;
+    // Express normalizes all header names to lowercase, so check lowercase first
+    const activeOrgId = (req.headers['x-active-org-id'] as string | undefined) || 
+                        (req.headers as any)['X-Active-Org-Id'] as string | undefined;
     
-    // Debug logging for org switching - log all headers to debug
-    console.log('[AuthContext] Checking for active org ID header. Available headers:', Object.keys(req.headers).filter(k => k.toLowerCase().includes('active')));
+    // Debug logging for org switching
+    console.log('[AuthContext] Checking for active org ID header. User:', user.id);
+    console.log('[AuthContext] All headers with "active" or "org":', Object.keys(req.headers).filter(k => k.toLowerCase().includes('active') || k.toLowerCase().includes('org')));
     if (activeOrgId) {
-      console.log('[AuthContext] Active org ID from header:', activeOrgId);
+      console.log('[AuthContext] ✓ Active org ID from header:', activeOrgId);
     } else {
-      console.log('[AuthContext] No active org ID header found. Headers:', Object.keys(req.headers));
+      console.log('[AuthContext] ✗ No active org ID header found');
     }
     
     let targetOrgId: string;
     
     // First, try to use the active org ID from header if provided
     if (activeOrgId) {
+      console.log('[AuthContext] Verifying user membership in org:', activeOrgId);
       // Verify user has access to the requested org
-      const { data: membershipCheck } = await supabaseAdmin
+      const { data: membershipCheck, error: membershipError } = await supabaseAdmin
         .from('org_members')
         .select('org_id, role')
         .eq('org_id', activeOrgId)
         .eq('user_id', user.id)
         .maybeSingle();
       
+      if (membershipError) {
+        console.error('[AuthContext] Error checking membership:', membershipError);
+      }
+      
       if (membershipCheck) {
         // User has access to the requested org, use it
+        console.log('[AuthContext] ✓ User has access to org:', activeOrgId, 'Role:', membershipCheck.role);
         targetOrgId = activeOrgId;
       } else {
+        console.log('[AuthContext] ✗ User does NOT have access to org:', activeOrgId, '- falling back to default');
         // User doesn't have access to requested org, fall through to default
         // Get user's org membership (use maybeSingle to handle no membership gracefully)
         const { data: membership, error: memberError } = await supabaseAdmin
@@ -112,6 +119,7 @@ export async function getOrgContext(req: express.Request): Promise<OrgContext | 
         }
         
         targetOrgId = membership.org_id;
+        console.log('[AuthContext] Using default org:', targetOrgId);
       }
     } else {
       // No active org ID in header, use default (first org)
