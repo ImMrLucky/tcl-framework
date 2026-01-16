@@ -64,11 +64,17 @@ export async function getOrgContext(req: express.Request): Promise<OrgContext | 
 
     // Check for active org ID in header (set by admin org switch)
     // HTTP headers are case-insensitive, but Express normalizes them to lowercase
-    const activeOrgId = (req.headers['x-active-org-id'] || req.headers['X-Active-Org-Id']) as string | undefined;
+    // Check both lowercase (Express normalized) and original case
+    const activeOrgId = (req.headers['x-active-org-id'] || 
+                         req.headers['X-Active-Org-Id'] ||
+                         (req.headers as any)['x-active-org-id']) as string | undefined;
     
-    // Debug logging for org switching
+    // Debug logging for org switching - log all headers to debug
+    console.log('[AuthContext] Checking for active org ID header. Available headers:', Object.keys(req.headers).filter(k => k.toLowerCase().includes('active')));
     if (activeOrgId) {
       console.log('[AuthContext] Active org ID from header:', activeOrgId);
+    } else {
+      console.log('[AuthContext] No active org ID header found. Headers:', Object.keys(req.headers));
     }
     
     let targetOrgId: string;
