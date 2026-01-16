@@ -1801,7 +1801,20 @@ console.log("Admin routes registered successfully");
 
 app.get("/api/me", async (req, res) => {
   try {
+    // Debug: Log headers for /api/me requests
+    console.log('[API/me] Request headers:', {
+      'x-active-org-id': req.headers['x-active-org-id'],
+      'X-Active-Org-Id': (req.headers as any)['X-Active-Org-Id'],
+      'all-header-keys': Object.keys(req.headers)
+    });
+    
     const context = await getOrgContext(req);
+    
+    // Debug: Log the context that was returned
+    console.log('[API/me] Context returned:', {
+      orgId: context?.orgId,
+      error: context?.error
+    });
     
     if (!context || context.error || !context.orgId) {
       return res.status(401).json({ error: context?.error || "Authorization required" });

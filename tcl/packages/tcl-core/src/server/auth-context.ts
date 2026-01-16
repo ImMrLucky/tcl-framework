@@ -15,6 +15,14 @@ export interface OrgContext {
  * Extract org/project/env from request (API key or user session JWT)
  */
 export async function getOrgContext(req: express.Request): Promise<OrgContext | null> {
+  // Debug: Log all headers to see what we're receiving
+  console.log('[AuthContext] Request headers keys:', Object.keys(req.headers));
+  console.log('[AuthContext] Looking for x-active-org-id in headers:', {
+    'x-active-org-id': req.headers['x-active-org-id'],
+    'X-Active-Org-Id': (req.headers as any)['X-Active-Org-Id'],
+    'all headers': Object.keys(req.headers).filter(k => k.toLowerCase().includes('active') || k.toLowerCase().includes('org'))
+  });
+  
   // Check for API key in Authorization header
   // Express lowercases header names, so check 'authorization' (lowercase)
   // Also check raw headers in case Express hasn't lowercased it yet
