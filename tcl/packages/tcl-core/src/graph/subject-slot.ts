@@ -10,10 +10,13 @@
  * 2. Match entities to slot lexicon
  * 3. Derive slotType and entityKey
  * 4. Normalize values if present
+ * 
+ * Now supports spaCy-enhanced extraction for better entity quality.
  */
 
 import { SubjectSlot, ExtractedEntity, ClaimModality, ClaimAnchor, AnchorType } from './types.js';
 import { getTemplateConfig, SlotLexiconEntry } from './template-config.js';
+import { extractEntitiesAsync as extractEntitiesWithSpacy, type Entity } from '../nlp/entity-extractor.js';
 
 // =============================================================================
 // ENTITY EXTRACTION PATTERNS (Base patterns, extended by template)
@@ -28,6 +31,9 @@ const DURATION_PATTERN = /\d+\s*(?:days?|weeks?|months?|years?)/gi;
 // EXTRACT ENTITIES FROM TEXT
 // =============================================================================
 
+/**
+ * Extract entities using regex patterns (synchronous, backwards compatible).
+ */
 export function extractEntities(text: string): ExtractedEntity[] {
   const entities: ExtractedEntity[] = [];
   const config = getTemplateConfig();
@@ -82,6 +88,35 @@ export function extractEntities(text: string): ExtractedEntity[] {
   entities.push(...lexiconEntities);
   
   return entities;
+}
+
+/**
+ * Extract entities using spaCy if available, otherwise falls back to regex (async).
+ * 
+ * This provides enhanced entity extraction with:
+ * - Better NER accuracy
+ * - Coreference resolution ("it" → "the fee")
+ * - Domain-specific patterns
+ * 
+ * Converts spaCy Entity format to ExtractedEntity format.
+ */
+export async function extractEntitiesAsync(text: string): Promise<ExtractedEntity[]> {
+  try {
+    // Try spaCy extraction
+    const spacyEntities = await extractEntitiesWithSpacy(text);
+    
+    // Convert spaCy Entity[] to ExtractedEntity[]
+    return spacyEntities.map(e => ({
+      type: e.type,
+      value: e.value,
+      normalized: typeof e.normalized === 'string' ? e.normalized : String(e.normalized),
+      span: e.span,
+    }));
+  } catch (error) {
+    // Fall back to regex if spaCy fails
+    console.warn('spaCy extraction failed in subject-slot, using regex fallback:', error);
+    return extractEntities(text);
+  }
 }
 
 // =============================================================================

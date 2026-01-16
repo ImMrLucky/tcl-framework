@@ -8,9 +8,12 @@
  * 1. Grouping statements by subject (only compare statements about SAME entity)
  * 2. Contradiction detection (conflicting values for same entity)
  * 3. Fact normalization (structured representation)
+ * 
+ * Now supports spaCy-enhanced extraction when available (falls back to regex).
  */
 
 import { getNLPConfig, type EntityPattern } from './config.js';
+import { extractEntitiesSingle, configureSpacyClient, type SpacyClientConfig } from './spacy-client.js';
 
 export interface Entity {
   type: string;           // Dynamic - from config
@@ -23,12 +26,64 @@ export interface Entity {
 // Legacy type for backwards compatibility - apps can define their own
 export type EntityType = string;
 
+// Global flag to enable/disable spaCy
+let useSpacy = process.env.ENABLE_SPACY !== 'false';
+
 /**
- * Extract entities from text using configurable patterns
+ * Configure entity extraction (including spaCy).
+ */
+export function configureEntityExtraction(config: { useSpacy?: boolean; spacyConfig?: SpacyClientConfig }): void {
+  if (config.useSpacy !== undefined) {
+    useSpacy = config.useSpacy;
+  }
+  if (config.spacyConfig) {
+    configureSpacyClient(config.spacyConfig);
+  }
+}
+
+/**
+ * Extract entities from text using regex patterns (synchronous).
+ * 
+ * This is the default method for backwards compatibility.
+ * For enhanced extraction with spaCy, use extractEntitiesAsync().
+ */
+export function extractEntities(text: string): Entity[] {
+  return extractEntitiesRegex(text);
+}
+
+/**
+ * Extract entities using spaCy if available, otherwise falls back to regex (async).
+ * 
+ * This provides enhanced entity extraction with:
+ * - Better NER accuracy
+ * - Coreference resolution ("it" → "the fee")
+ * - Domain-specific patterns
+ * 
+ * Falls back to regex extraction if spaCy service is unavailable.
+ */
+export async function extractEntitiesAsync(text: string): Promise<Entity[]> {
+  if (useSpacy) {
+    try {
+      const result = await extractEntitiesSingle(text, extractEntitiesRegex);
+      return result.entities;
+    } catch (error) {
+      // Fall back to regex if spaCy fails
+      console.warn('spaCy extraction failed, using regex fallback:', error);
+      return extractEntitiesRegex(text);
+    }
+  }
+  
+  // If spaCy is disabled, use regex
+  return extractEntitiesRegex(text);
+}
+
+
+/**
+ * Extract entities from text using regex patterns (synchronous fallback).
  * 
  * Uses patterns from NLPConfig - apps can add domain-specific patterns.
  */
-export function extractEntities(text: string): Entity[] {
+function extractEntitiesRegex(text: string): Entity[] {
   const config = getNLPConfig();
   const entities: Entity[] = [];
   
@@ -70,10 +125,22 @@ export function extractEntities(text: string): Entity[] {
 }
 
 /**
- * Extract the primary subject (entity) of a claim
+ * Extract the primary subject (entity) of a claim (synchronous).
  */
 export function extractPrimarySubject(text: string): string | null {
   const entities = extractEntities(text);
+  return getPrimarySubjectFromEntities(entities);
+}
+
+/**
+ * Extract the primary subject (entity) of a claim using spaCy (async).
+ */
+export async function extractPrimarySubjectAsync(text: string): Promise<string | null> {
+  const entities = await extractEntitiesAsync(text);
+  return getPrimarySubjectFromEntities(entities);
+}
+
+function getPrimarySubjectFromEntities(entities: Entity[]): string | null {
   
   // Priority: FEE > MONEY > PLAN > POLICY > ACTION > DATE
   const priority: EntityType[] = ['FEE', 'MONEY', 'PLAN', 'POLICY', 'ACTION', 'DATE'];
@@ -89,11 +156,24 @@ export function extractPrimarySubject(text: string): string | null {
 }
 
 /**
- * Check if two claims share the same primary entity
+ * Check if two claims share the same primary entity (synchronous).
  */
 export function sharesPrimaryEntity(textA: string, textB: string): { shares: boolean; entity?: string } {
   const entitiesA = extractEntities(textA);
   const entitiesB = extractEntities(textB);
+  return checkEntityOverlap(entitiesA, entitiesB);
+}
+
+/**
+ * Check if two claims share the same primary entity using spaCy (async).
+ */
+export async function sharesPrimaryEntityAsync(textA: string, textB: string): Promise<{ shares: boolean; entity?: string }> {
+  const entitiesA = await extractEntitiesAsync(textA);
+  const entitiesB = await extractEntitiesAsync(textB);
+  return checkEntityOverlap(entitiesA, entitiesB);
+}
+
+function checkEntityOverlap(entitiesA: Entity[], entitiesB: Entity[]): { shares: boolean; entity?: string } {
   
   // Check for exact normalized value matches
   for (const eA of entitiesA) {

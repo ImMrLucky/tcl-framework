@@ -1,0 +1,9 @@
+fastapi==0.115.0
+uvicorn==0.30.6
+pydantic==2.8.2
+spacy>=3.7.0
+# Coreference resolution (optional but recommended)
+neuralcoref>=4.0.0
+# For better performance
+thinc>=8.2.0
+

@@ -41,7 +41,8 @@ import { log } from "./server/utils/logger.js";
 
 // NEW: Unified Graph Builder (3-stage pipeline with subject slots)
 import { 
-  buildGraph as buildUnifiedGraph, 
+  buildGraph as buildUnifiedGraph,
+  buildGraphAsync as buildUnifiedGraphAsync, 
   toSpectralInput,
   setTemplateConfig,
   type GraphBuilderOutput 
@@ -307,19 +308,37 @@ async function runUnifiedGraphPath(
   
   // Build the unified graph
   // CRITICAL: Pass transcript so graph-builder can create transcript EvidenceNodes for grounding
+  // Use spaCy-enhanced extraction if available (better entity quality → better edges)
   timer.start('graph_build');
-  const graphResult = buildUnifiedGraph({
-    transcript,  // ✅ Required for grounding edges
-    rawClaims,
-    evidence: externalSources?.map(s => ({
-      id: s.id,
-      kind: 'document' as const,
-      content: s.text,
-    })),
-    template: templateId,
-    conversationId: (options as any)?.conversationId,
-  });
+  const useSpacy = process.env.ENABLE_SPACY !== 'false' && process.env.TCL_NLP_URL;
+  const graphResult = useSpacy 
+    ? await buildUnifiedGraphAsync({
+        transcript,  // ✅ Required for grounding edges
+        rawClaims,
+        evidence: externalSources?.map(s => ({
+          id: s.id,
+          kind: 'document' as const,
+          content: s.text,
+        })),
+        template: templateId,
+        conversationId: (options as any)?.conversationId,
+      })
+    : buildUnifiedGraph({
+        transcript,  // ✅ Required for grounding edges
+        rawClaims,
+        evidence: externalSources?.map(s => ({
+          id: s.id,
+          kind: 'document' as const,
+          content: s.text,
+        })),
+        template: templateId,
+        conversationId: (options as any)?.conversationId,
+      });
   timer.end('graph_build');
+  
+  if (useSpacy) {
+    log('debug', 'Orchestrator', 'Graph built with spaCy-enhanced entities');
+  }
   
   log('debug', 'Orchestrator', `Graph built`, { 
     totalEdges: graphResult.metrics.totalEdges, 

@@ -34,7 +34,7 @@ import {
   EvidenceKind,
   RunDiagnostics,
 } from './types.js';
-import { extractEntities, computeSubjectSlot, extractAnchors } from './subject-slot.js';
+import { extractEntities, extractEntitiesAsync, computeSubjectSlot, extractAnchors } from './subject-slot.js';
 import { getTemplateConfig, setTemplateConfig, TemplateConfig } from './template-config.js';
 import { normalizeTranscript, speakerTypeToRole } from './transcript-normalizer.js';
 
@@ -166,6 +166,9 @@ export interface GraphBuilderOutput {
 // MAIN GRAPH BUILDER
 // =============================================================================
 
+/**
+ * Build graph synchronously (uses regex entities, backwards compatible).
+ */
 export function buildGraph(input: GraphBuilderInput): GraphBuilderOutput {
   const startTime = Date.now();
   const pipelineSteps: Record<string, number> = {};
@@ -183,12 +186,53 @@ export function buildGraph(input: GraphBuilderInput): GraphBuilderOutput {
   }
   const config = getTemplateConfig();
   
-  // Step 1: Build ClaimNodes
+  // Step 1: Build ClaimNodes (sync with regex)
   const step1Start = Date.now();
   const claimNodes = buildClaimNodes(input);
   pipelineSteps['claimNodes'] = Date.now() - step1Start;
   logGraph('debug', `Claim nodes: ${claimNodes.length}`, { count: claimNodes.length, duration: pipelineSteps['claimNodes'] });
   
+  return buildGraphFromNodes(input, claimNodes, startTime, pipelineSteps);
+}
+
+/**
+ * Build graph asynchronously (uses spaCy entities if available, better quality).
+ */
+export async function buildGraphAsync(input: GraphBuilderInput): Promise<GraphBuilderOutput> {
+  const startTime = Date.now();
+  const pipelineSteps: Record<string, number> = {};
+  
+  // Step 0: Set template config
+  if (input.template) {
+    if (typeof input.template === 'string') {
+      setTemplateConfig(input.template);
+    } else {
+      setTemplateConfig({
+        ...getTemplateConfig(),
+        ...input.template,
+      });
+    }
+  }
+  const config = getTemplateConfig();
+  
+  // Step 1: Build ClaimNodes (async with spaCy)
+  const step1Start = Date.now();
+  const claimNodes = await buildClaimNodesAsync(input);
+  pipelineSteps['claimNodes'] = Date.now() - step1Start;
+  logGraph('debug', `Claim nodes: ${claimNodes.length} (spaCy-enhanced)`, { count: claimNodes.length, duration: pipelineSteps['claimNodes'] });
+  
+  return buildGraphFromNodes(input, claimNodes, startTime, pipelineSteps);
+}
+
+/**
+ * Common graph building logic (used by both sync and async versions).
+ */
+function buildGraphFromNodes(
+  input: GraphBuilderInput,
+  claimNodes: ClaimNode[],
+  startTime: number,
+  pipelineSteps: Record<string, number>
+): GraphBuilderOutput {
   // Step 2: Build EvidenceNodes
   const step2Start = Date.now();
   const evidenceNodes = buildEvidenceNodes(input);
@@ -398,7 +442,7 @@ function buildClaimNodes(input: GraphBuilderInput): ClaimNode[] {
   if (input.rawClaims) {
     // Use pre-extracted claims
     for (const raw of input.rawClaims) {
-      const entities = extractEntities(raw.text);
+      const entities = extractEntities(raw.text); // Sync regex extraction
       const slot = computeSubjectSlot(raw.text, entities, raw.modality);
       const anchors = extractAnchors(entities, raw.text); // 1.2: Extract industry-agnostic anchors
       
@@ -456,6 +500,92 @@ function buildClaimNodes(input: GraphBuilderInput): ClaimNode[] {
         anchors, // 1.2: Add anchors to claim node
         createdAt: new Date().toISOString(),
         // B2: Attach speaker info to claim
+        meta: {
+          speakerType: turn.speakerType,
+          speakerLabel: turn.speakerLabelRaw,
+          turnIndex: turn.turnIndex,
+        },
+      };
+      
+      claimNodes.push(node);
+    }
+  }
+  
+  return claimNodes;
+}
+
+/**
+ * Build claim nodes asynchronously using spaCy-enhanced entity extraction.
+ */
+async function buildClaimNodesAsync(input: GraphBuilderInput): Promise<ClaimNode[]> {
+  const claimNodes: ClaimNode[] = [];
+  
+  if (input.rawClaims) {
+    // Use pre-extracted claims
+    for (const raw of input.rawClaims) {
+      const entities = await extractEntitiesAsync(raw.text); // Async spaCy extraction
+      const slot = computeSubjectSlot(raw.text, entities, raw.modality);
+      const anchors = extractAnchors(entities, raw.text);
+      
+      const node: ClaimNode = {
+        id: raw.id,
+        type: 'CLAIM',
+        text: raw.text,
+        speakerRole: raw.speakerRole,
+        span: raw.span,
+        timestamp: raw.timestamp,
+        modality: raw.modality || detectModality(raw.text),
+        claimType: raw.claimType,
+        entities,
+        normalized: {
+          amount: entities.find(e => e.type === 'MONEY')?.normalized,
+          date: entities.find(e => e.type === 'DATE')?.normalized,
+          duration: entities.find(e => e.type === 'DURATION')?.normalized,
+          percentage: entities.find(e => e.type === 'PERCENT')?.normalized,
+        },
+        slot,
+        anchors,
+        confidence: raw.confidence,
+        createdAt: new Date().toISOString(),
+        meta: raw.meta,
+      };
+      
+      claimNodes.push(node);
+    }
+  } else if (input.transcript) {
+    // B1: Normalize transcript into structured turns with speaker info
+    const normalizedTurns = normalizeTranscript(input.transcript);
+    
+    // Batch extract entities for all turns (more efficient)
+    const texts = normalizedTurns.map(t => t.text);
+    const entitiesPromises = texts.map(text => extractEntitiesAsync(text));
+    const allEntities = await Promise.all(entitiesPromises);
+    
+    for (let i = 0; i < normalizedTurns.length; i++) {
+      const turn = normalizedTurns[i];
+      const entities = allEntities[i];
+      const slot = computeSubjectSlot(turn.text, entities);
+      const anchors = extractAnchors(entities, turn.text);
+      
+      const node: ClaimNode = {
+        id: `c${turn.turnIndex}`,
+        type: 'CLAIM',
+        text: turn.text,
+        speakerRole: turn.speakerType === 'agent' ? 'agent' : turn.speakerType === 'customer' ? 'customer' : 'unknown',
+        span: {
+          turnId: `turn-${turn.turnIndex}`,
+          startChar: 0,
+          endChar: turn.text.length,
+        },
+        modality: detectModality(turn.text),
+        entities,
+        normalized: {
+          amount: entities.find(e => e.type === 'MONEY')?.normalized,
+          date: entities.find(e => e.type === 'DATE')?.normalized,
+        },
+        slot,
+        anchors,
+        createdAt: new Date().toISOString(),
         meta: {
           speakerType: turn.speakerType,
           speakerLabel: turn.speakerLabelRaw,
