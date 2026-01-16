@@ -145,7 +145,7 @@ export interface EvaluationSearchResult {
             
             <mat-form-field appearance="outline">
               <mat-label>Severity Display</mat-label>
-              <mat-select [(ngModel)]="severityDisplay" (selectionChange)="applyFilters()">
+              <mat-select [(ngModel)]="severityDisplay" (ngModelChange)="applyFilters()">
                 <mat-option value="">All</mat-option>
                 <mat-option value="low">Low</mat-option>
                 <mat-option value="medium">Medium</mat-option>
@@ -155,7 +155,7 @@ export interface EvaluationSearchResult {
             
             <mat-form-field appearance="outline">
               <mat-label>Verification</mat-label>
-              <mat-select [(ngModel)]="verification" (selectionChange)="applyFilters()">
+              <mat-select [(ngModel)]="verification" (ngModelChange)="applyFilters()">
                 <mat-option value="">All</mat-option>
                 <mat-option value="EXTERNAL_VERIFIED">Verified</mat-option>
                 <mat-option value="TRANSCRIPT_ONLY">Transcript-only</mat-option>
@@ -185,7 +185,7 @@ export interface EvaluationSearchResult {
             
             <mat-form-field appearance="outline">
               <mat-label>Environment</mat-label>
-              <mat-select [(ngModel)]="envFilter" (selectionChange)="applyFilters()">
+              <mat-select [(ngModel)]="envFilter" (ngModelChange)="applyFilters()">
                 <mat-option value="">All</mat-option>
                 <mat-option value="sandbox">Sandbox</mat-option>
                 <mat-option value="production">Production</mat-option>

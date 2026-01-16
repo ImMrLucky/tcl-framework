@@ -478,7 +478,7 @@ export class AuthService {
     // STEP 2: Clear user state immediately (UI updates)
     this.currentUserSubject.next(null);
     
-    // STEP 3: Clear all localStorage (including Supabase auth tokens)
+    // STEP 3: Clear all localStorage (including Supabase auth tokens and user-specific data)
     if (typeof window !== 'undefined' && window.localStorage) {
       try {
         // Clear the Supabase auth token
@@ -492,19 +492,36 @@ export class AuthService {
           }
         }
         keysToRemove.forEach(key => localStorage.removeItem(key));
+        
+        // Clear user-specific organization context
+        localStorage.removeItem('activeOrgId');
       } catch (err) {
         // Ignore errors when clearing storage
       }
     }
     
-    // STEP 4: Sign out from Supabase (this clears the session on server)
+    // STEP 4: Clear sessionStorage (entitlements, etc.)
+    if (typeof window !== 'undefined' && window.sessionStorage) {
+      try {
+        sessionStorage.removeItem('orgEntitlements');
+      } catch (err) {
+        // Ignore errors when clearing storage
+      }
+    }
+    
+    // STEP 5: Clear in-memory services (plan context, entitlements)
+    // Note: We can't inject these services here to avoid circular dependencies,
+    // but they will be cleared when components re-initialize after redirect.
+    // The services should check auth state and clear themselves if user is null.
+    
+    // STEP 6: Sign out from Supabase (this clears the session on server)
     try {
       await this.supabase.auth.signOut();
     } catch (err) {
       // Continue even if Supabase signOut fails
     }
     
-    // STEP 5: Redirect to login page with full page reload
+    // STEP 7: Redirect to login page with full page reload
     // This ensures all components re-initialize and check auth state fresh
     if (typeof window !== 'undefined') {
       // Use window.location.href for a full page reload (not router navigation)
