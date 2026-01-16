@@ -1,0 +1,140 @@
+.batch-ingestion-container {
+  padding: 24px;
+  
+  .container {
+    max-width: 1200px;
+    margin: 0 auto;
+  }
+}
+
+.batch-status-card,
+.batch-items-card,
+.ingestion-tabs-card {
+  margin-bottom: 24px;
+}
+
+.progress-section {
+  margin: 16px 0;
+  
+  .progress-info {
+    display: flex;
+    justify-content: space-between;
+    margin-bottom: 8px;
+    font-size: 14px;
+  }
+  
+  .progress-details {
+    display: flex;
+    gap: 16px;
+    margin-top: 8px;
+    font-size: 12px;
+    color: #666;
+  }
+}
+
+.batch-actions {
+  display: flex;
+  gap: 12px;
+  margin-top: 16px;
+}
+
+.batch-items-table {
+  width: 100%;
+  
+  .error-message {
+    color: #f44336;
+    font-size: 12px;
+  }
+  
+  .retry-info {
+    color: #ff9800;
+    font-size: 12px;
+    margin-left: 8px;
+  }
+}
+
+.tab-content {
+  padding: 24px;
+}
+
+.upload-section {
+  .selected-files {
+    margin-top: 24px;
+    
+    h4 {
+      margin-bottom: 16px;
+    }
+    
+    .file-item {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 8px;
+      background: #f5f5f5;
+      border-radius: 4px;
+      margin-bottom: 8px;
+    }
+  }
+}
+
+.connector-section {
+  .connector-config {
+    margin-bottom: 24px;
+    
+    h4 {
+      margin-bottom: 16px;
+    }
+    
+    mat-form-field {
+      width: 100%;
+      max-width: 400px;
+      margin-right: 16px;
+      margin-bottom: 16px;
+    }
+  }
+  
+  .file-browser {
+    border: 1px solid #e0e0e0;
+    border-radius: 4px;
+    padding: 16px;
+    
+    .browser-header {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 16px;
+      padding-bottom: 8px;
+      border-bottom: 1px solid #e0e0e0;
+      
+      .current-path {
+        font-weight: 500;
+      }
+    }
+    
+    .connector-table {
+      width: 100%;
+      
+      .folder-link {
+        cursor: pointer;
+        color: #1976d2;
+        text-decoration: underline;
+        
+        &:hover {
+          color: #1565c0;
+        }
+      }
+    }
+    
+    .browser-actions {
+      margin-top: 16px;
+      display: flex;
+      justify-content: flex-end;
+    }
+  }
+}
+
+.inline-spinner {
+  display: inline-block;
+  margin-right: 8px;
+}
+

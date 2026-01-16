@@ -68,6 +68,11 @@ export interface MeResponse {
     planStatus: PlanStatus;
   }>;
   planContext?: PlanContext;
+  entitlements?: {
+    orgId: string;
+    tier: 'SANDBOX' | 'TEAM' | 'ENTERPRISE';
+    features: Record<string, boolean>;
+  };
   isSuperuser?: boolean;
 }
 

@@ -7,6 +7,9 @@ import PDFDocument from 'pdfkit';
 import { createHash } from 'crypto';
 import { SupabaseClient } from '@supabase/supabase-js';
 import { Readable } from 'stream';
+import archiver from 'archiver';
+
+export type AuditPackPreset = 'AUDIT' | 'LEGAL_HOLD' | 'CUSTOMER_DISPUTE' | 'CUSTOM';
 
 export interface AuditPackOptions {
   evaluationId?: string;
@@ -15,16 +18,22 @@ export interface AuditPackOptions {
   projectId?: string;
   env?: string;
   includeAllIssues?: boolean;
+  preset?: AuditPackPreset; // Preset type (default: CUSTOM)
 }
 
 export interface AuditPackResult {
   packId: string;
-  downloadUrl: string;
-  checksum: string;
-  files: {
+  pdfUrl: string;
+  jsonUrl: string;
+  csvUrl: string;
+  zipUrl?: string;
+  summary?: any;
+  checksums: {
     pdf: string;
     json: string;
     csv: string;
+    combined: string;
+    zip?: string;
   };
 }
 
@@ -116,18 +125,174 @@ export async function generateAuditPack(
     }
   }
 
+  // Fetch decisions, signoffs, and locks for all issues
+  const issueIds = allIssues.map(i => i.issueId || i.issue_id).filter(Boolean);
+  const decisionsMap = new Map<string, any>();
+  const signoffsMap = new Map<string, any[]>();
+  const locksMap = new Map<string, any>();
+  const snapshotsMap = new Map<string, any[]>();
+
+  if (issueIds.length > 0) {
+    // Fetch decisions
+    const { data: decisions } = await supabaseAdmin
+      .from('issue_decisions')
+      .select('*')
+      .eq('org_id', orgId)
+      .in('issue_id', issueIds);
+
+    if (decisions) {
+      for (const decision of decisions) {
+        decisionsMap.set(decision.issue_id, decision);
+      }
+    }
+
+    // Fetch signoffs for decisions
+    if (decisions && decisions.length > 0) {
+      const decisionIds = decisions.map(d => d.id);
+      const { data: signoffs } = await supabaseAdmin
+        .from('issue_signoffs')
+        .select('*')
+        .in('decision_id', decisionIds);
+
+      if (signoffs) {
+        for (const signoff of signoffs) {
+          const decision = decisions.find(d => d.id === signoff.decision_id);
+          if (decision) {
+            if (!signoffsMap.has(decision.issue_id)) {
+              signoffsMap.set(decision.issue_id, []);
+            }
+            signoffsMap.get(decision.issue_id)!.push(signoff);
+          }
+        }
+      }
+    }
+
+    // Fetch locks
+    const { data: locks } = await supabaseAdmin
+      .from('issue_locks')
+      .select('*')
+      .eq('org_id', orgId)
+      .in('issue_id', issueIds)
+      .eq('status', 'LOCKED');
+
+    if (locks) {
+      for (const lock of locks) {
+        locksMap.set(lock.issue_id, lock);
+      }
+    }
+
+    // Fetch snapshots for locked issues
+    if (locks && locks.length > 0) {
+      const snapshotIds = locks.map(l => l.snapshot_id).filter(Boolean);
+      if (snapshotIds.length > 0) {
+        const { data: snapshots } = await supabaseAdmin
+          .from('issue_snapshots')
+          .select('*')
+          .in('id', snapshotIds);
+
+        if (snapshots) {
+          for (const snapshot of snapshots) {
+            const lock = locks.find(l => l.snapshot_id === snapshot.id);
+            if (lock) {
+              if (!snapshotsMap.has(lock.issue_id)) {
+                snapshotsMap.set(lock.issue_id, []);
+              }
+              snapshotsMap.get(lock.issue_id)!.push(snapshot);
+            }
+          }
+        }
+      }
+    }
+  }
+
+  // Enrich issues with decisions, signoffs, and locks
+  const enrichedIssues = allIssues.map(issue => {
+    const issueId = issue.issueId || issue.issue_id;
+    const decision = decisionsMap.get(issueId);
+    const signoffs = signoffsMap.get(issueId) || [];
+    const lock = locksMap.get(issueId);
+    const snapshots = snapshotsMap.get(issueId) || [];
+
+    return {
+      ...issue,
+      decision: decision ? {
+        id: decision.id,
+        disposition: decision.disposition,
+        severityOverride: decision.severity_override,
+        assignedToUserId: decision.assigned_to_user_id,
+        notes: decision.notes,
+        expiresAt: decision.expires_at,
+        createdAt: decision.created_at,
+        updatedAt: decision.updated_at,
+      } : null,
+      signoffs: signoffs.map(s => ({
+        id: s.id,
+        role: s.role,
+        signedByUserId: s.signed_by_user_id,
+        signedAt: s.signed_at,
+        note: s.note,
+      })),
+      lock: lock ? {
+        id: lock.id,
+        status: lock.status,
+        lockedByUserId: lock.locked_by_user_id,
+        lockedAt: lock.locked_at,
+        reason: lock.reason,
+        snapshotId: lock.snapshot_id,
+      } : null,
+      snapshots: snapshots.map(s => ({
+        id: s.id,
+        snapshotJson: s.snapshot_json,
+        evidenceSetHash: s.evidence_set_hash,
+        inputHash: s.input_hash,
+        engineVersion: s.engine_version,
+        createdAt: s.created_at,
+      })),
+    };
+  });
+
   // Sort issues by riskScore (descending)
-  allIssues.sort((a, b) => {
+  enrichedIssues.sort((a, b) => {
     const scoreA = a.score ?? (a.riskScore ?? 0) * 100;
     const scoreB = b.score ?? (b.riskScore ?? 0) * 100;
     return scoreB - scoreA;
   });
 
   // Calculate average risk score
-  const totalScore = allIssues.reduce((sum, issue) => {
+  const totalScore = enrichedIssues.reduce((sum, issue) => {
     return sum + (issue.score ?? (issue.riskScore ?? 0) * 100);
   }, 0);
-  executiveSummary.avgRiskScore = allIssues.length > 0 ? totalScore / allIssues.length : 0;
+  executiveSummary.avgRiskScore = enrichedIssues.length > 0 ? totalScore / enrichedIssues.length : 0;
+
+  // Add decision counts to executive summary
+  const decisionCounts = {
+    open: 0,
+    acknowledged: 0,
+    remediated: 0,
+    acceptedRisk: 0,
+    falsePositive: 0,
+    requiresFollowup: 0,
+    escalated: 0,
+  };
+  const lockedCount = enrichedIssues.filter(i => i.lock).length;
+  const signoffCount = enrichedIssues.reduce((sum, i) => sum + (i.signoffs?.length || 0), 0);
+
+  for (const issue of enrichedIssues) {
+    if (issue.decision) {
+      const disp = issue.decision.disposition.toLowerCase();
+      if (disp === 'open') decisionCounts.open++;
+      else if (disp === 'acknowledged') decisionCounts.acknowledged++;
+      else if (disp === 'remediated') decisionCounts.remediated++;
+      else if (disp === 'accepted_risk') decisionCounts.acceptedRisk++;
+      else if (disp === 'false_positive') decisionCounts.falsePositive++;
+      else if (disp === 'requires_followup') decisionCounts.requiresFollowup++;
+      else if (disp === 'escalated') decisionCounts.escalated++;
+    }
+  }
+
+  executiveSummary.decisions = decisionCounts;
+  executiveSummary.lockedCount = lockedCount;
+  executiveSummary.signoffCount = signoffCount;
 
   // Get first evaluation for integrity info
   const firstEval = evaluations[0];
@@ -135,9 +300,10 @@ export async function generateAuditPack(
   const runInfo = firstReport?.run || firstReport?.manifest || {};
 
   // Generate files
-  const pdfBuffer = await generatePDF(executiveSummary, allIssues, runInfo, evaluations);
-  const jsonContent = generateJSON(allIssues, runInfo, evaluations);
-  const csvContent = generateCSV(allIssues);
+  const preset = options.preset || 'CUSTOM';
+  const pdfBuffer = await generatePDF(executiveSummary, enrichedIssues, runInfo, evaluations, preset);
+  const jsonContent = generateJSON(enrichedIssues, runInfo, evaluations, preset);
+  const csvContent = generateCSV(enrichedIssues);
 
   // Compute checksums
   const pdfChecksum = createHash('sha256').update(pdfBuffer).digest('hex');
@@ -202,20 +368,79 @@ export async function generateAuditPack(
   const { data: jsonUrlData } = supabaseAdmin.storage.from(bucket).getPublicUrl(jsonPath);
   const { data: csvUrlData } = supabaseAdmin.storage.from(bucket).getPublicUrl(csvPath);
 
-  // Create a zip bundle URL (for now, return individual URLs)
-  // In production, you might want to create an actual zip file
-  const downloadUrl = pdfUrlData.publicUrl;
+  // Create ZIP bundle
+  const zipBuffer = await createZipBundle(pdfBuffer, jsonContent, csvContent, preset);
+  const zipChecksum = createHash('sha256').update(zipBuffer).digest('hex');
+  
+  const zipFilename = `audit-pack-${timestamp}.zip`;
+  const zipPath = `${basePath}/${zipFilename}`;
+  const { error: zipError } = await supabaseAdmin.storage
+    .from(bucket)
+    .upload(zipPath, zipBuffer, {
+      contentType: 'application/zip',
+      upsert: false,
+    });
+
+  if (zipError) {
+    console.warn('Failed to upload ZIP, continuing with individual files:', zipError);
+  }
+
+  const { data: zipUrlData } = zipError ? { data: null } : supabaseAdmin.storage.from(bucket).getPublicUrl(zipPath);
 
   return {
     packId,
-    downloadUrl,
-    checksum: combinedChecksum,
-    files: {
-      pdf: pdfUrlData.publicUrl,
-      json: jsonUrlData.publicUrl,
-      csv: csvUrlData.publicUrl,
+    pdfUrl: pdfUrlData.publicUrl,
+    jsonUrl: jsonUrlData.publicUrl,
+    csvUrl: csvUrlData.publicUrl,
+    zipUrl: zipUrlData?.publicUrl,
+    checksums: {
+      pdf: pdfChecksum,
+      json: jsonChecksum,
+      csv: csvChecksum,
+      combined: combinedChecksum,
+      zip: zipChecksum,
     },
   };
+}
+
+/**
+ * Create ZIP bundle from PDF, JSON, and CSV
+ */
+async function createZipBundle(
+  pdfBuffer: Buffer,
+  jsonContent: string,
+  csvContent: string,
+  preset: AuditPackPreset
+): Promise<Buffer> {
+  return new Promise((resolve, reject) => {
+    const archive = archiver('zip', { zlib: { level: 9 } });
+    const chunks: Buffer[] = [];
+
+    archive.on('data', (chunk) => chunks.push(chunk));
+    archive.on('end', () => resolve(Buffer.concat(chunks)));
+    archive.on('error', reject);
+
+    // Add files to archive
+    archive.append(pdfBuffer, { name: 'summary.pdf' });
+    archive.append(jsonContent, { name: 'issues.json' });
+    archive.append(csvContent, { name: 'issues.csv' });
+
+    // Add summary JSON
+    const summary = {
+      preset,
+      generatedAt: new Date().toISOString(),
+      fileCount: 3,
+      description: {
+        AUDIT: 'Standard audit pack with all issues and decisions',
+        LEGAL_HOLD: 'Legal hold pack with locked issues and snapshots',
+        CUSTOMER_DISPUTE: 'Customer dispute pack with relevant evidence',
+        CUSTOM: 'Custom audit pack',
+      }[preset] || 'Audit pack',
+    };
+    archive.append(JSON.stringify(summary, null, 2), { name: 'summary.json' });
+
+    archive.finalize();
+  });
 }
 
 /**
@@ -225,7 +450,8 @@ async function generatePDF(
   summary: any,
   issues: any[],
   runInfo: any,
-  evaluations: any[]
+  evaluations: any[],
+  preset: AuditPackPreset = 'CUSTOM'
 ): Promise<Buffer> {
   return new Promise((resolve, reject) => {
     const doc = new PDFDocument({ margin: 50 });
@@ -236,9 +462,17 @@ async function generatePDF(
     doc.on('error', reject);
 
     // Title
-    doc.fontSize(20).text('ProtectQA Audit Pack', { align: 'center' });
+    const presetTitle = {
+      AUDIT: 'Audit Pack',
+      LEGAL_HOLD: 'Legal Hold Pack',
+      CUSTOMER_DISPUTE: 'Customer Dispute Pack',
+      CUSTOM: 'Custom Audit Pack',
+    }[preset] || 'Audit Pack';
+    
+    doc.fontSize(20).text(`ProtectQA ${presetTitle}`, { align: 'center' });
     doc.moveDown();
     doc.fontSize(12).text(`Generated: ${new Date().toISOString()}`, { align: 'center' });
+    doc.fontSize(10).text(`Preset: ${preset}`, { align: 'center' });
     doc.moveDown(2);
 
     // Executive Summary
@@ -254,6 +488,28 @@ async function generatePDF(
     doc.text(`Unverified Issues: ${summary.unverifiedCount} (${((summary.unverifiedCount / totalIssues) * 100).toFixed(1)}%)`);
     doc.text(`Average Risk Score: ${summary.avgRiskScore.toFixed(1)}`);
     doc.text(`Date Range: ${summary.dateRange.from} to ${summary.dateRange.to}`);
+    
+    // Decision summary
+    if (summary.decisions) {
+      doc.moveDown();
+      doc.fontSize(14).text('Decision Summary', { underline: true });
+      doc.fontSize(11);
+      doc.text(`Open: ${summary.decisions.open}`);
+      doc.text(`Acknowledged: ${summary.decisions.acknowledged}`);
+      doc.text(`Remediated: ${summary.decisions.remediated}`);
+      doc.text(`Accepted Risk: ${summary.decisions.acceptedRisk}`);
+      doc.text(`False Positive: ${summary.decisions.falsePositive}`);
+      doc.text(`Requires Follow-up: ${summary.decisions.requiresFollowup}`);
+      doc.text(`Escalated: ${summary.decisions.escalated}`);
+    }
+    
+    if (summary.lockedCount > 0) {
+      doc.text(`Locked Issues: ${summary.lockedCount}`);
+    }
+    if (summary.signoffCount > 0) {
+      doc.text(`Total Signoffs: ${summary.signoffCount}`);
+    }
+    
     doc.moveDown(2);
 
     // Verification Coverage
@@ -359,6 +615,75 @@ async function generatePDF(
       if (issue.verification?.reasonCodes && issue.verification.reasonCodes.length > 0) {
         doc.text(`Reason Codes: ${issue.verification.reasonCodes.join(', ')}`, { indent: 20 });
       }
+      doc.moveDown(0.5);
+
+      // Decision (if exists)
+      if (issue.decision) {
+        doc.fontSize(11).font('Helvetica-Bold');
+        doc.text('Decision:', { continued: false });
+        doc.fontSize(10).font('Helvetica');
+        doc.text(`Disposition: ${issue.decision.disposition}`, { indent: 20 });
+        if (issue.decision.severityOverride) {
+          doc.text(`Severity Override: ${issue.decision.severityOverride}`, { indent: 20 });
+        }
+        if (issue.decision.notes) {
+          doc.text(`Notes: ${issue.decision.notes}`, { indent: 20 });
+        }
+        if (issue.decision.expiresAt) {
+          doc.text(`Expires: ${issue.decision.expiresAt}`, { indent: 20 });
+        }
+        doc.moveDown(0.5);
+      }
+
+      // Signoffs (if exists)
+      if (issue.signoffs && issue.signoffs.length > 0) {
+        doc.fontSize(11).font('Helvetica-Bold');
+        doc.text('Signoffs:', { continued: false });
+        doc.fontSize(10).font('Helvetica');
+        issue.signoffs.forEach((signoff: any) => {
+          doc.text(`${signoff.role}: Signed at ${signoff.signedAt}`, { indent: 20 });
+          if (signoff.note) {
+            doc.text(`  Note: ${signoff.note}`, { indent: 30 });
+          }
+        });
+        doc.moveDown(0.5);
+      }
+
+      // Lock status (if locked)
+      if (issue.lock) {
+        doc.fontSize(11).font('Helvetica-Bold');
+        doc.text('Lock Status:', { continued: false });
+        doc.fontSize(10).font('Helvetica');
+        doc.text(`LOCKED - Locked at ${issue.lock.lockedAt}`, { indent: 20 });
+        if (issue.lock.reason) {
+          doc.text(`Reason: ${issue.lock.reason}`, { indent: 20 });
+        }
+        if (issue.lock.snapshotId) {
+          doc.text(`Snapshot ID: ${issue.lock.snapshotId}`, { indent: 20 });
+        }
+        doc.moveDown(0.5);
+      }
+
+      // Snapshot reference (if exists)
+      if (issue.snapshots && issue.snapshots.length > 0) {
+        doc.fontSize(11).font('Helvetica-Bold');
+        doc.text('Snapshots:', { continued: false });
+        doc.fontSize(10).font('Helvetica');
+        issue.snapshots.forEach((snapshot: any) => {
+          doc.text(`Snapshot ID: ${snapshot.id} (Created: ${snapshot.createdAt})`, { indent: 20 });
+          if (snapshot.evidenceSetHash) {
+            doc.text(`Evidence Set Hash: ${snapshot.evidenceSetHash}`, { indent: 30 });
+          }
+          if (snapshot.inputHash) {
+            doc.text(`Input Hash: ${snapshot.inputHash}`, { indent: 30 });
+          }
+          if (snapshot.engineVersion) {
+            doc.text(`Engine Version: ${snapshot.engineVersion}`, { indent: 30 });
+          }
+        });
+        doc.moveDown(0.5);
+      }
+
       doc.moveDown(1);
 
       // Page break if needed
@@ -389,9 +714,10 @@ async function generatePDF(
 /**
  * Generate JSON export
  */
-function generateJSON(issues: any[], runInfo: any, evaluations: any[]): string {
+function generateJSON(issues: any[], runInfo: any, evaluations: any[], preset: AuditPackPreset = 'CUSTOM'): string {
   const exportData = {
     exportedAt: new Date().toISOString(),
+    preset,
     packInfo: {
       totalIssues: issues.length,
       totalEvaluations: evaluations.length,
@@ -409,6 +735,11 @@ function generateJSON(issues: any[], runInfo: any, evaluations: any[]): string {
       ...issue,
       // Ensure scoring.components and reasons are included
       scoring: issue.scoring || undefined,
+      // Include decision, signoffs, lock, and snapshots
+      decision: issue.decision || undefined,
+      signoffs: issue.signoffs || undefined,
+      lock: issue.lock || undefined,
+      snapshots: issue.snapshots || undefined,
     })),
   };
 

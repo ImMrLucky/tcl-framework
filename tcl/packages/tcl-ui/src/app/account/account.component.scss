@@ -86,6 +86,21 @@
 }
 
 .comparison-table {
+  .section-header {
+    background: #f5f5f5;
+    font-weight: 600;
+    
+    td {
+      padding: 12px 16px;
+      border-bottom: 2px solid #e0e0e0;
+    }
+  }
+  
+  tbody tr:not(.section-header) {
+    td:first-child {
+      padding-left: 24px; // Indent non-header rows
+    }
+  }
   width: 100%;
   border-collapse: collapse;
   margin-bottom: 24px;

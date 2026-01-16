@@ -12,6 +12,8 @@ import { AppHeaderComponent } from '../shared/app-header.component';
 import { PlanService, PlanContext, PlanTier } from '../plan.service';
 import { BillingService } from '../billing.service';
 import { MatSnackBar, MatSnackBarModule } from '@angular/material/snack-bar';
+import { FeatureService } from '../features/feature.service';
+import { EntitlementsService } from '../entitlements.service';
 
 @Component({
   selector: 'app-account',
@@ -41,7 +43,9 @@ export class AccountComponent implements OnInit {
     public planService: PlanService, // Public for template access
     private route: ActivatedRoute,
     private billingService: BillingService,
-    private snackBar: MatSnackBar
+    private snackBar: MatSnackBar,
+    public featureService: FeatureService, // Public for template access
+    public entitlementsService: EntitlementsService // Public for template access
   ) {}
 
   ngOnInit() {

@@ -178,6 +178,60 @@
           </button>
         </mat-card-actions>
       </mat-card>
+
+      <!-- Jira Card (Phase 5) -->
+      <mat-card class="integration-card" [class.disabled]="!canAccessFeature('JIRA')">
+        <mat-card-header>
+          <mat-card-title>
+            <mat-icon>bug_report</mat-icon>
+            Jira
+          </mat-card-title>
+        </mat-card-header>
+        <mat-card-content>
+          <p>Export issues to Jira tickets for tracking and workflow management. Enterprise only.</p>
+          <div class="card-status" *ngIf="jiraIntegration">
+            <mat-chip [color]="jiraIntegration.status === 'ACTIVE' ? 'primary' : ''">
+              {{ jiraIntegration.status === 'ACTIVE' ? 'Active' : 'Disabled' }}
+            </mat-chip>
+          </div>
+        </mat-card-content>
+        <mat-card-actions>
+          <button 
+            mat-raised-button 
+            color="primary"
+            (click)="configureJira()">
+            <mat-icon>settings</mat-icon>
+            {{ jiraIntegration ? 'Configure' : 'Connect Jira' }}
+          </button>
+        </mat-card-actions>
+      </mat-card>
+
+      <!-- Webhooks Card (Phase 5 - Enterprise) -->
+      <mat-card class="integration-card" [class.disabled]="!canAccessFeature('WEBHOOK')">
+        <mat-card-header>
+          <mat-card-title>
+            <mat-icon>webhook</mat-icon>
+            Webhooks (Enterprise)
+          </mat-card-title>
+        </mat-card-header>
+        <mat-card-content>
+          <p>Receive real-time webhook events for issue decisions, locks, and more. Enterprise only.</p>
+          <div class="card-status" *ngIf="webhookIntegration">
+            <mat-chip [color]="webhookIntegration.status === 'ACTIVE' ? 'primary' : ''">
+              {{ webhookIntegration.status === 'ACTIVE' ? 'Active' : 'Disabled' }}
+            </mat-chip>
+          </div>
+        </mat-card-content>
+        <mat-card-actions>
+          <button 
+            mat-raised-button 
+            color="primary"
+            (click)="configureWebhook()">
+            <mat-icon>settings</mat-icon>
+            {{ webhookIntegration ? 'Configure' : 'Setup Webhook' }}
+          </button>
+        </mat-card-actions>
+      </mat-card>
     </div>
 
     <ng-template #loadingTemplate>

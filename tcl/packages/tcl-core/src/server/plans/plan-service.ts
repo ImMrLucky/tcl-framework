@@ -13,7 +13,8 @@ export interface OrgPlanContext {
   capabilities: Capability[];
   limits: PlanLimits;
   remainingToday: {
-    analyses: number;
+    analysisRuns: number; // Frontend field name
+    analyses?: number; // Backwards compatibility
     apiCalls: number;
     uploads: number;
   };
@@ -101,7 +102,12 @@ export class PlanService {
     }
 
     // Get limits for effective tier from config
-    const limits = { ...getLimitsForTier(effectiveTier) };
+    // Backend uses analysesPerDay, frontend expects analysisRunsPerDay
+    const rawLimits = getLimitsForTier(effectiveTier);
+    const limits: PlanLimits & { analysisRunsPerDay?: number } = {
+      ...rawLimits,
+      analysisRunsPerDay: rawLimits.analysesPerDay, // Frontend field name
+    };
 
     // Get today's usage
     const { data: usage } = await supabaseAdmin!
@@ -118,11 +124,13 @@ export class PlanService {
     };
 
     // Calculate remaining quotas
+    // Frontend expects analysisRuns, but we also provide analyses for backwards compatibility
+    const analysesRemaining = limits.analysesPerDay === -1
+      ? -1
+      : Math.max(0, limits.analysesPerDay - todayUsage.analysis_runs);
     const remainingToday = {
-      analyses:
-        limits.analysesPerDay === -1
-          ? -1
-          : Math.max(0, limits.analysesPerDay - todayUsage.analysis_runs),
+      analysisRuns: analysesRemaining, // Frontend field name
+      analyses: analysesRemaining, // Backwards compatibility
       apiCalls:
         limits.apiCallsPerDay === -1
           ? -1

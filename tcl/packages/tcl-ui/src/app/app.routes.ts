@@ -129,6 +129,31 @@ export const routes: Routes = [
     loadComponent: () => import('./admin/instructions.component').then(m => m.AdminInstructionsComponent),
     canActivate: [AuthGuard]
   },
+  {
+    path: 'integrations',
+    loadComponent: () => import('./integrations/integrations.component').then(m => m.IntegrationsComponent),
+    canActivate: [AuthGuard]
+  },
+  {
+    path: 'cases',
+    loadComponent: () => import('./cases/cases-list.component').then(m => m.CasesListComponent),
+    canActivate: [AuthGuard]
+  },
+  {
+    path: 'cases/:id',
+    loadComponent: () => import('./cases/case-detail.component').then(m => m.CaseDetailComponent),
+    canActivate: [AuthGuard]
+  },
+  {
+    path: 'bulk-ingest',
+    loadComponent: () => import('./batch-ingestion/batch-ingestion.component').then(m => m.BatchIngestionComponent),
+    canActivate: [AuthGuard]
+  },
+  {
+    path: 'bulk-ingest/:batchId',
+    loadComponent: () => import('./batch-ingestion/batch-ingestion.component').then(m => m.BatchIngestionComponent),
+    canActivate: [AuthGuard]
+  },
   
   // Default route
   {

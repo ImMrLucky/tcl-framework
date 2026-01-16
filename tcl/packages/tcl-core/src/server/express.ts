@@ -30,6 +30,14 @@ import {
 import { setupIntegrationRoutes } from "./integrations/routes.js";
 import { setupAuditRoutes } from "./audit/routes.js";
 import { setupIssueWorkflowRoutes } from "./issues/routes.js";
+import { setupIssueDecisionsRoutes } from "./issues/decisions-routes.js";
+import { setupIssueSignoffsRoutes } from "./issues/signoffs-routes.js";
+import { setupIssueSnapshotsRoutes } from "./issues/snapshots-routes.js";
+import { setupCasesRoutes } from "./cases/routes.js";
+import { setupWebhooksRoutes } from "./integrations/webhooks-routes.js";
+import { setupJiraRoutes } from "./integrations/jira-routes.js";
+import { setupBatchIngestionRoutes } from "./batch-ingestion/routes.js";
+import { setupConnectorRoutes } from "./connectors/routes.js";
 import { setupAnalyticsRoutes } from "./analytics/routes.js";
 import { setupExportRoutes } from "./exports/routes.js";
 import { setupEvaluationSearchRoutes } from "./evaluations/search.js";
@@ -64,6 +72,7 @@ import { registerIngestionJobRoutes } from "./ingest/jobs.js";
 import { planService } from "./plans/plan-service.js";
 import { requireCapability } from "./plans/capability-middleware.js";
 import { Capability } from "./plans/capabilities.js";
+import { entitlementsService } from "./entitlements/entitlements-service.js";
 
 const app = express();
 
@@ -1834,8 +1843,24 @@ app.get("/api/me", async (req, res) => {
     const { getAdminContext } = await import('./admin/middleware.js');
     const adminContext = await getAdminContext(req);
     
+    // Get entitlements
+    const entitlements = await entitlementsService.getOrgEntitlements(context.orgId);
+    
+    // Get user's role in the org
+    let role: string | null = null;
+    if (userId) {
+      const { data: member } = await supabaseAdmin
+        .from('org_members')
+        .select('role')
+        .eq('org_id', context.orgId)
+        .eq('user_id', userId)
+        .maybeSingle();
+      role = member?.role || null;
+    }
+    
     res.json({
       user: userId ? { id: userId } : undefined,
+      role: role || null,
       org: {
         id: org.id,
         name: org.name,
@@ -1856,10 +1881,41 @@ app.get("/api/me", async (req, res) => {
           effectivePlanTier: planContext.effectivePlanTier,
         }),
       },
+      entitlements: {
+        orgId: entitlements.orgId,
+        tier: entitlements.tier,
+        features: entitlements.features,
+      },
       isSuperuser: adminContext?.isSuperuser || false,
     });
   } catch (e: any) {
     console.error("Get /api/me error:", e);
+    res.status(500).json({ 
+      error: e?.message ?? "unknown error"
+    });
+  }
+});
+
+// Get entitlements endpoint
+app.get("/api/entitlements", async (req, res) => {
+  try {
+    const context = await getOrgContext(req);
+    
+    if (!context || context.error || !context.orgId) {
+      return res.status(401).json({ error: context?.error || "Authorization required" });
+    }
+    
+    const entitlements = await entitlementsService.getOrgEntitlements(context.orgId);
+    
+    res.json({
+      entitlements: {
+        orgId: entitlements.orgId,
+        tier: entitlements.tier,
+        features: entitlements.features,
+      },
+    });
+  } catch (e: any) {
+    console.error("Get /api/entitlements error:", e);
     res.status(500).json({ 
       error: e?.message ?? "unknown error"
     });
@@ -1940,8 +1996,8 @@ app.post("/api/orgs/:orgId/members/invite", async (req, res) => {
   }
 });
 
-// Update a member's role
-app.patch("/api/orgs/:orgId/members/:memberUserId", async (req, res) => {
+// Update a member's role (requires enterpriseGovernance entitlement for role changes)
+app.patch("/api/orgs/:orgId/members/:memberUserId", requireEntitlement('enterpriseGovernance'), async (req, res) => {
   try {
     const { orgId, memberUserId } = req.params;
     const { role } = req.body;
@@ -3407,7 +3463,29 @@ app.post("/api/transcribe", upload.single('audio'), async (req, res) => {
 });
 
 // Setup integration routes
+console.log("Registering integration routes...");
 setupIntegrationRoutes(app);
+console.log("Integration routes registered successfully");
+
+// Setup webhooks routes
+console.log("Registering webhooks routes...");
+setupWebhooksRoutes(app);
+console.log("Webhooks routes registered successfully");
+
+// Setup Jira routes
+console.log("Registering Jira routes...");
+setupJiraRoutes(app);
+console.log("Jira routes registered successfully");
+
+// Setup batch ingestion routes
+console.log("Registering batch ingestion routes...");
+setupBatchIngestionRoutes(app);
+console.log("Batch ingestion routes registered successfully");
+
+// Setup connector routes
+console.log("Registering connector routes...");
+setupConnectorRoutes(app);
+console.log("Connector routes registered successfully");
 
 // Setup evaluation search routes FIRST (before /api/evaluations)
 // This ensures /api/evaluations/search matches before the more general /api/evaluations route
@@ -3424,6 +3502,26 @@ console.log("Audit routes registered successfully");
 console.log("Registering issue workflow routes...");
 setupIssueWorkflowRoutes(app);
 console.log("Issue workflow routes registered successfully");
+
+// Setup issue decisions routes
+console.log("Registering issue decisions routes...");
+setupIssueDecisionsRoutes(app);
+console.log("Issue decisions routes registered successfully");
+
+// Setup issue signoffs routes
+console.log("Registering issue signoffs routes...");
+setupIssueSignoffsRoutes(app);
+console.log("Issue signoffs routes registered successfully");
+
+// Setup issue snapshots routes
+console.log("Registering issue snapshots routes...");
+setupIssueSnapshotsRoutes(app);
+console.log("Issue snapshots routes registered successfully");
+
+// Setup cases routes
+console.log("Registering cases routes...");
+setupCasesRoutes(app);
+console.log("Cases routes registered successfully");
 
 // Setup analytics routes
 console.log("Registering analytics routes...");

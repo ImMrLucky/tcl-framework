@@ -9,12 +9,13 @@ import { supabaseAdmin } from '../supabase.js';
 import { getOrgContext } from '../auth-context.js';
 import { logAudit } from '../supabase.js';
 import { toIssueDto, toIssueDtoArray } from '../dto/issue.dto.js';
+import { requirePermission } from '../permissions/middleware.js';
 
 export function setupIssueWorkflowRoutes(app: express.Application) {
   // ============================================================================
   // GET /api/issues-v2 - List issues with filters and pagination
   // ============================================================================
-  app.get('/api/issues-v2', async (req, res) => {
+  app.get('/api/issues-v2', requirePermission('view_issues'), async (req, res) => {
     try {
       const context = await getOrgContext(req);
       
@@ -159,17 +160,55 @@ export function setupIssueWorkflowRoutes(app: express.Application) {
         console.error('Error fetching workflows:', workflowError);
       }
 
+      // Get decision records for all issue IDs (if issueDecisions entitlement is enabled)
+      let decisions: any[] = [];
+      try {
+        const { entitlementsService } = await import('../entitlements/entitlements-service.js');
+        const hasIssueDecisions = await entitlementsService.has(context.orgId, 'issueDecisions');
+        if (hasIssueDecisions) {
+          const { data: decisionsData, error: decisionsError } = await supabaseAdmin
+            .from('issue_decisions')
+            .select('*')
+            .in('issue_id', issueIds)
+            .eq('org_id', context.orgId);
+
+          if (decisionsError) {
+            console.error('Error fetching decisions:', decisionsError);
+          } else {
+            decisions = decisionsData || [];
+          }
+        }
+      } catch (e) {
+        // Entitlements check failed, skip decisions
+        console.warn('Failed to check issueDecisions entitlement:', e);
+      }
+
       // Create a map of issue_id -> workflow
       const workflowMap = new Map((workflows || []).map(w => [w.issue_id, w]));
+      
+      // Create a map of issue_id -> decision
+      const decisionMap = new Map(decisions.map(d => [d.issue_id, d]));
 
-      // Merge issues with workflow data
+      // Merge issues with workflow and decision data
       let enrichedIssues = allIssues.map(issue => {
         const workflow = workflowMap.get(issue.issueId);
+        const decision = decisionMap.get(issue.issueId);
         return {
           ...issue,
-          status: workflow?.status || 'OPEN',
-          assigneeUserId: workflow?.assignee_user_id || null,
+          status: workflow?.status || decision?.disposition || 'OPEN',
+          assigneeUserId: workflow?.assignee_user_id || decision?.assigned_to_user_id || null,
           workflowUpdatedAt: workflow?.updated_at || null,
+          // Decision fields
+          decision: decision ? {
+            id: decision.id,
+            disposition: decision.disposition,
+            severityOverride: decision.severity_override,
+            assignedToUserId: decision.assigned_to_user_id,
+            notes: decision.notes,
+            expiresAt: decision.expires_at,
+            createdAt: decision.created_at,
+            updatedAt: decision.updated_at,
+          } : null,
         };
       });
 

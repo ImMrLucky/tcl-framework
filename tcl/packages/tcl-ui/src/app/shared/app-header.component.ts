@@ -12,6 +12,7 @@ import { AuthService, User } from '../auth.service';
 import { PlanService, PlanTier } from '../plan.service';
 import { Router } from '@angular/router';
 import { MatChipsModule } from '@angular/material/chips';
+import { MatProgressBarModule } from '@angular/material/progress-bar';
 import { Subject } from 'rxjs';
 import { takeUntil, distinctUntilChanged, debounceTime } from 'rxjs/operators';
 
@@ -28,6 +29,7 @@ import { takeUntil, distinctUntilChanged, debounceTime } from 'rxjs/operators';
     MatTooltipModule,
     MatListModule,
     MatChipsModule,
+    MatProgressBarModule,
     LogoComponent
   ],
   templateUrl: './app-header.component.html',
@@ -48,6 +50,13 @@ export class AppHeaderComponent implements OnInit, OnDestroy {
   
   planTier: PlanTier | null = null;
   planContext$ = this.planService.planContext$;
+  
+  // Usage tracking
+  usageInfo: {
+    analyses: { used: number; limit: number; remaining: number };
+    apiCalls: { used: number; limit: number; remaining: number };
+    uploads: { used: number; limit: number; remaining: number };
+  } | null = null;
   
   private destroy$ = new Subject<void>();
 
@@ -163,6 +172,46 @@ export class AppHeaderComponent implements OnInit, OnDestroy {
       .pipe(takeUntil(this.destroy$))
       .subscribe(context => {
         this.planTier = context?.tier ?? null;
+        
+        // Update usage info
+        if (context) {
+          const limits = context.limits;
+          const remaining = context.remainingToday;
+          
+          // Calculate used amounts
+          // Frontend PlanLimits uses analysisRunsPerDay, backend may use analysesPerDay
+          const analysesLimit = (limits as any).analysisRunsPerDay ?? (limits as any).analysesPerDay ?? 0;
+          const analysesRemaining = remaining.analysisRuns ?? remaining.analyses ?? 0;
+          const analysesUsed = analysesLimit === -1 
+            ? 0 
+            : analysesLimit - analysesRemaining;
+          const apiCallsUsed = limits.apiCallsPerDay === -1 
+            ? 0 
+            : limits.apiCallsPerDay - remaining.apiCalls;
+          const uploadsUsed = limits.uploadsPerDay === -1 
+            ? 0 
+            : limits.uploadsPerDay - remaining.uploads;
+          
+          this.usageInfo = {
+            analyses: {
+              used: analysesUsed,
+              limit: analysesLimit,
+              remaining: analysesRemaining
+            },
+            apiCalls: {
+              used: apiCallsUsed,
+              limit: limits.apiCallsPerDay,
+              remaining: remaining.apiCalls
+            },
+            uploads: {
+              used: uploadsUsed,
+              limit: limits.uploadsPerDay,
+              remaining: remaining.uploads
+            }
+          };
+        } else {
+          this.usageInfo = null;
+        }
       });
 
     // Subscribe to superuser status
@@ -248,6 +297,57 @@ export class AppHeaderComponent implements OnInit, OnDestroy {
       default:
         return '';
     }
+  }
+
+  /**
+   * Get primary usage metric for display (Evaluations/Analyses)
+   */
+  getPrimaryUsageDisplay(): string {
+    if (!this.usageInfo) return '';
+    
+    const { used, limit, remaining } = this.usageInfo.analyses;
+    
+    if (limit === -1) {
+      return `${used} Evaluations (Unlimited)`;
+    }
+    
+    return `${used} of ${limit} Evaluations`;
+  }
+
+  /**
+   * Get usage percentage for progress indicator
+   */
+  getUsagePercentage(): number {
+    if (!this.usageInfo) return 0;
+    
+    const { used, limit } = this.usageInfo.analyses;
+    if (limit === -1) return 0; // Unlimited
+    
+    return Math.min(100, (used / limit) * 100);
+  }
+
+  /**
+   * Check if usage is near limit (>= 80%)
+   */
+  isUsageNearLimit(): boolean {
+    if (!this.usageInfo) return false;
+    
+    const { used, limit } = this.usageInfo.analyses;
+    if (limit === -1) return false; // Unlimited
+    
+    return (used / limit) >= 0.8;
+  }
+
+  /**
+   * Check if usage is at limit
+   */
+  isUsageAtLimit(): boolean {
+    if (!this.usageInfo) return false;
+    
+    const { remaining, limit } = this.usageInfo.analyses;
+    if (limit === -1) return false; // Unlimited
+    
+    return remaining <= 0;
   }
 }
 

@@ -37,6 +37,7 @@ export function setupExportRoutes(app: express.Application) {
         projectId: req.body.projectId || context.projectId,
         env: req.body.env || context.env,
         includeAllIssues: req.body.includeAllIssues !== false, // Default true
+        preset: req.body.preset || 'CUSTOM', // Default to CUSTOM if not specified
       };
 
       // Validate options
@@ -52,8 +53,32 @@ export function setupExportRoutes(app: express.Application) {
 
       // Generate pack asynchronously
       generateAuditPack(options, context.orgId, supabaseAdmin)
-        .then((result) => {
+        .then(async (result) => {
           packStatus.set(packId, { status: 'completed', result });
+          
+          // Record export in ledger
+          try {
+            await supabaseAdmin.from('exports').insert({
+              org_id: context.orgId,
+              project_id: options.projectId || context.projectId || null,
+              export_type: 'AUDIT_PACK',
+              target_id: packId,
+              format: 'ZIP',
+              preset: options.preset || 'CUSTOM',
+              filename: `audit-pack-${packId}.zip`,
+              checksum: result.checksums.zip || result.checksums.combined,
+              item_count: result.summary?.totalIssues || 0,
+              summary_json: {
+                totalEvaluations: result.summary?.totalEvaluations || 0,
+                totalIssues: result.summary?.totalIssues || 0,
+                preset: options.preset || 'CUSTOM',
+              },
+              created_by_user_id: context.userId,
+            });
+          } catch (ledgerError) {
+            console.error('Failed to record export in ledger:', ledgerError);
+            // Don't fail the export if ledger recording fails
+          }
         })
         .catch((error) => {
           console.error('Audit pack generation error:', error);
@@ -94,9 +119,11 @@ export function setupExportRoutes(app: express.Application) {
         res.json({
           packId,
           status: 'completed',
-          downloadUrl: status.result.downloadUrl,
-          files: status.result.files,
-          checksum: status.result.checksum,
+          pdfUrl: status.result.pdfUrl,
+          jsonUrl: status.result.jsonUrl,
+          csvUrl: status.result.csvUrl,
+          zipUrl: status.result.zipUrl,
+          checksums: status.result.checksums,
         });
       } else if (status.status === 'failed') {
         res.json({

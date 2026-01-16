@@ -10,13 +10,15 @@ import { MatMenuModule } from '@angular/material/menu';
 import { MatDividerModule } from '@angular/material/divider';
 import { AuthService, User } from '../auth.service';
 import { LogoComponent } from '../shared/logo.component';
+import { PermissionService, Permission } from '../permissions/permission.service';
 import { filter } from 'rxjs/operators';
 
 interface NavItem {
   label: string;
   route: string;
   icon: string;
-  adminOnly?: boolean;
+  permission?: string; // Can be Permission (role-based) or FeatureKey (capability/entitlement)
+  adminOnly?: boolean; // Legacy: use permission instead
 }
 
 @Component({
@@ -241,18 +243,23 @@ export class MainLayoutComponent implements OnInit {
   currentRoute = '';
   
   navItems: NavItem[] = [
-    { label: 'Issues (Triage)', route: '/issues', icon: 'assignment' },
-    { label: 'Compliance Dashboard', route: '/compliance', icon: 'dashboard' },
-    { label: 'Evaluations', route: '/evaluations', icon: 'assessment' },
-    { label: 'Audit Packs', route: '/audit-packs', icon: 'folder' },
-    { label: 'Policies', route: '/policies', icon: 'description' },
-    { label: 'Evidence', route: '/evidence', icon: 'verified' },
+    { label: 'Issues (Triage)', route: '/issues', icon: 'assignment', permission: 'view_issues' },
+    { label: 'Compliance Dashboard', route: '/compliance', icon: 'dashboard', permission: 'view_evaluations' },
+    { label: 'Evaluations', route: '/evaluations', icon: 'assessment', permission: 'view_evaluations' },
+    { label: 'Audit Packs', route: '/audit-packs', icon: 'folder', permission: 'view_audit_packs' },
+    { label: 'Policies', route: '/policies', icon: 'description', permission: 'view_evidence' },
+    { label: 'Evidence', route: '/evidence', icon: 'verified', permission: 'view_evidence' },
+    { label: 'Cases', route: '/cases', icon: 'folder_special', permission: 'view_cases' },
+    { label: 'Integrations', route: '/integrations', icon: 'link', permission: 'view_integrations' },
+    { label: 'Bulk Ingestion', route: '/bulk-ingest', icon: 'upload_file', permission: 'create_batches' },
     { label: 'Admin → Scoring', route: '/admin/scoring', icon: 'tune', adminOnly: true },
   ];
 
   constructor(
     private authService: AuthService,
-    private router: Router
+    private router: Router,
+    private permissionService: PermissionService,
+    private featureService: FeatureService
   ) {}
 
   ngOnInit() {
@@ -264,9 +271,10 @@ export class MainLayoutComponent implements OnInit {
 
     this.authService.currentUser$.subscribe(user => {
       this.currentUser = user;
-      // Check if user is admin (you may need to add role checking to AuthService)
-      // For now, we'll show admin items to all authenticated users
-      this.isAdmin = true; // TODO: Check actual role from user or org context
+      // Check if user is admin based on role
+      this.permissionService.currentRole.subscribe(role => {
+        this.isAdmin = role === 'ADMIN' || role === 'OWNER';
+      });
     });
     
     // Track current route
@@ -297,9 +305,29 @@ export class MainLayoutComponent implements OnInit {
 
   get visibleNavItems(): NavItem[] {
     return this.navItems.filter(item => {
+      // Legacy adminOnly check
       if (item.adminOnly && !this.isAdmin) {
         return false;
       }
+      
+      // Permission-based check (for role-based permissions like view_issues, create_cases)
+      if (item.permission) {
+        // Check if it's a role-based permission (starts with view_, create_, etc.)
+        if (item.permission.startsWith('view_') || item.permission.startsWith('create_') || 
+            item.permission.startsWith('update_') || item.permission.startsWith('delete_') ||
+            item.permission.startsWith('manage_') || item.permission.startsWith('export_')) {
+          if (!this.permissionService.hasPermission(item.permission as Permission)) {
+            return false;
+          }
+        } else {
+          // Check if it's a feature (capability or entitlement)
+          // Try as feature key first
+          if (!this.featureService.hasFeature(item.permission as any)) {
+            return false;
+          }
+        }
+      }
+      
       return true;
     });
   }

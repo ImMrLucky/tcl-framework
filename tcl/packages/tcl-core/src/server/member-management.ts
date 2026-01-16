@@ -205,28 +205,51 @@ export async function updateMemberRole(
     return { success: false, message: 'Insufficient permissions to update member roles' };
   }
 
-  // Validate role
-  if (!isValidRole(newRole)) {
+  // Validate role (normalize to uppercase for database)
+  const normalizedRole = newRole.toUpperCase() as 'OWNER' | 'ADMIN' | 'MANAGER' | 'ANALYST' | 'VIEWER';
+  const validRoles = ['OWNER', 'ADMIN', 'MANAGER', 'ANALYST', 'VIEWER'];
+  if (!validRoles.includes(normalizedRole)) {
     return { success: false, message: `Invalid role: ${newRole}` };
   }
 
-  // Prevent removing the last owner
-  if (newRole !== 'owner') {
+  // Prevent demoting the last OWNER
+  if (newRole !== 'OWNER') {
     const { data: owners } = await supabaseAdmin
       .from('org_members')
       .select('user_id')
       .eq('org_id', orgId)
-      .eq('role', 'owner');
+      .eq('role', 'OWNER');
 
     if (owners && owners.length === 1 && owners[0].user_id === memberUserId) {
-      return { success: false, message: 'Cannot remove the last owner from an organization' };
+      return { success: false, message: 'Cannot demote the last owner from an organization' };
     }
   }
 
-  // Update role
+  // Prevent demoting/removing the last ADMIN (if they're currently ADMIN)
+  const { data: currentMember } = await supabaseAdmin
+    .from('org_members')
+    .select('role')
+    .eq('org_id', orgId)
+    .eq('user_id', memberUserId)
+    .single();
+
+  if (currentMember?.role === 'ADMIN' && newRole !== 'ADMIN' && newRole !== 'OWNER') {
+    // Check if this is the last ADMIN (excluding OWNERs who can also act as admins)
+    const { data: admins } = await supabaseAdmin
+      .from('org_members')
+      .select('user_id')
+      .eq('org_id', orgId)
+      .eq('role', 'ADMIN');
+
+    if (admins && admins.length === 1 && admins[0].user_id === memberUserId) {
+      return { success: false, message: 'Cannot demote the last admin. An organization must have at least one admin or owner.' };
+    }
+  }
+
+  // Update role (use normalized uppercase)
   const { error } = await supabaseAdmin
     .from('org_members')
-    .update({ role: newRole })
+    .update({ role: normalizedRole })
     .eq('org_id', orgId)
     .eq('user_id', memberUserId);
 
@@ -256,15 +279,42 @@ export async function removeMember(
     return { success: false, message: 'Insufficient permissions to remove members' };
   }
 
-  // Prevent removing the last owner
-  const { data: owners } = await supabaseAdmin
+  // Get current member role
+  const { data: currentMember } = await supabaseAdmin
     .from('org_members')
-    .select('user_id')
+    .select('role')
     .eq('org_id', orgId)
-    .eq('role', 'owner');
+    .eq('user_id', memberUserId)
+    .single();
 
-  if (owners && owners.length === 1 && owners[0].user_id === memberUserId) {
-    return { success: false, message: 'Cannot remove the last owner from an organization' };
+  if (!currentMember) {
+    return { success: false, message: 'Member not found' };
+  }
+
+  // Prevent removing the last OWNER
+  if (currentMember.role === 'OWNER') {
+    const { data: owners } = await supabaseAdmin
+      .from('org_members')
+      .select('user_id')
+      .eq('org_id', orgId)
+      .eq('role', 'OWNER');
+
+    if (owners && owners.length === 1 && owners[0].user_id === memberUserId) {
+      return { success: false, message: 'Cannot remove the last owner from an organization' };
+    }
+  }
+
+  // Prevent removing the last ADMIN
+  if (currentMember.role === 'ADMIN') {
+    const { data: admins } = await supabaseAdmin
+      .from('org_members')
+      .select('user_id')
+      .eq('org_id', orgId)
+      .eq('role', 'ADMIN');
+
+    if (admins && admins.length === 1 && admins[0].user_id === memberUserId) {
+      return { success: false, message: 'Cannot remove the last admin. An organization must have at least one admin or owner.' };
+    }
   }
 
   // Remove member

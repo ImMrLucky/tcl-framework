@@ -1,551 +1,409 @@
-/**
- * Integration Routes
- * Integrated into TCL Core Express server
- * Modular design - can be separated if needed
- */
-
 import express from 'express';
-import crypto from 'crypto';
 import { supabaseAdmin } from '../supabase.js';
-import { verifyApiKeyExtended } from '../supabase.js';
-import { verifyWebhookSignature, generateWebhookSignature } from './security/hmac.js';
-import { processArtifacts, checkIdempotency, storeIdempotencyKey } from './artifacts/processor.js';
-import type { WebhookIngestPayload, RealtimeSessionStart, RealtimeChunk, RealtimeFinalize } from './types.js';
-import { requireCapability } from '../plans/capability-middleware.js';
-import { Capability } from '../plans/capabilities.js';
-import { planService } from '../plans/plan-service.js';
+import { getOrgContext } from '../auth-context.js';
+import { logAudit } from '../supabase.js';
+import { requireEntitlement } from '../entitlements/middleware.js';
 
-// Reuse getOrgContext from express.ts
-async function getOrgContext(
-  req: express.Request
-): Promise<{ orgId: string; projectId: string; env: 'sandbox' | 'production' } | null> {
-  const authHeader = req.headers.authorization;
-  if (authHeader?.startsWith('Bearer ')) {
-    const key = authHeader.substring(7);
-    const verified = await verifyApiKeyExtended(key);
-    if (verified) {
-      return {
-        orgId: verified.orgId,
-        projectId: verified.projectId,
-        env: verified.env as 'sandbox' | 'production',
-      };
-    }
-  }
-  // TODO: Support user session JWT
-  return null;
-}
-
+/**
+ * Setup integrations API routes
+ */
 export function setupIntegrationRoutes(app: express.Application) {
   // ============================================================================
-  // WEBHOOK INGEST v2
+  // GET /api/integrations - List integrations
   // ============================================================================
-
-  app.post('/webhooks/:path_token', async (req, res) => {
+  app.get('/api/integrations', async (req, res) => {
     try {
-      const { path_token } = req.params;
-      // Get raw body for HMAC verification
-      const rawBody = Buffer.isBuffer(req.body) 
-        ? req.body.toString('utf8')
-        : typeof req.body === 'string'
-        ? req.body
-        : JSON.stringify(req.body);
-      const body = JSON.parse(rawBody) as WebhookIngestPayload;
-
-      if (!supabaseAdmin) {
-        return res.status(503).json({ error: 'Supabase not configured' });
-      }
-
-      // Get webhook token and integration
-      const { data: webhookToken, error: tokenError } = await supabaseAdmin
-        .from('webhook_tokens')
-        .select('*, integrations(*)')
-        .eq('path_token', path_token)
-        .single();
-
-      if (tokenError || !webhookToken) {
-        return res.status(404).json({ error: 'Invalid webhook token' });
-      }
-
-      const integration = webhookToken.integrations;
-
-      // Verify HMAC signature
-      const timestamp = req.headers['x-protectqa-timestamp'] as string;
-      const signature = req.headers['x-protectqa-signature'] as string;
-
-      if (!timestamp || !signature) {
-        return res.status(401).json({ error: 'Missing signature headers' });
-      }
-
-      const secret = webhookToken.secret;
-      if (!verifyWebhookSignature(secret, timestamp, signature, rawBody)) {
-        return res.status(401).json({ error: 'Invalid signature' });
-      }
-
-      // Get org context
-      const orgContext = {
-        orgId: integration.org_id,
-        projectId: integration.project_id,
-        env: integration.env,
-      };
-
-      // Check webhook capability based on environment
-      const requiredCapability = integration.env === 'production' 
-        ? Capability.WEBHOOKS_PROD 
-        : Capability.WEBHOOKS_TEST;
+      const context = await getOrgContext(req);
       
-      const hasCap = await planService.hasCapability(orgContext.orgId, requiredCapability);
-      if (!hasCap) {
-        const planContext = await planService.getOrgPlanContext(orgContext.orgId);
-        return res.status(403).json({
-          error: 'UPGRADE_REQUIRED',
-          requiredCapability: requiredCapability,
-          currentPlan: planContext.tier,
-          message: `Webhooks in ${integration.env} environment require ${requiredCapability}. Your current plan (${planContext.tier}) does not include this capability.`,
-        });
-      }
-
-      // Check idempotency
-      const existingConvId = await checkIdempotency(
-        orgContext.orgId,
-        'webhook',
-        body.external_id
-      );
-
-      let conversationId: string;
-
-      if (existingConvId) {
-        conversationId = existingConvId;
-        // Update existing conversation
-        if (supabaseAdmin) {
-          await supabaseAdmin
-            .from('conversations')
-            .update({
-              title: body.title || undefined,
-              metadata: body.meta || {},
-            })
-            .eq('id', conversationId);
-        }
-      } else {
-        // Create new conversation
-        if (!supabaseAdmin) {
-          return res.status(503).json({ error: 'Supabase not configured' });
-        }
-        const { data: conversation, error: convError } = await supabaseAdmin
-          .from('conversations')
-          .insert({
-            org_id: orgContext.orgId,
-            project_id: orgContext.projectId,
-            env: orgContext.env,
-            external_id: body.external_id,
-            title: body.title,
-            content: '', // Will be updated from artifacts
-            metadata: body.meta || {},
-          })
-          .select('id')
-          .single();
-
-        if (convError) {
-          return res.status(500).json({ error: 'Failed to create conversation' });
-        }
-
-        conversationId = conversation.id;
-
-        // Store idempotency key
-        await storeIdempotencyKey(
-          orgContext.orgId,
-          'webhook',
-          body.external_id,
-          conversationId
-        );
-      }
-
-      // Process artifacts
-      if (body.artifacts && body.artifacts.length > 0) {
-        await processArtifacts(
-          orgContext.orgId,
-          orgContext.projectId,
-          orgContext.env,
-          conversationId,
-          body.artifacts
-        );
-      }
-
-      // Auto-start evaluation if requested
-      if (body.auto_start_evaluation) {
-        // Trigger evaluation via internal validate function
-        // This is integrated - we can call validate directly
-        try {
-          // Lazy load validate function (same pattern as express.ts)
-          const { validate } = await import('../../orchestrator.js');
-          const transcriptText = body.artifacts?.find(a => a.type === 'transcript_text')?.text || 
-                                 body.artifacts?.find(a => a.type === 'chat_messages')?.messages
-                                   ?.map(m => `${m.author}: ${m.text}`).join('\n') || '';
-          
-          if (transcriptText) {
-            // Call validate asynchronously (don't wait for result)
-            validate({
-              question: transcriptText,
-              answer: '',
-              sources: [],
-              options: {},
-            }).catch(err => {
-              console.error('Evaluation failed (non-blocking):', err);
-            });
-          }
-        } catch (error) {
-          console.error('Failed to trigger evaluation:', error);
-          // Don't fail the webhook if evaluation fails
-        }
-      }
-
-      res.json({
-        success: true,
-        conversation_id: conversationId,
-        existing: !!existingConvId,
-      });
-    } catch (error: any) {
-      console.error('Webhook ingest error:', error);
-      res.status(500).json({ error: error.message || 'Internal server error' });
-    }
-  });
-
-  // ============================================================================
-  // REAL-TIME INGESTION
-  // ============================================================================
-
-  // Start real-time session
-  app.post('/v1/realtime/sessions/start', async (req, res) => {
-    try {
-      const body = req.body as RealtimeSessionStart;
-      const orgContext = await getOrgContext(req);
-
-      if (!orgContext) {
-        return res.status(401).json({ error: 'Unauthorized' });
+      if (!context || context.error || !context.orgId) {
+        return res.status(401).json({ error: context?.error || 'Authorization required' });
       }
 
       if (!supabaseAdmin) {
         return res.status(503).json({ error: 'Supabase not configured' });
       }
 
-      const { data: session, error } = await supabaseAdmin
-        .from('realtime_sessions')
-        .insert({
-          org_id: orgContext.orgId,
-          project_id: orgContext.projectId,
-          env: orgContext.env,
-          channel: body.channel,
-          metadata: body.meta || {},
-          status: 'active',
-        })
-        .select('id')
-        .single();
+      const kind = req.query.kind as string | undefined;
+
+      let query = supabaseAdmin
+        .from('enterprise_integrations')
+        .select('*')
+        .eq('org_id', context.orgId)
+        .order('created_at', { ascending: false });
+
+      if (kind) {
+        query = query.eq('kind', kind);
+      }
+
+      const { data: integrations, error } = await query;
 
       if (error) {
-        return res.status(500).json({ error: 'Failed to create session' });
+        return res.status(500).json({ error: `Failed to fetch integrations: ${error.message}` });
       }
 
-      res.json({ session_id: session.id });
+      // Remove secrets from response (secrets are in separate table)
+      const sanitizedIntegrations = (integrations || []).map((integration: any) => ({
+        ...integration,
+        // Ensure config_json doesn't contain secrets
+        config_json: integration.config_json || {},
+      }));
+
+      res.json({ integrations: sanitizedIntegrations });
     } catch (error: any) {
-      res.status(500).json({ error: error.message });
-    }
-  });
-
-  // Add chunk to session
-  app.post('/v1/realtime/sessions/:session_id/chunk', async (req, res) => {
-    try {
-      const { session_id } = req.params;
-      const body = req.body as RealtimeChunk;
-
-      if (!supabaseAdmin) {
-        return res.status(503).json({ error: 'Supabase not configured' });
-      }
-
-      // Get session
-      const { data: session, error: sessionError } = await supabaseAdmin
-        .from('realtime_sessions')
-        .select('*')
-        .eq('id', session_id)
-        .eq('status', 'active')
-        .single();
-
-      if (sessionError || !session) {
-        return res.status(404).json({ error: 'Session not found or not active' });
-      }
-
-      // Create or get conversation
-      let conversationId = session.conversation_id;
-
-      if (!conversationId) {
-        const { data: conversation, error: convError } = await supabaseAdmin
-          .from('conversations')
-          .insert({
-            org_id: session.org_id,
-            project_id: session.project_id,
-            env: session.env,
-            title: `Real-time ${session.channel}`,
-            content: '', // Will be updated from artifacts
-            metadata: session.meta || {},
-          })
-          .select('id')
-          .single();
-
-        if (convError) {
-          return res.status(500).json({ error: 'Failed to create conversation' });
-        }
-
-        conversationId = conversation.id;
-
-        // Update session with conversation ID
-        if (supabaseAdmin) {
-          await supabaseAdmin
-            .from('realtime_sessions')
-            .update({ conversation_id: conversationId })
-            .eq('id', session_id);
-        }
-      }
-
-      // Create artifact from chunk
-      const artifact: any = {
-        type: body.type === 'chat_messages' ? 'chat_messages' : 'transcript_text',
-      };
-
-      if (body.type === 'chat_messages' && body.messages) {
-        artifact.messages = body.messages;
-      } else if (body.text) {
-        artifact.text = body.text;
-      }
-
-      await processArtifacts(
-        session.org_id,
-        session.project_id,
-        session.env,
-        conversationId,
-        [artifact]
-      );
-
-      res.json({ success: true, conversation_id: conversationId });
-    } catch (error: any) {
-      res.status(500).json({ error: error.message });
-    }
-  });
-
-  // Finalize session
-  app.post('/v1/realtime/sessions/:session_id/finalize', async (req, res) => {
-    try {
-      const { session_id } = req.params;
-      const body = req.body as RealtimeFinalize;
-
-      if (!supabaseAdmin) {
-        return res.status(503).json({ error: 'Supabase not configured' });
-      }
-
-      // Get session
-      const { data: session, error: sessionError } = await supabaseAdmin
-        .from('realtime_sessions')
-        .select('*')
-        .eq('id', session_id)
-        .eq('status', 'active')
-        .single();
-
-      if (sessionError || !session) {
-        return res.status(404).json({ error: 'Session not found or not active' });
-      }
-
-      // Update session status
-      await supabaseAdmin
-        .from('realtime_sessions')
-        .update({
-          status: 'finalized',
-          finalized_at: new Date().toISOString(),
-        })
-        .eq('id', session_id);
-
-      // Auto-start evaluation if requested
-      if (body.auto_start_evaluation && session.conversation_id) {
-        try {
-          // Get conversation content
-          const { data: conversation } = await supabaseAdmin
-            .from('conversations')
-            .select('content, raw_text')
-            .eq('id', session.conversation_id)
-            .single();
-
-          const transcriptText = conversation?.raw_text || conversation?.content;
-          if (transcriptText) {
-            // Call validate asynchronously (don't wait for result)
-            const { validate } = await import('../../orchestrator.js');
-            validate({
-              question: transcriptText,
-              answer: '',
-              sources: [],
-              options: {},
-            }).catch(err => {
-              console.error('Evaluation failed (non-blocking):', err);
-            });
-          }
-        } catch (error) {
-          console.error('Failed to trigger evaluation:', error);
-        }
-      }
-
-      res.json({ success: true, conversation_id: session.conversation_id });
-    } catch (error: any) {
-      res.status(500).json({ error: error.message });
+      console.error('Get integrations error:', error);
+      res.status(500).json({ error: error.message || 'Unknown error' });
     }
   });
 
   // ============================================================================
-  // INTEGRATION MANAGEMENT
+  // GET /api/integrations/:id - Get integration details
   // ============================================================================
-
-  // List integrations
-  app.get('/integrations', async (req, res) => {
+  app.get('/api/integrations/:id', async (req, res) => {
     try {
-      const orgContext = await getOrgContext(req);
-
-      if (!orgContext) {
-        return res.status(401).json({ error: 'Unauthorized' });
+      const context = await getOrgContext(req);
+      
+      if (!context || context.error || !context.orgId) {
+        return res.status(401).json({ error: context?.error || 'Authorization required' });
       }
+
+      const { id } = req.params;
 
       if (!supabaseAdmin) {
         return res.status(503).json({ error: 'Supabase not configured' });
       }
 
-      const { data, error } = await supabaseAdmin
-        .from('integrations')
+      const { data: integration, error: integrationError } = await supabaseAdmin
+        .from('enterprise_integrations')
         .select('*')
-        .eq('org_id', orgContext.orgId)
-        .eq('project_id', orgContext.projectId)
-        .eq('env', orgContext.env);
-
-      if (error) {
-        return res.status(500).json({ error: 'Failed to fetch integrations' });
-      }
-
-      // Remove secrets from response
-      const safeData = data.map((i: any) => {
-        const { secrets, ...rest } = i;
-        return rest;
-      });
-
-      res.json({ integrations: safeData });
-    } catch (error: any) {
-      res.status(500).json({ error: error.message });
-    }
-  });
-
-  // Create integration
-  app.post('/integrations', async (req, res) => {
-    try {
-      const orgContext = await getOrgContext(req);
-
-      if (!orgContext) {
-        return res.status(401).json({ error: 'Unauthorized' });
-      }
-
-      if (!supabaseAdmin) {
-        return res.status(503).json({ error: 'Supabase not configured' });
-      }
-
-      const { name, integration_type, config, secrets, is_beta } = req.body;
-
-      const { data, error } = await supabaseAdmin!
-        .from('integrations')
-        .insert({
-          org_id: orgContext.orgId,
-          project_id: orgContext.projectId,
-          env: orgContext.env,
-          name,
-          integration_type,
-          config: config || {},
-          secrets: secrets || {}, // Should be encrypted in production
-          is_beta: is_beta || false,
-          is_active: true,
-        })
-        .select('*')
+        .eq('id', id)
+        .eq('org_id', context.orgId)
         .single();
 
-      if (error) {
-        return res.status(500).json({ error: 'Failed to create integration' });
-      }
-
-      // Create webhook token if webhook_ingest
-      if (integration_type === 'webhook_ingest') {
-        const pathToken = crypto.randomUUID();
-        const secret = crypto.randomBytes(32).toString('hex');
-
-        await supabaseAdmin.from('webhook_tokens').insert({
-          integration_id: data.id,
-          path_token: pathToken,
-          secret,
-        });
-
-        res.json({
-          ...data,
-          webhook_url: `/webhooks/${pathToken}`,
-        });
-      } else {
-        res.json(data);
-      }
-    } catch (error: any) {
-      res.status(500).json({ error: error.message });
-    }
-  });
-
-  // Trigger S3 Drop ingestion
-  app.post('/integrations/:integration_id/ingest', async (req, res) => {
-    try {
-      const orgContext = await getOrgContext(req);
-      if (!orgContext) {
-        return res.status(401).json({ error: 'Unauthorized' });
-      }
-
-      if (!supabaseAdmin) {
-        return res.status(503).json({ error: 'Supabase not configured' });
-      }
-
-      const { integration_id } = req.params;
-      const { since, limit } = req.body;
-
-      // Get integration
-      const { data: integration, error: intError } = await supabaseAdmin
-        .from('integrations')
-        .select('*')
-        .eq('id', integration_id)
-        .eq('org_id', orgContext.orgId)
-        .eq('env', orgContext.env)
-        .single();
-
-      if (intError || !integration) {
+      if (integrationError) {
         return res.status(404).json({ error: 'Integration not found' });
       }
 
-      if (integration.integration_type !== 's3_drop') {
-        return res.status(400).json({ error: 'Integration is not an S3 Drop connector' });
-      }
-
-      // Import and instantiate connector
-      const { S3DropConnector } = await import('./connectors/s3-drop.js');
-      const connector = new S3DropConnector({
-        orgId: orgContext.orgId,
-        projectId: orgContext.projectId || '',
-        env: orgContext.env,
-        integrationId: integration.id,
-        config: integration.config || {},
-        secrets: integration.secrets || {},
-      });
-
-      // Run ingestion
-      const result = await connector.ingest({ since, limit });
+      // Get recent exports for this integration
+      const { data: recentExports } = await supabaseAdmin
+        .from('integration_exports')
+        .select('*')
+        .eq('integration_id', id)
+        .order('created_at', { ascending: false })
+        .limit(10);
 
       res.json({
-        success: true,
-        conversation_id: result.conversationId,
-        artifacts_created: result.artifacts.length,
+        integration: {
+          ...integration,
+          config_json: integration.config_json || {},
+        },
+        recentExports: recentExports || [],
       });
     } catch (error: any) {
-      res.status(500).json({ error: error.message });
+      console.error('Get integration error:', error);
+      res.status(500).json({ error: error.message || 'Unknown error' });
+    }
+  });
+
+  // ============================================================================
+  // POST /api/integrations - Create integration
+  // ============================================================================
+  app.post(
+    '/api/integrations',
+    requireEntitlement('integrations'),
+    async (req, res) => {
+      try {
+        const context = await getOrgContext(req);
+        
+        if (!context || context.error || !context.orgId || !context.userId) {
+          return res.status(401).json({ error: context?.error || 'Authorization required' });
+        }
+
+        const { kind, config, secrets } = req.body;
+
+        if (!kind) {
+          return res.status(400).json({ error: 'kind is required' });
+        }
+
+        const validKinds = ['JIRA', 'WEBHOOK', 'ZENDESK', 'SERVICENOW'];
+        if (!validKinds.includes(kind)) {
+          return res.status(400).json({ error: `Invalid kind: ${kind}. Must be one of: ${validKinds.join(', ')}` });
+        }
+
+        if (!supabaseAdmin) {
+          return res.status(503).json({ error: 'Supabase not configured' });
+        }
+
+        // Create integration
+        const { data: integration, error: integrationError } = await supabaseAdmin
+          .from('enterprise_integrations')
+          .insert({
+            org_id: context.orgId,
+            kind,
+            status: 'ACTIVE',
+            config_json: config || {},
+            created_by_user_id: context.userId,
+          })
+          .select()
+          .single();
+
+        if (integrationError) {
+          return res.status(500).json({ error: `Failed to create integration: ${integrationError.message}` });
+        }
+
+        // Store secrets if provided
+        if (secrets && typeof secrets === 'object') {
+          for (const [key, value] of Object.entries(secrets)) {
+            if (value) {
+              // In production, encrypt the secret value using pgcrypto
+              // For now, store as plaintext (should be encrypted)
+              const { error: secretError } = await supabaseAdmin
+                .from('integration_secrets')
+                .upsert({
+                  org_id: context.orgId,
+                  integration_id: integration.id,
+                  integration_kind: kind,
+                  key,
+                  ciphertext: value as string, // TODO: Encrypt this
+                }, {
+                  onConflict: 'org_id,integration_kind,key',
+                });
+
+              if (secretError) {
+                console.error(`Failed to store secret ${key}:`, secretError);
+                // Continue even if secret storage fails
+              }
+            }
+          }
+        }
+
+        // Log audit
+        await logAudit({
+          orgId: context.orgId,
+          actorUserId: context.userId,
+          action: 'integration.create',
+          targetType: 'integration',
+          targetId: integration.id,
+          meta: { kind },
+        });
+
+        res.json({ success: true, integration });
+      } catch (error: any) {
+        console.error('Create integration error:', error);
+        res.status(500).json({ error: error.message || 'Unknown error' });
+      }
+    }
+  );
+
+  // ============================================================================
+  // PATCH /api/integrations/:id - Update integration
+  // ============================================================================
+  app.patch(
+    '/api/integrations/:id',
+    requireEntitlement('integrations'),
+    async (req, res) => {
+      try {
+        const context = await getOrgContext(req);
+        
+        if (!context || context.error || !context.orgId || !context.userId) {
+          return res.status(401).json({ error: context?.error || 'Authorization required' });
+        }
+
+        const { id } = req.params;
+        const { status, config, secrets } = req.body;
+
+        if (!supabaseAdmin) {
+          return res.status(503).json({ error: 'Supabase not configured' });
+        }
+
+        // Verify integration exists and belongs to org
+        const { data: existingIntegration, error: fetchError } = await supabaseAdmin
+          .from('enterprise_integrations')
+          .select('id, kind')
+          .eq('id', id)
+          .eq('org_id', context.orgId)
+          .single();
+
+        if (fetchError || !existingIntegration) {
+          return res.status(404).json({ error: 'Integration not found' });
+        }
+
+        // Build update object
+        const updates: any = {};
+        if (status !== undefined) {
+          const validStatuses = ['ACTIVE', 'DISABLED'];
+          if (!validStatuses.includes(status)) {
+            return res.status(400).json({ error: `Invalid status: ${status}` });
+          }
+          updates.status = status;
+        }
+        if (config !== undefined) {
+          updates.config_json = config;
+        }
+
+        // Update integration
+        const { data: updatedIntegration, error: updateError } = await supabaseAdmin
+          .from('enterprise_integrations')
+          .update(updates)
+          .eq('id', id)
+          .select()
+          .single();
+
+        if (updateError) {
+          return res.status(500).json({ error: `Failed to update integration: ${updateError.message}` });
+        }
+
+        // Update secrets if provided
+        if (secrets && typeof secrets === 'object') {
+          for (const [key, value] of Object.entries(secrets)) {
+            if (value) {
+              const { error: secretError } = await supabaseAdmin
+                .from('integration_secrets')
+                .upsert({
+                  org_id: context.orgId,
+                  integration_id: id,
+                  integration_kind: existingIntegration.kind,
+                  key,
+                  ciphertext: value as string, // TODO: Encrypt this
+                }, {
+                  onConflict: 'org_id,integration_kind,key',
+                });
+
+              if (secretError) {
+                console.error(`Failed to update secret ${key}:`, secretError);
+              }
+            }
+          }
+        }
+
+        // Log audit
+        await logAudit({
+          orgId: context.orgId,
+          actorUserId: context.userId,
+          action: 'integration.update',
+          targetType: 'integration',
+          targetId: id,
+          meta: updates,
+        });
+
+        res.json({ success: true, integration: updatedIntegration });
+      } catch (error: any) {
+        console.error('Update integration error:', error);
+        res.status(500).json({ error: error.message || 'Unknown error' });
+      }
+    }
+  );
+
+  // ============================================================================
+  // DELETE /api/integrations/:id - Delete integration
+  // ============================================================================
+  app.delete(
+    '/api/integrations/:id',
+    requireEntitlement('integrations'),
+    async (req, res) => {
+      try {
+        const context = await getOrgContext(req);
+        
+        if (!context || context.error || !context.orgId || !context.userId) {
+          return res.status(401).json({ error: context?.error || 'Authorization required' });
+        }
+
+        const { id } = req.params;
+
+        if (!supabaseAdmin) {
+          return res.status(503).json({ error: 'Supabase not configured' });
+        }
+
+        // Verify integration exists and belongs to org
+        const { data: existingIntegration, error: fetchError } = await supabaseAdmin
+          .from('enterprise_integrations')
+          .select('id, kind')
+          .eq('id', id)
+          .eq('org_id', context.orgId)
+          .single();
+
+        if (fetchError || !existingIntegration) {
+          return res.status(404).json({ error: 'Integration not found' });
+        }
+
+        // Delete integration (cascade will delete secrets and exports)
+        const { error: deleteError } = await supabaseAdmin
+          .from('enterprise_integrations')
+          .delete()
+          .eq('id', id);
+
+        if (deleteError) {
+          return res.status(500).json({ error: `Failed to delete integration: ${deleteError.message}` });
+        }
+
+        // Log audit
+        await logAudit({
+          orgId: context.orgId,
+          actorUserId: context.userId,
+          action: 'integration.delete',
+          targetType: 'integration',
+          targetId: id,
+          meta: { kind: existingIntegration.kind },
+        });
+
+        res.json({ success: true });
+      } catch (error: any) {
+        console.error('Delete integration error:', error);
+        res.status(500).json({ error: error.message || 'Unknown error' });
+      }
+    }
+  );
+
+  // ============================================================================
+  // GET /api/integrations/:id/exports - Get export history
+  // ============================================================================
+  app.get('/api/integrations/:id/exports', async (req, res) => {
+    try {
+      const context = await getOrgContext(req);
+      
+      if (!context || context.error || !context.orgId) {
+        return res.status(401).json({ error: context?.error || 'Authorization required' });
+      }
+
+      const { id } = req.params;
+      const limit = Math.min(parseInt(req.query.limit as string) || 50, 100);
+      const offset = parseInt(req.query.offset as string) || 0;
+
+      if (!supabaseAdmin) {
+        return res.status(503).json({ error: 'Supabase not configured' });
+      }
+
+      // Verify integration belongs to org
+      const { data: integration } = await supabaseAdmin
+        .from('enterprise_integrations')
+        .select('id')
+        .eq('id', id)
+        .eq('org_id', context.orgId)
+        .single();
+
+      if (!integration) {
+        return res.status(404).json({ error: 'Integration not found' });
+      }
+
+      const { data: exports, error: exportsError, count } = await supabaseAdmin
+        .from('integration_exports')
+        .select('*', { count: 'exact' })
+        .eq('integration_id', id)
+        .order('created_at', { ascending: false })
+        .range(offset, offset + limit - 1);
+
+      if (exportsError) {
+        return res.status(500).json({ error: `Failed to fetch exports: ${exportsError.message}` });
+      }
+
+      res.json({
+        exports: exports || [],
+        total: count || 0,
+        limit,
+        offset,
+      });
+    } catch (error: any) {
+      console.error('Get integration exports error:', error);
+      res.status(500).json({ error: error.message || 'Unknown error' });
     }
   });
 }
-

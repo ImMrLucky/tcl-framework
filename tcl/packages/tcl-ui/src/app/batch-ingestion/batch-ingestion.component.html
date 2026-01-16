@@ -1,0 +1,241 @@
+<app-header pageTitle="Bulk Ingestion"></app-header>
+
+<div class="batch-ingestion-container">
+  <div class="container">
+    <!-- Batch Status Card (if batch exists) -->
+    <mat-card *ngIf="currentBatch" class="batch-status-card">
+      <mat-card-header>
+        <mat-card-title>
+          <mat-icon>inventory_2</mat-icon>
+          Batch #{{ currentBatch.id.substring(0, 8) }}
+        </mat-card-title>
+        <mat-card-subtitle>
+          Status: <mat-chip [color]="getStatusColor(currentBatch.status)">{{ currentBatch.status }}</mat-chip>
+        </mat-card-subtitle>
+      </mat-card-header>
+      <mat-card-content>
+        <div class="progress-section">
+          <div class="progress-info">
+            <span>Progress: {{ getProgressPercentage(currentBatch) }}%</span>
+            <span *ngIf="currentBatch.progress_json">
+              ({{ currentBatch.progress_json.complete }} / {{ currentBatch.progress_json.total }} complete)
+            </span>
+          </div>
+          <mat-progress-bar 
+            mode="determinate" 
+            [value]="getProgressPercentage(currentBatch)">
+          </mat-progress-bar>
+          <div class="progress-details" *ngIf="currentBatch.progress_json">
+            <span>Queued: {{ currentBatch.progress_json.queued }}</span>
+            <span>Running: {{ currentBatch.progress_json.running }}</span>
+            <span>Complete: {{ currentBatch.progress_json.complete }}</span>
+            <span>Failed: {{ currentBatch.progress_json.failed }}</span>
+          </div>
+        </div>
+        
+        <div class="batch-actions">
+          <button 
+            mat-raised-button 
+            color="primary" 
+            (click)="startBatch()"
+            [disabled]="currentBatch.status !== 'CREATED' && currentBatch.status !== 'QUEUED'">
+            <mat-icon>play_arrow</mat-icon>
+            Start Batch
+          </button>
+          <button 
+            mat-stroked-button 
+            color="warn" 
+            (click)="cancelBatch()"
+            [disabled]="currentBatch.status === 'COMPLETE' || currentBatch.status === 'CANCELED'">
+            <mat-icon>cancel</mat-icon>
+            Cancel
+          </button>
+        </div>
+      </mat-card-content>
+    </mat-card>
+
+    <!-- Batch Items Table (if batch exists) -->
+    <mat-card *ngIf="currentBatch && batchItems.length > 0" class="batch-items-card">
+      <mat-card-header>
+        <mat-card-title>Batch Items</mat-card-title>
+      </mat-card-header>
+      <mat-card-content>
+        <table mat-table [dataSource]="batchItems" class="batch-items-table">
+          <ng-container matColumnDef="name">
+            <th mat-header-cell *matHeaderCellDef>Name</th>
+            <td mat-cell *matCellDef="let item">{{ item.title }}</td>
+          </ng-container>
+
+          <ng-container matColumnDef="status">
+            <th mat-header-cell *matHeaderCellDef>Status</th>
+            <td mat-cell *matCellDef="let item">
+              <mat-chip [color]="getStatusColor(item.status)">{{ item.status }}</mat-chip>
+            </td>
+          </ng-container>
+
+          <ng-container matColumnDef="error">
+            <th mat-header-cell *matHeaderCellDef>Error</th>
+            <td mat-cell *matCellDef="let item">
+              <span *ngIf="item.error_message" class="error-message">{{ item.error_message }}</span>
+              <span *ngIf="item.retry_count && item.retry_count > 0" class="retry-info">
+                (Retry {{ item.retry_count }})
+              </span>
+            </td>
+          </ng-container>
+
+          <tr mat-header-row *matHeaderRowDef="['name', 'status', 'error']"></tr>
+          <tr mat-row *matRowDef="let row; columns: ['name', 'status', 'error']"></tr>
+        </table>
+      </mat-card-content>
+    </mat-card>
+
+    <!-- Ingestion Tabs (if no batch or creating new) -->
+    <mat-card *ngIf="!currentBatch" class="ingestion-tabs-card">
+      <mat-tab-group [(selectedIndex)]="activeTab">
+        <!-- Upload Tab -->
+        <mat-tab label="Upload Files">
+          <div class="tab-content">
+            <div class="upload-section">
+              <input 
+                type="file" 
+                #fileInput 
+                multiple 
+                (change)="onFileSelected($event)"
+                accept=".mp3,.wav,.m4a,.txt,.json"
+                style="display: none">
+              
+              <button mat-raised-button color="primary" (click)="fileInput.click()">
+                <mat-icon>upload_file</mat-icon>
+                Select Files
+              </button>
+              
+              <div *ngIf="selectedFiles.length > 0" class="selected-files">
+                <h4>Selected Files ({{ selectedFiles.length }})</h4>
+                <div *ngFor="let file of selectedFiles; let i = index" class="file-item">
+                  <mat-icon>insert_drive_file</mat-icon>
+                  <span>{{ file.name }} ({{ formatFileSize(file.size) }})</span>
+                  <button mat-icon-button (click)="removeFile(i)">
+                    <mat-icon>close</mat-icon>
+                  </button>
+                </div>
+                <button mat-raised-button color="primary" (click)="createBatchFromUpload()">
+                  <mat-icon>add</mat-icon>
+                  Create Batch
+                </button>
+              </div>
+            </div>
+          </div>
+        </mat-tab>
+
+        <!-- Connector Tabs -->
+        <mat-tab *ngFor="let connector of connectors" [label]="connector.name">
+          <div class="tab-content">
+            <div class="connector-section">
+              <div class="connector-config">
+                <h4>Configuration</h4>
+                <mat-form-field appearance="outline" *ngIf="connector.type === 'S3'">
+                  <mat-label>Bucket</mat-label>
+                  <input matInput [(ngModel)]="connectorConfig[connector.type].bucket">
+                </mat-form-field>
+                <mat-form-field appearance="outline" *ngIf="connector.type === 'S3'">
+                  <mat-label>Region</mat-label>
+                  <input matInput [(ngModel)]="connectorConfig[connector.type].region">
+                </mat-form-field>
+                <mat-form-field appearance="outline">
+                  <mat-label>Access Key / Token</mat-label>
+                  <input matInput type="password" [(ngModel)]="connectorSecrets[connector.type].accessToken">
+                </mat-form-field>
+                <mat-form-field appearance="outline" *ngIf="connector.type === 'S3'">
+                  <mat-label>Secret Key</mat-label>
+                  <input matInput type="password" [(ngModel)]="connectorSecrets[connector.type].secretAccessKey">
+                </mat-form-field>
+                
+                <button 
+                  mat-raised-button 
+                  color="primary" 
+                  (click)="connectConnector(connector.type)"
+                  [disabled]="loadingConnector">
+                  <mat-spinner *ngIf="loadingConnector" diameter="20" class="inline-spinner"></mat-spinner>
+                  <mat-icon *ngIf="!loadingConnector">link</mat-icon>
+                  {{ loadingConnector ? 'Connecting...' : 'Connect' }}
+                </button>
+              </div>
+
+              <!-- File Browser -->
+              <div *ngIf="activeConnector === connector.type" class="file-browser">
+                <div class="browser-header">
+                  <button mat-icon-button (click)="loadConnectorObjects(connector.type)" *ngIf="browsingPath">
+                    <mat-icon>arrow_back</mat-icon>
+                  </button>
+                  <span class="current-path">{{ browsingPath || 'Root' }}</span>
+                </div>
+                
+                <table mat-table [dataSource]="connectorObjects" class="connector-table">
+                  <ng-container matColumnDef="select">
+                    <th mat-header-cell *matHeaderCellDef>
+                      <mat-checkbox 
+                        [checked]="selectedObjects.size === connectorObjects.length && connectorObjects.length > 0"
+                        (change)="$event.checked ? selectedObjects = new Set(connectorObjects.map(o => o.id)) : selectedObjects.clear()">
+                      </mat-checkbox>
+                    </th>
+                    <td mat-cell *matCellDef="let object">
+                      <mat-checkbox 
+                        [checked]="selectedObjects.has(object.id)"
+                        (change)="toggleObjectSelection(object)"
+                        *ngIf="!object.isDirectory">
+                      </mat-checkbox>
+                    </td>
+                  </ng-container>
+
+                  <ng-container matColumnDef="name">
+                    <th mat-header-cell *matHeaderCellDef>Name</th>
+                    <td mat-cell *matCellDef="let object">
+                      <mat-icon>{{ object.isDirectory ? 'folder' : 'insert_drive_file' }}</mat-icon>
+                      <span (click)="navigateToFolder(object)" [class.folder-link]="object.isDirectory">
+                        {{ object.name }}
+                      </span>
+                    </td>
+                  </ng-container>
+
+                  <ng-container matColumnDef="type">
+                    <th mat-header-cell *matHeaderCellDef>Type</th>
+                    <td mat-cell *matCellDef="let object">
+                      {{ object.isDirectory ? 'Folder' : 'File' }}
+                    </td>
+                  </ng-container>
+
+                  <ng-container matColumnDef="size">
+                    <th mat-header-cell *matHeaderCellDef>Size</th>
+                    <td mat-cell *matCellDef="let object">{{ formatFileSize(object.size) }}</td>
+                  </ng-container>
+
+                  <ng-container matColumnDef="modified">
+                    <th mat-header-cell *matHeaderCellDef>Modified</th>
+                    <td mat-cell *matCellDef="let object">
+                      {{ object.modifiedAt ? (object.modifiedAt | date:'short') : 'N/A' }}
+                    </td>
+                  </ng-container>
+
+                  <tr mat-header-row *matHeaderRowDef="connectorDisplayedColumns"></tr>
+                  <tr mat-row *matRowDef="let row; columns: connectorDisplayedColumns"></tr>
+                </table>
+
+                <div class="browser-actions">
+                  <button 
+                    mat-raised-button 
+                    color="primary" 
+                    (click)="createBatchFromSelection()"
+                    [disabled]="selectedObjects.size === 0">
+                    <mat-icon>add</mat-icon>
+                    Create Batch ({{ selectedObjects.size }} selected)
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </mat-tab>
+      </mat-tab-group>
+    </mat-card>
+  </div>
+</div>
+

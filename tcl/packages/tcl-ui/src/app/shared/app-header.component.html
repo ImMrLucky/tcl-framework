@@ -90,18 +90,37 @@
               </mat-menu>
             </ng-container>
 
-            <!-- Plan badge (only when authenticated) -->
+            <!-- Plan badge and usage (only when authenticated) -->
             <ng-container *ngIf="isAuthenticated && planTier">
-              <button 
-                mat-stroked-button 
-                [color]="getPlanTierColor()"
-                (click)="onPlanBadgeClick()"
-                class="plan-badge">
-                <mat-chip [color]="getPlanTierColor()" class="plan-chip">
-                  {{ getPlanTierDisplay() }}
-                </mat-chip>
-                <span class="plan-action">{{ getPlanBadgeText() }}</span>
-              </button>
+              <div class="plan-usage-container">
+                <!-- Usage indicator -->
+                <div 
+                  *ngIf="usageInfo && usageInfo.analyses.limit !== -1" 
+                  class="usage-indicator"
+                  [class.near-limit]="isUsageNearLimit()"
+                  [class.at-limit]="isUsageAtLimit()"
+                  [matTooltip]="'Evaluations: ' + getPrimaryUsageDisplay()">
+                  <span class="usage-text">{{ getPrimaryUsageDisplay() }}</span>
+                  <div class="usage-progress-bar">
+                    <div 
+                      class="usage-progress-fill" 
+                      [style.width.%]="getUsagePercentage()">
+                    </div>
+                  </div>
+                </div>
+                
+                <!-- Plan badge -->
+                <button 
+                  mat-stroked-button 
+                  [color]="getPlanTierColor()"
+                  (click)="onPlanBadgeClick()"
+                  class="plan-badge">
+                  <mat-chip [color]="getPlanTierColor()" class="plan-chip">
+                    {{ getPlanTierDisplay() }}
+                  </mat-chip>
+                  <span class="plan-action">{{ getPlanBadgeText() }}</span>
+                </button>
+              </div>
             </ng-container>
 
             <!-- User menu (only when authenticated) -->
@@ -219,18 +238,37 @@
           </mat-menu>
         </ng-container>
 
-        <!-- Plan badge (only when authenticated) -->
+        <!-- Plan badge and usage (only when authenticated) -->
         <ng-container *ngIf="isAuthenticated && planTier">
-          <button 
-            mat-stroked-button 
-            [color]="getPlanTierColor()"
-            (click)="onPlanBadgeClick()"
-            class="plan-badge">
-            <mat-chip [color]="getPlanTierColor()" class="plan-chip">
-              {{ getPlanTierDisplay() }}
-            </mat-chip>
-            <span class="plan-action">{{ getPlanBadgeText() }}</span>
-          </button>
+          <div class="plan-usage-container">
+            <!-- Usage indicator -->
+            <div 
+              *ngIf="usageInfo && usageInfo.analyses.limit !== -1" 
+              class="usage-indicator"
+              [class.near-limit]="isUsageNearLimit()"
+              [class.at-limit]="isUsageAtLimit()"
+              [matTooltip]="'Evaluations: ' + getPrimaryUsageDisplay()">
+              <span class="usage-text">{{ getPrimaryUsageDisplay() }}</span>
+              <div class="usage-progress-bar">
+                <div 
+                  class="usage-progress-fill" 
+                  [style.width.%]="getUsagePercentage()">
+                </div>
+              </div>
+            </div>
+            
+            <!-- Plan badge -->
+            <button 
+              mat-stroked-button 
+              [color]="getPlanTierColor()"
+              (click)="onPlanBadgeClick()"
+              class="plan-badge">
+              <mat-chip [color]="getPlanTierColor()" class="plan-chip">
+                {{ getPlanTierDisplay() }}
+              </mat-chip>
+              <span class="plan-action">{{ getPlanBadgeText() }}</span>
+            </button>
+          </div>
         </ng-container>
 
         <!-- User menu (only when authenticated) -->

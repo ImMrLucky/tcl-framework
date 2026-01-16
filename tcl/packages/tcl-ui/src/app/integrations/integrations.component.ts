@@ -6,9 +6,13 @@ import { MatButtonModule } from '@angular/material/button';
 import { MatIconModule } from '@angular/material/icon';
 import { MatChipsModule } from '@angular/material/chips';
 import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
+import { MatDialogModule, MatDialog } from '@angular/material/dialog';
+import { MatSnackBar, MatSnackBarModule } from '@angular/material/snack-bar';
 import { AppHeaderComponent } from '../shared/app-header.component';
 import { IntegrationsService, IntegrationType } from './integrations.service';
 import { PlanService, PlanTier } from '../plan.service';
+import { firstValueFrom } from 'rxjs';
+import { EntitlementsService } from '../entitlements.service';
 
 @Component({
   selector: 'app-integrations',
@@ -21,6 +25,8 @@ import { PlanService, PlanTier } from '../plan.service';
     MatIconModule,
     MatChipsModule,
     MatProgressSpinnerModule,
+    MatDialogModule,
+    MatSnackBarModule,
     AppHeaderComponent
   ],
   templateUrl: './integrations.component.html',
@@ -30,10 +36,19 @@ export class IntegrationsComponent implements OnInit {
   integrations: IntegrationType[] = [];
   loading = false;
   planTier: PlanTier | null = null;
+  
+  // Phase 5: Enterprise integrations
+  jiraIntegration: any = null;
+  webhookIntegration: any = null;
+  hasIntegrationsEntitlement = false;
 
   constructor(
     private integrationsService: IntegrationsService,
-    private planService: PlanService
+    private planService: PlanService,
+    private entitlementsService: EntitlementsService,
+    private featureService: FeatureService,
+    private dialog: MatDialog,
+    private snackBar: MatSnackBar
   ) {}
 
   ngOnInit() {
@@ -42,7 +57,35 @@ export class IntegrationsComponent implements OnInit {
       this.planTier = context?.tier ?? null;
     });
 
+    // Check entitlements
+    this.hasIntegrationsEntitlement = this.entitlementsService.hasFeature('integrations');
+
     this.loadIntegrations();
+    if (this.hasIntegrationsEntitlement) {
+      this.loadEnterpriseIntegrations();
+    }
+  }
+  
+  async loadEnterpriseIntegrations() {
+    try {
+      const response = await this.integrationsService.getEnterpriseIntegrations().toPromise();
+      if (response?.integrations) {
+        this.jiraIntegration = response.integrations.find((i: any) => i.kind === 'JIRA');
+        this.webhookIntegration = response.integrations.find((i: any) => i.kind === 'WEBHOOK');
+      }
+    } catch (error) {
+      console.error('Failed to load enterprise integrations:', error);
+    }
+  }
+  
+  configureJira() {
+    // TODO: Open Jira configuration dialog
+    this.snackBar.open('Jira configuration dialog coming soon', 'Close', { duration: 3000 });
+  }
+  
+  configureWebhook() {
+    // TODO: Open Webhook configuration dialog
+    this.snackBar.open('Webhook configuration dialog coming soon', 'Close', { duration: 3000 });
   }
 
   loadIntegrations() {
@@ -88,12 +131,23 @@ export class IntegrationsComponent implements OnInit {
   }
 
   canAccessFeature(type: string): boolean {
-    if (this.planTier === 'SANDBOX') {
-      // Sandbox can only access API and Webhooks
-      return type === 'API' || type === 'WEBHOOKS';
+    // Use unified FeatureService
+    if (type === 'JIRA' || type === 'WEBHOOK') {
+      return this.featureService.hasFeature('integrations');
     }
-    // Team+ can access all features (except those marked comingSoon)
-    return true;
+    if (type === 'S3' || type === 'DROPBOX' || type === 'GDRIVE') {
+      if (type === 'S3') return this.featureService.hasFeature('connectorsS3');
+      if (type === 'DROPBOX') return this.featureService.hasFeature('connectorsDropbox');
+      if (type === 'GDRIVE') return this.featureService.hasFeature('connectorsGDrive');
+    }
+    
+    // API and WEBHOOKS are available to all tiers (capabilities)
+    if (type === 'API' || type === 'WEBHOOKS') {
+      return true; // These are capabilities available to all
+    }
+    
+    // Default: check via FeatureService
+    return this.featureService.canAccessFeature(type as any);
   }
 
   getActionButtonText(type: string): string {
