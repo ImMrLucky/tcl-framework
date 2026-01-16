@@ -6,7 +6,7 @@
 
 import { Injectable } from '@angular/core';
 import { Observable, combineLatest, map } from 'rxjs';
-import { PlanService, Capability } from '../plan.service';
+import { PlanService, Capability, PlanTier } from '../plan.service';
 import { EntitlementsService, EntitlementFeature } from '../entitlements.service';
 
 export type FeatureKey = Capability | EntitlementFeature;

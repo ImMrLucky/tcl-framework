@@ -13,7 +13,6 @@ import { PlanService, PlanTier } from '../plan.service';
 import { Router } from '@angular/router';
 import { MatChipsModule } from '@angular/material/chips';
 import { MatProgressBarModule } from '@angular/material/progress-bar';
-import { MatTooltipModule } from '@angular/material/tooltip';
 import { Subject } from 'rxjs';
 import { takeUntil, distinctUntilChanged, debounceTime } from 'rxjs/operators';
 import { FeatureService } from '../features/feature.service';
@@ -260,7 +259,7 @@ export class AppHeaderComponent implements OnInit, OnDestroy {
     // Use UpgradeService to show upgrade prompt or navigate
     switch (this.planTier) {
       case 'SANDBOX':
-        this.upgradeService.showUpgradePrompt('TEAM');
+        this.router.navigate(['/account'], { queryParams: { upgrade: '1' } });
         break;
       case 'TEAM':
         this.router.navigate(['/account'], { queryParams: { manage: '1' } });
