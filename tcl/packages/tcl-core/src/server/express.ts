@@ -73,6 +73,7 @@ import { planService } from "./plans/plan-service.js";
 import { requireCapability } from "./plans/capability-middleware.js";
 import { Capability } from "./plans/capabilities.js";
 import { entitlementsService } from "./entitlements/entitlements-service.js";
+import { requireEntitlement } from "./entitlements/middleware.js";
 
 const app = express();
 

@@ -3,6 +3,7 @@ import { supabaseAdmin } from '../supabase.js';
 import { getOrgContext } from '../auth-context.js';
 import { logAudit } from '../supabase.js';
 import { requireEntitlement } from '../entitlements/middleware.js';
+import { requirePermission } from '../permissions/middleware.js';
 import { exportCaseAsJSON, exportCaseAsPDF, exportCaseAsZIP } from '../exports/case-exports.js';
 
 /**

@@ -144,6 +144,10 @@ export class EntitlementsService {
    * Check if org has a specific feature entitlement
    */
   async has(orgId: string, featureKey: EntitlementFeature): Promise<boolean> {
+    if (!supabaseAdmin) {
+      return false;
+    }
+    
     try {
       const { data, error } = await supabaseAdmin.rpc('has_entitlement', {
         p_org_id: orgId,

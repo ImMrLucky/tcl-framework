@@ -213,7 +213,8 @@ export async function updateMemberRole(
   }
 
   // Prevent demoting the last OWNER
-  if (newRole !== 'OWNER') {
+  // Note: Role type is lowercase ('owner'), but DB stores uppercase ('OWNER')
+  if (normalizedRole !== 'OWNER') {
     const { data: owners } = await supabaseAdmin
       .from('org_members')
       .select('user_id')
@@ -233,7 +234,8 @@ export async function updateMemberRole(
     .eq('user_id', memberUserId)
     .single();
 
-  if (currentMember?.role === 'ADMIN' && newRole !== 'ADMIN' && newRole !== 'OWNER') {
+  // Note: DB stores uppercase roles, normalizedRole is already uppercase
+  if (currentMember?.role === 'ADMIN' && normalizedRole !== 'ADMIN' && normalizedRole !== 'OWNER') {
     // Check if this is the last ADMIN (excluding OWNERs who can also act as admins)
     const { data: admins } = await supabaseAdmin
       .from('org_members')

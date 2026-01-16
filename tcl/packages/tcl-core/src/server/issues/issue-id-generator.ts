@@ -125,8 +125,8 @@ export function generateIssueIdFromIssue(
   orgId: string,
   evaluationId: string
 ): string {
-  // Extract issue type
-  const issueType = issue.type || issue.what?.issueType || 'UNKNOWN';
+  // Extract issue type - IssueV2 has 'type' property
+  const issueType = issue.type || (issue as any).what?.issueType || 'UNKNOWN';
   
   // Extract speaker
   const speaker = issue.who?.speaker || issue.who?.speakerLabel || 'UNKNOWN';
@@ -139,14 +139,14 @@ export function generateIssueIdFromIssue(
   const turnEndIdx = issue.transcriptSpans?.[issue.transcriptSpans.length - 1]?.turnIndex;
   
   // Extract topic ID from tags or compliance tags
-  const topicId = issue.compliance?.tags?.[0] || issue.tags?.[0] || undefined;
+  const topicId = issue.compliance?.tags?.[0] || (issue as any).tags?.[0] || undefined;
   
   // Extract rule ID from compliance.impactedPolicies
   const ruleId = issue.compliance?.impactedPolicies?.[0]?.policyId || undefined;
   
   // Extract evidence ref IDs
-  const evidenceRefIds = issue.evidence?.evidenceRefs?.map(ref => ref.evidenceId)
-    || issue.evidence?.refs?.map(ref => ref.sourceId)
+  const evidenceRefIds = issue.evidence?.evidenceRefs?.map((ref: any) => ref.evidenceId || ref.id || ref.sourceId)
+    || issue.evidence?.refs?.map((ref: any) => ref.sourceId || ref.id || ref.evidenceId)
     || [];
   
   // Extract fallback fields

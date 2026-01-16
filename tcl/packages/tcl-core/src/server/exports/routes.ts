@@ -58,6 +58,9 @@ export function setupExportRoutes(app: express.Application) {
           
           // Record export in ledger
           try {
+            if (!supabaseAdmin) {
+              throw new Error('Supabase not configured');
+            }
             await supabaseAdmin.from('exports').insert({
               org_id: context.orgId,
               project_id: options.projectId || context.projectId || null,

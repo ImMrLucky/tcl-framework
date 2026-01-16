@@ -290,9 +290,10 @@ export async function generateAuditPack(
     }
   }
 
-  executiveSummary.decisions = decisionCounts;
-  executiveSummary.lockedCount = lockedCount;
-  executiveSummary.signoffCount = signoffCount;
+  // Add decisions, locked, and signoff counts to executive summary
+  (executiveSummary as any).decisions = decisionCounts;
+  (executiveSummary as any).lockedCount = lockedCount;
+  (executiveSummary as any).signoffCount = signoffCount;
 
   // Get first evaluation for integrity info
   const firstEval = evaluations[0];
