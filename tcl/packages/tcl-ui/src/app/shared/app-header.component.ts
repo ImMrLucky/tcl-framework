@@ -10,7 +10,8 @@ import { MatListModule } from '@angular/material/list';
 import { LogoComponent } from './logo.component';
 import { AuthService, User } from '../auth.service';
 import { PlanService, PlanTier } from '../plan.service';
-import { Router } from '@angular/router';
+import { Router, NavigationEnd } from '@angular/router';
+import { filter } from 'rxjs/operators';
 import { MatChipsModule } from '@angular/material/chips';
 import { MatProgressBarModule } from '@angular/material/progress-bar';
 import { Subject } from 'rxjs';
@@ -171,10 +172,36 @@ export class AppHeaderComponent implements OnInit, OnDestroy {
       this.planService.loadPlanContext();
     }
     
+    // Reload plan context on navigation to ensure it's fresh
+    // This is especially important when navigating from admin page after switching orgs
+    this.router.events
+      .pipe(
+        filter(event => event instanceof NavigationEnd),
+        takeUntil(this.destroy$)
+      )
+      .subscribe((event: NavigationEnd) => {
+        // Check if we have an active org ID in localStorage (set by admin org switch)
+        const activeOrgId = typeof window !== 'undefined' ? localStorage.getItem('activeOrgId') : null;
+        if (activeOrgId && this.isAuthenticated) {
+          console.log('[Header] Navigation detected, reloading plan context for org:', activeOrgId);
+          // Clear and reload plan context to ensure it uses the active org
+          // Use a small delay to ensure navigation is complete
+          setTimeout(() => {
+            this.planService.clearPlanContext();
+            this.planService.loadPlanContext();
+          }, 100);
+        }
+      });
+    
     // Subscribe to plan context changes
     this.planContext$
       .pipe(takeUntil(this.destroy$))
       .subscribe(context => {
+        console.log('[Header] Plan context changed:', {
+          tier: context?.tier,
+          status: context?.status,
+          hasContext: !!context
+        });
         this.planTier = context?.tier ?? null;
         
         // Update usage info

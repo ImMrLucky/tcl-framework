@@ -196,19 +196,24 @@ export class AdminComponent implements OnInit, OnDestroy {
       if (result?.activeOrgId) {
         // Store active org ID in localStorage so it persists across requests
         localStorage.setItem('activeOrgId', result.activeOrgId);
+        console.log('[Admin] Switched org, stored in localStorage:', result.activeOrgId);
+        
+        // Update current org display
+        this.currentOrgId = this.selectedOrgId;
         
         // Clear plan context to force reload with new org
         this.planService.clearPlanContext();
         
-        const snackBarRef = this.snackBar.open('Organization switched successfully. Reloading...', 'Close', {
+        // Reload plan context immediately with new org
+        // This will update all components that subscribe to planContext$
+        setTimeout(() => {
+          this.planService.loadPlanContext();
+        }, 100);
+        
+        const snackBarRef = this.snackBar.open('Organization switched successfully', 'Close', {
           duration: 3000
         });
         snackBarRef.onAction().subscribe(() => snackBarRef.dismiss());
-        this.currentOrgId = this.selectedOrgId;
-        
-        // Reload the page immediately to ensure all components pick up the new org
-        // The plan context will be reloaded automatically when components initialize
-        window.location.reload();
       }
     } catch (error: any) {
       const snackBarRef = this.snackBar.open('Failed to switch organization: ' + (error.error?.error || error.message), 'Close', {
@@ -222,16 +227,11 @@ export class AdminComponent implements OnInit, OnDestroy {
 
   navigateToDashboard() {
     // Clear plan context to force reload with new org
+    // The header's router event listener will reload it after navigation
     this.planService.clearPlanContext();
     
-    // Navigate to dashboard
-    this.router.navigate(['/dashboard']).then(() => {
-      // Reload plan context after navigation to ensure header updates
-      // Use a small delay to ensure navigation completes
-      setTimeout(() => {
-        this.planService.loadPlanContext();
-      }, 100);
-    });
+    // Navigate to dashboard - no page reload, just client-side navigation
+    this.router.navigate(['/dashboard']);
   }
 
   async toggleEmulation() {

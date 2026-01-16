@@ -116,11 +116,22 @@ export class PlanService {
   loadPlanContext(): void {
     this.loadingSubject.next(true);
     
+    // Check for active org ID in localStorage
+    const activeOrgId = typeof window !== 'undefined' ? localStorage.getItem('activeOrgId') : null;
+    if (activeOrgId) {
+      console.log('[PlanService] Loading plan context with active org ID:', activeOrgId);
+    }
+    
     // Add cache-busting query parameter to ensure fresh data
     const cacheBuster = new Date().getTime();
     this.http.get<MeResponse>(`${this.apiUrl}/api/me?t=${cacheBuster}`)
       .pipe(
         tap(response => {
+          console.log('[PlanService] Plan context loaded:', {
+            tier: response.planContext?.tier,
+            orgId: response.org?.id,
+            orgName: response.org?.name
+          });
           if (response.planContext) {
             this.planContextSubject.next(response.planContext);
           }
