@@ -176,10 +176,10 @@ export class AppHeaderComponent implements OnInit, OnDestroy {
     // This is especially important when navigating from admin page after switching orgs
     this.router.events
       .pipe(
-        filter(event => event instanceof NavigationEnd),
+        filter((event): event is NavigationEnd => event instanceof NavigationEnd),
         takeUntil(this.destroy$)
       )
-      .subscribe((event: NavigationEnd) => {
+      .subscribe((event) => {
         // Check if we have an active org ID in localStorage (set by admin org switch)
         const activeOrgId = typeof window !== 'undefined' ? localStorage.getItem('activeOrgId') : null;
         if (activeOrgId && this.isAuthenticated) {
