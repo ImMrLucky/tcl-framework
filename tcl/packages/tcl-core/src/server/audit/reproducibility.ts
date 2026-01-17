@@ -451,8 +451,9 @@ export function calculateImportance(params: {
   speaker?: string;
   hasPolicyTag?: boolean;
   claimConfidence?: number;
+  role?: "REPRESENTATIVE" | "CUSTOMER" | "THIRD_PARTY" | "UNKNOWN";
 }): number {
-  const { nodeBlameNorm = 0, truthState, speaker, hasPolicyTag = false, claimConfidence } = params;
+  const { nodeBlameNorm = 0, truthState, speaker, hasPolicyTag = false, claimConfidence, role } = params;
   
   // Base importance - if no nodeBlameNorm, use truth state and other factors
   let baseImportance = nodeBlameNorm;
@@ -482,8 +483,7 @@ export function calculateImportance(params: {
   }[truthState || "Inconclusive"] || 1.0;
   
   // Representative multiplier - representative statements are more important for compliance
-  // Check role from claim.who if available, otherwise fallback to old speaker format
-  const role = (claim as any).who?.role;
+  // Check role from params if available, otherwise fallback to old speaker format
   const isRepresentative = role === "REPRESENTATIVE" || speaker === "AGENT";
   const agentMultiplier = isRepresentative ? 1.15 : 1.0;
   
@@ -531,10 +531,16 @@ function generateIssueDescription(
   truthState: string,
   issueType: string,
   speaker: string,
-  conflictsCount: number
+  conflictsCount: number,
+  role?: "REPRESENTATIVE" | "CUSTOMER" | "THIRD_PARTY" | "UNKNOWN"
 ): string {
-  const speakerLabel = speaker === "AGENT" ? "Agent" : 
-                       speaker === "CUSTOMER" ? "Customer" : "Speaker";
+  // Use role if provided, otherwise fallback to speaker string
+  const speakerLabel = role === "REPRESENTATIVE" ? "Representative" :
+                       role === "CUSTOMER" ? "Customer" :
+                       role === "THIRD_PARTY" ? "Third Party" :
+                       speaker === "AGENT" || speaker === "Agent" ? "Agent" :
+                       speaker === "CUSTOMER" || speaker === "Customer" ? "Customer" :
+                       speaker || "Speaker";
   
   switch (issueType) {
     case "CONTRADICTION":

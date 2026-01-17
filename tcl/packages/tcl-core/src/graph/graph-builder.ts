@@ -38,7 +38,6 @@ import { extractEntities, extractEntitiesAsync, computeSubjectSlot, extractAncho
 import { getTemplateConfig, setTemplateConfig, TemplateConfig } from './template-config.js';
 import { normalizeTranscript, speakerTypeToRole } from './transcript-normalizer.js';
 import { buildSpeakerRoleMap, getRoleForSpeaker, type Role } from './speaker-role-mapper.js';
-import { buildSpeakerRoleMap, getRoleForSpeaker, type Role } from './speaker-role-mapper.js';
 
 // Re-export for convenience
 export { setTemplateConfig, getTemplateConfig, TemplateConfig };
@@ -719,8 +718,6 @@ async function buildClaimNodesAsync(input: GraphBuilderInput): Promise<ClaimNode
       const entities = allEntities[i];
       const slot = computeSubjectSlot(turn.text, entities);
       const anchors = extractAnchors(entities, turn.text);
-      
-      const role = getRoleForSpeaker(turn.speakerLabelRaw, speakerRoleMap);
       
       const role = getRoleForSpeaker(turn.speakerLabelRaw, speakerRoleMap);
       

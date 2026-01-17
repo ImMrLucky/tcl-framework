@@ -8,7 +8,7 @@ import express from 'express';
 import { supabaseAdmin } from '../supabase.js';
 import { getOrgContext } from '../auth-context.js';
 import { requirePermission } from '../permissions/middleware.js';
-import { Permission } from '../permissions/types.js';
+import { Permission } from '../permissions/permission-service.js';
 
 export function setupRepresentativeRoutes(app: express.Application) {
   console.log("Setting up representative routes...");
