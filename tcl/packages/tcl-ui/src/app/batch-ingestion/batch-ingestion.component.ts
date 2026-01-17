@@ -22,6 +22,7 @@ import { BatchIngestionService, Batch, BatchItem } from './batch-ingestion.servi
 import { EntitlementsService } from '../entitlements.service';
 import { MemberService } from '../member.service';
 import { AuthService } from '../auth.service';
+import { HttpClient } from '@angular/common/http';
 import { interval, Subscription } from 'rxjs';
 import { switchMap, takeWhile } from 'rxjs/operators';
 import { firstValueFrom } from 'rxjs';
@@ -410,7 +411,7 @@ export class BatchIngestionComponent implements OnInit, OnDestroy {
       
       const orgId = orgs[0].id;
       const apiBase = this.authService.getApiBaseUrl();
-      const data = await firstValueFrom(
+      const data: { representatives: Array<{ id: string; display_name: string }> } = await firstValueFrom(
         this.http.get<{ representatives: Array<{ id: string; display_name: string }> }>(
           `${apiBase}/orgs/${orgId}/representatives`
         )
@@ -439,7 +440,7 @@ export class BatchIngestionComponent implements OnInit, OnDestroy {
       
       const orgId = orgs[0].id;
       const apiBase = this.authService.getApiBaseUrl();
-      const data = await firstValueFrom(
+      const data: { representative: { id: string } } = await firstValueFrom(
         this.http.post<{ representative: { id: string } }>(
           `${apiBase}/orgs/${orgId}/representatives/upsert-by-name`,
           { displayName }
