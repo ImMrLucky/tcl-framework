@@ -11,6 +11,7 @@ import { MatDividerModule } from '@angular/material/divider';
 import { AuthService, User } from '../auth.service';
 import { LogoComponent } from '../shared/logo.component';
 import { PermissionService, Permission } from '../permissions/permission.service';
+import { FeatureService } from '../features/feature.service';
 import { filter } from 'rxjs/operators';
 
 interface NavItem {
@@ -251,7 +252,7 @@ export class MainLayoutComponent implements OnInit {
     { label: 'Evidence', route: '/evidence', icon: 'verified', permission: 'view_evidence' },
     { label: 'Cases', route: '/cases', icon: 'folder_special', permission: 'view_cases' },
     { label: 'Integrations', route: '/integrations', icon: 'link', permission: 'view_integrations' },
-    { label: 'Bulk Ingestion', route: '/bulk-ingest', icon: 'upload_file', permission: 'create_batches' },
+    { label: 'Bulk Ingestion', route: '/bulk-ingest', icon: 'upload_file', permission: 'batchIngestion' },
     { label: 'Admin → Scoring', route: '/admin/scoring', icon: 'tune', adminOnly: true },
   ];
 
