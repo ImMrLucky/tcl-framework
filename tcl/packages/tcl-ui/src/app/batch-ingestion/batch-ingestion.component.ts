@@ -17,6 +17,7 @@ import { MatInputModule } from '@angular/material/input';
 import { MatSelectModule } from '@angular/material/select';
 import { MatDialogModule, MatDialog } from '@angular/material/dialog';
 import { AppHeaderComponent } from '../shared/app-header.component';
+import { AddRepresentativeDialogComponent } from '../shared/add-representative-dialog.component';
 import { BatchIngestionService, Batch, BatchItem } from './batch-ingestion.service';
 import { EntitlementsService } from '../entitlements.service';
 import { MemberService } from '../member.service';
@@ -81,7 +82,6 @@ export class BatchIngestionComponent implements OnInit, OnDestroy {
   // Representative selection
   representatives: Array<{ id: string; display_name: string }> = [];
   selectedRepresentativeId: string | null = null;
-  newRepresentativeName = '';
   representativesLoading = false;
   
   // Table columns
@@ -457,14 +457,20 @@ export class BatchIngestionComponent implements OnInit, OnDestroy {
     return null;
   }
 
-  async onRepresentativeNameEntered() {
-    if (this.newRepresentativeName.trim()) {
-      const id = await this.upsertRepresentative(this.newRepresentativeName.trim());
-      if (id) {
-        this.selectedRepresentativeId = id;
-        this.newRepresentativeName = '';
+  async openAddRepresentativeDialog() {
+    const dialogRef = this.dialog.open(AddRepresentativeDialogComponent, {
+      width: '400px',
+      data: { displayName: '' }
+    });
+
+    dialogRef.afterClosed().subscribe(async (result) => {
+      if (result && result.displayName) {
+        const id = await this.upsertRepresentative(result.displayName.trim());
+        if (id) {
+          this.selectedRepresentativeId = id;
+        }
       }
-    }
+    });
   }
 }
 

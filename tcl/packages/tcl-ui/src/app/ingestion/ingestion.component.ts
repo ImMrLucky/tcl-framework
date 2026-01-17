@@ -14,7 +14,9 @@ import { MatSnackBar, MatSnackBarModule } from '@angular/material/snack-bar';
 import { MatTabsModule } from '@angular/material/tabs';
 import { MatTableModule } from '@angular/material/table';
 import { MatChipsModule } from '@angular/material/chips';
+import { MatDialogModule, MatDialog } from '@angular/material/dialog';
 import { AppHeaderComponent } from '../shared/app-header.component';
+import { AddRepresentativeDialogComponent } from '../shared/add-representative-dialog.component';
 import { AuditService } from '../audit.service';
 import { TclService } from '../tcl.service';
 import { AuthService } from '../auth.service';
@@ -73,6 +75,7 @@ interface IngestPreview {
     MatTabsModule,
     MatTableModule,
     MatChipsModule,
+    MatDialogModule,
     AppHeaderComponent
   ],
   templateUrl: './ingestion.component.html',
@@ -235,14 +238,20 @@ export class IngestionComponent implements OnInit, OnDestroy {
     return null;
   }
 
-  async onRepresentativeNameEntered() {
-    if (this.newRepresentativeName.trim()) {
-      const id = await this.upsertRepresentative(this.newRepresentativeName.trim());
-      if (id) {
-        this.selectedRepresentativeId = id;
-        this.newRepresentativeName = '';
+  async openAddRepresentativeDialog() {
+    const dialogRef = this.dialog.open(AddRepresentativeDialogComponent, {
+      width: '400px',
+      data: { displayName: '' }
+    });
+
+    dialogRef.afterClosed().subscribe(async (result) => {
+      if (result && result.displayName) {
+        const id = await this.upsertRepresentative(result.displayName.trim());
+        if (id) {
+          this.selectedRepresentativeId = id;
+        }
       }
-    }
+    });
   }
 
   async loadTemplates() {

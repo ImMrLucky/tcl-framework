@@ -96,27 +96,16 @@
             </mat-form-field>
           </div>
 
-          <div class="form-row" *ngIf="selectedRepresentativeId === null">
-            <mat-form-field appearance="outline" class="full-width">
-              <mat-label>Add New Representative (Optional)</mat-label>
-              <input 
-                matInput 
-                [(ngModel)]="newRepresentativeName" 
-                name="newRepresentativeName"
-                placeholder="e.g., Vanessa Smith"
-                (keyup.enter)="onRepresentativeNameEntered()"
-              >
-              <button 
-                mat-icon-button 
-                matSuffix 
-                (click)="onRepresentativeNameEntered()"
-                [disabled]="!newRepresentativeName.trim() || representativesLoading"
-                type="button"
-              >
-                <mat-icon>add</mat-icon>
-              </button>
-              <mat-hint>Type a name and press Enter or click + to add</mat-hint>
-            </mat-form-field>
+          <div class="form-row">
+            <button 
+              mat-stroked-button 
+              type="button"
+              (click)="openAddRepresentativeDialog()"
+              [disabled]="representativesLoading"
+            >
+              <mat-icon>add</mat-icon>
+              Add New Representative
+            </button>
           </div>
 
           <!-- Transcript Only Mode -->
