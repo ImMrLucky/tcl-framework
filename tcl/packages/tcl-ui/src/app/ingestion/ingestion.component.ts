@@ -23,6 +23,7 @@ import { AuthService } from '../auth.service';
 import { EvidenceService, EvidenceItem } from '../evidence.service';
 import { MemberService } from '../member.service';
 import { ConversationDraftsService } from '../conversation-drafts.service';
+import { FeatureService } from '../features/feature.service';
 import { HttpClient } from '@angular/common/http';
 import { firstValueFrom } from 'rxjs';
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
@@ -96,8 +97,10 @@ export class IngestionComponent implements OnInit, OnDestroy {
   // Representative selection
   representatives: Array<{ id: string; display_name: string }> = [];
   selectedRepresentativeId: string | null = null;
-  newRepresentativeName = '';
   representativesLoading = false;
+  
+  // Batch ingestion availability
+  hasBatchIngestion = false;
   
   // Preview state
   showPreview = false;
@@ -165,13 +168,15 @@ export class IngestionComponent implements OnInit, OnDestroy {
     private memberService: MemberService,
     private http: HttpClient,
     private draftsService: ConversationDraftsService,
-    private dialog: MatDialog
+    private dialog: MatDialog,
+    private featureService: FeatureService
   ) {}
 
   ngOnInit() {
     // Component initialization
     this.loadTemplates();
     this.loadRepresentatives();
+    this.hasBatchIngestion = this.featureService.hasFeature('batchIngestion');
   }
 
   async loadRepresentatives() {

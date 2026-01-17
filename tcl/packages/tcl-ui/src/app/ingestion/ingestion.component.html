@@ -6,6 +6,29 @@
   </app-header>
 
   <div class="container">
+    <!-- Batch Ingestion Banner (Enterprise/Team only) -->
+    <mat-card *ngIf="hasBatchIngestion" class="batch-ingestion-banner" style="margin-bottom: 24px; background: #e3f2fd; border-left: 4px solid #1976d2;">
+      <mat-card-content style="display: flex; align-items: center; justify-content: space-between; padding: 16px;">
+        <div style="flex: 1;">
+          <h3 style="margin: 0 0 4px 0; color: #1976d2;">
+            <mat-icon style="vertical-align: middle; margin-right: 8px;">upload_file</mat-icon>
+            Need to upload multiple files?
+          </h3>
+          <p style="margin: 0; color: #666;">
+            Use Bulk Ingestion to upload many files at once, connect to S3, Dropbox, or Google Drive, and process them in batches.
+          </p>
+        </div>
+        <button 
+          mat-raised-button 
+          color="primary" 
+          (click)="router.navigate(['/bulk-ingest'])"
+          style="margin-left: 16px;">
+          <mat-icon>upload_file</mat-icon>
+          Go to Bulk Ingestion
+        </button>
+      </mat-card-content>
+    </mat-card>
+
     <!-- Mode Selection -->
     <div class="mode-toggle">
       <button 
