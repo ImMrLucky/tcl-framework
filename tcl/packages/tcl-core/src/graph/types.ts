@@ -113,8 +113,18 @@ export interface ClaimNode {
   type: 'CLAIM';
   text: string;
   
-  /** Speaker role */
+  /** Speaker role (legacy - for backward compatibility) */
   speakerRole: SpeakerRole;
+  
+  /** Who said this claim - normalized attribution */
+  who?: {
+    /** Transcript speaker label (e.g., "Vanessa", "Agent", "SPEAKER_0") */
+    speaker: string;
+    /** Display label (same as speaker, or normalized) */
+    speakerLabel: string;
+    /** Normalized role: REPRESENTATIVE | CUSTOMER | THIRD_PARTY | UNKNOWN */
+    role: 'REPRESENTATIVE' | 'CUSTOMER' | 'THIRD_PARTY' | 'UNKNOWN';
+  };
   
   /** Location in transcript */
   span: {

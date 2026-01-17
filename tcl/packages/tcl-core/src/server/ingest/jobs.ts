@@ -96,6 +96,7 @@ export interface CreateJobRequest {
   mode: IngestionMode;
   title?: string;
   channel?: string;
+  representativeId?: string | null;
   options?: {
     analyzeImmediately?: boolean;
   };
@@ -134,13 +135,14 @@ export async function createIngestionJob(
   userId: string,
   mode: IngestionMode,
   title?: string,
-  channel?: string
+  channel?: string,
+  representativeId?: string | null
 ): Promise<string> {
   if (!supabaseAdmin) {
     throw new Error('Database not configured');
   }
 
-  logUpload('debug', 'Creating job', { orgId, projectId, env, userId, mode, title, channel });
+  logUpload('debug', 'Creating job', { orgId, projectId, env, userId, mode, title, channel, representativeId });
 
   const { data, error } = await supabaseAdmin
     .from('ingestion_jobs')
@@ -152,6 +154,7 @@ export async function createIngestionJob(
       mode,
       title: title || null,
       channel: channel || null,
+      representative_id: representativeId || null,
       status: 'UPLOADED',
       progress_json: { stage: null, pct: 0 },
       result_json: { analysisRunId: null, verificationReportId: null },

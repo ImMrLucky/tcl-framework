@@ -44,8 +44,9 @@ export interface DefensibleIssue {
   
   // WHO: Who made the claim?
   who: {
-    speaker: "AGENT" | "CUSTOMER" | "SYSTEM" | "UNKNOWN";
-    speakerLabel?: string; // "Agent Smith", "Customer", etc.
+    speaker: string; // Transcript speaker label (e.g., "Vanessa", "Agent", "SPEAKER_0")
+    speakerLabel: string; // Display label (same as speaker, or normalized)
+    role: "REPRESENTATIVE" | "CUSTOMER" | "THIRD_PARTY" | "UNKNOWN"; // Normalized role
   };
   
   // WHERE: When/where did it occur?
@@ -480,8 +481,11 @@ export function calculateImportance(params: {
     "Supported": 0.75
   }[truthState || "Inconclusive"] || 1.0;
   
-  // Agent multiplier - agent statements are more important for compliance
-  const agentMultiplier = speaker === "AGENT" ? 1.15 : 1.0;
+  // Representative multiplier - representative statements are more important for compliance
+  // Check role from claim.who if available, otherwise fallback to old speaker format
+  const role = (claim as any).who?.role;
+  const isRepresentative = role === "REPRESENTATIVE" || speaker === "AGENT";
+  const agentMultiplier = isRepresentative ? 1.15 : 1.0;
   
   // Policy multiplier - policy-related issues are more important
   const policyMultiplier = hasPolicyTag ? 1.25 : 1.0;
@@ -629,9 +633,11 @@ function generateWhyFlagged(
 function generateRiskExplanation(
   issueType: string,
   severity: string,
-  speaker: string
+  speaker: string,
+  role?: "REPRESENTATIVE" | "CUSTOMER" | "THIRD_PARTY" | "UNKNOWN"
 ): string {
-  const agentContext = speaker === "AGENT" ? " by an agent" : "";
+  const isRepresentative = role === "REPRESENTATIVE" || speaker === "AGENT";
+  const agentContext = isRepresentative ? " by a representative" : "";
   
   switch (issueType) {
     case "CONTRADICTION":
@@ -841,12 +847,11 @@ export function buildIssuesList(
       continue;
     }
     
-    // Determine speaker
-    const speakerRaw = claim.meta?.speaker;
-    const speaker: "AGENT" | "CUSTOMER" | "SYSTEM" | "UNKNOWN" = 
-      speakerRaw === "Agent" || speakerRaw === "AGENT" ? "AGENT" :
-      speakerRaw === "Customer" || speakerRaw === "CUSTOMER" ? "CUSTOMER" :
-      speakerRaw === "System" || speakerRaw === "SYSTEM" ? "SYSTEM" : "UNKNOWN";
+    // Determine speaker and role from claim.who (normalized) or fallback to meta
+    const claimWho = (claim as any).who; // ClaimNode.who field
+    const speaker = claimWho?.speaker || claim.meta?.speakerLabel || claim.meta?.speaker || "Unknown";
+    const speakerLabel = claimWho?.speakerLabel || claim.meta?.speakerLabel || claim.meta?.speaker || "Unknown";
+    const role = claimWho?.role || "UNKNOWN";
     
     // Determine issue type using new risk scoring module
     const circularityScore = spectral.circularityScore || 0;
@@ -929,16 +934,15 @@ export function buildIssuesList(
         claimSummary,
         issueType,
         truthState,
-        description: generateIssueDescription(truthState, issueType, speaker, conflicts.length),
+        description: generateIssueDescription(truthState, issueType, speaker, conflicts.length, role),
         whyFlagged,
         claimType: claim.claimType
       },
       
       who: {
         speaker,
-        speakerLabel: speaker === "AGENT" ? "Agent" : 
-                      speaker === "CUSTOMER" ? "Customer" : 
-                      speaker === "SYSTEM" ? "System" : "Unknown"
+        speakerLabel,
+        role: role as "REPRESENTATIVE" | "CUSTOMER" | "THIRD_PARTY" | "UNKNOWN"
       },
       
       where: {
@@ -957,7 +961,7 @@ export function buildIssuesList(
                   issueType === "CIRCULAR" ? "reasoning" :
                   issueType === "PROMISE_RISK" || issueType === "ABSOLUTE_CLAIM" ? "commitment" :
                   "compliance",
-        explanation: generateRiskExplanation(issueType, severity, speaker),
+        explanation: generateRiskExplanation(issueType, severity, speaker, role),
         policyRuleIds: undefined
       },
       

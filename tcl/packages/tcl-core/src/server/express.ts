@@ -47,6 +47,7 @@ import { setupOrgRoutes } from "./orgs/routes.js";
 import { setupProjectRoutes } from "./projects/routes.js";
 import { setupTemplateRoutes } from "./templates/routes.js";
 import { setupConversationRoutes } from "./conversations/routes.js";
+import { setupRepresentativeRoutes } from "./representatives/routes.js";
 import { resolveEvidenceSet } from "./evidence/service.js";
 import type { EvidenceSet, EvidenceDiagnostics } from "../types/evidence.types.js";
 import { startIndexingWorker } from "./evidence/indexing-worker.js";
@@ -3199,6 +3200,9 @@ app.post("/api/orgs/:orgId/projects/:projectId/api-keys/:keyId/revoke", async (r
 console.log("Registering conversation routes (before /api/conversations)...");
 setupConversationRoutes(app);
 console.log("Conversation routes registered successfully");
+
+setupRepresentativeRoutes(app);
+console.log("Representative routes registered successfully");
 
 // Create conversation (ingest transcript)
 app.post("/api/conversations", async (req, res) => {

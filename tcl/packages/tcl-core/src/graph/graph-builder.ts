@@ -37,6 +37,8 @@ import {
 import { extractEntities, extractEntitiesAsync, computeSubjectSlot, extractAnchors } from './subject-slot.js';
 import { getTemplateConfig, setTemplateConfig, TemplateConfig } from './template-config.js';
 import { normalizeTranscript, speakerTypeToRole } from './transcript-normalizer.js';
+import { buildSpeakerRoleMap, getRoleForSpeaker, type Role } from './speaker-role-mapper.js';
+import { buildSpeakerRoleMap, getRoleForSpeaker, type Role } from './speaker-role-mapper.js';
 
 // Re-export for convenience
 export { setTemplateConfig, getTemplateConfig, TemplateConfig };
@@ -102,6 +104,12 @@ export interface GraphBuilderInput {
    * Conversation/interaction ID for traceability.
    */
   conversationId?: string;
+  
+  /**
+   * Speaker role map (from conversation.metadata.speakerRoleMap)
+   * Maps transcript speaker labels to normalized roles: REPRESENTATIVE | CUSTOMER | THIRD_PARTY | UNKNOWN
+   */
+  speakerRoleMap?: Record<string, 'REPRESENTATIVE' | 'CUSTOMER' | 'THIRD_PARTY' | 'UNKNOWN'>;
 }
 
 // =============================================================================
@@ -515,18 +523,39 @@ function computeSlotMappingDiagnostics(
 function buildClaimNodes(input: GraphBuilderInput): ClaimNode[] {
   const claimNodes: ClaimNode[] = [];
   
+  // Build or use speakerRoleMap
+  let speakerRoleMap: Record<string, Role> = input.speakerRoleMap || {};
+  
   if (input.rawClaims) {
     // Use pre-extracted claims
+    // If speakerRoleMap not provided, try to build from rawClaims
+    if (!input.speakerRoleMap && input.rawClaims.length > 0) {
+      const turns = input.rawClaims.map(c => ({
+        speaker: c.meta?.speakerLabel || c.meta?.speaker || 'unknown',
+        text: c.text
+      }));
+      const config = getTemplateConfig();
+      speakerRoleMap = buildSpeakerRoleMap(turns, config.templateId);
+    }
+    
     for (const raw of input.rawClaims) {
       const entities = extractEntities(raw.text); // Sync regex extraction
       const slot = computeSubjectSlot(raw.text, entities, raw.modality);
       const anchors = extractAnchors(entities, raw.text); // 1.2: Extract industry-agnostic anchors
+      
+      const speakerLabel = raw.meta?.speakerLabel || raw.meta?.speaker || 'unknown';
+      const role = getRoleForSpeaker(speakerLabel, speakerRoleMap);
       
       const node: ClaimNode = {
         id: raw.id,
         type: 'CLAIM',
         text: raw.text,
         speakerRole: raw.speakerRole,
+        who: {
+          speaker: speakerLabel,
+          speakerLabel: speakerLabel,
+          role: role,
+        },
         span: raw.span,
         timestamp: raw.timestamp,
         modality: raw.modality || detectModality(raw.text),
@@ -551,16 +580,33 @@ function buildClaimNodes(input: GraphBuilderInput): ClaimNode[] {
     // B1: Normalize transcript into structured turns with speaker info
     const normalizedTurns = normalizeTranscript(input.transcript);
     
+    // Build speakerRoleMap if not provided
+    if (!input.speakerRoleMap) {
+      const config = getTemplateConfig();
+      const turns = normalizedTurns.map(t => ({
+        speaker: t.speakerLabelRaw,
+        text: t.text
+      }));
+      speakerRoleMap = buildSpeakerRoleMap(turns, config.templateId);
+    }
+    
     for (const turn of normalizedTurns) {
       const entities = extractEntities(turn.text);
       const slot = computeSubjectSlot(turn.text, entities);
       const anchors = extractAnchors(entities, turn.text); // 1.2: Extract industry-agnostic anchors
+      
+      const role = getRoleForSpeaker(turn.speakerLabelRaw, speakerRoleMap);
       
       const node: ClaimNode = {
         id: `c${turn.turnIndex}`,
         type: 'CLAIM',
         text: turn.text,
         speakerRole: turn.speakerType === 'agent' ? 'agent' : turn.speakerType === 'customer' ? 'customer' : 'unknown',
+        who: {
+          speaker: turn.speakerLabelRaw,
+          speakerLabel: turn.speakerLabelRaw,
+          role: role,
+        },
         span: {
           turnId: `turn-${turn.turnIndex}`,
           startChar: 0,
@@ -596,18 +642,39 @@ function buildClaimNodes(input: GraphBuilderInput): ClaimNode[] {
 async function buildClaimNodesAsync(input: GraphBuilderInput): Promise<ClaimNode[]> {
   const claimNodes: ClaimNode[] = [];
   
+  // Build or use speakerRoleMap
+  let speakerRoleMap: Record<string, Role> = input.speakerRoleMap || {};
+  
   if (input.rawClaims) {
     // Use pre-extracted claims
+    // If speakerRoleMap not provided, try to build from rawClaims
+    if (!input.speakerRoleMap && input.rawClaims.length > 0) {
+      const turns = input.rawClaims.map(c => ({
+        speaker: c.meta?.speakerLabel || c.meta?.speaker || 'unknown',
+        text: c.text
+      }));
+      const config = getTemplateConfig();
+      speakerRoleMap = buildSpeakerRoleMap(turns, config.templateId);
+    }
+    
     for (const raw of input.rawClaims) {
       const entities = await extractEntitiesAsync(raw.text); // Async spaCy extraction
       const slot = computeSubjectSlot(raw.text, entities, raw.modality);
       const anchors = extractAnchors(entities, raw.text);
+      
+      const speakerLabel = raw.meta?.speakerLabel || raw.meta?.speaker || 'unknown';
+      const role = getRoleForSpeaker(speakerLabel, speakerRoleMap);
       
       const node: ClaimNode = {
         id: raw.id,
         type: 'CLAIM',
         text: raw.text,
         speakerRole: raw.speakerRole,
+        who: {
+          speaker: speakerLabel,
+          speakerLabel: speakerLabel,
+          role: role,
+        },
         span: raw.span,
         timestamp: raw.timestamp,
         modality: raw.modality || detectModality(raw.text),
@@ -632,6 +699,16 @@ async function buildClaimNodesAsync(input: GraphBuilderInput): Promise<ClaimNode
     // B1: Normalize transcript into structured turns with speaker info
     const normalizedTurns = normalizeTranscript(input.transcript);
     
+    // Build speakerRoleMap if not provided
+    if (!input.speakerRoleMap) {
+      const config = getTemplateConfig();
+      const turns = normalizedTurns.map(t => ({
+        speaker: t.speakerLabelRaw,
+        text: t.text
+      }));
+      speakerRoleMap = buildSpeakerRoleMap(turns, config.templateId);
+    }
+    
     // Batch extract entities for all turns (more efficient)
     const texts = normalizedTurns.map(t => t.text);
     const entitiesPromises = texts.map(text => extractEntitiesAsync(text));
@@ -643,11 +720,20 @@ async function buildClaimNodesAsync(input: GraphBuilderInput): Promise<ClaimNode
       const slot = computeSubjectSlot(turn.text, entities);
       const anchors = extractAnchors(entities, turn.text);
       
+      const role = getRoleForSpeaker(turn.speakerLabelRaw, speakerRoleMap);
+      
+      const role = getRoleForSpeaker(turn.speakerLabelRaw, speakerRoleMap);
+      
       const node: ClaimNode = {
         id: `c${turn.turnIndex}`,
         type: 'CLAIM',
         text: turn.text,
         speakerRole: turn.speakerType === 'agent' ? 'agent' : turn.speakerType === 'customer' ? 'customer' : 'unknown',
+        who: {
+          speaker: turn.speakerLabelRaw,
+          speakerLabel: turn.speakerLabelRaw,
+          role: role,
+        },
         span: {
           turnId: `turn-${turn.turnIndex}`,
           startChar: 0,

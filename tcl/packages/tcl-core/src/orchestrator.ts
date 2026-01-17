@@ -311,6 +311,7 @@ async function runUnifiedGraphPath(
   // Use spaCy-enhanced extraction if available (better entity quality → better edges)
   timer.start('graph_build');
   const useSpacy = process.env.ENABLE_SPACY !== 'false' && process.env.TCL_NLP_URL;
+  const speakerRoleMap = (options as any)?.speakerRoleMap;
   const graphResult = useSpacy 
     ? await buildUnifiedGraphAsync({
         transcript,  // ✅ Required for grounding edges
@@ -322,6 +323,7 @@ async function runUnifiedGraphPath(
         })),
         template: templateId,
         conversationId: (options as any)?.conversationId,
+        speakerRoleMap, // Pass speaker role map to graph builder
       })
     : buildUnifiedGraph({
         transcript,  // ✅ Required for grounding edges
@@ -333,6 +335,7 @@ async function runUnifiedGraphPath(
         })),
         template: templateId,
         conversationId: (options as any)?.conversationId,
+        speakerRoleMap, // Pass speaker role map to graph builder
       });
   timer.end('graph_build');
   
