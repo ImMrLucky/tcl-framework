@@ -14,7 +14,6 @@ import { MatIconModule } from '@angular/material/icon';
 import { MatSnackBar, MatSnackBarModule } from '@angular/material/snack-bar';
 import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
 import { MatPaginatorModule, PageEvent } from '@angular/material/paginator';
-import { MatInputModule } from '@angular/material/input';
 import { Subject } from 'rxjs';
 import { takeUntil } from 'rxjs/operators';
 import { AdminService, Org, EmulationState } from './admin.service';
@@ -41,7 +40,6 @@ import { Router } from '@angular/router';
     MatSnackBarModule,
     MatProgressSpinnerModule,
     MatPaginatorModule,
-    MatInputModule,
   ],
   templateUrl: './admin.component.html',
   styleUrls: ['./admin.component.scss']
@@ -61,6 +59,14 @@ export class AdminComponent implements OnInit, OnDestroy {
   upgradeDisplayedColumns: string[] = ['name', 'planTier', 'planStatus', 'upgradeActions'];
   
   currentOrgId: string = '';
+  
+  // Pagination for org upgrades
+  upgradePageSize = 50;
+  upgradePageIndex = 0;
+  upgradeTotalOrgs = 0;
+  upgradeSearchQuery = '';
+  upgradePlanTierFilter: string | undefined = undefined;
+  upgradePlanStatusFilter: string | undefined = undefined;
   
   private destroy$ = new Subject<void>();
 
