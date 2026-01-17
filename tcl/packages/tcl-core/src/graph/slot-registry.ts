@@ -45,21 +45,36 @@ export interface TemplateSlotRegistry {
 // =============================================================================
 
 function getConfigPath(filename: string): string {
-  // Try dist/config first (production)
-  const distPath = join(__dirname, '../../config', filename);
-  if (existsSync(distPath)) {
-    return distPath;
+  // In production (compiled), __dirname is dist/graph, so config is at dist/config
+  // In development (ts-node), __dirname is src/graph, so config is at src/config
+  // In Docker, files might be at /app/config or /app/dist/config
+  
+  const pathsToTry = [
+    // 1. dist/config relative to compiled code (production - most common)
+    join(__dirname, '../../config', filename),
+    // 2. dist/config from working directory
+    join(process.cwd(), 'dist', 'config', filename),
+    // 3. config from working directory (Docker - files at /app/config)
+    join(process.cwd(), 'config', filename),
+    // 4. src/config relative to compiled code (fallback)
+    join(__dirname, '../../config', filename),
+    // 5. src/config from working directory
+    join(process.cwd(), 'src', 'config', filename),
+  ];
+  
+  for (const pathToTry of pathsToTry) {
+    if (existsSync(pathToTry)) {
+      return pathToTry;
+    }
   }
   
-  // Fall back to src/config (development)
-  const srcPath = join(__dirname, '../../config', filename);
-  if (existsSync(srcPath)) {
-    return srcPath;
-  }
-  
-  // Last resort: try relative to current file
-  const relativePath = join(__dirname, '../../config', filename);
-  return relativePath;
+  // If none found, return the most likely path and let the error happen with a clear message
+  const mostLikelyPath = join(process.cwd(), 'dist', 'config', filename);
+  console.error(`[SlotRegistry] Config file not found: ${filename}`);
+  console.error(`[SlotRegistry] Tried paths:`, pathsToTry);
+  console.error(`[SlotRegistry] __dirname: ${__dirname}`);
+  console.error(`[SlotRegistry] process.cwd(): ${process.cwd()}`);
+  return mostLikelyPath;
 }
 
 let cachedGlobalRegistry: GlobalSlotRegistry | null = null;
@@ -69,6 +84,9 @@ let synonymIndex: Map<string, SlotLexiconEntry> | null = null;
 function loadGlobalRegistry(): GlobalSlotRegistry {
   if (!cachedGlobalRegistry) {
     const path = getConfigPath('slot-registry.global.json');
+    if (!existsSync(path)) {
+      throw new Error(`Slot registry file not found: ${path}. Please ensure the file exists in dist/config/ or src/config/. Current working directory: ${process.cwd()}, __dirname: ${__dirname}`);
+    }
     const content = readFileSync(path, 'utf-8');
     cachedGlobalRegistry = JSON.parse(content) as GlobalSlotRegistry;
     
@@ -88,6 +106,9 @@ function loadGlobalRegistry(): GlobalSlotRegistry {
 function loadTemplateRegistry(): TemplateSlotRegistry {
   if (!cachedTemplateRegistry) {
     const path = getConfigPath('slot-registry.templates.json');
+    if (!existsSync(path)) {
+      throw new Error(`Slot registry template file not found: ${path}. Please ensure the file exists in dist/config/ or src/config/. Current working directory: ${process.cwd()}, __dirname: ${__dirname}`);
+    }
     const content = readFileSync(path, 'utf-8');
     cachedTemplateRegistry = JSON.parse(content) as TemplateSlotRegistry;
   }
