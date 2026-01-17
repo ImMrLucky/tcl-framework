@@ -164,7 +164,8 @@ export class IngestionComponent implements OnInit, OnDestroy {
     private evidenceService: EvidenceService,
     private memberService: MemberService,
     private http: HttpClient,
-    private draftsService: ConversationDraftsService
+    private draftsService: ConversationDraftsService,
+    private dialog: MatDialog
   ) {}
 
   ngOnInit() {
@@ -244,7 +245,7 @@ export class IngestionComponent implements OnInit, OnDestroy {
       data: { displayName: '' }
     });
 
-    dialogRef.afterClosed().subscribe(async (result) => {
+    dialogRef.afterClosed().subscribe(async (result: { displayName: string } | undefined) => {
       if (result && result.displayName) {
         const id = await this.upsertRepresentative(result.displayName.trim());
         if (id) {
