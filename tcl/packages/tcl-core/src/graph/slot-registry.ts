@@ -10,7 +10,8 @@
 import { readFileSync, existsSync } from 'fs';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
-import { SubjectSlot, SlotLexiconEntry } from './types.js';
+import { SubjectSlot } from './types.js';
+import { SlotLexiconEntry } from './template-config.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);

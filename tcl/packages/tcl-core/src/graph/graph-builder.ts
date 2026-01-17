@@ -144,6 +144,8 @@ export interface GraphBuilderOutput {
       rejectedByTopicGating: number;
       rejectedByPolarityGating: number;
       rejectedByThreshold: number;
+      rejectedByIneligibleSlot: number;
+      rejectedByValueTypeMismatch: number;
       sampleRejections: Array<{
         claimA: string;
         claimB: string;
