@@ -64,7 +64,7 @@ export function setupRepresentativeRoutes(app: express.Application) {
    * Creates if not exists, returns existing if found
    */
   app.post("/api/orgs/:orgId/representatives/upsert-by-name", 
-    requirePermission(Permission.MANAGE_ORGANIZATION),
+    requirePermission('manage_members' as Permission),
     async (req, res) => {
       try {
         const context = await getOrgContext(req);
