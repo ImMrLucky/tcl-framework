@@ -391,5 +391,80 @@ export class BatchIngestionComponent implements OnInit, OnDestroy {
     if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
     return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
   }
+
+  async loadRepresentatives() {
+    this.representativesLoading = true;
+    try {
+      const user = this.authService.getCurrentUser();
+      if (!user?.id) {
+        return;
+      }
+      
+      // Get orgId from user's organizations
+      const orgsResponse = await firstValueFrom(this.memberService.getUserOrgs(user.id));
+      const orgs = orgsResponse?.orgs || [];
+      if (orgs.length === 0) {
+        return;
+      }
+      
+      const orgId = orgs[0].id;
+      const apiBase = this.authService.getApiBaseUrl();
+      const response = await fetch(`${apiBase}/orgs/${orgId}/representatives`);
+      if (response.ok) {
+        const data = await response.json();
+        this.representatives = data.representatives || [];
+      }
+    } catch (error) {
+      console.error('Failed to load representatives:', error);
+    } finally {
+      this.representativesLoading = false;
+    }
+  }
+
+  async upsertRepresentative(displayName: string): Promise<string | null> {
+    try {
+      const user = this.authService.getCurrentUser();
+      if (!user?.id) {
+        return null;
+      }
+      
+      // Get orgId from user's organizations
+      const orgsResponse = await firstValueFrom(this.memberService.getUserOrgs(user.id));
+      const orgs = orgsResponse?.orgs || [];
+      if (orgs.length === 0) {
+        return null;
+      }
+      
+      const orgId = orgs[0].id;
+      const apiBase = this.authService.getApiBaseUrl();
+      const response = await fetch(`${apiBase}/orgs/${orgId}/representatives/upsert-by-name`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ displayName }),
+      });
+      
+      if (response.ok) {
+        const data = await response.json();
+        // Reload representatives to include the new one
+        await this.loadRepresentatives();
+        return data.representative?.id || null;
+      }
+    } catch (error) {
+      console.error('Failed to upsert representative:', error);
+    }
+    return null;
+  }
+
+  async onRepresentativeNameEntered() {
+    if (this.newRepresentativeName.trim()) {
+      const id = await this.upsertRepresentative(this.newRepresentativeName.trim());
+      if (id) {
+        this.selectedRepresentativeId = id;
+        this.newRepresentativeName = '';
+      }
+    }
+  }
 }
 
