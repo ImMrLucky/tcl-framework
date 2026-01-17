@@ -68,7 +68,8 @@ export class AppHeaderComponent implements OnInit, OnDestroy {
     private planService: PlanService,
     private router: Router,
     private featureService: FeatureService,
-    private upgradeService: UpgradeService
+    private upgradeService: UpgradeService,
+    private entitlementsService: EntitlementsService
   ) {}
 
   ngOnInit() {
@@ -164,6 +165,15 @@ export class AppHeaderComponent implements OnInit, OnDestroy {
         // Load plan context when user is authenticated
         if (user) {
           this.planService.loadPlanContext();
+          
+          // Also load entitlements from cache immediately
+          this.entitlementsService.loadFromCache();
+          
+          // Load entitlements if we have an org ID
+          const activeOrgId = typeof window !== 'undefined' ? localStorage.getItem('activeOrgId') : null;
+          if (activeOrgId) {
+            this.entitlementsService.loadEntitlements(activeOrgId);
+          }
         }
       });
     

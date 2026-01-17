@@ -145,6 +145,33 @@ export class PlanService {
             orgId: response.org?.id,
             orgName: response.org?.name
           });
+          
+          // Set activeOrgId in localStorage if we got an org back
+          if (response.org?.id && typeof window !== 'undefined') {
+            const currentActiveOrgId = localStorage.getItem('activeOrgId');
+            if (currentActiveOrgId !== response.org.id) {
+              localStorage.setItem('activeOrgId', response.org.id);
+              console.log('[PlanService] Set activeOrgId in localStorage:', response.org.id);
+            }
+          }
+          
+          // Load entitlements if provided (cache in sessionStorage for EntitlementsService to pick up)
+          if (response.entitlements && typeof window !== 'undefined' && window.sessionStorage) {
+            sessionStorage.setItem('orgEntitlements', JSON.stringify({
+              orgId: response.entitlements.orgId,
+              tier: response.entitlements.tier,
+              features: response.entitlements.features,
+            }));
+            console.log('[PlanService] Cached entitlements in sessionStorage:', {
+              tier: response.entitlements.tier,
+              batchIngestion: response.entitlements.features.batchIngestion,
+            });
+            
+            // Trigger EntitlementsService to reload from cache
+            // We'll use a custom event to notify EntitlementsService
+            window.dispatchEvent(new CustomEvent('entitlementsUpdated'));
+          }
+          
           if (response.planContext) {
             this.planContextSubject.next(response.planContext);
           }

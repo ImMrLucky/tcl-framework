@@ -25,7 +25,8 @@ import { MemberService } from '../member.service';
 import { ConversationDraftsService } from '../conversation-drafts.service';
 import { FeatureService } from '../features/feature.service';
 import { HttpClient } from '@angular/common/http';
-import { firstValueFrom } from 'rxjs';
+import { firstValueFrom, Subject } from 'rxjs';
+import { takeUntil } from 'rxjs/operators';
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
 
 // Normalized turn from backend
@@ -102,6 +103,8 @@ export class IngestionComponent implements OnInit, OnDestroy {
   // Batch ingestion availability
   hasBatchIngestion = false;
   
+  private destroy$ = new Subject<void>();
+  
   // Preview state
   showPreview = false;
   previewData: IngestPreview | null = null;
@@ -176,7 +179,20 @@ export class IngestionComponent implements OnInit, OnDestroy {
     // Component initialization
     this.loadTemplates();
     this.loadRepresentatives();
+    
+    // Check batch ingestion feature (initial check)
     this.hasBatchIngestion = this.featureService.hasFeature('batchIngestion');
+    
+    // Subscribe to feature changes (in case entitlements load asynchronously)
+    this.featureService.hasFeature$('batchIngestion')
+      .pipe(takeUntil(this.destroy$))
+      .subscribe(hasFeature => {
+        this.hasBatchIngestion = hasFeature;
+        console.log('[IngestionComponent] Batch ingestion entitlement updated:', {
+          hasBatchIngestion: this.hasBatchIngestion,
+          featureServiceAvailable: !!this.featureService
+        });
+      });
     
     // Debug logging for entitlements (helpful for troubleshooting)
     console.log('[IngestionComponent] Batch ingestion entitlement check:', {
@@ -311,6 +327,9 @@ export class IngestionComponent implements OnInit, OnDestroy {
   ngOnDestroy() {
     // Clean up polling interval
     this.stopJobPolling();
+    // Clean up subscriptions
+    this.destroy$.next();
+    this.destroy$.complete();
   }
 
   // ============================================================================

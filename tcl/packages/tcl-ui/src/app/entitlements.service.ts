@@ -52,6 +52,13 @@ export class EntitlementsService {
   constructor(private http: HttpClient) {
     // Load entitlements on service initialization (after login/org select)
     // This will be called explicitly by components that need it
+    
+    // Listen for entitlements updates from PlanService
+    if (typeof window !== 'undefined') {
+      window.addEventListener('entitlementsUpdated', () => {
+        this.loadFromCache();
+      });
+    }
   }
 
   /**
