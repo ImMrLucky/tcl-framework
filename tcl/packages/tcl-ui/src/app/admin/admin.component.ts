@@ -13,6 +13,8 @@ import { MatChipsModule } from '@angular/material/chips';
 import { MatIconModule } from '@angular/material/icon';
 import { MatSnackBar, MatSnackBarModule } from '@angular/material/snack-bar';
 import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
+import { MatPaginatorModule, PageEvent } from '@angular/material/paginator';
+import { MatInputModule } from '@angular/material/input';
 import { Subject } from 'rxjs';
 import { takeUntil } from 'rxjs/operators';
 import { AdminService, Org, EmulationState } from './admin.service';
@@ -38,6 +40,8 @@ import { Router } from '@angular/router';
     MatIconModule,
     MatSnackBarModule,
     MatProgressSpinnerModule,
+    MatPaginatorModule,
+    MatInputModule,
   ],
   templateUrl: './admin.component.html',
   styleUrls: ['./admin.component.scss']
@@ -115,9 +119,24 @@ export class AdminComponent implements OnInit, OnDestroy {
   async loadAllOrgs() {
     this.loadingAllOrgs = true;
     try {
-      this.allOrgs = await this.adminService.getAllOrgs().toPromise() || [];
-      console.log('Loaded all orgs:', this.allOrgs.length);
-      if (this.allOrgs.length === 0) {
+      const response = await this.adminService.getAllOrgs({
+        limit: this.upgradePageSize,
+        offset: this.upgradePageIndex * this.upgradePageSize,
+        query: this.upgradeSearchQuery || undefined,
+        planTier: this.upgradePlanTierFilter,
+        planStatus: this.upgradePlanStatusFilter,
+      }).toPromise();
+      
+      if (response) {
+        this.allOrgs = response.orgs || [];
+        this.upgradeTotalOrgs = response.total || 0;
+        console.log(`Loaded ${this.allOrgs.length} orgs (page ${this.upgradePageIndex + 1}, total: ${this.upgradeTotalOrgs})`);
+      } else {
+        this.allOrgs = [];
+        this.upgradeTotalOrgs = 0;
+      }
+      
+      if (this.allOrgs.length === 0 && this.upgradePageIndex === 0) {
         const snackBarRef = this.snackBar.open('No organizations found. Make sure you are a superuser.', 'Close', {
           duration: 5000
         });
@@ -129,9 +148,27 @@ export class AdminComponent implements OnInit, OnDestroy {
         duration: 5000
       });
       snackBarRef.onAction().subscribe(() => snackBarRef.dismiss());
+      this.allOrgs = [];
+      this.upgradeTotalOrgs = 0;
     } finally {
       this.loadingAllOrgs = false;
     }
+  }
+
+  onUpgradePageChange(event: PageEvent) {
+    this.upgradePageIndex = event.pageIndex;
+    this.upgradePageSize = event.pageSize;
+    this.loadAllOrgs();
+  }
+
+  onUpgradeSearch() {
+    this.upgradePageIndex = 0; // Reset to first page when searching
+    this.loadAllOrgs();
+  }
+
+  onUpgradeFilterChange() {
+    this.upgradePageIndex = 0; // Reset to first page when filtering
+    this.loadAllOrgs();
   }
 
   async loadCurrentOrg() {
@@ -380,5 +417,8 @@ export class AdminComponent implements OnInit, OnDestroy {
       default: return '';
     }
   }
+
+  // Expose Math to template
+  Math = Math;
 }
 

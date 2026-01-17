@@ -80,31 +80,45 @@ export function setupAdminRoutes(app: express.Application) {
   });
 
   // ============================================================================
-  // GET /api/admin/orgs - List all orgs (superuser only)
+  // GET /api/admin/orgs - List all orgs with pagination (superuser only)
   // ============================================================================
   app.get('/api/admin/orgs', requireSuperuser, async (req, res) => {
     try {
       const query = (req.query.query as string) || '';
-      const limit = parseInt((req.query.limit as string) || '50', 10);
+      const limit = Math.min(parseInt((req.query.limit as string) || '50', 10), 100); // Max 100 per page
+      const offset = parseInt((req.query.offset as string) || '0', 10);
+      const planTier = req.query.planTier as string | undefined;
+      const planStatus = req.query.planStatus as string | undefined;
 
       if (!supabaseAdmin) {
         return res.status(503).json({ error: 'Database not configured' });
       }
 
+      // Build base query with count
       let queryBuilder = supabaseAdmin
         .from('organizations')
-        .select('id, name, slug, plan_tier, plan_status, is_internal_test, billing_mode, created_at')
+        .select('id, name, slug, plan_tier, plan_status, is_internal_test, billing_mode, created_at', { count: 'exact' })
         .order('is_internal_test', { ascending: false })
-        .order('created_at', { ascending: false })
-        .limit(limit);
+        .order('created_at', { ascending: false });
 
+      // Apply filters
       if (query) {
         queryBuilder = queryBuilder.or(`name.ilike.%${query}%,slug.ilike.%${query}%`);
       }
+      if (planTier) {
+        queryBuilder = queryBuilder.eq('plan_tier', planTier);
+      }
+      if (planStatus) {
+        queryBuilder = queryBuilder.eq('plan_status', planStatus);
+      }
 
-      const { data: orgs, error } = await queryBuilder;
+      // Apply pagination
+      queryBuilder = queryBuilder.range(offset, offset + limit - 1);
+
+      const { data: orgs, error, count } = await queryBuilder;
 
       if (error) {
+        console.error('Error fetching organizations:', error);
         return res.status(500).json({ error: 'Failed to fetch organizations' });
       }
 
@@ -119,6 +133,9 @@ export function setupAdminRoutes(app: express.Application) {
           billingMode: org.billing_mode || 'STRIPE',
           createdAt: org.created_at,
         })),
+        total: count || 0,
+        limit,
+        offset,
       });
     } catch (error: any) {
       console.error('Error listing all orgs:', error);

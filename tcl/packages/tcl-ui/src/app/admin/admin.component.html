@@ -176,6 +176,35 @@
             <mat-card-subtitle>Upgrade any organization to Enterprise, Team, or Sandbox tier. Entitlements are automatically updated.</mat-card-subtitle>
           </mat-card-header>
           <mat-card-content>
+            <!-- Search and Filters -->
+            <div class="filters-section" style="margin-bottom: 16px; display: flex; gap: 16px; align-items: center; flex-wrap: wrap;">
+              <mat-form-field appearance="outline" style="flex: 1; min-width: 200px;">
+                <mat-label>Search Organizations</mat-label>
+                <input matInput [(ngModel)]="upgradeSearchQuery" (keyup.enter)="onUpgradeSearch()" placeholder="Search by name or slug">
+                <mat-icon matSuffix (click)="onUpgradeSearch()" style="cursor: pointer;">search</mat-icon>
+              </mat-form-field>
+              
+              <mat-form-field appearance="outline" style="width: 150px;">
+                <mat-label>Plan Tier</mat-label>
+                <mat-select [(ngModel)]="upgradePlanTierFilter" (selectionChange)="onUpgradeFilterChange()">
+                  <mat-option [value]="undefined">All Tiers</mat-option>
+                  <mat-option value="SANDBOX">Sandbox</mat-option>
+                  <mat-option value="TEAM">Team</mat-option>
+                  <mat-option value="ENTERPRISE">Enterprise</mat-option>
+                </mat-select>
+              </mat-form-field>
+              
+              <mat-form-field appearance="outline" style="width: 150px;">
+                <mat-label>Status</mat-label>
+                <mat-select [(ngModel)]="upgradePlanStatusFilter" (selectionChange)="onUpgradeFilterChange()">
+                  <mat-option [value]="undefined">All Statuses</mat-option>
+                  <mat-option value="ACTIVE">Active</mat-option>
+                  <mat-option value="PAST_DUE">Past Due</mat-option>
+                  <mat-option value="CANCELED">Canceled</mat-option>
+                </mat-select>
+              </mat-form-field>
+            </div>
+
             <div *ngIf="loadingAllOrgs" class="loading-container">
               <mat-spinner diameter="40"></mat-spinner>
               <p>Loading organizations...</p>
@@ -237,6 +266,21 @@
               <tr mat-header-row *matHeaderRowDef="upgradeDisplayedColumns"></tr>
               <tr mat-row *matRowDef="let row; columns: upgradeDisplayedColumns;"></tr>
             </table>
+
+            <!-- Pagination -->
+            <mat-paginator
+              *ngIf="!loadingAllOrgs && upgradeTotalOrgs > 0"
+              [length]="upgradeTotalOrgs"
+              [pageSize]="upgradePageSize"
+              [pageIndex]="upgradePageIndex"
+              [pageSizeOptions]="[25, 50, 100]"
+              (page)="onUpgradePageChange($event)"
+              showFirstLastButtons>
+            </mat-paginator>
+
+            <div *ngIf="!loadingAllOrgs && upgradeTotalOrgs > 0" class="pagination-info" style="margin-top: 8px; text-align: center; color: #666;">
+              Showing {{ upgradePageIndex * upgradePageSize + 1 }} - {{ Math.min((upgradePageIndex + 1) * upgradePageSize, upgradeTotalOrgs) }} of {{ upgradeTotalOrgs }} organizations
+            </div>
           </mat-card-content>
         </mat-card>
       </div>

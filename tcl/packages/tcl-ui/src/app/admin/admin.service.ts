@@ -42,12 +42,26 @@ export class AdminService {
   }
 
   /**
-   * Get list of all organizations (superuser only)
+   * Get list of all organizations with pagination (superuser only)
    */
-  getAllOrgs(): Observable<Org[]> {
-    return this.http.get<{ orgs: Org[] }>(`${this.apiUrl}/api/admin/orgs`).pipe(
-      map(response => response.orgs || [])
-    );
+  getAllOrgs(options?: {
+    query?: string;
+    limit?: number;
+    offset?: number;
+    planTier?: string;
+    planStatus?: string;
+  }): Observable<{ orgs: Org[]; total: number; limit: number; offset: number }> {
+    const params: any = {};
+    if (options?.query) params.query = options.query;
+    if (options?.limit) params.limit = options.limit.toString();
+    if (options?.offset) params.offset = options.offset.toString();
+    if (options?.planTier) params.planTier = options.planTier;
+    if (options?.planStatus) params.planStatus = options.planStatus;
+
+    const queryString = new URLSearchParams(params).toString();
+    const url = `${this.apiUrl}/api/admin/orgs${queryString ? '?' + queryString : ''}`;
+
+    return this.http.get<{ orgs: Org[]; total: number; limit: number; offset: number }>(url);
   }
 
   /**
