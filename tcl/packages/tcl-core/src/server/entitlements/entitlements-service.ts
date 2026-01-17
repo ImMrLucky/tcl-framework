@@ -141,6 +141,43 @@ export class EntitlementsService {
   }
 
   /**
+   * Get entitlements for a specific tier (without org context)
+   * Useful for emulation or tier comparison
+   */
+  async getEntitlementsForTier(tier: EntitlementTier): Promise<OrgEntitlements> {
+    // Use the default entitlements based on tier
+    return this.getDefaultEntitlementsForTier(tier);
+  }
+
+  /**
+   * Get default entitlements for a tier
+   */
+  private getDefaultEntitlementsForTier(tier: EntitlementTier): OrgEntitlements {
+    const defaultFeatures: Record<EntitlementFeature, boolean> = {
+      enterpriseGovernance: tier === 'ENTERPRISE',
+      approvalsWorkflow: tier === 'ENTERPRISE',
+      auditPacksAdvanced: tier === 'ENTERPRISE',
+      legalHold: tier === 'ENTERPRISE',
+      issueDecisions: tier === 'TEAM' || tier === 'ENTERPRISE',
+      reviewerSignoff: tier === 'ENTERPRISE',
+      cases: tier === 'ENTERPRISE',
+      integrations: tier === 'ENTERPRISE',
+      batchIngestion: tier === 'TEAM' || tier === 'ENTERPRISE',
+      connectorsS3: tier === 'ENTERPRISE',
+      connectorsDropbox: tier === 'ENTERPRISE',
+      connectorsGDrive: tier === 'ENTERPRISE',
+      ssoSaml: false,
+      scim: false,
+    };
+
+    return {
+      orgId: '00000000-0000-0000-0000-000000000000', // Dummy org ID for tier-based entitlements
+      tier,
+      features: defaultFeatures,
+    };
+  }
+
+  /**
    * Check if org has a specific feature entitlement
    */
   async has(orgId: string, featureKey: EntitlementFeature): Promise<boolean> {

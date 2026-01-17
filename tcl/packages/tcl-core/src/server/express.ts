@@ -1870,8 +1870,30 @@ app.get("/api/me", async (req, res) => {
     const { getAdminContext } = await import('./admin/middleware.js');
     const adminContext = await getAdminContext(req);
     
-    // Get entitlements
-    const entitlements = await entitlementsService.getOrgEntitlements(context.orgId);
+    // Get base entitlements from database
+    const baseEntitlements = await entitlementsService.getOrgEntitlements(context.orgId);
+    
+    // If emulation is active and tier differs, override entitlements for emulated tier
+    let entitlements = baseEntitlements;
+    if (emulation?.enabled && emulation?.planTier && planContext.effectivePlanTier) {
+      // Get entitlements for the emulated tier
+      const emulatedEntitlements = await entitlementsService.getEntitlementsForTier(
+        planContext.effectivePlanTier
+      );
+      
+      entitlements = {
+        ...baseEntitlements,
+        tier: planContext.effectivePlanTier as any,
+        features: emulatedEntitlements.features,
+      };
+      
+      console.log('[API/me] Emulation active, overriding entitlements:', {
+        orgId: context.orgId,
+        realTier: baseEntitlements.tier,
+        emulatedTier: planContext.effectivePlanTier,
+        batchIngestion: emulatedEntitlements.features.batchIngestion,
+      });
+    }
     
     // Get user's role in the org
     let role: string | null = null;
@@ -1932,7 +1954,39 @@ app.get("/api/entitlements", async (req, res) => {
       return res.status(401).json({ error: context?.error || "Authorization required" });
     }
     
-    const entitlements = await entitlementsService.getOrgEntitlements(context.orgId);
+    // Check for emulation (superuser only)
+    const emulation = (req as any).emulation;
+    
+    // Get plan context to determine effective tier (respects emulation)
+    const planContext = await planService.getOrgPlanContext(
+      context.orgId,
+      emulation
+    );
+    
+    // Get base entitlements from database
+    const baseEntitlements = await entitlementsService.getOrgEntitlements(context.orgId);
+    
+    // If emulation is active and tier differs, override entitlements for emulated tier
+    let entitlements = baseEntitlements;
+    if (emulation?.enabled && emulation?.planTier && planContext.effectivePlanTier) {
+      // Get entitlements for the emulated tier
+      const emulatedEntitlements = await entitlementsService.getEntitlementsForTier(
+        planContext.effectivePlanTier
+      );
+      
+      entitlements = {
+        ...baseEntitlements,
+        tier: planContext.effectivePlanTier as any,
+        features: emulatedEntitlements.features,
+      };
+      
+      console.log('[API/entitlements] Emulation active:', {
+        orgId: context.orgId,
+        realTier: baseEntitlements.tier,
+        emulatedTier: planContext.effectivePlanTier,
+        batchIngestion: emulatedEntitlements.features.batchIngestion,
+      });
+    }
     
     res.json({
       entitlements: {
