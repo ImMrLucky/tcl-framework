@@ -22,6 +22,7 @@ import {
 import { getTemplateConfig } from './template-config.js';
 import { ClaimPairCandidate, ClaimEvidenceCandidate } from './candidate-generation.js';
 import { slotsMatch, valuesContradict, hasExplicitContradictionPattern, hasStrongAnchorMatch, hasCustomerDenialVsAssertion } from './subject-slot.js';
+import { areSlotsEquivalent, isHardSlot, getSlotMetaWithTemplate } from './slot-registry.js';
 
 // =============================================================================
 // EDGE CLASSIFICATION RESULTS
@@ -39,6 +40,8 @@ export interface EdgeClassificationResult {
     rejectedByTopicGating: number;
     rejectedByPolarityGating: number;
     rejectedByThreshold: number;
+    rejectedByIneligibleSlot: number;
+    rejectedByValueTypeMismatch: number;
     // Debug: first N rejected pairs for inspection
     sampleRejections: Array<{
       claimA: string;
@@ -72,6 +75,8 @@ export function classifyEdges(
   let rejectedByTopicGating = 0;
   let rejectedByPolarityGating = 0;
   let rejectedByThreshold = 0;
+  let rejectedByIneligibleSlot = 0;
+  let rejectedByValueTypeMismatch = 0;
   
   // Track sample rejections for debugging (first 20)
   const sampleRejections: EdgeClassificationResult['diagnostics']['sampleRejections'] = [];
@@ -88,6 +93,8 @@ export function classifyEdges(
       if (result.reason === 'topic') rejectedByTopicGating++;
       if (result.reason === 'polarity') rejectedByPolarityGating++;
       if (result.reason === 'threshold') rejectedByThreshold++;
+      if (result.reason === 'ineligible_slot') rejectedByIneligibleSlot++;
+      if (result.reason === 'value_type_mismatch') rejectedByValueTypeMismatch++;
       
       // Sample first N rejections for debugging
       if (sampleRejections.length < MAX_SAMPLE_REJECTIONS) {
@@ -111,7 +118,7 @@ export function classifyEdges(
   }
   
   // Log rejection summary
-  console.log(`📊 Contradiction gating: slot=${rejectedBySlotGating}, topic=${rejectedByTopicGating}, polarity=${rejectedByPolarityGating}, threshold=${rejectedByThreshold}, created=${contradictions.length}`);
+  console.log(`📊 Contradiction gating: slot=${rejectedBySlotGating}, topic=${rejectedByTopicGating}, polarity=${rejectedByPolarityGating}, threshold=${rejectedByThreshold}, ineligible=${rejectedByIneligibleSlot}, valueType=${rejectedByValueTypeMismatch}, created=${contradictions.length}`);
   if (sampleRejections.length > 0) {
     console.log(`🔍 Sample rejections (first ${sampleRejections.length}):`);
     sampleRejections.slice(0, 5).forEach(r => {
@@ -186,6 +193,8 @@ export function classifyEdges(
       rejectedByTopicGating,
       rejectedByPolarityGating,
       rejectedByThreshold,
+      rejectedByIneligibleSlot,
+      rejectedByValueTypeMismatch,
       sampleRejections,
     },
   };
@@ -198,7 +207,7 @@ export function classifyEdges(
 interface ClassificationResult {
   edge?: GraphEdge;
   rejected: boolean;
-  reason?: 'slot' | 'polarity' | 'threshold' | 'topic' | 'mutual_exclusivity';
+  reason?: 'slot' | 'polarity' | 'threshold' | 'topic' | 'mutual_exclusivity' | 'ineligible_slot' | 'value_type_mismatch';
 }
 
 function classifyContradiction(
@@ -285,12 +294,31 @@ function classifyContradiction(
       return { rejected: true, reason: 'topic' };
     }
     
-    // Hard gate: slotKey must match (slotType + entityKey)
+    // Hard gate: slotKey must match OR slots are equivalent
     const slotKeyA = claimA.slot.slotType + (claimA.slot.entityKey || '');
     const slotKeyB = claimB.slot.slotType + (claimB.slot.entityKey || '');
-    if (slotKeyA !== slotKeyB) {
+    const slotsMatchExact = slotKeyA === slotKeyB;
+    const slotsEquivalent = areSlotsEquivalent(claimA.slot, claimB.slot);
+    
+    if (!slotsMatchExact && !slotsEquivalent) {
       return { rejected: true, reason: 'slot' };
     }
+  }
+  
+  // NEW: HARD eligibility requirement for contradictions
+  // Both slots must be HARD eligible (can create contradictions)
+  const templateId = config.templateId;
+  const slotAIsHard = isHardSlot(claimA.slot.slotType, claimA.slot.entityKey, templateId);
+  const slotBIsHard = isHardSlot(claimB.slot.slotType, claimB.slot.entityKey, templateId);
+  
+  if (!slotAIsHard || !slotBIsHard) {
+    return { rejected: true, reason: 'ineligible_slot' };
+  }
+  
+  // NEW: Value-type compatibility check
+  // Prevent contradictions between incompatible value types (money vs date, etc.)
+  if (!valueTypesCompatible(claimA.slot, claimB.slot)) {
+    return { rejected: true, reason: 'value_type_mismatch' };
   }
   
   // GATE 3: Polarity check (must have opposing polarity)
@@ -306,13 +334,15 @@ function classifyContradiction(
     return { rejected: true, reason: 'mutual_exclusivity' as const };
   }
   
-  // F1: "unknown slot" must not create high-weight contradictions
+  // F1: "misc/unclassified slot" must not create high-weight contradictions
   // F2: Require at least one "hard signal" for high contradiction weights
-  const hasUnknownSlot = claimA.slot.entityKey === 'unknown' || claimA.slot.slotType === 'unknown' ||
-                         claimB.slot.entityKey === 'unknown' || claimB.slot.slotType === 'unknown';
+  const hasMiscSlot = (claimA.slot.entityKey === 'unclassified' || claimA.slot.slotType === 'misc') ||
+                      (claimB.slot.entityKey === 'unclassified' || claimB.slot.slotType === 'misc');
   const hasHardSignal = exactSlotMatch && 
-                        claimA.slot.entityKey !== 'unknown' && 
-                        claimB.slot.entityKey !== 'unknown' &&
+                        claimA.slot.entityKey !== 'unclassified' && 
+                        claimB.slot.entityKey !== 'unclassified' &&
+                        claimA.slot.slotType !== 'misc' &&
+                        claimB.slot.slotType !== 'misc' &&
                         (polarityFlip || valuesContradict(claimA.slot, claimB.slot));
   
   // Compute contradiction score (boost for exact slot match)
@@ -321,20 +351,20 @@ function classifyContradiction(
     contradictionScore = Math.min(1.0, contradictionScore + 0.1); // Bonus for exact slot
   }
   
-  // F1: Clamp weight lower for unknown slots OR require higher semantic similarity
-  if (hasUnknownSlot && !hasHardSignal) {
-    // F1: Unknown slot contradictions allowed only with much lower max weight OR require higher semanticSimilarity threshold
-    const unknownSlotMaxWeight = config.thresholds.contradiction * 0.7; // 70% of normal threshold
-    const unknownSlotSemanticThreshold = config.thresholds.semanticHighForFallback ?? 0.88;
+  // F1: Clamp weight lower for misc slots OR require higher semantic similarity
+  if (hasMiscSlot && !hasHardSignal) {
+    // F1: Misc slot contradictions allowed only with much lower max weight OR require higher semanticSimilarity threshold
+    const miscSlotMaxWeight = config.thresholds.contradiction * 0.7; // 70% of normal threshold
+    const miscSlotSemanticThreshold = config.thresholds.semanticHighForFallback ?? 0.88;
     
-    if (signals.semanticSimilarity < unknownSlotSemanticThreshold) {
-      // Require very high semantic similarity for unknown slots
-      contradictionScore = Math.min(contradictionScore, unknownSlotMaxWeight);
+    if (signals.semanticSimilarity < miscSlotSemanticThreshold) {
+      // Require very high semantic similarity for misc slots
+      contradictionScore = Math.min(contradictionScore, miscSlotMaxWeight);
     }
   }
   
   // F2: Require at least one "hard signal" for high contradiction weights
-  // To allow weight > X (config): same slotType AND same entityKey (not unknown) AND opposing polarity OR numeric mismatch
+  // To allow weight > X (config): same slotType AND same entityKey (not misc/unclassified) AND opposing polarity OR numeric mismatch
   const highWeightThreshold = config.thresholds.contradiction * 1.2; // 20% above normal threshold
   if (contradictionScore > highWeightThreshold && !hasHardSignal) {
     // Clamp contradiction weights lower if no hard signal
@@ -545,6 +575,82 @@ function hasMutualExclusivity(a: ClaimNode, b: ClaimNode): boolean {
 // =============================================================================
 // POLARITY DETECTION
 // =============================================================================
+
+/**
+ * Infer value type from slot (money, date, duration, percent, string, none)
+ */
+function inferValueType(slot: SubjectSlot): 'money' | 'date' | 'duration' | 'percent' | 'string' | 'none' {
+  // Check slotType and entityKey for hints
+  const slotType = slot.slotType.toLowerCase();
+  const entityKey = (slot.entityKey || '').toLowerCase();
+  
+  // Money-related slots
+  if (slotType === 'fee' || slotType === 'refund' || slotType === 'amount' || 
+      slotType === 'plan_price' || entityKey.includes('amount') || entityKey.includes('fee') ||
+      entityKey.includes('price') || entityKey.includes('refund')) {
+    return 'money';
+  }
+  
+  // Date-related slots
+  if (slotType === 'date' || entityKey.includes('date') || entityKey.includes('time')) {
+    return 'date';
+  }
+  
+  // Duration/timeframe slots
+  if (slotType === 'timeframe' || slotType === 'duration' || entityKey.includes('timeframe') ||
+      entityKey.includes('duration') || entityKey.includes('month') || entityKey.includes('day')) {
+    return 'duration';
+  }
+  
+  // Percent slots
+  if (slotType === 'percent' || entityKey.includes('percent') || entityKey.includes('rate')) {
+    return 'percent';
+  }
+  
+  // Check valueNorm for type hints
+  if (slot.valueNorm) {
+    const normStr = String(slot.valueNorm);
+    // Money patterns: $, cents, dollars
+    if (/\$|cents?|dollars?/i.test(normStr) || /^\d+$/.test(normStr) && slotType !== 'date') {
+      return 'money';
+    }
+    // Date patterns: ISO dates, YYYY-MM-DD
+    if (/^\d{4}-\d{2}-\d{2}/.test(normStr) || /jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec/i.test(normStr)) {
+      return 'date';
+    }
+    // Duration patterns: _h, _d, _w, _m, _bd
+    if (/_\d+[hdwmb]|next_cycle/.test(normStr)) {
+      return 'duration';
+    }
+    // Percent patterns: %
+    if (/%/.test(normStr)) {
+      return 'percent';
+    }
+  }
+  
+  // Default to string if we have any value
+  if (slot.value || slot.valueNorm) {
+    return 'string';
+  }
+  
+  return 'none';
+}
+
+/**
+ * Check if two slots have compatible value types for contradiction
+ */
+function valueTypesCompatible(a: SubjectSlot, b: SubjectSlot): boolean {
+  const typeA = inferValueType(a);
+  const typeB = inferValueType(b);
+  
+  // Both must have the same type, OR one must be 'none' (undefined)
+  if (typeA === 'none' || typeB === 'none') {
+    return true; // Allow contradictions when one slot has no value
+  }
+  
+  // Must match exactly
+  return typeA === typeB;
+}
 
 function hasOpposingPolarity(a: ClaimNode, b: ClaimNode): boolean {
   // Check modality opposition
@@ -808,7 +914,8 @@ function classifyClaimSupport(
   const hasSlotMatch = signals.slotMatch > 0.3; // Same slot type
   const hasEntityOverlap = signals.entityOverlap > 0.2; // Shared entities
   const hasSharedEntityKey = claimA.slot.entityKey === claimB.slot.entityKey && 
-                             claimA.slot.entityKey !== 'unknown';
+                             claimA.slot.entityKey !== 'unclassified' &&
+                             claimA.slot.slotType !== 'misc';
   
   if (!hasSlotMatch && !hasEntityOverlap && !hasSharedEntityKey) {
     return { rejected: true, reason: 'threshold' }; // No meaningful connection
@@ -1001,8 +1108,8 @@ function createSupportEdge(
       sourceIds: [toId],
     },
     slot: {
-      slotType: 'unknown',
-      entityKey: 'unknown',
+      slotType: 'misc',
+      entityKey: 'unclassified',
     },
     createdAt: new Date().toISOString(),
   };

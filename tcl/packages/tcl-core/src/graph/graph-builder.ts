@@ -48,6 +48,7 @@ import { deriveTruthStatesFromGraph, TruthDerivationResult, computeTruthScores, 
 import { buildRunDiagnostics, DiagnosticsInput, validateGraphIntegrity } from './run-diagnostics.js';
 import { createHash } from 'crypto';
 import { logGraph } from '../server/utils/logger.js';
+import { getSlotRegistryVersion, getSlotMetaWithTemplate } from './slot-registry.js';
 
 // =============================================================================
 // GRAPH BUILDER INPUT
@@ -159,6 +160,14 @@ export interface GraphBuilderOutput {
       claimsWithZeroCandidates: number;
       budgetExhausted: boolean;
     };
+    /** Slot mapping diagnostics */
+    slotMapping?: {
+      registryVersion: string;
+      totalClaims: number;
+      counts: { HARD: number; SOFT: number; NONE: number };
+      miscClaims: number;
+      topSlotKeys: Array<{ slotKey: string; count: number }>;
+    };
   };
 }
 
@@ -246,6 +255,9 @@ function buildGraphFromNodes(
   const segmentation = assignTopicIds(claimNodes);
   pipelineSteps['topicSegmentation'] = Date.now() - step3Start;
   logGraph('debug', `Topic clusters: ${segmentation.clusters.length}`, { count: segmentation.clusters.length, duration: pipelineSteps['topicSegmentation'] });
+  
+  // Compute slot mapping diagnostics
+  const slotMapping = computeSlotMappingDiagnostics(claimNodes, config.templateId);
   
   // Step 4: Candidate Generation
   const step4Start = Date.now();
@@ -422,6 +434,8 @@ function buildGraphFromNodes(
         rejectedByTopicGating: classified.diagnostics.rejectedByTopicGating,
         rejectedByPolarityGating: classified.diagnostics.rejectedByPolarityGating,
         rejectedByThreshold: classified.diagnostics.rejectedByThreshold,
+        rejectedByIneligibleSlot: classified.diagnostics.rejectedByIneligibleSlot,
+        rejectedByValueTypeMismatch: classified.diagnostics.rejectedByValueTypeMismatch,
         sampleRejections: classified.diagnostics.sampleRejections,
       },
       // Candidate generation diagnostics
@@ -430,7 +444,65 @@ function buildGraphFromNodes(
         claimsWithZeroCandidates: candidates.diagnostics.claimsWithZeroCandidates,
         budgetExhausted: candidates.diagnostics.budgetExhausted,
       },
+      // Slot mapping diagnostics
+      slotMapping,
     },
+  };
+}
+
+/**
+ * Compute slot mapping diagnostics for claims
+ */
+function computeSlotMappingDiagnostics(
+  claimNodes: ClaimNode[],
+  templateId: string
+): {
+  registryVersion: string;
+  totalClaims: number;
+  counts: { HARD: number; SOFT: number; NONE: number };
+  miscClaims: number;
+  topSlotKeys: Array<{ slotKey: string; count: number }>;
+} {
+  const registryVersion = getSlotRegistryVersion();
+  const counts = { HARD: 0, SOFT: 0, NONE: 0 };
+  let miscClaims = 0;
+  const slotKeyCounts = new Map<string, number>();
+  
+  for (const claim of claimNodes) {
+    const slot = claim.slot;
+    const slotKey = `${slot.slotType}:${slot.entityKey}`;
+    
+    // Count by slot key
+    slotKeyCounts.set(slotKey, (slotKeyCounts.get(slotKey) || 0) + 1);
+    
+    // Count misc claims
+    if (slot.slotType === 'misc' && slot.entityKey === 'unclassified') {
+      miscClaims++;
+    }
+    
+    // Count by edge eligibility
+    const meta = getSlotMetaWithTemplate(slot.slotType, slot.entityKey, templateId);
+    if (meta.edgeEligibility === 'HARD') {
+      counts.HARD++;
+    } else if (meta.edgeEligibility === 'SOFT') {
+      counts.SOFT++;
+    } else {
+      counts.NONE++;
+    }
+  }
+  
+  // Get top 10 slot keys
+  const topSlotKeys = Array.from(slotKeyCounts.entries())
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 10)
+    .map(([slotKey, count]) => ({ slotKey, count }));
+  
+  return {
+    registryVersion,
+    totalClaims: claimNodes.length,
+    counts,
+    miscClaims,
+    topSlotKeys,
   };
 }
 
@@ -865,8 +937,8 @@ export function assertGraphInvariants(graph: ClaimGraph): { passed: boolean; fai
   
   // Invariant 1: All contradiction edges must have same slotType/entityKey
   for (const edge of graph.edges.contradiction) {
-    if (!edge.slot || edge.slot.slotType === 'unknown') {
-      failures.push(`Contradiction edge ${edge.id} has unknown slot`);
+    if (!edge.slot || edge.slot.slotType === 'misc' || edge.slot.entityKey === 'unclassified') {
+      failures.push(`Contradiction edge ${edge.id} has misc/unclassified slot`);
     }
   }
   

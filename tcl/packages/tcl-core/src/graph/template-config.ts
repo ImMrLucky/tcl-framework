@@ -9,6 +9,7 @@
  */
 
 import { CandidateBudgets } from './types.js';
+import { getGlobalSlotLexicon, getTemplateSlotLexicon, getMergedLexicon } from './slot-registry.js';
 
 // =============================================================================
 // SLOT LEXICON (Domain-specific entity mappings)
@@ -308,6 +309,28 @@ const TEMPLATE_REGISTRY: Record<string, TemplateConfig> = {
 
 let _activeTemplate: TemplateConfig = DEFAULT_TEMPLATE_CONFIG;
 
+/**
+ * Resolve slot lexicon for a template by merging:
+ * 1. Template's static slotLexicon (highest precedence)
+ * 2. Template overlay from slot-registry.templates.json
+ * 3. Global lexicon from slot-registry.global.json (lowest precedence)
+ */
+function resolveSlotLexiconForTemplate(templateId: string, current: TemplateConfig): Record<string, SlotLexiconEntry> {
+  // Start with global lexicon
+  const globalLexicon = getGlobalSlotLexicon();
+  
+  // Add template overlay
+  const templateOverlay = getTemplateSlotLexicon(templateId);
+  
+  // Merge: template static > template overlay > global
+  // This preserves existing template-specific entries while adding registry entries
+  return {
+    ...globalLexicon,
+    ...templateOverlay,
+    ...current.slotLexicon, // Template static entries win
+  };
+}
+
 export function getTemplateConfig(): TemplateConfig {
   const config = _activeTemplate;
   
@@ -331,9 +354,24 @@ export function setTemplateConfig(templateIdOrConfig: string | TemplateConfig): 
     if (!template) {
       throw new Error(`Unknown template: ${templateIdOrConfig}. Available: ${Object.keys(TEMPLATE_REGISTRY).join(', ')}`);
     }
-    _activeTemplate = template;
+    
+    // Merge slot lexicon with registry
+    const mergedLexicon = resolveSlotLexiconForTemplate(templateIdOrConfig, template);
+    _activeTemplate = {
+      ...template,
+      slotLexicon: mergedLexicon,
+    };
   } else {
-    _activeTemplate = templateIdOrConfig;
+    // For custom config objects, merge lexicon if templateId is present
+    if (templateIdOrConfig.templateId) {
+      const mergedLexicon = resolveSlotLexiconForTemplate(templateIdOrConfig.templateId, templateIdOrConfig);
+      _activeTemplate = {
+        ...templateIdOrConfig,
+        slotLexicon: mergedLexicon,
+      };
+    } else {
+      _activeTemplate = templateIdOrConfig;
+    }
   }
 }
 

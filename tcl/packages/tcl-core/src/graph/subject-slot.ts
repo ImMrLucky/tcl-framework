@@ -161,6 +161,28 @@ function extractLexiconEntities(
 // COMPUTE SUBJECT SLOT (Main function)
 // =============================================================================
 
+/**
+ * Normalize slot: lowercase, convert unknown/general to misc/unclassified
+ */
+function normalizeSlot(slot: SubjectSlot): SubjectSlot {
+  let slotType = slot.slotType.toLowerCase();
+  let entityKey = slot.entityKey.toLowerCase();
+  
+  // Convert unknown/general to misc/unclassified
+  if (slotType === 'unknown' || slotType === 'general') {
+    slotType = 'misc';
+  }
+  if (entityKey === 'unknown' || entityKey === 'general') {
+    entityKey = 'unclassified';
+  }
+  
+  return {
+    ...slot,
+    slotType,
+    entityKey,
+  };
+}
+
 export function computeSubjectSlot(
   text: string,
   entities: ExtractedEntity[],
@@ -169,16 +191,19 @@ export function computeSubjectSlot(
   const config = getTemplateConfig();
   const textLower = text.toLowerCase();
   
+  let slot: SubjectSlot;
+  
   // E1: Step 0: Check for semantic slots (industry-agnostic policy-like statements)
   const semanticSlot = extractSemanticSlot(text, entities);
   if (semanticSlot) {
-    return {
+    slot = {
       slotType: semanticSlot.slotType,
       entityKey: semanticSlot.entityKey,
       value: extractSlotValue(entities),
       valueNorm: normalizeSlotValue(extractSlotValue(entities)),
       qualifiers: extractQualifiers(text, entities),
     };
+    return normalizeSlot(slot);
   }
   
   // Step 1: Find primary entity from lexicon-matched entities
@@ -194,45 +219,52 @@ export function computeSubjectSlot(
     );
     
     if (lexiconEntry) {
-      return {
+      slot = {
         slotType: lexiconEntry.slotType,
         entityKey: lexiconEntry.entityKey,
         value: extractSlotValue(entities),
         valueNorm: normalizeSlotValue(extractSlotValue(entities)),
         qualifiers: extractQualifiers(text, entities),
       };
+      return normalizeSlot(slot);
     }
   }
   
   // Step 2: Infer from entity types
   const primaryEntityType = inferPrimaryEntityType(entities);
   if (primaryEntityType) {
-    return {
+    slot = {
       slotType: primaryEntityType.slotType,
       entityKey: primaryEntityType.entityKey,
       value: extractSlotValue(entities),
       valueNorm: normalizeSlotValue(extractSlotValue(entities)),
     };
+    return normalizeSlot(slot);
   }
   
   // Step 3: Semantic fallback - extract key terms from text
   const keyTerms = extractKeyTerms(text);
   if (keyTerms.length > 0) {
-    return {
-      slotType: 'general',
-      entityKey: keyTerms[0],
+    slot = {
+      slotType: 'misc',
+      entityKey: 'unclassified',
       value: undefined,
       valueNorm: undefined,
+      qualifiers: {
+        keyTerms: keyTerms,
+      },
     };
+    return normalizeSlot(slot);
   }
   
-  // Step 4: Default slot
-  return {
-    slotType: 'unknown',
-    entityKey: 'unknown',
+  // Step 4: Default slot (never unknown)
+  slot = {
+    slotType: 'misc',
+    entityKey: 'unclassified',
     value: undefined,
     valueNorm: undefined,
   };
+  return normalizeSlot(slot);
 }
 
 /**
@@ -246,47 +278,37 @@ function extractSemanticSlot(
   const textLower = text.toLowerCase();
   
   // FEE (late fee, cancellation fee, termination fee)
-  const feePatterns = [
-    { pattern: /\b(late\s*fee|cancellation\s*fee|termination\s*fee|early\s*termination|etf)\b/i, key: 'FEE' },
-    { pattern: /\bfee\b.*?\b(?:late|cancel|terminat|early)\b/i, key: 'FEE' },
-  ];
-  for (const { pattern, key } of feePatterns) {
-    if (pattern.test(text)) {
-      const moneyEntity = entities.find(e => e.type === 'MONEY');
-      const feeKey = moneyEntity ? `FEE:${moneyEntity.normalized}` : 'FEE:unknown';
-      return { slotType: 'fee', entityKey: feeKey };
-    }
+  // Detect subtype and set entityKey to subtype (not amount)
+  if (/\blate\s*fee|\blate\s*payment\s*fee|\bpast\s*due\s*fee/i.test(text)) {
+    return { slotType: 'fee', entityKey: 'late_fee' };
+  }
+  if (/\bcancellation\s*fee|\btermination\s*fee|\betf|\bearly\s*termination\s*fee/i.test(text)) {
+    return { slotType: 'fee', entityKey: 'cancellation_fee' };
+  }
+  if (/\bfee\b/i.test(text)) {
+    return { slotType: 'fee', entityKey: 'fee' };
   }
   
   // REFUND (refund amount, refund months)
-  const refundPatterns = [
-    { pattern: /\brefund\b/i, key: 'REFUND' },
-    { pattern: /\bcredit\b.*?\b(?:refund|back)\b/i, key: 'REFUND' },
-  ];
-  for (const { pattern, key } of refundPatterns) {
-    if (pattern.test(text)) {
-      const moneyEntity = entities.find(e => e.type === 'MONEY');
-      const durationEntity = entities.find(e => e.type === 'DURATION');
-      if (moneyEntity) {
-        return { slotType: 'refund', entityKey: `REFUND_AMOUNT:${moneyEntity.normalized}` };
-      } else if (durationEntity && /\bmonth/i.test(text)) {
-        return { slotType: 'refund', entityKey: `REFUND_MONTHS:${durationEntity.normalized}` };
-      } else {
-        return { slotType: 'refund', entityKey: 'REFUND:unknown' };
-      }
+  // entityKey is refund or refund_months, MONEY stays in value
+  if (/\brefund\b/i.test(text) || /\bcredit\b.*?\b(?:refund|back)\b/i.test(text)) {
+    const durationEntity = entities.find(e => e.type === 'DURATION');
+    if (durationEntity && /\bmonth/i.test(text)) {
+      return { slotType: 'refund', entityKey: 'refund_months' };
+    } else {
+      return { slotType: 'refund', entityKey: 'refund' };
     }
   }
   
   // RECORDING (recorded / not recorded)
-  const recordingPatterns = [
-    { pattern: /\b(?:call|conversation|this)\s*(?:is|will\s*be|are)\s*(?:recorded|being\s*recorded)\b/i, key: 'RECORDING:yes' },
-    { pattern: /\b(?:not|not\s*being|won't\s*be|aren't)\s*recorded\b/i, key: 'RECORDING:no' },
-    { pattern: /\brecord(?:ing|ed)\s*(?:yes|no|on|off)\b/i, key: 'RECORDING' },
-  ];
-  for (const { pattern, key } of recordingPatterns) {
-    if (pattern.test(text)) {
-      return { slotType: 'recording', entityKey: key.includes(':') ? key : 'RECORDING:unknown' };
-    }
+  if (/\b(?:call|conversation|this)\s*(?:is|will\s*be|are)\s*(?:recorded|being\s*recorded)\b/i.test(text)) {
+    return { slotType: 'recording', entityKey: 'recording' };
+  }
+  if (/\b(?:not|not\s*being|won't\s*be|aren't)\s*recorded\b/i.test(text)) {
+    return { slotType: 'recording', entityKey: 'recording' }; // Same entityKey, polarity in value/qualifiers
+  }
+  if (/\brecord(?:ing|ed)\s*(?:yes|no|on|off)\b/i.test(text)) {
+    return { slotType: 'recording', entityKey: 'recording' };
   }
   
   // PAYMENT_METHOD (card/CVV storage)
@@ -302,16 +324,9 @@ function extractSemanticSlot(
   }
   
   // PLAN_PRICE (plan monthly rate)
-  const planPricePatterns = [
-    { pattern: /\b(?:plan|monthly|rate|price)\b.*?\$\d+/i, key: 'PLAN_PRICE' },
-    { pattern: /\$\d+.*?\b(?:plan|monthly|rate|price)\b/i, key: 'PLAN_PRICE' },
-  ];
-  for (const { pattern, key } of planPricePatterns) {
-    if (pattern.test(text)) {
-      const moneyEntity = entities.find(e => e.type === 'MONEY');
-      const planKey = moneyEntity ? `PLAN_PRICE:${moneyEntity.normalized}` : 'PLAN_PRICE:unknown';
-      return { slotType: 'plan_price', entityKey: planKey };
-    }
+  // entityKey is plan_price, MONEY stays in value
+  if (/\b(?:plan|monthly|rate|price)\b.*?\$\d+/i.test(text) || /\$\d+.*?\b(?:plan|monthly|rate|price)\b/i.test(text)) {
+    return { slotType: 'plan_price', entityKey: 'plan_price' };
   }
   
   // COMMITMENT (guarantee/never/locked)
@@ -326,21 +341,25 @@ function extractSemanticSlot(
   }
   
   // AMOUNT (money) - if money entity exists and no other semantic slot matched
+  // entityKey is amount or bill_total, MONEY stays in value
   const moneyEntity = entities.find(e => e.type === 'MONEY');
   if (moneyEntity) {
     // Check if it's part of a fee/refund/plan context (already handled above)
     if (!/\b(fee|refund|plan|price|rate)\b/i.test(text)) {
-      return { slotType: 'amount', entityKey: `AMOUNT:${moneyEntity.normalized}` };
+      // Check if it's a bill/total context
+      if (/\b(bill|total|balance|amount\s*due)\b/i.test(text)) {
+        return { slotType: 'amount', entityKey: 'bill_total' };
+      } else {
+        return { slotType: 'amount', entityKey: 'amount' };
+      }
     }
   }
   
   // TIMEFRAME - if timeframe pattern exists
+  // entityKey is timeframe, duration stays in value
   const timeframePattern = /\b(\d+)\s*(?:hours?|days?|weeks?|months?|business\s*days?)\b|\bnext\s*(?:cycle|billing\s*cycle)\b/i;
   if (timeframePattern.test(text)) {
-    const durationEntity = entities.find(e => e.type === 'DURATION');
-    if (durationEntity) {
-      return { slotType: 'timeframe', entityKey: `TIMEFRAME:${durationEntity.normalized}` };
-    }
+    return { slotType: 'timeframe', entityKey: 'timeframe' };
   }
   
   return null;

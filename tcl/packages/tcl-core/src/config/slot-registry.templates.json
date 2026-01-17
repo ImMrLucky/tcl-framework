@@ -1,0 +1,60 @@
+{
+  "version": "1.0.0",
+  "templates": {
+    "telco": {
+      "lexiconAdditions": {
+        "device protection": {
+          "slotType": "plan",
+          "entityKey": "device_protection",
+          "synonyms": ["protection plan", "device insurance"]
+        }
+      },
+      "slotMetaAdditions": {
+        "plan:device_protection": {
+          "edgeEligibility": "HARD",
+          "family": "plan"
+        }
+      }
+    },
+    "legal": {
+      "lexiconAdditions": {
+        "defense": {
+          "slotType": "legal",
+          "entityKey": "case_defense",
+          "synonyms": ["defend", "defending", "legal defense"]
+        },
+        "settlement": {
+          "slotType": "legal",
+          "entityKey": "settlement",
+          "synonyms": ["settle", "settling", "settlement offer"]
+        }
+      },
+      "slotMetaAdditions": {
+        "legal:case_defense": {
+          "edgeEligibility": "SOFT",
+          "family": "legal"
+        },
+        "legal:settlement": {
+          "edgeEligibility": "HARD",
+          "family": "legal"
+        }
+      }
+    },
+    "gaming": {
+      "lexiconAdditions": {
+        "defense": {
+          "slotType": "game",
+          "entityKey": "defense_stat",
+          "synonyms": ["def stat", "armor", "damage reduction"]
+        }
+      },
+      "slotMetaAdditions": {
+        "game:defense_stat": {
+          "edgeEligibility": "SOFT",
+          "family": "game"
+        }
+      }
+    }
+  }
+}
+

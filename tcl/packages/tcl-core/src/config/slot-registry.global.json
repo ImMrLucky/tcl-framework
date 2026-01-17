@@ -1,0 +1,87 @@
+{
+  "version": "1.0.0",
+  "globalLexicon": {
+    "fee": {
+      "slotType": "fee",
+      "entityKey": "fee",
+      "synonyms": ["charge", "cost", "pricing", "rate"]
+    },
+    "late fee": {
+      "slotType": "fee",
+      "entityKey": "late_fee",
+      "synonyms": ["past due fee", "late charge", "late payment fee"]
+    },
+    "cancellation fee": {
+      "slotType": "fee",
+      "entityKey": "cancellation_fee",
+      "synonyms": ["termination fee", "etf", "early termination fee"]
+    },
+    "refund": {
+      "slotType": "refund",
+      "entityKey": "refund",
+      "synonyms": ["credit back", "reimburse", "refund back"]
+    },
+    "plan": {
+      "slotType": "plan",
+      "entityKey": "plan",
+      "synonyms": ["package", "subscription", "service plan"]
+    },
+    "recorded": {
+      "slotType": "recording",
+      "entityKey": "recording",
+      "synonyms": ["being recorded", "call is recorded"]
+    },
+    "cvv": {
+      "slotType": "payment_security",
+      "entityKey": "cvv",
+      "synonyms": ["cvc", "security code", "card code"]
+    },
+    "store cvv": {
+      "slotType": "payment_security",
+      "entityKey": "cvv_storage",
+      "synonyms": ["save cvv", "storing cvv", "stored cvv"]
+    }
+  },
+  "slotMeta": {
+    "fee:late_fee": {
+      "edgeEligibility": "HARD",
+      "family": "money"
+    },
+    "fee:cancellation_fee": {
+      "edgeEligibility": "HARD",
+      "family": "money"
+    },
+    "fee:fee": {
+      "edgeEligibility": "HARD",
+      "family": "money"
+    },
+    "refund:refund": {
+      "edgeEligibility": "HARD",
+      "family": "money"
+    },
+    "plan:plan": {
+      "edgeEligibility": "SOFT",
+      "family": "plan"
+    },
+    "recording:recording": {
+      "edgeEligibility": "HARD",
+      "family": "policy"
+    },
+    "payment_security:cvv_storage": {
+      "edgeEligibility": "HARD",
+      "family": "policy"
+    },
+    "payment_security:cvv": {
+      "edgeEligibility": "HARD",
+      "family": "policy"
+    },
+    "misc:unclassified": {
+      "edgeEligibility": "NONE",
+      "family": "misc"
+    }
+  },
+  "equivalences": [
+    ["fee:late_fee", "fee:past_due_fee"]
+  ]
+}
+
