@@ -179,6 +179,10 @@ export class IngestionComponent implements OnInit, OnDestroy {
     this.hasBatchIngestion = this.featureService.hasFeature('batchIngestion');
   }
 
+  navigateToBulkIngestion() {
+    this.router.navigate(['/bulk-ingest']);
+  }
+
   async loadRepresentatives() {
     this.representativesLoading = true;
     try {
