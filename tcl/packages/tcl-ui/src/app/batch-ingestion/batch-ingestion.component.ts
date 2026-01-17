@@ -93,6 +93,7 @@ export class BatchIngestionComponent implements OnInit, OnDestroy {
     private entitlementsService: EntitlementsService,
     private memberService: MemberService,
     private authService: AuthService,
+    private http: HttpClient,
     private router: Router,
     private route: ActivatedRoute,
     private snackBar: MatSnackBar,
@@ -409,11 +410,12 @@ export class BatchIngestionComponent implements OnInit, OnDestroy {
       
       const orgId = orgs[0].id;
       const apiBase = this.authService.getApiBaseUrl();
-      const response = await fetch(`${apiBase}/orgs/${orgId}/representatives`);
-      if (response.ok) {
-        const data = await response.json();
-        this.representatives = data.representatives || [];
-      }
+      const data = await firstValueFrom(
+        this.http.get<{ representatives: Array<{ id: string; display_name: string }> }>(
+          `${apiBase}/orgs/${orgId}/representatives`
+        )
+      );
+      this.representatives = data.representatives || [];
     } catch (error) {
       console.error('Failed to load representatives:', error);
     } finally {
@@ -437,20 +439,15 @@ export class BatchIngestionComponent implements OnInit, OnDestroy {
       
       const orgId = orgs[0].id;
       const apiBase = this.authService.getApiBaseUrl();
-      const response = await fetch(`${apiBase}/orgs/${orgId}/representatives/upsert-by-name`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ displayName }),
-      });
-      
-      if (response.ok) {
-        const data = await response.json();
-        // Reload representatives to include the new one
-        await this.loadRepresentatives();
-        return data.representative?.id || null;
-      }
+      const data = await firstValueFrom(
+        this.http.post<{ representative: { id: string } }>(
+          `${apiBase}/orgs/${orgId}/representatives/upsert-by-name`,
+          { displayName }
+        )
+      );
+      // Reload representatives to include the new one
+      await this.loadRepresentatives();
+      return data.representative?.id || null;
     } catch (error) {
       console.error('Failed to upsert representative:', error);
     }
