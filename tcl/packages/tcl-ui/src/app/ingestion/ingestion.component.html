@@ -83,6 +83,42 @@
             </mat-form-field>
           </div>
 
+          <div class="form-row">
+            <mat-form-field appearance="outline" class="full-width">
+              <mat-label>Representative (Optional)</mat-label>
+              <mat-select [(ngModel)]="selectedRepresentativeId" name="representativeId">
+                <mat-option [value]="null">None</mat-option>
+                <mat-option *ngFor="let rep of representatives" [value]="rep.id">
+                  {{ rep.display_name }}
+                </mat-option>
+              </mat-select>
+              <mat-hint>Select a representative for analytics and attribution</mat-hint>
+            </mat-form-field>
+          </div>
+
+          <div class="form-row" *ngIf="selectedRepresentativeId === null">
+            <mat-form-field appearance="outline" class="full-width">
+              <mat-label>Add New Representative (Optional)</mat-label>
+              <input 
+                matInput 
+                [(ngModel)]="newRepresentativeName" 
+                name="newRepresentativeName"
+                placeholder="e.g., Vanessa Smith"
+                (keyup.enter)="onRepresentativeNameEntered()"
+              >
+              <button 
+                mat-icon-button 
+                matSuffix 
+                (click)="onRepresentativeNameEntered()"
+                [disabled]="!newRepresentativeName.trim() || representativesLoading"
+                type="button"
+              >
+                <mat-icon>add</mat-icon>
+              </button>
+              <mat-hint>Type a name and press Enter or click + to add</mat-hint>
+            </mat-form-field>
+          </div>
+
           <!-- Transcript Only Mode -->
           <ng-container *ngIf="selectedMode === 'TRANSCRIPT_ONLY'">
             <div class="file-upload-section" style="margin-bottom: 16px;">

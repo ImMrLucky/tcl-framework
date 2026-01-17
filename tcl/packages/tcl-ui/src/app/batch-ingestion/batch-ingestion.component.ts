@@ -19,8 +19,11 @@ import { MatDialogModule, MatDialog } from '@angular/material/dialog';
 import { AppHeaderComponent } from '../shared/app-header.component';
 import { BatchIngestionService, Batch, BatchItem } from './batch-ingestion.service';
 import { EntitlementsService } from '../entitlements.service';
+import { MemberService } from '../member.service';
+import { AuthService } from '../auth.service';
 import { interval, Subscription } from 'rxjs';
 import { switchMap, takeWhile } from 'rxjs/operators';
+import { firstValueFrom } from 'rxjs';
 
 @Component({
   selector: 'app-batch-ingestion',
@@ -75,6 +78,12 @@ export class BatchIngestionComponent implements OnInit, OnDestroy {
   loadingBatch = false;
   progressSubscription?: Subscription;
   
+  // Representative selection
+  representatives: Array<{ id: string; display_name: string }> = [];
+  selectedRepresentativeId: string | null = null;
+  newRepresentativeName = '';
+  representativesLoading = false;
+  
   // Table columns
   displayedColumns = ['select', 'name', 'type', 'size', 'status'];
   connectorDisplayedColumns = ['select', 'name', 'type', 'size', 'modified'];
@@ -82,6 +91,8 @@ export class BatchIngestionComponent implements OnInit, OnDestroy {
   constructor(
     private batchService: BatchIngestionService,
     private entitlementsService: EntitlementsService,
+    private memberService: MemberService,
+    private authService: AuthService,
     private router: Router,
     private route: ActivatedRoute,
     private snackBar: MatSnackBar,
@@ -96,6 +107,8 @@ export class BatchIngestionComponent implements OnInit, OnDestroy {
       this.router.navigate(['/ingest']);
       return;
     }
+    
+    this.loadRepresentatives();
     
     // Check if batch ID is in route
     this.route.params.subscribe(params => {
@@ -241,9 +254,15 @@ export class BatchIngestionComponent implements OnInit, OnDestroy {
     try {
       const selection = this.connectorObjects.filter(obj => this.selectedObjects.has(obj.id));
       
+      const config: any = {};
+      if (this.selectedRepresentativeId) {
+        config.representativeId = this.selectedRepresentativeId;
+      }
+      
       const response = await this.batchService.createBatchFromSelection(
         this.activeConnector,
-        selection
+        selection,
+        config
       ).toPromise();
       
       if (response?.success && response.batch) {

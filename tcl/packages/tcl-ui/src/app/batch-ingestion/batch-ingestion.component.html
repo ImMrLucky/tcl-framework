@@ -95,6 +95,47 @@
         <!-- Upload Tab -->
         <mat-tab label="Upload Files">
           <div class="tab-content">
+            <!-- Batch Configuration -->
+            <div class="batch-config-section">
+              <h4>Batch Configuration</h4>
+              
+              <div class="form-row">
+                <mat-form-field appearance="outline" class="full-width">
+                  <mat-label>Default Representative (Optional)</mat-label>
+                  <mat-select [(ngModel)]="selectedRepresentativeId" name="representativeId">
+                    <mat-option [value]="null">None</mat-option>
+                    <mat-option *ngFor="let rep of representatives" [value]="rep.id">
+                      {{ rep.display_name }}
+                    </mat-option>
+                  </mat-select>
+                  <mat-hint>Select a default representative for all items in this batch</mat-hint>
+                </mat-form-field>
+              </div>
+
+              <div class="form-row" *ngIf="selectedRepresentativeId === null">
+                <mat-form-field appearance="outline" class="full-width">
+                  <mat-label>Add New Representative (Optional)</mat-label>
+                  <input 
+                    matInput 
+                    [(ngModel)]="newRepresentativeName" 
+                    name="newRepresentativeName"
+                    placeholder="e.g., Vanessa Smith"
+                    (keyup.enter)="onRepresentativeNameEntered()"
+                  >
+                  <button 
+                    mat-icon-button 
+                    matSuffix 
+                    (click)="onRepresentativeNameEntered()"
+                    [disabled]="!newRepresentativeName.trim() || representativesLoading"
+                    type="button"
+                  >
+                    <mat-icon>add</mat-icon>
+                  </button>
+                  <mat-hint>Type a name and press Enter or click + to add</mat-hint>
+                </mat-form-field>
+              </div>
+            </div>
+
             <div class="upload-section">
               <input 
                 type="file" 
@@ -130,9 +171,50 @@
         <!-- Connector Tabs -->
         <mat-tab *ngFor="let connector of connectors" [label]="connector.name">
           <div class="tab-content">
+            <!-- Batch Configuration -->
+            <div class="batch-config-section">
+              <h4>Batch Configuration</h4>
+              
+              <div class="form-row">
+                <mat-form-field appearance="outline" class="full-width">
+                  <mat-label>Default Representative (Optional)</mat-label>
+                  <mat-select [(ngModel)]="selectedRepresentativeId" name="representativeId">
+                    <mat-option [value]="null">None</mat-option>
+                    <mat-option *ngFor="let rep of representatives" [value]="rep.id">
+                      {{ rep.display_name }}
+                    </mat-option>
+                  </mat-select>
+                  <mat-hint>Select a default representative for all items in this batch</mat-hint>
+                </mat-form-field>
+              </div>
+
+              <div class="form-row" *ngIf="selectedRepresentativeId === null">
+                <mat-form-field appearance="outline" class="full-width">
+                  <mat-label>Add New Representative (Optional)</mat-label>
+                  <input 
+                    matInput 
+                    [(ngModel)]="newRepresentativeName" 
+                    name="newRepresentativeName"
+                    placeholder="e.g., Vanessa Smith"
+                    (keyup.enter)="onRepresentativeNameEntered()"
+                  >
+                  <button 
+                    mat-icon-button 
+                    matSuffix 
+                    (click)="onRepresentativeNameEntered()"
+                    [disabled]="!newRepresentativeName.trim() || representativesLoading"
+                    type="button"
+                  >
+                    <mat-icon>add</mat-icon>
+                  </button>
+                  <mat-hint>Type a name and press Enter or click + to add</mat-hint>
+                </mat-form-field>
+              </div>
+            </div>
+
             <div class="connector-section">
               <div class="connector-config">
-                <h4>Configuration</h4>
+                <h4>Connector Configuration</h4>
                 <mat-form-field appearance="outline" *ngIf="connector.type === 'S3'">
                   <mat-label>Bucket</mat-label>
                   <input matInput [(ngModel)]="connectorConfig[connector.type].bucket">

@@ -46,6 +46,7 @@ export interface CreateIngestionJobRequest {
   mode: 'TRANSCRIPT_ONLY' | 'AUDIO_ONLY' | 'AUDIO_PLUS_TRANSCRIPT';
   title?: string;
   channel?: string;
+  representativeId?: string | null;
   options?: {
     analyzeImmediately?: boolean;
   };

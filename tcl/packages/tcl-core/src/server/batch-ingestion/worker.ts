@@ -223,6 +223,9 @@ async function processConnectorItem(batch: any, item: any, sourceRef: any): Prom
   const fetchResult = await connector.fetchObject(sourceRef.path || sourceRef.id, config, secrets);
 
   // Create ingestion job
+  // Get representativeId from batch config (default representative for all items)
+  const representativeId = config?.representativeId || null;
+  
   const jobId = await createIngestionJob(
     batch.org_id,
     batch.project_id || null,
@@ -230,7 +233,8 @@ async function processConnectorItem(batch: any, item: any, sourceRef: any): Prom
     batch.created_by_user_id,
     item.mode || 'AUDIO_PLUS_TRANSCRIPT',
     item.title,
-    item.channel || null
+    item.channel || null,
+    representativeId
   );
 
   // Upload file to Supabase Storage

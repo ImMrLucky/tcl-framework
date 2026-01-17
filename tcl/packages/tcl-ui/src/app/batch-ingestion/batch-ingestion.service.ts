@@ -16,6 +16,7 @@ export interface BatchIngestionConfig {
   projectId?: string;
   env?: 'sandbox' | 'production';
   templateId?: string;
+  representativeId?: string | null;
 }
 
 export interface Batch {
