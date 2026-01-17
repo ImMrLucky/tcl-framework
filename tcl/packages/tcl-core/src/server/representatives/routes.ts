@@ -21,19 +21,31 @@ export function setupRepresentativeRoutes(app: express.Application) {
     try {
       const context = await getOrgContext(req);
       
-      if (!context || context.error) {
+      if (!context || context.error || !context.userId) {
         return res.status(401).json({ error: context?.error || "Authorization required" });
       }
       
       const { orgId } = req.params;
       
-      // Verify user has access to this org
-      if (orgId !== context.orgId) {
-        return res.status(403).json({ error: "Access denied" });
-      }
-      
       if (!supabaseAdmin) {
         return res.status(503).json({ error: "Supabase not configured" });
+      }
+      
+      // Verify user has access to the requested org
+      const { data: membership, error: membershipError } = await supabaseAdmin
+        .from('org_members')
+        .select('org_id, role')
+        .eq('org_id', orgId)
+        .eq('user_id', context.userId)
+        .maybeSingle();
+      
+      if (membershipError) {
+        console.error("Error checking org membership:", membershipError);
+        return res.status(500).json({ error: membershipError.message });
+      }
+      
+      if (!membership) {
+        return res.status(403).json({ error: "Access denied: You are not a member of this organization" });
       }
       
       // Get active representatives
@@ -69,24 +81,36 @@ export function setupRepresentativeRoutes(app: express.Application) {
       try {
         const context = await getOrgContext(req);
         
-        if (!context || context.error) {
+        if (!context || context.error || !context.userId) {
           return res.status(401).json({ error: context?.error || "Authorization required" });
         }
         
         const { orgId } = req.params;
         const { displayName } = req.body;
         
-        // Verify user has access to this org
-        if (orgId !== context.orgId) {
-          return res.status(403).json({ error: "Access denied" });
+        if (!supabaseAdmin) {
+          return res.status(503).json({ error: "Supabase not configured" });
+        }
+        
+        // Verify user has access to the requested org
+        const { data: membership, error: membershipError } = await supabaseAdmin
+          .from('org_members')
+          .select('org_id, role')
+          .eq('org_id', orgId)
+          .eq('user_id', context.userId)
+          .maybeSingle();
+        
+        if (membershipError) {
+          console.error("Error checking org membership:", membershipError);
+          return res.status(500).json({ error: membershipError.message });
+        }
+        
+        if (!membership) {
+          return res.status(403).json({ error: "Access denied: You are not a member of this organization" });
         }
         
         if (!displayName || typeof displayName !== 'string' || !displayName.trim()) {
           return res.status(400).json({ error: "displayName is required and must be a non-empty string" });
-        }
-        
-        if (!supabaseAdmin) {
-          return res.status(503).json({ error: "Supabase not configured" });
         }
         
         const normalizedName = displayName.trim();
