@@ -353,5 +353,132 @@ export function setupAdminRoutes(app: express.Application) {
       res.status(403).json({ error: error.message || 'Failed to set org plan' });
     }
   });
+
+  // ============================================================================
+  // POST /api/admin/orgs/:orgId/upgrade - Upgrade any org to Enterprise (superuser only)
+  // This is the general upgrade endpoint for customer orgs
+  // ============================================================================
+  app.post('/api/admin/orgs/:orgId/upgrade', requireSuperuser, async (req, res) => {
+    try {
+      const adminContext = (req as any).adminContext;
+      const { orgId } = req.params;
+      const { planTier, planStatus, billingMode } = req.body;
+
+      if (!orgId) {
+        return res.status(400).json({ error: 'orgId is required' });
+      }
+
+      const targetTier = planTier || 'ENTERPRISE';
+      if (!['SANDBOX', 'TEAM', 'ENTERPRISE'].includes(targetTier)) {
+        return res.status(400).json({ error: 'Valid planTier is required (SANDBOX, TEAM, or ENTERPRISE)' });
+      }
+
+      if (!supabaseAdmin) {
+        return res.status(503).json({ error: 'Database not configured' });
+      }
+
+      // Get current org info
+      const { data: currentOrg, error: fetchError } = await supabaseAdmin
+        .from('organizations')
+        .select('id, name, plan_tier, plan_status, billing_mode')
+        .eq('id', orgId)
+        .single();
+
+      if (fetchError || !currentOrg) {
+        return res.status(404).json({ error: 'Organization not found' });
+      }
+
+      // Update org plan (this will trigger the entitlement update via database trigger)
+      const updateData: any = {
+        plan_tier: targetTier,
+        plan_changed_at: new Date().toISOString(),
+      };
+
+      if (planStatus && ['ACTIVE', 'PAST_DUE', 'CANCELED'].includes(planStatus)) {
+        updateData.plan_status = planStatus as PlanStatus;
+      } else if (!currentOrg.plan_status) {
+        updateData.plan_status = 'ACTIVE';
+      }
+
+      if (billingMode && ['STRIPE', 'COMPED'].includes(billingMode)) {
+        updateData.billing_mode = billingMode;
+      }
+
+      const { data: updatedOrg, error: updateError } = await supabaseAdmin
+        .from('organizations')
+        .update(updateData)
+        .eq('id', orgId)
+        .select('id, name, plan_tier, plan_status, billing_mode')
+        .single();
+
+      if (updateError) {
+        console.error('Failed to update org plan:', updateError);
+        return res.status(500).json({ error: `Failed to update org plan: ${updateError.message}` });
+      }
+
+      // Explicitly refresh entitlements (in case trigger didn't fire or needs manual refresh)
+      const { error: entitlementsError } = await supabaseAdmin.rpc('init_org_entitlements', {
+        p_org_id: orgId,
+        p_tier: targetTier
+      });
+
+      if (entitlementsError) {
+        console.warn('Warning: Failed to explicitly refresh entitlements (trigger should have handled this):', entitlementsError);
+        // Don't fail the request, as the trigger should have handled it
+      }
+
+      // Verify entitlements were updated
+      const { data: entitlements, error: entitlementsFetchError } = await supabaseAdmin
+        .from('org_entitlements')
+        .select('tier, features')
+        .eq('org_id', orgId)
+        .single();
+
+      if (entitlementsFetchError) {
+        console.warn('Warning: Could not verify entitlements after upgrade:', entitlementsFetchError);
+      } else {
+        console.log(`[Upgrade] Org ${orgId} upgraded to ${targetTier}. Entitlements:`, {
+          tier: entitlements.tier,
+          batchIngestion: entitlements.features?.batchIngestion,
+          allFeatures: entitlements.features
+        });
+      }
+
+      // Log audit
+      await logAdminAction(
+        adminContext.userId,
+        'admin.org.upgrade',
+        orgId,
+        {
+          previousTier: currentOrg.plan_tier,
+          newTier: targetTier,
+          planStatus: updatedOrg.plan_status,
+          billingMode: updatedOrg.billing_mode,
+          orgName: updatedOrg.name,
+          entitlementsVerified: !entitlementsFetchError
+        }
+      );
+
+      res.json({
+        success: true,
+        message: `Organization upgraded to ${targetTier}`,
+        org: {
+          id: updatedOrg.id,
+          name: updatedOrg.name,
+          planTier: updatedOrg.plan_tier,
+          planStatus: updatedOrg.plan_status,
+          billingMode: updatedOrg.billing_mode,
+        },
+        entitlements: entitlements ? {
+          tier: entitlements.tier,
+          batchIngestion: entitlements.features?.batchIngestion,
+          allFeatures: entitlements.features
+        } : null,
+      });
+    } catch (error: any) {
+      console.error('Error upgrading org:', error);
+      res.status(500).json({ error: error.message || 'Failed to upgrade organization' });
+    }
+  });
 }
 

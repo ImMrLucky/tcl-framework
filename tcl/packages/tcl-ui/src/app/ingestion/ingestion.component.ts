@@ -177,6 +177,12 @@ export class IngestionComponent implements OnInit, OnDestroy {
     this.loadTemplates();
     this.loadRepresentatives();
     this.hasBatchIngestion = this.featureService.hasFeature('batchIngestion');
+    
+    // Debug logging for entitlements (helpful for troubleshooting)
+    console.log('[IngestionComponent] Batch ingestion entitlement check:', {
+      hasBatchIngestion: this.hasBatchIngestion,
+      featureServiceAvailable: !!this.featureService
+    });
   }
 
   navigateToBulkIngestion() {

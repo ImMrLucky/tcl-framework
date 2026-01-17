@@ -54,6 +54,7 @@ export class AdminComponent implements OnInit, OnDestroy {
   emulationTier: 'SANDBOX' | 'TEAM' | 'ENTERPRISE' = 'SANDBOX';
   
   displayedColumns = ['name', 'planTier', 'planStatus', 'isInternalTest', 'actions'];
+  upgradeDisplayedColumns: string[] = ['name', 'planTier', 'planStatus', 'upgradeActions'];
   
   currentOrgId: string = '';
   
@@ -325,6 +326,46 @@ export class AdminComponent implements OnInit, OnDestroy {
       const snackBarRef = this.snackBar.open('Failed to update plan: ' + (error.error?.error || error.message), 'Close', {
         duration: 5000
       });
+      snackBarRef.onAction().subscribe(() => snackBarRef.dismiss());
+    } finally {
+      this.loading = false;
+    }
+  }
+
+  async upgradeOrg(org: Org, planTier: 'SANDBOX' | 'TEAM' | 'ENTERPRISE') {
+    const confirmMessage = `Are you sure you want to upgrade "${org.name}" to ${planTier}? This will automatically update all entitlements.`;
+    if (!confirm(confirmMessage)) {
+      return;
+    }
+
+    this.loading = true;
+    try {
+      const result = await this.adminService.upgradeOrg(org.id, planTier, 'ACTIVE').toPromise();
+      if (result?.success) {
+        const snackBarRef = this.snackBar.open(
+          `Organization upgraded to ${planTier}${result.entitlements ? '. Entitlements updated.' : ''}`,
+          'Close',
+          { duration: 5000 }
+        );
+        snackBarRef.onAction().subscribe(() => snackBarRef.dismiss());
+        
+        // Log entitlements info if available
+        if (result.entitlements) {
+          console.log('[Admin] Upgrade completed. Entitlements:', {
+            tier: result.entitlements.tier,
+            batchIngestion: result.entitlements.batchIngestion,
+            allFeatures: result.entitlements.allFeatures
+          });
+        }
+        
+        await this.loadAllOrgs();
+      }
+    } catch (error: any) {
+      const snackBarRef = this.snackBar.open(
+        'Failed to upgrade organization: ' + (error.error?.error || error.message),
+        'Close',
+        { duration: 5000 }
+      );
       snackBarRef.onAction().subscribe(() => snackBarRef.dismiss());
     } finally {
       this.loading = false;

@@ -105,5 +105,41 @@ export class AdminService {
       { orgId, planTier, planStatus }
     );
   }
+
+  /**
+   * Upgrade any organization to Enterprise (or other tier)
+   * This is the general upgrade endpoint for customer orgs
+   */
+  upgradeOrg(
+    orgId: string,
+    planTier: 'SANDBOX' | 'TEAM' | 'ENTERPRISE' = 'ENTERPRISE',
+    planStatus: 'ACTIVE' | 'PAST_DUE' | 'CANCELED' = 'ACTIVE',
+    billingMode?: 'STRIPE' | 'COMPED'
+  ): Observable<{
+    success: boolean;
+    message?: string;
+    org?: {
+      id: string;
+      name: string;
+      planTier: string;
+      planStatus: string;
+      billingMode?: string;
+    };
+    entitlements?: {
+      tier: string;
+      batchIngestion: boolean;
+      allFeatures: Record<string, boolean>;
+    };
+  }> {
+    return this.http.post<{
+      success: boolean;
+      message?: string;
+      org?: any;
+      entitlements?: any;
+    }>(
+      `${this.apiUrl}/api/admin/orgs/${orgId}/upgrade`,
+      { planTier, planStatus, billingMode }
+    );
+  }
 }
 

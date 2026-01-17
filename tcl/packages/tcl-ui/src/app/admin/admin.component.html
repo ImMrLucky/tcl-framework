@@ -166,6 +166,81 @@
         </mat-card>
       </div>
     </mat-tab>
+
+    <!-- Org Upgrades Tab (for any org, not just internal test) -->
+    <mat-tab label="Org Upgrades">
+      <div class="tab-content">
+        <mat-card>
+          <mat-card-header>
+            <mat-card-title>Upgrade Organizations</mat-card-title>
+            <mat-card-subtitle>Upgrade any organization to Enterprise, Team, or Sandbox tier. Entitlements are automatically updated.</mat-card-subtitle>
+          </mat-card-header>
+          <mat-card-content>
+            <div *ngIf="loadingAllOrgs" class="loading-container">
+              <mat-spinner diameter="40"></mat-spinner>
+              <p>Loading organizations...</p>
+            </div>
+
+            <div *ngIf="!loadingAllOrgs && allOrgs.length === 0" class="empty-state">
+              <p>No organizations found.</p>
+            </div>
+
+            <table mat-table [dataSource]="allOrgs" *ngIf="!loadingAllOrgs && allOrgs.length > 0" class="orgs-table">
+              <ng-container matColumnDef="name">
+                <th mat-header-cell *matHeaderCellDef>Organization Name</th>
+                <td mat-cell *matCellDef="let org">{{ org.name }}</td>
+              </ng-container>
+
+              <ng-container matColumnDef="planTier">
+                <th mat-header-cell *matHeaderCellDef>Current Tier</th>
+                <td mat-cell *matCellDef="let org">
+                  <mat-chip [color]="getPlanTierColor(org.planTier)" selected>
+                    {{ org.planTier }}
+                  </mat-chip>
+                </td>
+              </ng-container>
+
+              <ng-container matColumnDef="planStatus">
+                <th mat-header-cell *matHeaderCellDef>Status</th>
+                <td mat-cell *matCellDef="let org">{{ org.planStatus }}</td>
+              </ng-container>
+
+              <ng-container matColumnDef="upgradeActions">
+                <th mat-header-cell *matHeaderCellDef>Upgrade To</th>
+                <td mat-cell *matCellDef="let org">
+                  <div class="action-buttons">
+                    <button 
+                      mat-stroked-button 
+                      color="warn" 
+                      (click)="upgradeOrg(org, 'SANDBOX')"
+                      [disabled]="loading || org.planTier === 'SANDBOX'">
+                      Sandbox
+                    </button>
+                    <button 
+                      mat-stroked-button 
+                      color="primary" 
+                      (click)="upgradeOrg(org, 'TEAM')"
+                      [disabled]="loading || org.planTier === 'TEAM'">
+                      Team
+                    </button>
+                    <button 
+                      mat-raised-button 
+                      color="accent" 
+                      (click)="upgradeOrg(org, 'ENTERPRISE')"
+                      [disabled]="loading || org.planTier === 'ENTERPRISE'">
+                      Enterprise
+                    </button>
+                  </div>
+                </td>
+              </ng-container>
+
+              <tr mat-header-row *matHeaderRowDef="upgradeDisplayedColumns"></tr>
+              <tr mat-row *matRowDef="let row; columns: upgradeDisplayedColumns;"></tr>
+            </table>
+          </mat-card-content>
+        </mat-card>
+      </div>
+    </mat-tab>
   </mat-tab-group>
 </div>
 
