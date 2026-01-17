@@ -233,6 +233,8 @@ function buildGraphFromNodes(
   startTime: number,
   pipelineSteps: Record<string, number>
 ): GraphBuilderOutput {
+  const config = getTemplateConfig();
+  
   // Step 2: Build EvidenceNodes
   const step2Start = Date.now();
   const evidenceNodes = buildEvidenceNodes(input);
