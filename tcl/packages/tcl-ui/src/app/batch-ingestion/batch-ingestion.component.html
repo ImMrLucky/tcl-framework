@@ -195,23 +195,23 @@
                 <h4>Connector Configuration</h4>
                 <mat-form-field appearance="outline" *ngIf="connector.type === 'S3'">
                   <mat-label>Bucket</mat-label>
-                  <input matInput [(ngModel)]="connectorConfig[connector.type]?.bucket">
+                  <input matInput [(ngModel)]="connectorConfig[connector.type].bucket">
                 </mat-form-field>
                 <mat-form-field appearance="outline" *ngIf="connector.type === 'S3'">
                   <mat-label>Region</mat-label>
-                  <input matInput [(ngModel)]="connectorConfig[connector.type]?.region">
+                  <input matInput [(ngModel)]="connectorConfig[connector.type].region">
                 </mat-form-field>
                 <mat-form-field appearance="outline" *ngIf="connector.type === 'S3'">
                   <mat-label>Access Key</mat-label>
-                  <input matInput type="password" [(ngModel)]="connectorSecrets[connector.type]?.accessKey">
+                  <input matInput type="password" [(ngModel)]="connectorSecrets[connector.type].accessKey">
                 </mat-form-field>
                 <mat-form-field appearance="outline" *ngIf="connector.type === 'S3'">
                   <mat-label>Secret Key</mat-label>
-                  <input matInput type="password" [(ngModel)]="connectorSecrets[connector.type]?.secretAccessKey">
+                  <input matInput type="password" [(ngModel)]="connectorSecrets[connector.type].secretAccessKey">
                 </mat-form-field>
                 <mat-form-field appearance="outline" *ngIf="connector.type !== 'S3'">
                   <mat-label>Access Token</mat-label>
-                  <input matInput type="password" [(ngModel)]="connectorSecrets[connector.type]?.accessToken">
+                  <input matInput type="password" [(ngModel)]="connectorSecrets[connector.type].accessToken">
                 </mat-form-field>
                 
                 <button 
