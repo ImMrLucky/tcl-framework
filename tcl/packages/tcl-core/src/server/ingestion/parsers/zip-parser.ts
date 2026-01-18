@@ -10,10 +10,7 @@ import { promisify } from 'util';
 import type { CanonicalTranscript, TranscriptSource } from '../canonical-transcript.js';
 import { normalizeToCanonical } from '../canonical-transcript.js';
 import { getBatchIngestionConfig } from '../batch-config.js';
-import { parseJsonTurns } from '../../ingestion/normalizers/json-turns.js';
-import { parseCsvTurns } from '../../ingestion/normalizers/csv-turns.js';
-import { parseTxtSpeakerPrefixed } from '../../ingestion/normalizers/txt-speaker-prefixed.js';
-import { parseVttSrt } from '../../ingestion/normalizers/vtt-srt.js';
+import { normalizeFile } from '../normalizers/index.js';
 
 const openZip = promisify(yauzl.fromBuffer);
 
@@ -189,9 +186,13 @@ async function extractZipEntry(
   entry: yauzl.Entry
 ): Promise<Buffer> {
   return new Promise((resolve, reject) => {
-    zipfile.openReadStream(entry, (err, readStream) => {
+    zipfile.openReadStream(entry, (err: Error | null, readStream: NodeJS.ReadableStream | null) => {
       if (err) {
         reject(err);
+        return;
+      }
+      if (!readStream) {
+        reject(new Error('Failed to open read stream'));
         return;
       }
       
@@ -218,33 +219,32 @@ async function parseTranscriptFile(
     path_in_archive: fileName,
   };
   
-  const text = data.toString('utf-8');
-  
   try {
-    let normalized: any;
+    // Use normalizeFile to parse the transcript
+    const result = await normalizeFile(data, fileName);
     
-    switch (ext) {
-      case 'json':
-        normalized = parseJsonTurns(text);
-        break;
-      case 'jsonl':
-        // JSONL is handled separately (one line = one transcript)
-        return null; // Should not reach here for zip
-      case 'csv':
-        normalized = parseCsvTurns(text);
-        break;
-      case 'txt':
-        normalized = parseTxtSpeakerPrefixed(text);
-        break;
-      case 'vtt':
-      case 'srt':
-        normalized = parseVttSrt(text, ext);
-        break;
-      default:
-        throw new Error(`Unsupported transcript format: ${ext}`);
+    if (!result.success || !result.normalized) {
+      throw new Error(result.warnings?.[0] || 'Failed to normalize file');
     }
     
-    return normalizeToCanonical(normalized, source);
+    // Convert NormalizedConversation to CanonicalTranscript
+    const canonical: CanonicalTranscript = {
+      conversation_id: result.normalized.raw?.originalFilename || fileName.replace(/\.[^/.]+$/, ''),
+      turns: result.normalized.turns.map((turn) => ({
+        t: turn.turnIndex,
+        speaker_raw: turn.speakerLabel || turn.meta?.rawSpeaker || undefined,
+        text: turn.text,
+        start_ms: turn.startTimeMs,
+        end_ms: turn.endTimeMs,
+      })),
+      source,
+      metadata: {
+        ...result.normalized.conversation,
+        ...result.normalized.raw?.inferredValues,
+      },
+    };
+    
+    return canonical;
   } catch (error: any) {
     throw new Error(`Failed to parse ${fileName}: ${error.message}`);
   }

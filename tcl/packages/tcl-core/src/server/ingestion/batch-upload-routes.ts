@@ -218,7 +218,6 @@ export function setupBatchUploadRoutes(app: express.Application) {
               {
                 representativeId: config?.representativeId || null,
                 templateId: template_id || null,
-                channel: mode === 'TRANSCRIPT_ONLY' ? 'call' : undefined,
                 autoAnalyze: false, // Don't auto-analyze in batch upload, user can trigger later
               }
             );

@@ -20,6 +20,9 @@ export interface BatchIngestionConfig {
   
   /** JSONL parsing configuration */
   jsonl_config: JsonlConfig;
+  
+  /** Optional representative ID for batch ingestion */
+  representativeId?: string | null;
 }
 
 export interface ZipRules {

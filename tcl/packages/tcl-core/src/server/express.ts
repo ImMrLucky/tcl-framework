@@ -39,6 +39,8 @@ import { setupJiraRoutes } from "./integrations/jira-routes.js";
 import { setupBatchIngestionRoutes } from "./batch-ingestion/routes.js";
 import { setupBatchUploadRoutes } from "./ingestion/batch-upload-routes.js";
 import { setupIngestionConfigRoutes } from "./ingestion/config-routes.js";
+import { setupScheduledIngestionRoutes } from "./ingestion/scheduled-routes.js";
+import { startSchedulerWorker } from "./ingestion/scheduler-worker.js";
 import { setupConnectorRoutes } from "./connectors/routes.js";
 import { setupAnalyticsRoutes } from "./analytics/routes.js";
 import { setupExportRoutes } from "./exports/routes.js";

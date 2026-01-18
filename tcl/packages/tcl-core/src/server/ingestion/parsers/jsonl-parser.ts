@@ -77,11 +77,14 @@ export function parseJsonlBatch(
         }
         
         // Convert minimal schema to canonical
+        const conversationId = minimalFields.conversation_id ? json[minimalFields.conversation_id] : undefined;
+        const speaker = minimalFields.speaker ? json[minimalFields.speaker] : undefined;
+        
         const normalized = normalizeToCanonical(
           {
-            conversation_id: json[minimalFields.conversation_id],
+            conversation_id: conversationId || `jsonl_line_${i + 1}`,
             text: textField,
-            speaker: json[minimalFields.speaker],
+            speaker: speaker,
           },
           source
         );

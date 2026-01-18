@@ -232,7 +232,7 @@ async function executeSchedule(schedule: any): Promise<void> {
             transcripts,
             {
               templateId: schedule.template_id || null,
-              mode: schedule.mode || 'AUDIO_PLUS_TRANSCRIPT',
+              representativeId: schedule.representative_id || null,
               autoAnalyze: false,
             }
           );
