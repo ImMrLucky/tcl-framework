@@ -1,0 +1,221 @@
+<app-header pageTitle="Scheduled Ingestion"></app-header>
+
+<div class="scheduled-ingestion-container">
+  <div class="container">
+    <mat-tab-group [(selectedIndex)]="activeTab">
+      <!-- Data Sources Tab -->
+      <mat-tab label="Data Sources">
+        <div class="tab-content">
+          <div class="header-actions">
+            <h2>Data Sources</h2>
+            <button mat-raised-button color="primary" (click)="createSource()">
+              <mat-icon>add</mat-icon>
+              Add Data Source
+            </button>
+          </div>
+          
+          <mat-card *ngIf="loadingSources" class="loading-card">
+            <mat-card-content>
+              <p>Loading sources...</p>
+            </mat-card-content>
+          </mat-card>
+          
+          <mat-card *ngIf="!loadingSources">
+            <mat-card-content>
+              <table mat-table [dataSource]="sources" class="sources-table">
+                <ng-container matColumnDef="name">
+                  <th mat-header-cell *matHeaderCellDef>Name</th>
+                  <td mat-cell *matCellDef="let source">{{ source.name || source.type }}</td>
+                </ng-container>
+                
+                <ng-container matColumnDef="type">
+                  <th mat-header-cell *matHeaderCellDef>Type</th>
+                  <td mat-cell *matCellDef="let source">
+                    <mat-chip>{{ source.type }}</mat-chip>
+                  </td>
+                </ng-container>
+                
+                <ng-container matColumnDef="enabled">
+                  <th mat-header-cell *matHeaderCellDef>Status</th>
+                  <td mat-cell *matCellDef="let source">
+                    <mat-chip [color]="source.enabled ? 'primary' : 'accent'">
+                      {{ source.enabled ? 'Enabled' : 'Disabled' }}
+                    </mat-chip>
+                  </td>
+                </ng-container>
+                
+                <ng-container matColumnDef="created_at">
+                  <th mat-header-cell *matHeaderCellDef>Created</th>
+                  <td mat-cell *matCellDef="let source">{{ source.created_at | date:'short' }}</td>
+                </ng-container>
+                
+                <ng-container matColumnDef="actions">
+                  <th mat-header-cell *matHeaderCellDef>Actions</th>
+                  <td mat-cell *matCellDef="let source">
+                    <button mat-icon-button (click)="testSource(source)">
+                      <mat-icon>check_circle</mat-icon>
+                    </button>
+                    <button mat-icon-button (click)="editSource(source)">
+                      <mat-icon>edit</mat-icon>
+                    </button>
+                  </td>
+                </ng-container>
+                
+                <tr mat-header-row *matHeaderRowDef="sourceDisplayedColumns"></tr>
+                <tr mat-row *matRowDef="let row; columns: sourceDisplayedColumns;"></tr>
+              </table>
+              
+              <p *ngIf="sources.length === 0" class="empty-state">
+                No data sources configured. Click "Add Data Source" to create one.
+              </p>
+            </mat-card-content>
+          </mat-card>
+        </div>
+      </mat-tab>
+      
+      <!-- Schedules Tab -->
+      <mat-tab label="Schedules">
+        <div class="tab-content">
+          <div class="header-actions">
+            <h2>Schedules</h2>
+            <button mat-raised-button color="primary" (click)="createSchedule()">
+              <mat-icon>add</mat-icon>
+              Create Schedule
+            </button>
+          </div>
+          
+          <mat-card *ngIf="loadingSchedules" class="loading-card">
+            <mat-card-content>
+              <p>Loading schedules...</p>
+            </mat-card-content>
+          </mat-card>
+          
+          <mat-card *ngIf="!loadingSchedules">
+            <mat-card-content>
+              <table mat-table [dataSource]="schedules" class="schedules-table">
+                <ng-container matColumnDef="name">
+                  <th mat-header-cell *matHeaderCellDef>Name</th>
+                  <td mat-cell *matCellDef="let schedule">{{ schedule.name }}</td>
+                </ng-container>
+                
+                <ng-container matColumnDef="source">
+                  <th mat-header-cell *matHeaderCellDef>Source</th>
+                  <td mat-cell *matCellDef="let schedule">
+                    {{ schedule.ingest_sources?.name || schedule.ingest_sources?.type || 'Unknown' }}
+                  </td>
+                </ng-container>
+                
+                <ng-container matColumnDef="rrule">
+                  <th mat-header-cell *matHeaderCellDef>Frequency</th>
+                  <td mat-cell *matCellDef="let schedule">{{ formatRRule(schedule.rrule) }}</td>
+                </ng-container>
+                
+                <ng-container matColumnDef="next_run">
+                  <th mat-header-cell *matHeaderCellDef>Next Run</th>
+                  <td mat-cell *matCellDef="let schedule">
+                    {{ schedule.next_run_at ? (schedule.next_run_at | date:'short') : '—' }}
+                  </td>
+                </ng-container>
+                
+                <ng-container matColumnDef="status">
+                  <th mat-header-cell *matHeaderCellDef>Status</th>
+                  <td mat-cell *matCellDef="let schedule">
+                    <mat-chip [color]="schedule.enabled ? 'primary' : 'accent'">
+                      {{ schedule.enabled ? 'Enabled' : 'Disabled' }}
+                    </mat-chip>
+                  </td>
+                </ng-container>
+                
+                <ng-container matColumnDef="actions">
+                  <th mat-header-cell *matHeaderCellDef>Actions</th>
+                  <td mat-cell *matCellDef="let schedule">
+                    <button mat-icon-button (click)="toggleSchedule(schedule)">
+                      <mat-icon>{{ schedule.enabled ? 'pause' : 'play_arrow' }}</mat-icon>
+                    </button>
+                    <button mat-icon-button (click)="viewScheduleRuns(schedule)">
+                      <mat-icon>history</mat-icon>
+                    </button>
+                    <button mat-icon-button (click)="editSchedule(schedule)">
+                      <mat-icon>edit</mat-icon>
+                    </button>
+                  </td>
+                </ng-container>
+                
+                <tr mat-header-row *matHeaderRowDef="scheduleDisplayedColumns"></tr>
+                <tr mat-row *matRowDef="let row; columns: scheduleDisplayedColumns;"></tr>
+              </table>
+              
+              <p *ngIf="schedules.length === 0" class="empty-state">
+                No schedules configured. Click "Create Schedule" to create one.
+              </p>
+            </mat-card-content>
+          </mat-card>
+        </div>
+      </mat-tab>
+      
+      <!-- Schedule Runs Tab -->
+      <mat-tab label="Run History" *ngIf="selectedScheduleId">
+        <div class="tab-content">
+          <h2>Schedule Run History</h2>
+          
+          <mat-card *ngIf="loadingRuns" class="loading-card">
+            <mat-card-content>
+              <p>Loading run history...</p>
+            </mat-card-content>
+          </mat-card>
+          
+          <mat-card *ngIf="!loadingRuns">
+            <mat-card-content>
+              <table mat-table [dataSource]="scheduleRuns" class="runs-table">
+                <ng-container matColumnDef="started_at">
+                  <th mat-header-cell *matHeaderCellDef>Started</th>
+                  <td mat-cell *matCellDef="let run">{{ run.started_at | date:'short' }}</td>
+                </ng-container>
+                
+                <ng-container matColumnDef="status">
+                  <th mat-header-cell *matHeaderCellDef>Status</th>
+                  <td mat-cell *matCellDef="let run">
+                    <mat-chip [color]="getStatusColor(run.status)">{{ run.status }}</mat-chip>
+                  </td>
+                </ng-container>
+                
+                <ng-container matColumnDef="stats">
+                  <th mat-header-cell *matHeaderCellDef>Stats</th>
+                  <td mat-cell *matCellDef="let run">
+                    <span *ngIf="run.stats_json">
+                      New: {{ run.stats_json.new_files || 0 }},
+                      Parsed: {{ run.stats_json.parsed || 0 }},
+                      Failed: {{ run.stats_json.failed || 0 }}
+                    </span>
+                  </td>
+                </ng-container>
+                
+                <ng-container matColumnDef="actions">
+                  <th mat-header-cell *matHeaderCellDef>Actions</th>
+                  <td mat-cell *matCellDef="let run">
+                    <button 
+                      *ngIf="run.import_id" 
+                      mat-button 
+                      color="primary"
+                      (click)="navigateToImport(run.import_id!)">
+                      <mat-icon>visibility</mat-icon>
+                      View Import
+                    </button>
+                  </td>
+                </ng-container>
+                
+                <tr mat-header-row *matHeaderRowDef="runsDisplayedColumns"></tr>
+                <tr mat-row *matRowDef="let row; columns: runsDisplayedColumns;"></tr>
+              </table>
+              
+              <p *ngIf="scheduleRuns.length === 0" class="empty-state">
+                No run history available.
+              </p>
+            </mat-card-content>
+          </mat-card>
+        </div>
+      </mat-tab>
+    </mat-tab-group>
+  </div>
+</div>
+

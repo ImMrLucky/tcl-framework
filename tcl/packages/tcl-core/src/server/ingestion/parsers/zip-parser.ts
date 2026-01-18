@@ -5,9 +5,6 @@
  * Automatically pairs audio + transcript files by basename.
  */
 
-import { createReadStream } from 'fs';
-import { pipeline } from 'stream/promises';
-import { Readable } from 'stream';
 import * as yauzl from 'yauzl';
 import { promisify } from 'util';
 import type { CanonicalTranscript, TranscriptSource } from '../canonical-transcript.js';

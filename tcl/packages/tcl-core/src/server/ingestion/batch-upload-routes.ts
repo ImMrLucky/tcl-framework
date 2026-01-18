@@ -15,6 +15,7 @@ import { parseJsonlBatch } from './parsers/jsonl-parser.js';
 import { parseCsvBatch } from './parsers/csv-batch-parser.js';
 import { createIngestionJob } from '../ingest/jobs.js';
 import { enqueueJob } from '../ingest/worker.js';
+import { createConversationsFromCanonicalBatch } from './canonical-to-conversation.js';
 
 // Configure multer for batch uploads
 const batchUpload = multer({
@@ -204,17 +205,60 @@ export function setupBatchUploadRoutes(app: express.Application) {
         // Process parsed transcripts (create conversations and optionally evaluations)
         let parsedCount = 0;
         let failedCount = 0;
+        const conversationResults: Array<{ conversation_id: string; source_name: string; evaluation_id?: string }> = [];
 
-        for (const { transcript, sourceName } of allTranscripts) {
+        if (allTranscripts.length > 0) {
           try {
-            // Create conversation from canonical transcript
-            // TODO: Implement conversation creation from canonical transcript
-            // For now, we'll need to integrate with existing ingestion pipeline
-            
-            parsedCount++;
+            const results = await createConversationsFromCanonicalBatch(
+              context.orgId,
+              context.projectId || '',
+              context.env || 'sandbox',
+              context.userId,
+              allTranscripts.map(t => t.transcript),
+              {
+                representativeId: config?.representativeId || null,
+                templateId: template_id || null,
+                channel: mode === 'TRANSCRIPT_ONLY' ? 'call' : undefined,
+                autoAnalyze: false, // Don't auto-analyze in batch upload, user can trigger later
+              }
+            );
+
+            // Update import items with conversation IDs
+            for (let i = 0; i < results.length; i++) {
+              const result = results[i];
+              const sourceName = allTranscripts[i]?.sourceName || 'unknown';
+
+              if (result.conversation_id) {
+                parsedCount++;
+                conversationResults.push({
+                  conversation_id: result.conversation_id,
+                  source_name: sourceName,
+                  evaluation_id: result.evaluation_id,
+                });
+
+                // Update import item with conversation ID
+                const importItem = importItems.find(item => 
+                  item.source_name === sourceName || 
+                  item.source_name.includes(sourceName)
+                );
+                if (importItem) {
+                  await supabaseAdmin
+                    .from('ingest_import_items')
+                    .update({
+                      conversation_id: result.conversation_id,
+                      evaluation_id: result.evaluation_id || null,
+                      status: result.evaluation_id ? 'ANALYZED' : 'PARSED',
+                    })
+                    .eq('import_id', importRecord.id)
+                    .eq('source_name', importItem.source_name);
+                }
+              } else {
+                failedCount++;
+              }
+            }
           } catch (error: any) {
-            failedCount++;
-            console.error(`Failed to process transcript from ${sourceName}:`, error);
+            console.error('Failed to create conversations from batch:', error);
+            failedCount += allTranscripts.length;
           }
         }
 

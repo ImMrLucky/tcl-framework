@@ -154,6 +154,16 @@ export const routes: Routes = [
     loadComponent: () => import('./batch-ingestion/batch-ingestion.component').then(m => m.BatchIngestionComponent),
     canActivate: [AuthGuard]
   },
+  {
+    path: 'bulk-ingest/import/:importId',
+    loadComponent: () => import('./batch-ingestion/batch-import-results.component').then(m => m.BatchImportResultsComponent),
+    canActivate: [AuthGuard]
+  },
+  {
+    path: 'bulk-ingest/scheduled',
+    loadComponent: () => import('./batch-ingestion/scheduled-ingestion.component').then(m => m.ScheduledIngestionComponent),
+    canActivate: [AuthGuard]
+  },
   
   // Default route
   {

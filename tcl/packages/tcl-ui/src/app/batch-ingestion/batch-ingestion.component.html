@@ -126,15 +126,64 @@
             </div>
 
             <div class="upload-section">
+              <!-- Accepted File Types Display -->
+              <div class="accepted-types-info" *ngIf="!loadingConfig && acceptedExtensions.length > 0">
+                <mat-icon>info</mat-icon>
+                <span><strong>Accepted file types:</strong> {{ acceptedExtensions.map(ext => '.' + ext).join(', ') }}</span>
+                <span class="size-limit">Max size: {{ maxUploadSizeMB }}MB per file</span>
+              </div>
+              
+              <!-- What's Supported Panel -->
+              <mat-expansion-panel class="support-info-panel">
+                <mat-expansion-panel-header>
+                  <mat-panel-title>
+                    <mat-icon>help_outline</mat-icon>
+                    What's supported?
+                  </mat-panel-title>
+                </mat-expansion-panel-header>
+                <div class="support-content">
+                  <h4>File Types</h4>
+                  <ul>
+                    <li><strong>Archives:</strong> .zip (recommended)</li>
+                    <li><strong>Text formats:</strong> .txt, .json, .jsonl, .csv</li>
+                    <li><strong>Subtitle formats:</strong> .vtt, .srt</li>
+                    <li><strong>Audio formats:</strong> .mp3, .wav, .m4a, .flac, .ogg, .opus</li>
+                  </ul>
+                  
+                  <h4>CSV Contracts</h4>
+                  <p><strong>Turn-Level CSV (Recommended):</strong></p>
+                  <ul>
+                    <li>Required columns: conversation_id, turn_index, text</li>
+                    <li>Optional columns: speaker, timestamp, channel</li>
+                  </ul>
+                  
+                  <h4>JSONL Format</h4>
+                  <p>Each line is a JSON object. Supports:</p>
+                  <ul>
+                    <li>Canonical schema (turns array with speaker_raw, text)</li>
+                    <li>Minimal schema (text field with optional speaker, conversation_id)</li>
+                  </ul>
+                  
+                  <h4>ZIP Files</h4>
+                  <p>ZIP files can contain:</p>
+                  <ul>
+                    <li>Transcripts: .txt, .json, .jsonl, .vtt, .srt</li>
+                    <li>Audio: .wav, .mp3, .flac, .m4a, .ogg, .opus</li>
+                    <li>Metadata: .csv, .json</li>
+                  </ul>
+                  <p>Audio and transcript files are automatically paired by basename (e.g., call_123.wav pairs with call_123.txt).</p>
+                </div>
+              </mat-expansion-panel>
+              
               <input 
                 type="file" 
                 #fileInput 
                 multiple 
                 (change)="onFileSelected($event)"
-                accept=".mp3,.wav,.m4a,.txt,.json"
+                [accept]="acceptedExtensions.map(ext => '.' + ext).join(',')"
                 style="display: none">
               
-              <button mat-raised-button color="primary" (click)="fileInput.click()">
+              <button mat-raised-button color="primary" (click)="fileInput.click()" [disabled]="loadingConfig">
                 <mat-icon>upload_file</mat-icon>
                 Select Files
               </button>
@@ -144,13 +193,16 @@
                 <div *ngFor="let file of selectedFiles; let i = index" class="file-item">
                   <mat-icon>insert_drive_file</mat-icon>
                   <span>{{ file.name }} ({{ formatFileSize(file.size) }})</span>
+                  <mat-icon *ngIf="!acceptedExtensions.includes(getFileExtension(file.name))" 
+                            class="warning-icon" 
+                            matTooltip="File type may not be supported">warning</mat-icon>
                   <button mat-icon-button (click)="removeFile(i)">
                     <mat-icon>close</mat-icon>
                   </button>
                 </div>
                 <button mat-raised-button color="primary" (click)="createBatchFromUpload()">
-                  <mat-icon>add</mat-icon>
-                  Create Batch
+                  <mat-icon>cloud_upload</mat-icon>
+                  Upload & Parse Batch
                 </button>
               </div>
             </div>

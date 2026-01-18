@@ -1,0 +1,91 @@
+.batch-import-results-container {
+  padding: 24px;
+  
+  .container {
+    max-width: 1200px;
+    margin: 0 auto;
+  }
+}
+
+.loading-card {
+  margin-bottom: 24px;
+  
+  .loading-spinner {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 16px;
+    padding: 40px;
+  }
+}
+
+.summary-card {
+  margin-bottom: 24px;
+  
+  .summary-stats {
+    display: flex;
+    gap: 32px;
+    margin-bottom: 16px;
+    flex-wrap: wrap;
+    
+    .stat-item {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      
+      .stat-label {
+        font-size: 0.875rem;
+        color: #666;
+      }
+      
+      .stat-value {
+        font-size: 1.5rem;
+        font-weight: 600;
+        
+        &.success {
+          color: #4caf50;
+        }
+        
+        &.error {
+          color: #f44336;
+        }
+      }
+    }
+  }
+  
+  .progress-bar {
+    height: 8px;
+    border-radius: 4px;
+  }
+}
+
+.items-card {
+  .filters-section {
+    margin-bottom: 16px;
+    
+    mat-form-field {
+      width: 200px;
+    }
+  }
+  
+  .items-table {
+    width: 100%;
+    
+    .file-name-cell {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    
+    .error-text {
+      color: #f44336;
+      font-size: 0.875rem;
+    }
+    
+    .no-link {
+      color: #999;
+      font-style: italic;
+    }
+  }
+}
+

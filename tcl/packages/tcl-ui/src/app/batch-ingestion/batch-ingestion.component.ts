@@ -19,6 +19,7 @@ import { MatDialogModule, MatDialog } from '@angular/material/dialog';
 import { AppHeaderComponent } from '../shared/app-header.component';
 import { AddRepresentativeDialogComponent } from '../shared/add-representative-dialog.component';
 import { BatchIngestionService, Batch, BatchItem } from './batch-ingestion.service';
+import { BatchUploadService } from './batch-upload.service';
 import { EntitlementsService } from '../entitlements.service';
 import { MemberService } from '../member.service';
 import { AuthService } from '../auth.service';
@@ -47,6 +48,8 @@ import { firstValueFrom } from 'rxjs';
     MatInputModule,
     MatSelectModule,
     MatDialogModule,
+    MatExpansionModule,
+    MatTooltipModule,
     AppHeaderComponent,
   ],
   templateUrl: './batch-ingestion.component.html',
@@ -119,6 +122,7 @@ export class BatchIngestionComponent implements OnInit, OnDestroy {
     }
     
     this.loadRepresentatives();
+    this.loadIngestionConfig();
     
     // Check if batch ID is in route
     this.route.params.subscribe(params => {

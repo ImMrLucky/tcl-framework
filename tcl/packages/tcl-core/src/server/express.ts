@@ -37,6 +37,8 @@ import { setupCasesRoutes } from "./cases/routes.js";
 import { setupWebhooksRoutes } from "./integrations/webhooks-routes.js";
 import { setupJiraRoutes } from "./integrations/jira-routes.js";
 import { setupBatchIngestionRoutes } from "./batch-ingestion/routes.js";
+import { setupBatchUploadRoutes } from "./ingestion/batch-upload-routes.js";
+import { setupIngestionConfigRoutes } from "./ingestion/config-routes.js";
 import { setupConnectorRoutes } from "./connectors/routes.js";
 import { setupAnalyticsRoutes } from "./analytics/routes.js";
 import { setupExportRoutes } from "./exports/routes.js";
@@ -3566,6 +3568,21 @@ console.log("Registering batch ingestion routes...");
 setupBatchIngestionRoutes(app);
 console.log("Batch ingestion routes registered successfully");
 
+// Setup batch upload routes (new batch file upload API)
+console.log("Registering batch upload routes...");
+setupBatchUploadRoutes(app);
+console.log("Batch upload routes registered successfully");
+
+// Setup ingestion configuration routes
+console.log("Registering ingestion config routes...");
+setupIngestionConfigRoutes(app);
+console.log("Ingestion config routes registered successfully");
+
+// Setup scheduled ingestion routes
+console.log("Registering scheduled ingestion routes...");
+setupScheduledIngestionRoutes(app);
+console.log("Scheduled ingestion routes registered successfully");
+
 // Setup connector routes
 console.log("Registering connector routes...");
 setupConnectorRoutes(app);
@@ -3723,6 +3740,14 @@ if (spectralUrl) {
 
 // Start server with error handling
 try {
+  // Start scheduler worker for scheduled ingestion
+  try {
+    startSchedulerWorker();
+    console.log('✅ Scheduled ingestion worker started');
+  } catch (error: any) {
+    console.error('❌ Failed to start scheduler worker:', error);
+  }
+
   const server = app.listen(port, '0.0.0.0', () => {
     console.log(`✅ TCL-Core listening on ${port}`);
     console.log(`Health check available at http://0.0.0.0:${port}/health`);
