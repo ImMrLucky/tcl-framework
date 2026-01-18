@@ -16,6 +16,9 @@ import { MatFormFieldModule } from '@angular/material/form-field';
 import { MatInputModule } from '@angular/material/input';
 import { MatSelectModule } from '@angular/material/select';
 import { MatDialogModule, MatDialog } from '@angular/material/dialog';
+import { MatExpansionModule } from '@angular/material/expansion';
+import { MatTooltipModule } from '@angular/material/tooltip';
+import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
 import { AppHeaderComponent } from '../shared/app-header.component';
 import { AddRepresentativeDialogComponent } from '../shared/add-representative-dialog.component';
 import { BatchIngestionService, Batch, BatchItem } from './batch-ingestion.service';
@@ -61,6 +64,12 @@ export class BatchIngestionComponent implements OnInit, OnDestroy {
   
   // Upload tab
   selectedFiles: File[] = [];
+  
+  // Batch upload configuration
+  ingestionConfig: any = null;
+  acceptedExtensions: string[] = [];
+  maxUploadSizeMB: number = 500;
+  loadingConfig = false;
   
   // Connector tabs
   connectors = [
@@ -156,26 +165,40 @@ export class BatchIngestionComponent implements OnInit, OnDestroy {
       return;
     }
     
+    // Validate files
+    const invalidFiles: string[] = [];
+    for (const file of this.selectedFiles) {
+      const ext = this.getFileExtension(file.name);
+      if (this.acceptedExtensions.length > 0 && !this.acceptedExtensions.includes(ext)) {
+        invalidFiles.push(file.name);
+      }
+      if (file.size > this.maxUploadSizeMB * 1024 * 1024) {
+        invalidFiles.push(`${file.name} (exceeds ${this.maxUploadSizeMB}MB limit)`);
+      }
+    }
+    
+    if (invalidFiles.length > 0) {
+      this.snackBar.open(`Invalid files: ${invalidFiles.join(', ')}`, 'Close', { duration: 5000 });
+      return;
+    }
+    
     try {
-      const items = this.selectedFiles.map(file => ({
-        title: file.name,
-        mode: 'AUDIO_PLUS_TRANSCRIPT' as const,
-        sourceRef: {
-          name: file.name,
-          size: file.size,
-          type: file.type,
-        },
-      }));
+      // Use new batch upload API
+      const response = await this.batchUploadService.uploadBatch(
+        this.selectedFiles,
+        {
+          representativeId: this.selectedRepresentativeId,
+          mode: 'AUDIO_PLUS_TRANSCRIPT',
+        }
+      ).toPromise();
       
-      const response = await this.batchService.createBatch('UPLOAD', items).toPromise();
-      
-      if (response?.success && response.batch) {
-        this.currentBatch = response.batch;
-        this.router.navigate(['/bulk-ingest', response.batch.id]);
-        this.snackBar.open('Batch created successfully', 'Close', { duration: 3000 });
+      if (response) {
+        this.snackBar.open(`Batch uploaded: ${response.counts.parsed_transcripts} transcripts parsed`, 'Close', { duration: 3000 });
+        // Navigate to import results page
+        this.router.navigate(['/bulk-ingest/import', response.import_id]);
       }
     } catch (error: any) {
-      this.snackBar.open('Failed to create batch: ' + (error.error?.error || error.message), 'Close', {
+      this.snackBar.open('Failed to upload batch: ' + (error.error?.error || error.message), 'Close', {
         duration: 5000
       });
     }
