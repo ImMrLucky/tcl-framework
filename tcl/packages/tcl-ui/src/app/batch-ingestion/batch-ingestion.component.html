@@ -10,7 +10,7 @@
           Batch #{{ currentBatch.id.substring(0, 8) }}
         </mat-card-title>
         <mat-card-subtitle>
-          Status: <mat-chip [color]="getStatusColor(currentBatch.status)">{{ currentBatch.status }}</mat-chip>
+          Status: <mat-chip [color]="getStatusColor(currentBatch.status) || 'accent'">{{ currentBatch.status }}</mat-chip>
         </mat-card-subtitle>
       </mat-card-header>
       <mat-card-content>
@@ -18,7 +18,7 @@
           <div class="progress-info">
             <span>Progress: {{ getProgressPercentage(currentBatch) }}%</span>
             <span *ngIf="currentBatch.progress_json">
-              ({{ currentBatch.progress_json.complete }} / {{ currentBatch.progress_json.total }} complete)
+              ({{ (currentBatch.progress_json as any)?.complete || 0 }} / {{ (currentBatch.progress_json as any)?.total || 0 }} complete)
             </span>
           </div>
           <mat-progress-bar 
@@ -26,10 +26,10 @@
             [value]="getProgressPercentage(currentBatch)">
           </mat-progress-bar>
           <div class="progress-details" *ngIf="currentBatch.progress_json">
-            <span>Queued: {{ currentBatch.progress_json.queued }}</span>
-            <span>Running: {{ currentBatch.progress_json.running }}</span>
-            <span>Complete: {{ currentBatch.progress_json.complete }}</span>
-            <span>Failed: {{ currentBatch.progress_json.failed }}</span>
+            <span>Queued: {{ (currentBatch.progress_json as any)?.queued || 0 }}</span>
+            <span>Running: {{ (currentBatch.progress_json as any)?.running || 0 }}</span>
+            <span>Complete: {{ (currentBatch.progress_json as any)?.complete || 0 }}</span>
+            <span>Failed: {{ (currentBatch.progress_json as any)?.failed || 0 }}</span>
           </div>
         </div>
         
@@ -69,7 +69,7 @@
           <ng-container matColumnDef="status">
             <th mat-header-cell *matHeaderCellDef>Status</th>
             <td mat-cell *matCellDef="let item">
-              <mat-chip [color]="getStatusColor(item.status)">{{ item.status }}</mat-chip>
+              <mat-chip [color]="getStatusColor(item.status) || 'accent'">{{ item.status }}</mat-chip>
             </td>
           </ng-container>
 
@@ -77,8 +77,8 @@
             <th mat-header-cell *matHeaderCellDef>Error</th>
             <td mat-cell *matCellDef="let item">
               <span *ngIf="item.error_message" class="error-message">{{ item.error_message }}</span>
-              <span *ngIf="item.retry_count && item.retry_count > 0" class="retry-info">
-                (Retry {{ item.retry_count }})
+              <span *ngIf="(item as any).retry_count && (item as any).retry_count > 0" class="retry-info">
+                (Retry {{ (item as any).retry_count }})
               </span>
             </td>
           </ng-container>
@@ -127,9 +127,9 @@
 
             <div class="upload-section">
               <!-- Accepted File Types Display -->
-              <div class="accepted-types-info" *ngIf="!loadingConfig && acceptedExtensions.length > 0">
+              <div class="accepted-types-info" *ngIf="!loadingConfig && acceptedExtensions && acceptedExtensions.length > 0">
                 <mat-icon>info</mat-icon>
-                <span><strong>Accepted file types:</strong> {{ acceptedExtensions.map(ext => '.' + ext).join(', ') }}</span>
+                <span><strong>Accepted file types:</strong> {{ acceptedExtensions.map((ext: string) => '.' + ext).join(', ') }}</span>
                 <span class="size-limit">Max size: {{ maxUploadSizeMB }}MB per file</span>
               </div>
               
@@ -180,7 +180,7 @@
                 #fileInput 
                 multiple 
                 (change)="onFileSelected($event)"
-                [accept]="acceptedExtensions.map(ext => '.' + ext).join(',')"
+                [accept]="acceptedExtensions && acceptedExtensions.length > 0 ? (acceptedExtensions.map((ext: string) => '.' + ext).join(',')) : ''"
                 style="display: none">
               
               <button mat-raised-button color="primary" (click)="fileInput.click()" [disabled]="loadingConfig">
@@ -193,7 +193,7 @@
                 <div *ngFor="let file of selectedFiles; let i = index" class="file-item">
                   <mat-icon>insert_drive_file</mat-icon>
                   <span>{{ file.name }} ({{ formatFileSize(file.size) }})</span>
-                  <mat-icon *ngIf="!acceptedExtensions.includes(getFileExtension(file.name))" 
+                  <mat-icon *ngIf="acceptedExtensions.length > 0 && !acceptedExtensions.includes(getFileExtension(file.name))" 
                             class="warning-icon" 
                             matTooltip="File type may not be supported">warning</mat-icon>
                   <button mat-icon-button (click)="removeFile(i)">
@@ -247,23 +247,23 @@
                 <h4>Connector Configuration</h4>
                 <mat-form-field appearance="outline" *ngIf="connector.type === 'S3'">
                   <mat-label>Bucket</mat-label>
-                  <input matInput [(ngModel)]="connectorConfig[connector.type].bucket">
+                  <input matInput [(ngModel)]="connectorConfig[connector.type]?.bucket">
                 </mat-form-field>
                 <mat-form-field appearance="outline" *ngIf="connector.type === 'S3'">
                   <mat-label>Region</mat-label>
-                  <input matInput [(ngModel)]="connectorConfig[connector.type].region">
+                  <input matInput [(ngModel)]="connectorConfig[connector.type]?.region">
                 </mat-form-field>
                 <mat-form-field appearance="outline" *ngIf="connector.type === 'S3'">
                   <mat-label>Access Key</mat-label>
-                  <input matInput type="password" [(ngModel)]="connectorSecrets[connector.type].accessKey">
+                  <input matInput type="password" [(ngModel)]="connectorSecrets[connector.type]?.accessKey">
                 </mat-form-field>
                 <mat-form-field appearance="outline" *ngIf="connector.type === 'S3'">
                   <mat-label>Secret Key</mat-label>
-                  <input matInput type="password" [(ngModel)]="connectorSecrets[connector.type].secretAccessKey">
+                  <input matInput type="password" [(ngModel)]="connectorSecrets[connector.type]?.secretAccessKey">
                 </mat-form-field>
                 <mat-form-field appearance="outline" *ngIf="connector.type !== 'S3'">
                   <mat-label>Access Token</mat-label>
-                  <input matInput type="password" [(ngModel)]="connectorSecrets[connector.type].accessToken">
+                  <input matInput type="password" [(ngModel)]="connectorSecrets[connector.type]?.accessToken">
                 </mat-form-field>
                 
                 <button 
@@ -328,7 +328,9 @@
                   <ng-container matColumnDef="modified">
                     <th mat-header-cell *matHeaderCellDef>Modified</th>
                     <td mat-cell *matCellDef="let object">
-                      {{ object.modifiedAt ? (object.modifiedAt | date:'short') : 'N/A' }}
+                      <span *ngIf="object.modifiedAt">{{ object.modifiedAt | date:'short' }}</span>
+                      <span *ngIf="!object.modifiedAt && (object as any).modified">{{ (object as any).modified | date:'short' }}</span>
+                      <span *ngIf="!object.modifiedAt && !(object as any).modified">N/A</span>
                     </td>
                   </ng-container>
 

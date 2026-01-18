@@ -18,7 +18,6 @@ import { MatSelectModule } from '@angular/material/select';
 import { MatDialogModule, MatDialog } from '@angular/material/dialog';
 import { MatExpansionModule } from '@angular/material/expansion';
 import { MatTooltipModule } from '@angular/material/tooltip';
-import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
 import { AppHeaderComponent } from '../shared/app-header.component';
 import { AddRepresentativeDialogComponent } from '../shared/add-representative-dialog.component';
 import { BatchIngestionService, Batch, BatchItem } from './batch-ingestion.service';
@@ -111,6 +110,7 @@ export class BatchIngestionComponent implements OnInit, OnDestroy {
   
   constructor(
     private batchService: BatchIngestionService,
+    private batchUploadService: BatchUploadService,
     private entitlementsService: EntitlementsService,
     private memberService: MemberService,
     private authService: AuthService,
@@ -408,7 +408,7 @@ export class BatchIngestionComponent implements OnInit, OnDestroy {
     return Math.round(((progress.complete + progress.failed) / progress.total) * 100);
   }
   
-  getStatusColor(status: string): string {
+  getStatusColor(status: string): 'primary' | 'accent' | 'warn' | '' {
     switch (status) {
       case 'COMPLETE':
         return 'primary';
@@ -504,6 +504,30 @@ export class BatchIngestionComponent implements OnInit, OnDestroy {
         }
       }
     });
+  }
+
+  async loadIngestionConfig() {
+    this.loadingConfig = true;
+    try {
+      const config = await this.batchUploadService.getConfig().toPromise();
+      if (config) {
+        this.ingestionConfig = config;
+        this.acceptedExtensions = config.accepted_extensions || [];
+        this.maxUploadSizeMB = config.max_upload_size_mb || 500;
+      }
+    } catch (error: any) {
+      console.error('Failed to load ingestion config:', error);
+      // Use defaults
+      this.acceptedExtensions = ['zip', 'jsonl', 'csv', 'txt', 'json', 'vtt', 'srt', 'mp3', 'wav', 'm4a'];
+      this.maxUploadSizeMB = 500;
+    } finally {
+      this.loadingConfig = false;
+    }
+  }
+  
+  getFileExtension(fileName: string): string {
+    const parts = fileName.split('.');
+    return parts.length > 1 ? parts[parts.length - 1].toLowerCase() : '';
   }
 }
 
