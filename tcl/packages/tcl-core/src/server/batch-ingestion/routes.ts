@@ -112,18 +112,38 @@ export function setupBatchIngestionRoutes(app: express.Application) {
   );
 
   // ============================================================================
-  // GET /api/ingest/batch/scheduled - Redirect/info for scheduled ingestion
+  // GET /api/ingest/batch/scheduled - Info endpoint for scheduled ingestion
   // ============================================================================
   app.get('/api/ingest/batch/scheduled', async (req, res) => {
-    return res.status(404).json({ 
-      error: 'Batch not found',
-      message: 'Scheduled ingestion endpoints are available at /api/ingest/sources and /api/ingest/schedules',
-      endpoints: {
-        sources: '/api/ingest/sources',
-        schedules: '/api/ingest/schedules',
-        scheduleRuns: '/api/ingest/schedules/:id/runs'
+    try {
+      const context = await getOrgContext(req);
+      
+      if (!context || context.error || !context.orgId) {
+        return res.status(401).json({ error: context?.error || 'Authorization required' });
       }
-    });
+
+      // Return information about scheduled ingestion endpoints
+      res.json({ 
+        message: 'Scheduled ingestion is available through the following endpoints',
+        endpoints: {
+          sources: {
+            list: 'GET /api/ingest/sources',
+            create: 'POST /api/ingest/sources',
+            test: 'POST /api/ingest/sources/:id/test'
+          },
+          schedules: {
+            list: 'GET /api/ingest/schedules',
+            create: 'POST /api/ingest/schedules',
+            update: 'PATCH /api/ingest/schedules/:id',
+            runs: 'GET /api/ingest/schedules/:id/runs'
+          }
+        },
+        documentation: 'See /api/ingest/sources and /api/ingest/schedules for scheduled ingestion management'
+      });
+    } catch (error: any) {
+      console.error('Get scheduled info error:', error);
+      res.status(500).json({ error: error.message || 'Unknown error' });
+    }
   });
 
   // GET /api/ingest/batch/:id - Get batch details
