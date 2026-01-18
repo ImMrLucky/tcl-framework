@@ -18,7 +18,7 @@
           <div class="progress-info">
             <span>Progress: {{ getProgressPercentage(currentBatch) }}%</span>
             <span *ngIf="currentBatch.progress_json">
-              ({{ (currentBatch.progress_json as any)?.complete || 0 }} / {{ (currentBatch.progress_json as any)?.total || 0 }} complete)
+              ({{ getProgressComplete(currentBatch) }} / {{ getProgressTotal(currentBatch) }} complete)
             </span>
           </div>
           <mat-progress-bar 
@@ -26,10 +26,10 @@
             [value]="getProgressPercentage(currentBatch)">
           </mat-progress-bar>
           <div class="progress-details" *ngIf="currentBatch.progress_json">
-            <span>Queued: {{ (currentBatch.progress_json as any)?.queued || 0 }}</span>
-            <span>Running: {{ (currentBatch.progress_json as any)?.running || 0 }}</span>
-            <span>Complete: {{ (currentBatch.progress_json as any)?.complete || 0 }}</span>
-            <span>Failed: {{ (currentBatch.progress_json as any)?.failed || 0 }}</span>
+            <span>Queued: {{ getProgressQueued(currentBatch) }}</span>
+            <span>Running: {{ getProgressRunning(currentBatch) }}</span>
+            <span>Complete: {{ getProgressComplete(currentBatch) }}</span>
+            <span>Failed: {{ getProgressFailed(currentBatch) }}</span>
           </div>
         </div>
         

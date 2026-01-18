@@ -428,6 +428,31 @@ export class BatchIngestionComponent implements OnInit, OnDestroy {
     return Math.round(((progress.complete + progress.failed) / progress.total) * 100);
   }
   
+  getProgressComplete(batch: Batch | null): number {
+    if (!batch || !batch.progress_json) return 0;
+    return (batch.progress_json as any)?.complete || 0;
+  }
+  
+  getProgressTotal(batch: Batch | null): number {
+    if (!batch || !batch.progress_json) return 0;
+    return (batch.progress_json as any)?.total || 0;
+  }
+  
+  getProgressQueued(batch: Batch | null): number {
+    if (!batch || !batch.progress_json) return 0;
+    return (batch.progress_json as any)?.queued || 0;
+  }
+  
+  getProgressRunning(batch: Batch | null): number {
+    if (!batch || !batch.progress_json) return 0;
+    return (batch.progress_json as any)?.running || 0;
+  }
+  
+  getProgressFailed(batch: Batch | null): number {
+    if (!batch || !batch.progress_json) return 0;
+    return (batch.progress_json as any)?.failed || 0;
+  }
+  
   getStatusColor(status: string): 'primary' | 'accent' | 'warn' | '' {
     switch (status) {
       case 'COMPLETE':
