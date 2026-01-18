@@ -118,10 +118,19 @@ TCL helps organizations:
 - **`ingestion_batch_items`**: Individual items in a batch
 - **`ingest_imports`**: Batch upload imports (ZIP, JSONL, CSV)
 - **`ingest_import_items`**: Per-file results from batch imports
-- **`ingest_sources`**: Data sources for scheduled ingestion (S3, Dropbox, etc.)
-- **`ingest_schedules`**: Scheduled ingestion jobs with recurrence rules
+- **`ingest_sources`**: Data sources for scheduled ingestion (S3, Dropbox, GDrive, GCS, Azure Blob, SFTP, Manifest URL)
+  - Stores source configuration in `config_json` (credentials, bucket, path, etc.)
+  - Supports connection testing
+- **`ingest_schedules`**: Scheduled ingestion jobs with recurrence rules (RRULE)
+  - Links to `ingest_sources`
+  - Supports template and representative assignment
+  - Tracks `next_run_at` for execution timing
 - **`ingest_schedule_runs`**: Execution history for schedules
+  - Stores stats (new files, parsed, failed)
+  - Links to `ingest_imports` for detailed results
 - **`ingest_objects`**: Deduplication tracking for processed objects
+  - Tracks object keys, ETags, hashes per source
+  - Prevents reprocessing of already-ingested files
 
 #### Integrations
 - **`enterprise_integrations`**: Integration configurations (Jira, Webhooks)
@@ -156,8 +165,8 @@ server/
 │   └── storage-supabase.ts # Storage utilities
 ├── ingestion/             # Batch ingestion system
 │   ├── batch-upload-routes.ts    # Batch file upload API
-│   ├── scheduled-routes.ts       # Scheduled ingestion API
-│   ├── scheduler-worker.ts       # Background scheduler
+│   ├── scheduled-routes.ts       # Scheduled ingestion API (sources & schedules CRUD)
+│   ├── scheduler-worker.ts       # Background scheduler (executes schedules)
 │   ├── canonical-transcript.ts   # Canonical format
 │   ├── canonical-to-conversation.ts # Conversion logic
 │   ├── batch-config.ts           # Configuration
@@ -194,7 +203,8 @@ server/
 #### 1. **Ingestion Pipeline**
 - **Single File**: `/api/ingest` - Upload audio/transcript, normalize, create conversation
 - **Batch Upload**: `/api/ingest/batch/upload` - Upload ZIP/JSONL/CSV, parse, create conversations
-- **Scheduled**: Background worker polls schedules, downloads from sources, processes
+- **Manual Connector Batch**: Browse S3/Dropbox/GDrive, select files, create batch immediately
+- **Scheduled**: Background worker polls schedules, downloads from sources, processes automatically
 
 #### 2. **Analysis Pipeline**
 - **Graph Building**: Extracts claims, builds semantic graph, identifies contradictions
@@ -230,9 +240,12 @@ app/
 ├── ingestion/                     # Single file ingestion page
 ├── batch-ingestion/               # Batch ingestion UI
 │   ├── batch-ingestion.component.ts
+│   ├── batch-ingestion.service.ts
 │   ├── batch-upload.service.ts
 │   ├── batch-import-results.component.ts
-│   └── scheduled-ingestion.component.ts
+│   ├── scheduled-ingestion.component.ts
+│   ├── create-source-dialog.component.ts
+│   └── create-schedule-dialog.component.ts
 ├── evaluations/                   # Evaluations list and detail
 ├── issues/                        # Issues list and detail
 ├── cases/                         # Cases list and detail
@@ -356,8 +369,17 @@ app/
 
 ### 1. Conversation Ingestion
 - **Single Upload**: Audio files (MP3, WAV, M4A) or transcripts (TXT, JSON, VTT, SRT)
-- **Batch Upload**: ZIP files, JSONL, CSV with automatic parsing
-- **Scheduled Ingestion**: Automatic ingestion from S3, Dropbox, Google Drive
+- **Batch Upload**: ZIP files, JSONL, CSV with automatic parsing and per-file status tracking
+- **Manual Connector Batch**: 
+  - Browse S3, Dropbox, Google Drive with file browser
+  - Test connections before browsing
+  - Select files and create batch immediately
+  - Real-time progress tracking
+- **Scheduled Ingestion**: 
+  - Configure data sources (S3, Dropbox, GDrive, GCS, Azure Blob, SFTP, Manifest URL)
+  - Create recurring schedules (hourly/daily/weekly/custom RRULE)
+  - Automatic file discovery and deduplication
+  - Execution history with detailed stats
 - **Transcription**: Audio files transcribed using Whisper.cpp + VAD
 
 ### 2. Analysis Engine
@@ -404,8 +426,12 @@ app/
 
 ### 8. Batch Ingestion
 - **File Upload**: ZIP, JSONL, CSV with format parsing
-- **Connector Browsers**: Browse S3, Dropbox, Google Drive
-- **Scheduled Ingestion**: Recurring jobs (hourly/daily/weekly)
+- **Connector Browsers**: Browse S3, Dropbox, Google Drive with file selection
+- **Manual Batch Creation**: Select files from connectors, create batch immediately
+- **Scheduled Ingestion**: Recurring jobs (hourly/daily/weekly/custom RRULE)
+  - **Data Sources**: Configure S3, Dropbox, Google Drive, GCS, Azure Blob, SFTP, Manifest URL
+  - **Schedules**: Create recurring ingestion jobs with frequency, templates, representatives
+  - **Run History**: View execution history with stats and import links
 - **Deduplication**: Tracks processed objects to avoid duplicates
 - **Progress Tracking**: Real-time progress for batch operations
 
@@ -477,20 +503,63 @@ Returns import_id for tracking
 
 ### 4. Scheduled Ingestion Flow
 ```
+User creates data source (S3/Dropbox/GDrive/etc.)
+  - Configures credentials and settings
+  - Tests connection
+  ↓
+User creates schedule
+  - Selects data source
+  - Sets frequency (hourly/daily/weekly/custom RRULE)
+  - Configures template, representative, mode
+  - Schedule saved with next_run_at calculated
+  ↓
 Scheduler worker runs (every minute)
   ↓
-Checks for schedules with next_run_at <= now
+Checks for schedules with next_run_at <= now AND enabled = true
   ↓
-For each schedule:
-  - Lists objects from source (S3/Dropbox/GDrive)
-  - Filters out already processed (ingest_objects)
+For each due schedule:
+  - Loads source configuration
+  - Lists objects from source using connector provider
+  - Filters out already processed (checks ingest_objects table)
   - Downloads new objects
-  - Parses (ZIP/JSONL/CSV)
-  - Creates conversations
-  - Updates ingest_objects
-  - Creates ingest_import record
+  - Parses (ZIP/JSONL/CSV) based on file type
+  - Creates conversations from canonical transcripts
+  - Updates ingest_objects with processed status
+  - Creates ingest_import record for tracking
+  - Creates ingest_schedule_run record with stats
   ↓
-Updates schedule next_run_at
+Updates schedule next_run_at based on RRULE
+```
+
+### 5. Manual Connector Batch Flow
+```
+User navigates to /bulk-ingest
+  ↓
+User selects connector tab (S3/Dropbox/GDrive)
+  ↓
+User enters credentials and clicks "Connect"
+  - Frontend calls POST /api/connectors/:type/test
+  - Backend tests connection using connector provider
+  ↓
+If successful, frontend calls GET /api/connectors/:type/list
+  - Backend lists objects from connector
+  - Returns files and folders
+  ↓
+User browses and selects files
+  ↓
+User clicks "Create Batch"
+  - Frontend calls POST /api/connectors/:type/batch-from-selection
+  - Backend creates ingestion_batches record
+  - Backend creates ingestion_batch_items for each selected file
+  ↓
+User navigates to batch detail page
+  ↓
+User clicks "Start Batch" (or auto-starts)
+  - Backend enqueues batch for processing
+  - Background worker processes items concurrently
+  - Downloads files, creates conversations, enqueues analysis
+  ↓
+UI polls batch status to show progress
 ```
 
 ---
@@ -512,10 +581,14 @@ Updates schedule next_run_at
 ### Scheduled Ingestion Endpoints
 - `GET /api/ingest/sources` - List data sources
 - `POST /api/ingest/sources` - Create data source
+- `PUT /api/ingest/sources/:id` - Update data source
+- `PATCH /api/ingest/sources/:id` - Partial update data source
+- `DELETE /api/ingest/sources/:id` - Delete data source
 - `POST /api/ingest/sources/:id/test` - Test source connection
 - `GET /api/ingest/schedules` - List schedules
 - `POST /api/ingest/schedules` - Create schedule
 - `PATCH /api/ingest/schedules/:id` - Update schedule
+- `DELETE /api/ingest/schedules/:id` - Delete schedule
 - `GET /api/ingest/schedules/:id/runs` - Get schedule run history
 
 ### Conversation Endpoints
@@ -578,18 +651,31 @@ Updates schedule next_run_at
   - Error reporting
   - Progress tracking
 
-### Scheduled Ingestion (SPEC 2)
+### Scheduled Ingestion (SPEC 2) - COMPLETED
 - **Purpose**: Automatically ingest new files from cloud storage on a schedule
 - **Components**:
-  - `scheduled-routes.ts`: API for sources and schedules
+  - `scheduled-routes.ts`: API for sources and schedules (CRUD operations)
   - `scheduler-worker.ts`: Background worker that executes schedules
-  - `scheduled-ingestion.component.ts`: UI for management
+  - `scheduled-ingestion.component.ts`: UI for managing sources and schedules
+  - `create-source-dialog.component.ts`: Dialog for creating/editing data sources
+  - `create-schedule-dialog.component.ts`: Dialog for creating/editing schedules
 - **Database**: `ingest_sources`, `ingest_schedules`, `ingest_schedule_runs`, `ingest_objects` tables
 - **Features**:
-  - Multiple source types (S3, Dropbox, Google Drive)
-  - Recurrence rules (hourly/daily/weekly)
-  - Deduplication tracking
-  - Run history
+  - Multiple source types (S3, Dropbox, Google Drive, GCS, Azure Blob, SFTP, Manifest URL)
+  - Source configuration with credentials (stored in `config_json`)
+  - Connection testing for sources
+  - Recurrence rules (hourly/daily/weekly/custom RRULE)
+  - Schedule management (create, update, delete, enable/disable)
+  - Template and representative assignment per schedule
+  - Deduplication tracking via `ingest_objects` table
+  - Run history with stats (new files, parsed, failed)
+  - Links to import results from schedule runs
+- **UI Features**:
+  - Three-tab interface: Data Sources, Schedules, Run History
+  - Source creation/editing with type-specific configuration forms
+  - Schedule creation with frequency selection and RRULE support
+  - Real-time schedule status (enabled/disabled)
+  - Schedule run history with detailed stats
 
 ### Slot Registry System
 - **Purpose**: Eliminate "unknown" slots and improve consistency
@@ -667,13 +753,15 @@ Updates schedule next_run_at
 
 ## Future Enhancements
 
-- **Advanced Scheduling**: More flexible recurrence rules (cron expressions)
-- **More Connectors**: Azure Blob, SFTP, Webhook manifest URLs
+- **Advanced Scheduling**: More flexible recurrence rules (cron expressions) - Currently supports RRULE
+- **More Connectors**: Azure Blob, SFTP, Webhook manifest URLs - Currently supports S3, Dropbox, Google Drive, GCS, Azure Blob, SFTP, Manifest URL
 - **Real-time Processing**: WebSocket updates for batch progress
 - **Advanced NLP**: More sophisticated entity extraction and coreference
 - **Custom Templates**: User-defined analysis templates
 - **API Webhooks**: Inbound webhooks for external integrations
 - **Advanced Analytics**: Dashboards and reporting
+- **Credential Encryption**: Encrypt source credentials in `ingest_sources.config_json` (currently stored as plain JSON)
+- **Connection Validation**: Enhanced connection testing with detailed error messages
 
 ---
 
