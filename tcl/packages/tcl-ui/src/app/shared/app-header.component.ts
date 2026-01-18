@@ -18,6 +18,7 @@ import { Subject } from 'rxjs';
 import { takeUntil, distinctUntilChanged, debounceTime } from 'rxjs/operators';
 import { FeatureService } from '../features/feature.service';
 import { UpgradeService } from './upgrade.service';
+import { EntitlementsService } from '../entitlements.service';
 
 @Component({
   selector: 'app-header',

@@ -164,7 +164,7 @@ export class PlanService {
             }));
             console.log('[PlanService] Cached entitlements in sessionStorage:', {
               tier: response.entitlements.tier,
-              batchIngestion: response.entitlements.features.batchIngestion,
+              batchIngestion: response.entitlements.features['batchIngestion'],
             });
             
             // Trigger EntitlementsService to reload from cache
