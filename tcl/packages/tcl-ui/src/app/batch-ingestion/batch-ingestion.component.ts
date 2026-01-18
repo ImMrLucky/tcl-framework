@@ -130,6 +130,7 @@ export class BatchIngestionComponent implements OnInit, OnDestroy {
       return;
     }
     
+    this.initializeConnectorConfigs();
     this.loadRepresentatives();
     this.loadIngestionConfig();
     
@@ -184,13 +185,15 @@ export class BatchIngestionComponent implements OnInit, OnDestroy {
     
     try {
       // Use new batch upload API
-      const response = await this.batchUploadService.uploadBatch(
-        this.selectedFiles,
-        {
-          representativeId: this.selectedRepresentativeId,
-          mode: 'AUDIO_PLUS_TRANSCRIPT',
-        }
-      ).toPromise();
+      const response = await firstValueFrom(
+        this.batchUploadService.uploadBatch(
+          this.selectedFiles,
+          {
+            representativeId: this.selectedRepresentativeId,
+            mode: 'AUDIO_PLUS_TRANSCRIPT',
+          }
+        )
+      );
       
       if (response) {
         this.snackBar.open(`Batch uploaded: ${response.counts.parsed_transcripts} transcripts parsed`, 'Close', { duration: 3000 });
@@ -209,11 +212,13 @@ export class BatchIngestionComponent implements OnInit, OnDestroy {
     this.loadingConnector = true;
     try {
       // Test connection
-      const testResult = await this.batchService.testConnector(
-        type,
-        this.connectorConfig[type] || {},
-        this.connectorSecrets[type] || {}
-      ).toPromise();
+      const testResult = await firstValueFrom(
+        this.batchService.testConnector(
+          type,
+          this.connectorConfig[type] || {},
+          this.connectorSecrets[type] || {}
+        )
+      );
       
       if (testResult?.success) {
         this.activeConnector = type;
@@ -238,13 +243,15 @@ export class BatchIngestionComponent implements OnInit, OnDestroy {
     if (!this.activeConnector) return;
     
     try {
-      const result = await this.batchService.listConnectorObjects(type, {
-        path: path || this.browsingPath,
-        limit: 100,
-        recursive: false,
-        config: this.connectorConfig[type] || {},
-        secrets: this.connectorSecrets[type] || {},
-      }).toPromise();
+      const result = await firstValueFrom(
+        this.batchService.listConnectorObjects(type, {
+          path: path || this.browsingPath,
+          limit: 100,
+          recursive: false,
+          config: this.connectorConfig[type] || {},
+          secrets: this.connectorSecrets[type] || {},
+        })
+      );
       
       if (result) {
         this.connectorObjects = result.objects || [];
@@ -262,6 +269,17 @@ export class BatchIngestionComponent implements OnInit, OnDestroy {
       this.selectedObjects.clear();
       this.loadConnectorObjects(this.activeConnector!, object.path);
     }
+  }
+  
+  navigateBack() {
+    if (!this.activeConnector) return;
+    // Navigate to parent directory
+    const pathParts = this.browsingPath.split('/').filter(Boolean);
+    pathParts.pop(); // Remove last part
+    const parentPath = pathParts.length > 0 ? pathParts.join('/') + '/' : '';
+    this.browsingPath = parentPath;
+    this.selectedObjects.clear();
+    this.loadConnectorObjects(this.activeConnector, parentPath);
   }
   
   toggleObjectSelection(object: any) {
@@ -296,11 +314,13 @@ export class BatchIngestionComponent implements OnInit, OnDestroy {
         config.representativeId = this.selectedRepresentativeId;
       }
       
-      const response = await this.batchService.createBatchFromSelection(
-        this.activeConnector,
-        selection,
-        config
-      ).toPromise();
+      const response = await firstValueFrom(
+        this.batchService.createBatchFromSelection(
+          this.activeConnector,
+          selection,
+          config
+        )
+      );
       
       if (response?.success && response.batch) {
         this.currentBatch = response.batch;
@@ -318,7 +338,7 @@ export class BatchIngestionComponent implements OnInit, OnDestroy {
   async loadBatch(batchId: string) {
     this.loadingBatch = true;
     try {
-      const response = await this.batchService.getBatch(batchId).toPromise();
+      const response = await firstValueFrom(this.batchService.getBatch(batchId));
       if (response) {
         this.currentBatch = response.batch;
         this.batchItems = response.items || [];
@@ -341,7 +361,7 @@ export class BatchIngestionComponent implements OnInit, OnDestroy {
     if (!this.currentBatch) return;
     
     try {
-      const response = await this.batchService.startBatch(this.currentBatch.id).toPromise();
+      const response = await firstValueFrom(this.batchService.startBatch(this.currentBatch.id));
       if (response?.success) {
         this.currentBatch = response.batch;
         this.startProgressPolling(this.currentBatch.id);
@@ -358,7 +378,7 @@ export class BatchIngestionComponent implements OnInit, OnDestroy {
     if (!this.currentBatch) return;
     
     try {
-      await this.batchService.cancelBatch(this.currentBatch.id).toPromise();
+      await firstValueFrom(this.batchService.cancelBatch(this.currentBatch.id));
       this.snackBar.open('Batch canceled', 'Close', { duration: 3000 });
       await this.loadBatch(this.currentBatch.id);
     } catch (error: any) {
@@ -509,7 +529,7 @@ export class BatchIngestionComponent implements OnInit, OnDestroy {
   async loadIngestionConfig() {
     this.loadingConfig = true;
     try {
-      const config = await this.batchUploadService.getConfig().toPromise();
+      const config = await firstValueFrom(this.batchUploadService.getConfig());
       if (config) {
         this.ingestionConfig = config;
         this.acceptedExtensions = config.accepted_extensions || [];
@@ -528,6 +548,20 @@ export class BatchIngestionComponent implements OnInit, OnDestroy {
   getFileExtension(fileName: string): string {
     const parts = fileName.split('.');
     return parts.length > 1 ? parts[parts.length - 1].toLowerCase() : '';
+  }
+  
+  getAcceptedExtensionsString(): string {
+    if (!this.acceptedExtensions || this.acceptedExtensions.length === 0) {
+      return '';
+    }
+    return this.acceptedExtensions.map(ext => '.' + ext).join(', ');
+  }
+  
+  getAcceptedExtensionsForInput(): string {
+    if (!this.acceptedExtensions || this.acceptedExtensions.length === 0) {
+      return '';
+    }
+    return this.acceptedExtensions.map(ext => '.' + ext).join(',');
   }
 }
 

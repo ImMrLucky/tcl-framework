@@ -129,7 +129,7 @@
               <!-- Accepted File Types Display -->
               <div class="accepted-types-info" *ngIf="!loadingConfig && acceptedExtensions && acceptedExtensions.length > 0">
                 <mat-icon>info</mat-icon>
-                <span><strong>Accepted file types:</strong> {{ acceptedExtensions.map((ext: string) => '.' + ext).join(', ') }}</span>
+                <span><strong>Accepted file types:</strong> {{ getAcceptedExtensionsString() }}</span>
                 <span class="size-limit">Max size: {{ maxUploadSizeMB }}MB per file</span>
               </div>
               
@@ -180,7 +180,7 @@
                 #fileInput 
                 multiple 
                 (change)="onFileSelected($event)"
-                [accept]="acceptedExtensions && acceptedExtensions.length > 0 ? (acceptedExtensions.map((ext: string) => '.' + ext).join(',')) : ''"
+                [accept]="getAcceptedExtensionsForInput()"
                 style="display: none">
               
               <button mat-raised-button color="primary" (click)="fileInput.click()" [disabled]="loadingConfig">
@@ -280,7 +280,7 @@
               <!-- File Browser -->
               <div *ngIf="activeConnector === connector.type" class="file-browser">
                 <div class="browser-header">
-                  <button mat-icon-button (click)="loadConnectorObjects(connector.type)" *ngIf="browsingPath">
+                  <button mat-icon-button (click)="navigateBack()" *ngIf="browsingPath">
                     <mat-icon>arrow_back</mat-icon>
                   </button>
                   <span class="current-path">{{ browsingPath || 'Root' }}</span>
