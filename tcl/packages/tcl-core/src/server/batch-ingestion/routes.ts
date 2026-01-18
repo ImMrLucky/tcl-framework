@@ -112,6 +112,20 @@ export function setupBatchIngestionRoutes(app: express.Application) {
   );
 
   // ============================================================================
+  // GET /api/ingest/batch/scheduled - Redirect/info for scheduled ingestion
+  // ============================================================================
+  app.get('/api/ingest/batch/scheduled', async (req, res) => {
+    return res.status(404).json({ 
+      error: 'Batch not found',
+      message: 'Scheduled ingestion endpoints are available at /api/ingest/sources and /api/ingest/schedules',
+      endpoints: {
+        sources: '/api/ingest/sources',
+        schedules: '/api/ingest/schedules',
+        scheduleRuns: '/api/ingest/schedules/:id/runs'
+      }
+    });
+  });
+
   // GET /api/ingest/batch/:id - Get batch details
   // ============================================================================
   app.get('/api/ingest/batch/:id', async (req, res) => {
