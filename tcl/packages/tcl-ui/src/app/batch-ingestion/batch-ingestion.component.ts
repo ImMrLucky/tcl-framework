@@ -453,6 +453,42 @@ export class BatchIngestionComponent implements OnInit, OnDestroy {
     return (batch.progress_json as any)?.failed || 0;
   }
   
+  hasRetryCount(item: any): boolean {
+    return !!(item as any)?.retry_count && (item as any).retry_count > 0;
+  }
+  
+  getRetryCount(item: any): number {
+    return (item as any)?.retry_count || 0;
+  }
+  
+  getObjectModifiedDate(object: any): string | null {
+    if (object?.modifiedAt) {
+      return object.modifiedAt;
+    }
+    if ((object as any)?.modified) {
+      return (object as any).modified;
+    }
+    return null;
+  }
+  
+  initializeConnectorConfigs(): void {
+    // Initialize connector configs if not already initialized
+    if (!this.connectorConfig || Object.keys(this.connectorConfig).length === 0) {
+      this.connectorConfig = {
+        S3: { bucket: '', region: 'us-east-1' },
+        DROPBOX: {},
+        GDRIVE: {},
+      };
+    }
+    if (!this.connectorSecrets || Object.keys(this.connectorSecrets).length === 0) {
+      this.connectorSecrets = {
+        S3: { accessKey: '', secretAccessKey: '' },
+        DROPBOX: { accessToken: '' },
+        GDRIVE: { accessToken: '' },
+      };
+    }
+  }
+  
   getStatusColor(status: string): 'primary' | 'accent' | 'warn' | '' {
     switch (status) {
       case 'COMPLETE':
