@@ -138,3 +138,25 @@
   margin-right: 8px;
 }
 
+// Ensure mat-hint is visible in all form fields
+// This fixes an issue where hints may not display in Angular Material 17
+:host ::ng-deep {
+  .mat-mdc-form-field-hint-wrapper {
+    display: block !important;
+    min-height: 1.5em;
+  }
+  
+  .mat-mdc-form-field-hint {
+    display: block !important;
+    opacity: 1 !important;
+    visibility: visible !important;
+    font-size: 0.75rem;
+  }
+  
+  // Ensure hint shows even when form field is focused or has value
+  .mat-mdc-form-field.mat-focused .mat-mdc-form-field-hint,
+  .mat-mdc-form-field:not(.mat-form-field-invalid) .mat-mdc-form-field-hint {
+    opacity: 0.7;
+  }
+}
+
