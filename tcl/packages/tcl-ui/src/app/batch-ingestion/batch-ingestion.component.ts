@@ -67,8 +67,16 @@ export class BatchIngestionComponent implements OnInit, OnDestroy {
   ];
   
   activeConnector: string | null = null;
-  connectorConfig: any = {};
-  connectorSecrets: any = {};
+  connectorConfig: any = {
+    S3: { bucket: '', region: 'us-east-1' },
+    DROPBOX: {},
+    GDRIVE: {},
+  };
+  connectorSecrets: any = {
+    S3: { accessKey: '', secretAccessKey: '' },
+    DROPBOX: { accessToken: '' },
+    GDRIVE: { accessToken: '' },
+  };
   connectorObjects: any[] = [];
   selectedObjects: Set<string> = new Set();
   loadingConnector = false;
