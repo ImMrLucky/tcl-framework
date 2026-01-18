@@ -209,7 +209,7 @@ async function executeSchedule(schedule: any): Promise<void> {
         
         if (ext === 'zip') {
           const { parseZipBatch } = await import('./parsers/zip-parser.js');
-          const result = await parseZipBatch(fileBuffer);
+          const result = await parseZipBatch(fileBuffer, obj.key);
           transcripts = result.transcripts || [];
         } else if (ext === 'jsonl') {
           const { parseJsonlBatch } = await import('./parsers/jsonl-parser.js');

@@ -232,10 +232,9 @@ async function parseTranscriptFile(
       conversation_id: result.normalized.raw?.originalFilename || fileName.replace(/\.[^/.]+$/, ''),
       turns: result.normalized.turns.map((turn) => ({
         t: turn.turnIndex,
-        speaker_raw: turn.speakerLabel || turn.meta?.rawSpeaker || undefined,
+        speaker_raw: turn.speakerLabel || turn.meta?.rawSpeaker || null,
         text: turn.text,
-        start_ms: turn.startTimeMs,
-        end_ms: turn.endTimeMs,
+        timestamp: turn.startTimeMs ? turn.startTimeMs / 1000 : undefined, // Convert ms to seconds
       })),
       source,
       metadata: {
