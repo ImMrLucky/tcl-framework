@@ -489,6 +489,40 @@ export class BatchIngestionComponent implements OnInit, OnDestroy {
     }
   }
   
+  getConnectorConfigValue(connectorType: string, key: string): string {
+    if (!this.connectorConfig || !this.connectorConfig[connectorType]) {
+      return '';
+    }
+    return this.connectorConfig[connectorType][key] || '';
+  }
+  
+  setConnectorConfigValue(connectorType: string, key: string, value: string): void {
+    if (!this.connectorConfig) {
+      this.initializeConnectorConfigs();
+    }
+    if (!this.connectorConfig[connectorType]) {
+      this.connectorConfig[connectorType] = {};
+    }
+    this.connectorConfig[connectorType][key] = value;
+  }
+  
+  getConnectorSecretValue(connectorType: string, key: string): string {
+    if (!this.connectorSecrets || !this.connectorSecrets[connectorType]) {
+      return '';
+    }
+    return this.connectorSecrets[connectorType][key] || '';
+  }
+  
+  setConnectorSecretValue(connectorType: string, key: string, value: string): void {
+    if (!this.connectorSecrets) {
+      this.initializeConnectorConfigs();
+    }
+    if (!this.connectorSecrets[connectorType]) {
+      this.connectorSecrets[connectorType] = {};
+    }
+    this.connectorSecrets[connectorType][key] = value;
+  }
+  
   getStatusColor(status: string): 'primary' | 'accent' | 'warn' | '' {
     switch (status) {
       case 'COMPLETE':

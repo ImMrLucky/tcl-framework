@@ -247,23 +247,23 @@
                 <h4>Connector Configuration</h4>
                 <mat-form-field appearance="outline" *ngIf="connector.type === 'S3'">
                   <mat-label>Bucket</mat-label>
-                  <input matInput [(ngModel)]="connectorConfig[connector.type]?.bucket">
+                  <input matInput [ngModel]="getConnectorConfigValue(connector.type, 'bucket')" (ngModelChange)="setConnectorConfigValue(connector.type, 'bucket', $event)">
                 </mat-form-field>
                 <mat-form-field appearance="outline" *ngIf="connector.type === 'S3'">
                   <mat-label>Region</mat-label>
-                  <input matInput [(ngModel)]="connectorConfig[connector.type]?.region">
+                  <input matInput [ngModel]="getConnectorConfigValue(connector.type, 'region')" (ngModelChange)="setConnectorConfigValue(connector.type, 'region', $event)">
                 </mat-form-field>
                 <mat-form-field appearance="outline" *ngIf="connector.type === 'S3'">
                   <mat-label>Access Key</mat-label>
-                  <input matInput type="password" [(ngModel)]="connectorSecrets[connector.type]?.accessKey">
+                  <input matInput type="password" [ngModel]="getConnectorSecretValue(connector.type, 'accessKey')" (ngModelChange)="setConnectorSecretValue(connector.type, 'accessKey', $event)">
                 </mat-form-field>
                 <mat-form-field appearance="outline" *ngIf="connector.type === 'S3'">
                   <mat-label>Secret Key</mat-label>
-                  <input matInput type="password" [(ngModel)]="connectorSecrets[connector.type]?.secretAccessKey">
+                  <input matInput type="password" [ngModel]="getConnectorSecretValue(connector.type, 'secretAccessKey')" (ngModelChange)="setConnectorSecretValue(connector.type, 'secretAccessKey', $event)">
                 </mat-form-field>
                 <mat-form-field appearance="outline" *ngIf="connector.type !== 'S3'">
                   <mat-label>Access Token</mat-label>
-                  <input matInput type="password" [(ngModel)]="connectorSecrets[connector.type]?.accessToken">
+                  <input matInput type="password" [ngModel]="getConnectorSecretValue(connector.type, 'accessToken')" (ngModelChange)="setConnectorSecretValue(connector.type, 'accessToken', $event)">
                 </mat-form-field>
                 
                 <button 
