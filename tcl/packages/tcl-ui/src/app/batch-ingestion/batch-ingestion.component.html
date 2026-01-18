@@ -2,6 +2,23 @@
 
 <div class="batch-ingestion-container">
   <div class="container">
+    <!-- Navigation to Scheduled Ingestion -->
+    <div *ngIf="hasBatchIngestion" class="scheduled-ingestion-link" style="margin-bottom: 16px;">
+      <mat-card>
+        <mat-card-content style="display: flex; align-items: center; justify-content: space-between;">
+          <div>
+            <h3 style="margin: 0 0 4px 0;">Scheduled Ingestion</h3>
+            <p style="margin: 0; color: #666; font-size: 14px;">
+              Set up automated ingestion from S3, Dropbox, Google Drive, and more
+            </p>
+          </div>
+          <button mat-raised-button color="primary" routerLink="/bulk-ingest/scheduled">
+            <mat-icon>schedule</mat-icon>
+            Manage Schedules
+          </button>
+        </mat-card-content>
+      </mat-card>
+    </div>
     <!-- Batch Status Card (if batch exists) -->
     <mat-card *ngIf="currentBatch" class="batch-status-card">
       <mat-card-header>
