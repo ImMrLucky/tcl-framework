@@ -5,7 +5,7 @@
  */
 
 import { Component, OnInit, OnDestroy } from '@angular/core';
-import { CommonModule } from '@angular/common';
+import { CommonModule, DatePipe } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { Router, RouterModule } from '@angular/router';
 import { MatCardModule } from '@angular/material/card';
@@ -26,6 +26,8 @@ import { HttpClient } from '@angular/common/http';
 import { Subject } from 'rxjs';
 import { takeUntil } from 'rxjs/operators';
 import { firstValueFrom } from 'rxjs';
+import { CreateSourceDialogComponent, SourceDialogData } from './create-source-dialog.component';
+import { CreateScheduleDialogComponent, ScheduleDialogData } from './create-schedule-dialog.component';
 
 interface IngestSource {
   id: string;
@@ -83,6 +85,7 @@ interface ScheduleRun {
     MatDialogModule,
     MatExpansionModule,
     AppHeaderComponent,
+    DatePipe,
   ],
   templateUrl: './scheduled-ingestion.component.html',
   styleUrls: ['./scheduled-ingestion.component.scss']
@@ -106,6 +109,10 @@ export class ScheduledIngestionComponent implements OnInit, OnDestroy {
   scheduleRuns: ScheduleRun[] = [];
   loadingRuns = false;
   runsDisplayedColumns = ['started_at', 'status', 'stats', 'actions'];
+  
+  // Templates and representatives for schedule creation
+  templates: Array<{ id: string; name: string }> = [];
+  representatives: Array<{ id: string; display_name: string }> = [];
   
   private destroy$ = new Subject<void>();
   private get apiUrl(): string {
@@ -131,6 +138,40 @@ export class ScheduledIngestionComponent implements OnInit, OnDestroy {
     
     this.loadSources();
     this.loadSchedules();
+    this.loadTemplates();
+    this.loadRepresentatives();
+  }
+  
+  async loadTemplates() {
+    try {
+      const orgId = typeof window !== 'undefined' ? localStorage.getItem('activeOrgId') : null;
+      if (!orgId) return;
+      
+      const response = await firstValueFrom(
+        this.http.get<{ templates: Array<{ id: string; name: string }> }>(`${this.apiUrl}/api/templates`)
+      );
+      this.templates = response.templates || [];
+    } catch (error: any) {
+      console.error('Failed to load templates:', error);
+      // Don't show error - templates are optional
+    }
+  }
+  
+  async loadRepresentatives() {
+    try {
+      const orgId = typeof window !== 'undefined' ? localStorage.getItem('activeOrgId') : null;
+      if (!orgId) return;
+      
+      const response = await firstValueFrom(
+        this.http.get<{ representatives: Array<{ id: string; display_name: string }> }>(
+          `${this.apiUrl}/api/orgs/${orgId}/representatives`
+        )
+      );
+      this.representatives = response.representatives || [];
+    } catch (error: any) {
+      console.error('Failed to load representatives:', error);
+      // Don't show error - representatives are optional
+    }
   }
 
   ngOnDestroy() {
@@ -232,24 +273,102 @@ export class ScheduledIngestionComponent implements OnInit, OnDestroy {
     return rrule;
   }
 
-  createSource() {
-    // TODO: Open dialog to create source
-    this.snackBar.open('Source creation dialog coming soon', 'Close', { duration: 3000 });
+  async createSource() {
+    const dialogRef = this.dialog.open(CreateSourceDialogComponent, {
+      width: '600px',
+      data: {} as SourceDialogData
+    });
+
+    const result = await firstValueFrom(dialogRef.afterClosed());
+    if (result) {
+      try {
+        await firstValueFrom(
+          this.http.post<{ source: IngestSource }>(`${this.apiUrl}/api/ingest/sources`, result)
+        );
+        this.snackBar.open('Data source created successfully', 'Close', { duration: 3000 });
+        await this.loadSources();
+      } catch (error: any) {
+        this.snackBar.open('Failed to create source: ' + (error.error?.error || error.message), 'Close', {
+          duration: 5000
+        });
+      }
+    }
   }
 
-  testSource(source: IngestSource) {
-    // TODO: Test source connection
-    this.snackBar.open('Source testing coming soon', 'Close', { duration: 3000 });
+  async testSource(source: IngestSource) {
+    try {
+      const response = await firstValueFrom(
+        this.http.post<{ success: boolean; message: string }>(
+          `${this.apiUrl}/api/ingest/sources/${source.id}/test`,
+          {}
+        )
+      );
+      this.snackBar.open(
+        response.message || (response.success ? 'Connection test successful' : 'Connection test failed'),
+        'Close',
+        { duration: 3000 }
+      );
+    } catch (error: any) {
+      this.snackBar.open('Connection test failed: ' + (error.error?.error || error.message), 'Close', {
+        duration: 5000
+      });
+    }
   }
 
-  editSource(source: IngestSource) {
-    // TODO: Open dialog to edit source
-    this.snackBar.open('Source editing coming soon', 'Close', { duration: 3000 });
+  async editSource(source: IngestSource) {
+    const dialogRef = this.dialog.open(CreateSourceDialogComponent, {
+      width: '600px',
+      data: { source } as SourceDialogData
+    });
+
+    const result = await firstValueFrom(dialogRef.afterClosed());
+    if (result) {
+      try {
+        await firstValueFrom(
+          this.http.patch<{ source: IngestSource }>(
+            `${this.apiUrl}/api/ingest/sources/${source.id}`,
+            result
+          )
+        );
+        this.snackBar.open('Data source updated successfully', 'Close', { duration: 3000 });
+        await this.loadSources();
+      } catch (error: any) {
+        this.snackBar.open('Failed to update source: ' + (error.error?.error || error.message), 'Close', {
+          duration: 5000
+        });
+      }
+    }
   }
 
-  createSchedule() {
-    // TODO: Open dialog to create schedule
-    this.snackBar.open('Schedule creation dialog coming soon', 'Close', { duration: 3000 });
+  async createSchedule() {
+    if (this.sources.length === 0) {
+      this.snackBar.open('Please create a data source first', 'Close', { duration: 3000 });
+      return;
+    }
+
+    const dialogRef = this.dialog.open(CreateScheduleDialogComponent, {
+      width: '600px',
+      data: {
+        sources: this.sources,
+        templates: this.templates,
+        representatives: this.representatives,
+      } as ScheduleDialogData
+    });
+
+    const result = await firstValueFrom(dialogRef.afterClosed());
+    if (result) {
+      try {
+        await firstValueFrom(
+          this.http.post<{ schedule: IngestSchedule }>(`${this.apiUrl}/api/ingest/schedules`, result)
+        );
+        this.snackBar.open('Schedule created successfully', 'Close', { duration: 3000 });
+        await this.loadSchedules();
+      } catch (error: any) {
+        this.snackBar.open('Failed to create schedule: ' + (error.error?.error || error.message), 'Close', {
+          duration: 5000
+        });
+      }
+    }
   }
 
   viewScheduleRuns(schedule: IngestSchedule) {
@@ -257,9 +376,34 @@ export class ScheduledIngestionComponent implements OnInit, OnDestroy {
     this.activeTab = 2; // Switch to runs tab
   }
 
-  editSchedule(schedule: IngestSchedule) {
-    // TODO: Open dialog to edit schedule
-    this.snackBar.open('Schedule editing coming soon', 'Close', { duration: 3000 });
+  async editSchedule(schedule: IngestSchedule) {
+    const dialogRef = this.dialog.open(CreateScheduleDialogComponent, {
+      width: '600px',
+      data: {
+        schedule,
+        sources: this.sources,
+        templates: this.templates,
+        representatives: this.representatives,
+      } as ScheduleDialogData
+    });
+
+    const result = await firstValueFrom(dialogRef.afterClosed());
+    if (result) {
+      try {
+        await firstValueFrom(
+          this.http.patch<{ schedule: IngestSchedule }>(
+            `${this.apiUrl}/api/ingest/schedules/${schedule.id}`,
+            result
+          )
+        );
+        this.snackBar.open('Schedule updated successfully', 'Close', { duration: 3000 });
+        await this.loadSchedules();
+      } catch (error: any) {
+        this.snackBar.open('Failed to update schedule: ' + (error.error?.error || error.message), 'Close', {
+          duration: 5000
+        });
+      }
+    }
   }
 }
 

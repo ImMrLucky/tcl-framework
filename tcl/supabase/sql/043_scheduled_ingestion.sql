@@ -67,6 +67,7 @@ CREATE TABLE IF NOT EXISTS public.ingest_schedules (
   
   -- Template and mode configuration
   template_id uuid REFERENCES public.templates(id) ON DELETE SET NULL,
+  representative_id uuid REFERENCES public.representatives(id) ON DELETE SET NULL,
   mode text CHECK (mode IN ('TRANSCRIPT_ONLY', 'AUDIO_ONLY', 'AUDIO_PLUS_TRANSCRIPT')) DEFAULT 'AUDIO_PLUS_TRANSCRIPT',
   
   -- Deduplication strategy

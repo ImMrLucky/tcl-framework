@@ -97,6 +97,141 @@ export function setupScheduledIngestionRoutes(app: express.Application) {
     }
   );
 
+  // PUT /api/ingest/sources/:id - Update source
+  app.put(
+    '/api/ingest/sources/:id',
+    requireEntitlement('batchIngestion'),
+    requirePermission('create_batches'),
+    async (req, res) => {
+      try {
+        const context = await getOrgContext(req);
+        
+        if (!context || context.error || !context.orgId) {
+          return res.status(401).json({ error: context?.error || 'Authorization required' });
+        }
+
+        const { id } = req.params;
+        const { type, config_json, name, description, enabled } = req.body;
+
+        if (!supabaseAdmin) {
+          return res.status(503).json({ error: 'Database not configured' });
+        }
+
+        const updates: any = {};
+        if (type !== undefined) updates.type = type;
+        if (config_json !== undefined) updates.config_json = config_json;
+        if (name !== undefined) updates.name = name;
+        if (description !== undefined) updates.description = description;
+        if (enabled !== undefined) updates.enabled = enabled;
+
+        const { data: source, error: updateError } = await supabaseAdmin
+          .from('ingest_sources')
+          .update(updates)
+          .eq('id', id)
+          .eq('org_id', context.orgId)
+          .select()
+          .single();
+
+        if (updateError || !source) {
+          return res.status(updateError ? 500 : 404).json({ 
+            error: updateError?.message || 'Source not found' 
+          });
+        }
+
+        res.json({ source });
+      } catch (error: any) {
+        console.error('Update source error:', error);
+        res.status(500).json({ error: error.message || 'Unknown error' });
+      }
+    }
+  );
+
+  // PATCH /api/ingest/sources/:id - Partial update source
+  app.patch(
+    '/api/ingest/sources/:id',
+    requireEntitlement('batchIngestion'),
+    requirePermission('create_batches'),
+    async (req, res) => {
+      try {
+        const context = await getOrgContext(req);
+        
+        if (!context || context.error || !context.orgId) {
+          return res.status(401).json({ error: context?.error || 'Authorization required' });
+        }
+
+        const { id } = req.params;
+        const { type, config_json, name, description, enabled } = req.body;
+
+        if (!supabaseAdmin) {
+          return res.status(503).json({ error: 'Database not configured' });
+        }
+
+        const updates: any = {};
+        if (type !== undefined) updates.type = type;
+        if (config_json !== undefined) updates.config_json = config_json;
+        if (name !== undefined) updates.name = name;
+        if (description !== undefined) updates.description = description;
+        if (enabled !== undefined) updates.enabled = enabled;
+
+        const { data: source, error: updateError } = await supabaseAdmin
+          .from('ingest_sources')
+          .update(updates)
+          .eq('id', id)
+          .eq('org_id', context.orgId)
+          .select()
+          .single();
+
+        if (updateError || !source) {
+          return res.status(updateError ? 500 : 404).json({ 
+            error: updateError?.message || 'Source not found' 
+          });
+        }
+
+        res.json({ source });
+      } catch (error: any) {
+        console.error('Update source error:', error);
+        res.status(500).json({ error: error.message || 'Unknown error' });
+      }
+    }
+  );
+
+  // DELETE /api/ingest/sources/:id - Delete source
+  app.delete(
+    '/api/ingest/sources/:id',
+    requireEntitlement('batchIngestion'),
+    requirePermission('create_batches'),
+    async (req, res) => {
+      try {
+        const context = await getOrgContext(req);
+        
+        if (!context || context.error || !context.orgId) {
+          return res.status(401).json({ error: context?.error || 'Authorization required' });
+        }
+
+        const { id } = req.params;
+
+        if (!supabaseAdmin) {
+          return res.status(503).json({ error: 'Database not configured' });
+        }
+
+        const { error: deleteError } = await supabaseAdmin
+          .from('ingest_sources')
+          .delete()
+          .eq('id', id)
+          .eq('org_id', context.orgId);
+
+        if (deleteError) {
+          return res.status(500).json({ error: `Failed to delete source: ${deleteError.message}` });
+        }
+
+        res.status(204).send();
+      } catch (error: any) {
+        console.error('Delete source error:', error);
+        res.status(500).json({ error: error.message || 'Unknown error' });
+      }
+    }
+  );
+
   // POST /api/ingest/sources/:id/test - Test source connection
   app.post('/api/ingest/sources/:id/test', async (req, res) => {
     try {
@@ -187,7 +322,7 @@ export function setupScheduledIngestionRoutes(app: express.Application) {
           return res.status(401).json({ error: context?.error || 'Authorization required' });
         }
 
-        const { source_id, name, rrule, template_id, mode, dedupe_strategy } = req.body;
+        const { source_id, name, rrule, template_id, representative_id, mode, dedupe_strategy } = req.body;
 
         if (!source_id || !name || !rrule) {
           return res.status(400).json({ error: 'source_id, name, and rrule are required' });
@@ -221,6 +356,7 @@ export function setupScheduledIngestionRoutes(app: express.Application) {
             name,
             rrule,
             template_id: template_id || null,
+            representative_id: representative_id || null,
             mode: mode || 'AUDIO_PLUS_TRANSCRIPT',
             dedupe_strategy: dedupe_strategy || 'object_key_etag',
             enabled: true,
