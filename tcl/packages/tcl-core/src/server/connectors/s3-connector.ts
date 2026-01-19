@@ -91,34 +91,6 @@ export class S3ConnectorProvider implements ConnectorProvider {
       throw new Error('Missing required S3 configuration (bucket)');
     }
 
-      // Test by listing objects (limit 1)
-      await s3.listObjectsV2({
-        Bucket: bucket,
-        MaxKeys: 1,
-      }).promise();
-
-      return { success: true };
-    } catch (error: any) {
-      return { success: false, error: error.message || 'Failed to connect to S3' };
-    }
-  }
-
-  async list(options: ListOptions, config: ConnectorConfig, secrets: ConnectorSecrets): Promise<ListResult> {
-    const { bucket, region } = config;
-    const { accessKeyId, secretAccessKey } = secrets;
-
-    if (!bucket || !region || !accessKeyId || !secretAccessKey) {
-      throw new Error('Missing required S3 configuration');
-    }
-
-    const s3 = new AWS.S3({
-      region,
-      credentials: {
-        accessKeyId,
-        secretAccessKey,
-      },
-    });
-
     const prefix = options.prefix || options.path || '';
     const limit = options.limit || 100;
     const continuationToken = options.offset ? String(options.offset) : undefined;
