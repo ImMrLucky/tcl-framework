@@ -7,7 +7,7 @@ import { s3Connector } from './s3-connector.js';
 import { dropboxConnector } from './dropbox-connector.js';
 import { gdriveConnector } from './gdrive-connector.js';
 import type { ConnectorProvider } from './connector-provider.js';
-import { decryptSecret } from '../security/secret-crypto.js';
+import { decryptSecret, encryptSecret } from '../security/secret-crypto.js';
 import { ensureDropboxAccessToken, ensureGDriveAccessToken } from './token-refresh.js';
 
 /**
