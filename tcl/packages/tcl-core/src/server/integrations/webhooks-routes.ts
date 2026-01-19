@@ -5,6 +5,7 @@ import { logAudit } from '../supabase.js';
 import { requireEntitlement } from '../entitlements/middleware.js';
 import { getWebhookIntegration, deliverWebhook, createWebhookDelivery, updateWebhookDelivery } from './webhooks.js';
 import { createHash } from 'crypto';
+import { encryptSecret } from '../security/secret-crypto.js';
 
 /**
  * Setup webhooks API routes
@@ -210,18 +211,24 @@ export function setupWebhooksRoutes(app: express.Application) {
 
         // Store signing secret if provided
         if (signingSecret) {
-          const secretId = 'signing_secret';
-          await supabaseAdmin
-            .from('integration_secrets')
-            .upsert({
-              org_id: context.orgId,
-              integration_id: integration.id,
-              integration_kind: 'WEBHOOK',
-              key: secretId,
-              ciphertext: signingSecret, // TODO: Encrypt
-            }, {
-              onConflict: 'org_id,integration_kind,key',
-            });
+          try {
+            const secretId = 'signing_secret';
+            const encryptedSecret = encryptSecret(signingSecret);
+            await supabaseAdmin
+              .from('integration_secrets')
+              .upsert({
+                org_id: context.orgId,
+                integration_id: integration.id,
+                integration_kind: 'WEBHOOK',
+                key: secretId,
+                ciphertext: encryptedSecret,
+              }, {
+                onConflict: 'org_id,integration_kind,key',
+              });
+          } catch (encryptError: any) {
+            console.error('Failed to encrypt webhook signing secret:', encryptError);
+            // Continue - error will be caught by validation
+          }
         }
 
         // Log audit

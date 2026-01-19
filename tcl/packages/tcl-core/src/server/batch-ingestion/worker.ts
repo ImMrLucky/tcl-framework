@@ -10,6 +10,8 @@ import { s3Connector } from '../connectors/s3-connector.js';
 import { dropboxConnector } from '../connectors/dropbox-connector.js';
 import { gdriveConnector } from '../connectors/gdrive-connector.js';
 import type { ConnectorProvider } from '../connectors/connector-provider.js';
+import { decryptSecret } from '../security/secret-crypto.js';
+import { ensureDropboxAccessToken, ensureGDriveAccessToken } from '../connectors/token-refresh.js';
 
 // In-memory batch processing queue
 const batchQueue: string[] = [];
@@ -213,10 +215,26 @@ async function processConnectorItem(batch: any, item: any, sourceRef: any): Prom
 
   // Get connector config and secrets
   const config = batch.config_json || {};
-  const secrets = await getConnectorSecrets(batch.org_id, batch.source_type, supabaseAdmin);
+  let secrets = await getConnectorSecrets(batch.org_id, batch.source_type, supabaseAdmin);
 
   if (!secrets) {
     throw new Error(`Connector secrets not found for ${batch.source_type}`);
+  }
+
+  // For OAuth connectors, ensure fresh token
+  const sourceTypeUpper = batch.source_type.toUpperCase();
+  if (sourceTypeUpper === 'DROPBOX') {
+    const freshToken = await ensureDropboxAccessToken(batch.org_id);
+    if (!freshToken) {
+      throw new Error('Dropbox connection expired. Please reconnect.');
+    }
+    secrets = { ...secrets, accessToken: freshToken.accessToken };
+  } else if (sourceTypeUpper === 'GDRIVE') {
+    const freshToken = await ensureGDriveAccessToken(batch.org_id);
+    if (!freshToken) {
+      throw new Error('Google Drive connection expired. Please reconnect.');
+    }
+    secrets = { ...secrets, accessToken: freshToken.accessToken };
   }
 
   // Fetch the file from connector
@@ -297,8 +315,12 @@ async function getConnectorSecrets(
 
   const secretsMap: Record<string, string> = {};
   for (const secret of secrets) {
-    // TODO: Decrypt ciphertext in production
-    secretsMap[secret.key] = secret.ciphertext;
+    try {
+      secretsMap[secret.key] = decryptSecret(secret.ciphertext);
+    } catch (decryptError: any) {
+      console.error(`Failed to decrypt secret ${secret.key}:`, decryptError);
+      // Continue - will fail when connector tries to use it
+    }
   }
 
   return secretsMap;

@@ -1,6 +1,7 @@
 import { supabaseAdmin } from '../supabase.js';
 import { createHash, createHmac } from 'crypto';
 import type { SupabaseClient } from '@supabase/supabase-js';
+import { decryptSecret } from '../security/secret-crypto.js';
 
 export interface WebhookConfig {
   endpoint_url: string;
@@ -59,8 +60,12 @@ export async function getWebhookSigningSecret(
     return null;
   }
 
-  // TODO: Decrypt ciphertext in production
-  return data.ciphertext;
+  try {
+    return decryptSecret(data.ciphertext);
+  } catch (decryptError: any) {
+    console.error('Failed to decrypt webhook signing secret:', decryptError);
+    return null;
+  }
 }
 
 /**

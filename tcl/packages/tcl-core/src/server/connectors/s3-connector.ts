@@ -2,25 +2,94 @@ import AWS from 'aws-sdk';
 import type { ConnectorProvider, ConnectorConfig, ConnectorSecrets, ListOptions, ListResult, ConnectorObject, FetchResult } from './connector-provider.js';
 
 /**
+ * Create S3 client with credentials (assume-role or static keys)
+ */
+async function createS3Client(config: ConnectorConfig, secrets: ConnectorSecrets): Promise<AWS.S3> {
+  const { bucket, region } = config;
+  const { roleArn, externalId, accessKeyId, secretAccessKey } = secrets;
+
+  if (!bucket || !region) {
+    throw new Error('Missing required S3 configuration (bucket, region)');
+  }
+
+  // Prefer assume-role if available
+  if (roleArn && externalId) {
+    const sts = new AWS.STS({
+      region: region || 'us-east-1',
+    });
+
+    // Assume role
+    const assumeRoleResponse = await sts.assumeRole({
+      RoleArn: roleArn,
+      RoleSessionName: `tcl-connector-${Date.now()}`,
+      ExternalId: externalId,
+      DurationSeconds: 3600, // 1 hour
+    }).promise();
+
+    if (!assumeRoleResponse.Credentials) {
+      throw new Error('Failed to assume role: no credentials returned');
+    }
+
+    const credentials = assumeRoleResponse.Credentials;
+    return new AWS.S3({
+      region,
+      credentials: {
+        accessKeyId: credentials.AccessKeyId!,
+        secretAccessKey: credentials.SecretAccessKey!,
+        sessionToken: credentials.SessionToken,
+      },
+    });
+  } else if (accessKeyId && secretAccessKey) {
+    // Fallback to static keys (dev mode only)
+    const ALLOW_STATIC_KEYS = process.env.ALLOW_DEV_CONNECTOR_SECRETS_FROM_CLIENT === 'true';
+    if (!ALLOW_STATIC_KEYS) {
+      throw new Error('Static keys not allowed in production. Use assume-role.');
+    }
+
+    return new AWS.S3({
+      region,
+      credentials: {
+        accessKeyId,
+        secretAccessKey,
+      },
+    });
+  } else {
+    throw new Error('Missing S3 credentials (roleArn+externalId or accessKeyId+secretAccessKey)');
+  }
+}
+
+/**
  * S3 Connector Provider
  */
 export class S3ConnectorProvider implements ConnectorProvider {
   async testConnection(config: ConnectorConfig, secrets: ConnectorSecrets): Promise<{ success: boolean; error?: string }> {
     try {
-      const { bucket, region } = config;
-      const { accessKeyId, secretAccessKey } = secrets;
+      const s3 = await createS3Client(config, secrets);
+      const { bucket } = config;
 
-      if (!bucket || !region || !accessKeyId || !secretAccessKey) {
-        return { success: false, error: 'Missing required S3 configuration (bucket, region, accessKeyId, secretAccessKey)' };
+      if (!bucket) {
+        return { success: false, error: 'Missing required S3 configuration (bucket)' };
       }
 
-      const s3 = new AWS.S3({
-        region,
-        credentials: {
-          accessKeyId,
-          secretAccessKey,
-        },
-      });
+      // Test by listing objects (limit 1)
+      await s3.listObjectsV2({
+        Bucket: bucket,
+        MaxKeys: 1,
+      }).promise();
+
+      return { success: true };
+    } catch (error: any) {
+      return { success: false, error: error.message || 'Failed to connect to S3' };
+    }
+  }
+
+  async list(options: ListOptions, config: ConnectorConfig, secrets: ConnectorSecrets): Promise<ListResult> {
+    const s3 = await createS3Client(config, secrets);
+    const { bucket } = config;
+
+    if (!bucket) {
+      throw new Error('Missing required S3 configuration (bucket)');
+    }
 
       // Test by listing objects (limit 1)
       await s3.listObjectsV2({
@@ -111,20 +180,12 @@ export class S3ConnectorProvider implements ConnectorProvider {
   }
 
   async fetchObject(ref: string, config: ConnectorConfig, secrets: ConnectorSecrets): Promise<FetchResult> {
-    const { bucket, region } = config;
-    const { accessKeyId, secretAccessKey } = secrets;
+    const s3 = await createS3Client(config, secrets);
+    const { bucket } = config;
 
-    if (!bucket || !region || !accessKeyId || !secretAccessKey) {
-      throw new Error('Missing required S3 configuration');
+    if (!bucket) {
+      throw new Error('Missing required S3 configuration (bucket)');
     }
-
-    const s3 = new AWS.S3({
-      region,
-      credentials: {
-        accessKeyId,
-        secretAccessKey,
-      },
-    });
 
     // Get object metadata first
     const headResponse = await s3.headObject({

@@ -1,5 +1,6 @@
 import { supabaseAdmin } from '../supabase.js';
 import type { SupabaseClient } from '@supabase/supabase-js';
+import { decryptSecret } from '../security/secret-crypto.js';
 
 export interface JiraConfig {
   base_url: string;
@@ -66,11 +67,15 @@ export async function getJiraCredentials(
     return null;
   }
 
-  // TODO: Decrypt ciphertext in production
-  return {
-    email: emailData.ciphertext,
-    apiToken: tokenData.ciphertext,
-  };
+  try {
+    return {
+      email: decryptSecret(emailData.ciphertext),
+      apiToken: decryptSecret(tokenData.ciphertext),
+    };
+  } catch (decryptError: any) {
+    console.error('Failed to decrypt Jira credentials:', decryptError);
+    return null;
+  }
 }
 
 /**

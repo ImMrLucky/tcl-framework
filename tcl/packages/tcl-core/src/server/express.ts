@@ -42,6 +42,8 @@ import { setupIngestionConfigRoutes } from "./ingestion/config-routes.js";
 import { setupScheduledIngestionRoutes } from "./ingestion/scheduled-routes.js";
 import { startSchedulerWorker } from "./ingestion/scheduler-worker.js";
 import { setupConnectorRoutes } from "./connectors/routes.js";
+import { setupDropboxOAuthRoutes } from "./connectors/oauth/dropbox-oauth.js";
+import { setupGDriveOAuthRoutes } from "./connectors/oauth/gdrive-oauth.js";
 import { setupAnalyticsRoutes } from "./analytics/routes.js";
 import { setupExportRoutes } from "./exports/routes.js";
 import { setupEvaluationSearchRoutes } from "./evaluations/search.js";
@@ -3588,6 +3590,8 @@ console.log("Scheduled ingestion routes registered successfully");
 // Setup connector routes
 console.log("Registering connector routes...");
 setupConnectorRoutes(app);
+setupDropboxOAuthRoutes(app);
+setupGDriveOAuthRoutes(app);
 console.log("Connector routes registered successfully");
 
 // Setup evaluation search routes FIRST (before /api/evaluations)

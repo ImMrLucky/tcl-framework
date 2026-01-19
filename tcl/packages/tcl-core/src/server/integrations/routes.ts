@@ -3,6 +3,7 @@ import { supabaseAdmin } from '../supabase.js';
 import { getOrgContext } from '../auth-context.js';
 import { logAudit } from '../supabase.js';
 import { requireEntitlement } from '../entitlements/middleware.js';
+import { encryptSecret } from '../security/secret-crypto.js';
 
 /**
  * Setup integrations API routes
@@ -154,23 +155,27 @@ export function setupIntegrationRoutes(app: express.Application) {
         if (secrets && typeof secrets === 'object') {
           for (const [key, value] of Object.entries(secrets)) {
             if (value) {
-              // In production, encrypt the secret value using pgcrypto
-              // For now, store as plaintext (should be encrypted)
-              const { error: secretError } = await supabaseAdmin
-                .from('integration_secrets')
-                .upsert({
-                  org_id: context.orgId,
-                  integration_id: integration.id,
-                  integration_kind: kind,
-                  key,
-                  ciphertext: value as string, // TODO: Encrypt this
-                }, {
-                  onConflict: 'org_id,integration_kind,key',
-                });
+              try {
+                const encryptedValue = encryptSecret(value as string);
+                const { error: secretError } = await supabaseAdmin
+                  .from('integration_secrets')
+                  .upsert({
+                    org_id: context.orgId,
+                    integration_id: integration.id,
+                    integration_kind: kind,
+                    key,
+                    ciphertext: encryptedValue,
+                  }, {
+                    onConflict: 'org_id,integration_kind,key',
+                  });
 
-              if (secretError) {
-                console.error(`Failed to store secret ${key}:`, secretError);
-                // Continue even if secret storage fails
+                if (secretError) {
+                  console.error(`Failed to store secret ${key}:`, secretError);
+                  // Continue even if secret storage fails
+                }
+              } catch (encryptError: any) {
+                console.error(`Failed to encrypt secret ${key}:`, encryptError);
+                // Continue even if encryption fails (will be caught by validation)
               }
             }
           }
@@ -256,20 +261,25 @@ export function setupIntegrationRoutes(app: express.Application) {
         if (secrets && typeof secrets === 'object') {
           for (const [key, value] of Object.entries(secrets)) {
             if (value) {
-              const { error: secretError } = await supabaseAdmin
-                .from('integration_secrets')
-                .upsert({
-                  org_id: context.orgId,
-                  integration_id: id,
-                  integration_kind: existingIntegration.kind,
-                  key,
-                  ciphertext: value as string, // TODO: Encrypt this
-                }, {
-                  onConflict: 'org_id,integration_kind,key',
-                });
+              try {
+                const encryptedValue = encryptSecret(value as string);
+                const { error: secretError } = await supabaseAdmin
+                  .from('integration_secrets')
+                  .upsert({
+                    org_id: context.orgId,
+                    integration_id: id,
+                    integration_kind: existingIntegration.kind,
+                    key,
+                    ciphertext: encryptedValue,
+                  }, {
+                    onConflict: 'org_id,integration_kind,key',
+                  });
 
-              if (secretError) {
-                console.error(`Failed to update secret ${key}:`, secretError);
+                if (secretError) {
+                  console.error(`Failed to update secret ${key}:`, secretError);
+                }
+              } catch (encryptError: any) {
+                console.error(`Failed to encrypt secret ${key}:`, encryptError);
               }
             }
           }
