@@ -262,40 +262,143 @@
             <div class="connector-section">
               <div class="connector-config">
                 <h4>Connector Configuration</h4>
-                <mat-form-field appearance="outline" *ngIf="connector.type === 'S3'">
-                  <mat-label>Bucket</mat-label>
-                  <input matInput [ngModel]="getConnectorConfigValue(connector.type, 'bucket')" (ngModelChange)="setConnectorConfigValue(connector.type, 'bucket', $event)">
-                </mat-form-field>
-                <mat-form-field appearance="outline" *ngIf="connector.type === 'S3'">
-                  <mat-label>Region</mat-label>
-                  <input matInput [ngModel]="getConnectorConfigValue(connector.type, 'region')" (ngModelChange)="setConnectorConfigValue(connector.type, 'region', $event)">
-                </mat-form-field>
-                <mat-form-field appearance="outline" *ngIf="connector.type === 'S3'">
-                  <mat-label>Access Key</mat-label>
-                  <input matInput type="password" [ngModel]="getConnectorSecretValue(connector.type, 'accessKey')" (ngModelChange)="setConnectorSecretValue(connector.type, 'accessKey', $event)">
-                </mat-form-field>
-                <mat-form-field appearance="outline" *ngIf="connector.type === 'S3'">
-                  <mat-label>Secret Key</mat-label>
-                  <input matInput type="password" [ngModel]="getConnectorSecretValue(connector.type, 'secretAccessKey')" (ngModelChange)="setConnectorSecretValue(connector.type, 'secretAccessKey', $event)">
-                </mat-form-field>
-                <mat-form-field appearance="outline" *ngIf="connector.type !== 'S3'">
-                  <mat-label>Access Token</mat-label>
-                  <input matInput type="password" [ngModel]="getConnectorSecretValue(connector.type, 'accessToken')" (ngModelChange)="setConnectorSecretValue(connector.type, 'accessToken', $event)">
-                </mat-form-field>
                 
-                <button 
-                  mat-raised-button 
-                  color="primary" 
-                  (click)="connectConnector(connector.type)"
-                  [disabled]="loadingConnector">
-                  <mat-spinner *ngIf="loadingConnector" diameter="20" class="inline-spinner"></mat-spinner>
-                  <mat-icon *ngIf="!loadingConnector">link</mat-icon>
-                  {{ loadingConnector ? 'Connecting...' : 'Connect' }}
-                </button>
+                <!-- OAuth Connectors (Dropbox, Google Drive) -->
+                <div *ngIf="connector.type === 'DROPBOX' || connector.type === 'GDRIVE'">
+                  <div *ngIf="isConnectorConnected(connector.type)" class="connection-status connected">
+                    <mat-icon>check_circle</mat-icon>
+                    <div class="status-info">
+                      <strong>Connected</strong>
+                      <div *ngIf="getConnectorDisplayInfo(connector.type)?.email" class="account-info">
+                        Account: {{ getConnectorDisplayInfo(connector.type)?.email }}
+                      </div>
+                      <div *ngIf="getConnectorDisplayInfo(connector.type)?.name" class="account-info">
+                        {{ getConnectorDisplayInfo(connector.type)?.name }}
+                      </div>
+                    </div>
+                    <button 
+                      mat-stroked-button 
+                      color="warn" 
+                      (click)="disconnectConnector(connector.type)"
+                      style="margin-left: auto;">
+                      <mat-icon>link_off</mat-icon>
+                      Disconnect
+                    </button>
+                  </div>
+                  <div *ngIf="!isConnectorConnected(connector.type)" class="connection-status disconnected">
+                    <mat-icon>link_off</mat-icon>
+                    <span>Not connected</span>
+                    <button 
+                      mat-raised-button 
+                      color="primary" 
+                      (click)="connectConnector(connector.type)"
+                      style="margin-left: auto;">
+                      <mat-icon>link</mat-icon>
+                      Connect to {{ connector.name }}
+                    </button>
+                  </div>
+                </div>
+
+                <!-- S3 Connector -->
+                <div *ngIf="connector.type === 'S3'">
+                  <mat-form-field appearance="outline">
+                    <mat-label>Bucket</mat-label>
+                    <input matInput [ngModel]="getConnectorConfigValue(connector.type, 'bucket')" (ngModelChange)="setConnectorConfigValue(connector.type, 'bucket', $event)" required>
+                  </mat-form-field>
+                  
+                  <mat-form-field appearance="outline">
+                    <mat-label>Region</mat-label>
+                    <input matInput [ngModel]="getConnectorConfigValue(connector.type, 'region')" (ngModelChange)="setConnectorConfigValue(connector.type, 'region', $event)" required>
+                    <mat-hint>e.g., us-east-1, eu-west-1</mat-hint>
+                  </mat-form-field>
+                  
+                  <mat-form-field appearance="outline">
+                    <mat-label>Prefix (Optional)</mat-label>
+                    <input matInput [ngModel]="getConnectorConfigValue(connector.type, 'prefix')" (ngModelChange)="setConnectorConfigValue(connector.type, 'prefix', $event)">
+                    <mat-hint>Folder path prefix, e.g., "data/conversations/"</mat-hint>
+                  </mat-form-field>
+
+                  <mat-form-field appearance="outline">
+                    <mat-label>Connection Mode</mat-label>
+                    <mat-select [ngModel]="getConnectorConfigValue(connector.type, 'mode')" (ngModelChange)="setConnectorConfigValue(connector.type, 'mode', $event)">
+                      <mat-option value="ASSUME_ROLE">Assume Role (Recommended)</mat-option>
+                      <mat-option value="STATIC_KEYS">Static Keys (Dev Only)</mat-option>
+                    </mat-select>
+                  </mat-form-field>
+
+                  <!-- Assume Role Fields -->
+                  <div *ngIf="getConnectorConfigValue(connector.type, 'mode') === 'ASSUME_ROLE'">
+                    <mat-form-field appearance="outline">
+                      <mat-label>Role ARN</mat-label>
+                      <input matInput [ngModel]="getConnectorConfigValue(connector.type, 'roleArn')" (ngModelChange)="setConnectorConfigValue(connector.type, 'roleArn', $event)" required>
+                      <mat-hint>ARN of the IAM role to assume</mat-hint>
+                    </mat-form-field>
+                    
+                    <mat-form-field appearance="outline">
+                      <mat-label>External ID</mat-label>
+                      <input matInput [ngModel]="getConnectorConfigValue(connector.type, 'externalId')" (ngModelChange)="setConnectorConfigValue(connector.type, 'externalId', $event)" required>
+                      <mat-hint>External ID for assume role (security best practice)</mat-hint>
+                    </mat-form-field>
+                  </div>
+
+                  <!-- Static Keys Fields (Dev Only) -->
+                  <div *ngIf="getConnectorConfigValue(connector.type, 'mode') === 'STATIC_KEYS'">
+                    <mat-expansion-panel>
+                      <mat-expansion-panel-header>
+                        <mat-panel-title>
+                          <mat-icon>warning</mat-icon>
+                          Static Keys (Development Only)
+                        </mat-panel-title>
+                      </mat-expansion-panel-header>
+                      <p style="color: #f44336; margin-bottom: 16px;">
+                        <strong>Warning:</strong> Static keys are not recommended for production. Use assume-role mode instead.
+                      </p>
+                      <mat-form-field appearance="outline">
+                        <mat-label>Access Key ID</mat-label>
+                        <input matInput type="password" [ngModel]="getConnectorConfigValue(connector.type, 'accessKeyId')" (ngModelChange)="setConnectorConfigValue(connector.type, 'accessKeyId', $event)">
+                      </mat-form-field>
+                      
+                      <mat-form-field appearance="outline">
+                        <mat-label>Secret Access Key</mat-label>
+                        <input matInput type="password" [ngModel]="getConnectorConfigValue(connector.type, 'secretAccessKey')" (ngModelChange)="setConnectorConfigValue(connector.type, 'secretAccessKey', $event)">
+                      </mat-form-field>
+                    </mat-expansion-panel>
+                  </div>
+
+                  <div *ngIf="isConnectorConnected(connector.type)" class="connection-status connected" style="margin-top: 16px;">
+                    <mat-icon>check_circle</mat-icon>
+                    <div class="status-info">
+                      <strong>Connected</strong>
+                      <div *ngIf="getConnectorDisplayInfo(connector.type)" class="account-info">
+                        Bucket: {{ getConnectorDisplayInfo(connector.type)?.bucket }}<br>
+                        Region: {{ getConnectorDisplayInfo(connector.type)?.region }}
+                      </div>
+                    </div>
+                    <button 
+                      mat-stroked-button 
+                      color="warn" 
+                      (click)="disconnectConnector(connector.type)"
+                      style="margin-left: auto;">
+                      <mat-icon>link_off</mat-icon>
+                      Disconnect
+                    </button>
+                  </div>
+                  
+                  <button 
+                    mat-raised-button 
+                    color="primary" 
+                    (click)="connectConnector(connector.type)"
+                    [disabled]="loadingConnector"
+                    style="margin-top: 16px;">
+                    <mat-spinner *ngIf="loadingConnector" diameter="20" class="inline-spinner"></mat-spinner>
+                    <mat-icon *ngIf="!loadingConnector">link</mat-icon>
+                    {{ loadingConnector ? 'Connecting...' : (isConnectorConnected(connector.type) ? 'Reconnect' : 'Connect') }}
+                  </button>
+                </div>
               </div>
 
               <!-- File Browser -->
-              <div *ngIf="activeConnector === connector.type" class="file-browser">
+              <div *ngIf="activeConnector === connector.type && isConnectorConnected(connector.type)" class="file-browser">
                 <div class="browser-header">
                   <button mat-icon-button (click)="navigateBack()" *ngIf="browsingPath">
                     <mat-icon>arrow_back</mat-icon>

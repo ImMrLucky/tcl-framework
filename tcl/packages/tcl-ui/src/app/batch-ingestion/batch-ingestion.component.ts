@@ -80,18 +80,15 @@ export class BatchIngestionComponent implements OnInit, OnDestroy {
   
   activeConnector: string | null = null;
   connectorConfig: any = {
-    S3: { bucket: '', region: 'us-east-1' },
+    S3: { bucket: '', region: 'us-east-1', prefix: '', mode: 'ASSUME_ROLE', roleArn: '', externalId: '' },
     DROPBOX: {},
     GDRIVE: {},
   };
-  connectorSecrets: any = {
-    S3: { accessKey: '', secretAccessKey: '' },
-    DROPBOX: { accessToken: '' },
-    GDRIVE: { accessToken: '' },
-  };
+  connectorStatus: Record<string, { connected: boolean; displayInfo?: any; error?: string }> = {};
   connectorObjects: any[] = [];
   selectedObjects: Set<string> = new Set();
   loadingConnector = false;
+  loadingStatus = false;
   browsingPath = '';
   
   // Batch management
@@ -134,6 +131,19 @@ export class BatchIngestionComponent implements OnInit, OnDestroy {
     this.initializeConnectorConfigs();
     this.loadRepresentatives();
     this.loadIngestionConfig();
+    this.checkConnectorStatuses();
+    
+    // Listen for OAuth callbacks
+    window.addEventListener('message', (event) => {
+      if (event.data?.type === 'dropbox_oauth_success' || event.data?.type === 'gdrive_oauth_success') {
+        const type = event.data.type === 'dropbox_oauth_success' ? 'DROPBOX' : 'GDRIVE';
+        this.snackBar.open(`${type} connected successfully!`, 'Close', { duration: 3000 });
+        this.checkConnectorStatus(type);
+        if (this.activeConnector === type) {
+          this.loadConnectorObjects(type);
+        }
+      }
+    });
     
     // Check if batch ID is in route
     this.route.params.subscribe(params => {
@@ -209,39 +219,120 @@ export class BatchIngestionComponent implements OnInit, OnDestroy {
   }
   
   // Connector handlers
+  async checkConnectorStatuses() {
+    for (const connector of this.connectors) {
+      await this.checkConnectorStatus(connector.type);
+    }
+  }
+
+  async checkConnectorStatus(type: string) {
+    this.loadingStatus = true;
+    try {
+      const status = await firstValueFrom(this.batchService.getConnectorStatus(type));
+      this.connectorStatus[type] = status;
+    } catch (error: any) {
+      console.error(`Failed to check ${type} status:`, error);
+      this.connectorStatus[type] = { connected: false, error: error.error?.error || error.message };
+    } finally {
+      this.loadingStatus = false;
+    }
+  }
+
   async connectConnector(type: string) {
+    const typeUpper = type.toUpperCase();
+    
+    // For OAuth connectors, start OAuth flow
+    if (typeUpper === 'DROPBOX' || typeUpper === 'GDRIVE') {
+      this.batchService.startOAuthFlow(typeUpper.toLowerCase() as 'dropbox' | 'gdrive');
+      return;
+    }
+    
+    // For S3, use the connect endpoint
+    if (typeUpper === 'S3') {
+      await this.connectS3();
+      return;
+    }
+  }
+
+  async connectS3() {
     this.loadingConnector = true;
     try {
-      // Test connection
-      const testResult = await firstValueFrom(
-        this.batchService.testConnector(
-          type,
-          this.connectorConfig[type] || {},
-          this.connectorSecrets[type] || {}
-        )
-      );
+      const config = this.connectorConfig.S3;
       
-      if (testResult?.success) {
-        this.activeConnector = type;
+      if (!config.bucket || !config.region) {
+        this.snackBar.open('Bucket and region are required', 'Close', { duration: 3000 });
+        return;
+      }
+
+      if (config.mode === 'ASSUME_ROLE') {
+        if (!config.roleArn || !config.externalId) {
+          this.snackBar.open('Role ARN and External ID are required for assume-role mode', 'Close', { duration: 3000 });
+          return;
+        }
+      } else if (config.mode === 'STATIC_KEYS') {
+        if (!config.accessKeyId || !config.secretAccessKey) {
+          this.snackBar.open('Access Key ID and Secret Access Key are required for static keys mode', 'Close', { duration: 3000 });
+          return;
+        }
+      }
+
+      const result = await firstValueFrom(this.batchService.connectS3({
+        mode: config.mode,
+        bucket: config.bucket,
+        region: config.region,
+        prefix: config.prefix || '',
+        roleArn: config.roleArn,
+        externalId: config.externalId,
+        accessKeyId: config.accessKeyId,
+        secretAccessKey: config.secretAccessKey,
+      }));
+
+      if (result?.success) {
+        await this.checkConnectorStatus('S3');
+        this.activeConnector = 'S3';
         this.browsingPath = '';
-        await this.loadConnectorObjects(type);
-        this.snackBar.open('Connected successfully', 'Close', { duration: 3000 });
-      } else {
-        this.snackBar.open('Connection failed: ' + (testResult?.error || 'Unknown error'), 'Close', {
-          duration: 5000
-        });
+        await this.loadConnectorObjects('S3');
+        this.snackBar.open('S3 connected successfully', 'Close', { duration: 3000 });
       }
     } catch (error: any) {
-      this.snackBar.open('Failed to connect: ' + (error.error?.error || error.message), 'Close', {
+      this.snackBar.open('Failed to connect S3: ' + (error.error?.error || error.message), 'Close', {
         duration: 5000
       });
     } finally {
       this.loadingConnector = false;
     }
   }
+
+  async disconnectConnector(type: string) {
+    try {
+      const result = await firstValueFrom(this.batchService.disconnectConnector(type));
+      if (result?.success) {
+        await this.checkConnectorStatus(type);
+        if (this.activeConnector === type) {
+          this.activeConnector = null;
+          this.connectorObjects = [];
+          this.selectedObjects.clear();
+        }
+        this.snackBar.open('Disconnected successfully', 'Close', { duration: 3000 });
+      }
+    } catch (error: any) {
+      this.snackBar.open('Failed to disconnect: ' + (error.error?.error || error.message), 'Close', {
+        duration: 5000
+      });
+    }
+  }
   
   async loadConnectorObjects(type: string, path?: string) {
     if (!this.activeConnector) return;
+    
+    // Check if connected first
+    if (!this.connectorStatus[type]?.connected) {
+      await this.checkConnectorStatus(type);
+      if (!this.connectorStatus[type]?.connected) {
+        this.snackBar.open('Not connected. Please connect first.', 'Close', { duration: 3000 });
+        return;
+      }
+    }
     
     try {
       const result = await firstValueFrom(
@@ -249,8 +340,6 @@ export class BatchIngestionComponent implements OnInit, OnDestroy {
           path: path || this.browsingPath,
           limit: 100,
           recursive: false,
-          config: this.connectorConfig[type] || {},
-          secrets: this.connectorSecrets[type] || {},
         })
       );
       
@@ -476,16 +565,9 @@ export class BatchIngestionComponent implements OnInit, OnDestroy {
     // Initialize connector configs if not already initialized
     if (!this.connectorConfig || Object.keys(this.connectorConfig).length === 0) {
       this.connectorConfig = {
-        S3: { bucket: '', region: 'us-east-1' },
+        S3: { bucket: '', region: 'us-east-1', prefix: '', mode: 'ASSUME_ROLE', roleArn: '', externalId: '', accessKeyId: '', secretAccessKey: '' },
         DROPBOX: {},
         GDRIVE: {},
-      };
-    }
-    if (!this.connectorSecrets || Object.keys(this.connectorSecrets).length === 0) {
-      this.connectorSecrets = {
-        S3: { accessKey: '', secretAccessKey: '' },
-        DROPBOX: { accessToken: '' },
-        GDRIVE: { accessToken: '' },
       };
     }
   }
@@ -506,22 +588,13 @@ export class BatchIngestionComponent implements OnInit, OnDestroy {
     }
     this.connectorConfig[connectorType][key] = value;
   }
-  
-  getConnectorSecretValue(connectorType: string, key: string): string {
-    if (!this.connectorSecrets || !this.connectorSecrets[connectorType]) {
-      return '';
-    }
-    return this.connectorSecrets[connectorType][key] || '';
+
+  isConnectorConnected(type: string): boolean {
+    return this.connectorStatus[type]?.connected || false;
   }
-  
-  setConnectorSecretValue(connectorType: string, key: string, value: string): void {
-    if (!this.connectorSecrets) {
-      this.initializeConnectorConfigs();
-    }
-    if (!this.connectorSecrets[connectorType]) {
-      this.connectorSecrets[connectorType] = {};
-    }
-    this.connectorSecrets[connectorType][key] = value;
+
+  getConnectorDisplayInfo(type: string): any {
+    return this.connectorStatus[type]?.displayInfo;
   }
   
   getStatusColor(status: string): 'primary' | 'accent' | 'warn' | '' {

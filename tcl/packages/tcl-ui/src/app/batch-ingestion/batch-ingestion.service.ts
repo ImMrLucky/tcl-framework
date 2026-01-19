@@ -102,10 +102,15 @@ export class BatchIngestionService {
   }
 
   // Connector operations
-  testConnector(type: string, config: any, secrets?: any): Observable<{ success: boolean; error?: string }> {
+  getConnectorStatus(type: string): Observable<{ connected: boolean; displayInfo?: any; error?: string }> {
+    return this.http.get<{ connected: boolean; displayInfo?: any; error?: string }>(
+      `${this.apiUrl}/api/connectors/${type}/status`
+    );
+  }
+
+  testConnector(type: string, config?: any): Observable<{ success: boolean; error?: string }> {
     return this.http.post<{ success: boolean; error?: string }>(`${this.apiUrl}/api/connectors/${type}/test`, {
-      config,
-      secrets,
+      config: config || {},
     });
   }
 
@@ -117,8 +122,6 @@ export class BatchIngestionService {
       limit?: number;
       offset?: number;
       recursive?: boolean;
-      config?: any;
-      secrets?: any;
     }
   ): Observable<{ objects: any[]; hasMore: boolean; nextOffset?: number }> {
     const params: any = {};
@@ -127,13 +130,36 @@ export class BatchIngestionService {
     if (options.limit) params.limit = options.limit.toString();
     if (options.offset) params.offset = options.offset.toString();
     if (options.recursive) params.recursive = 'true';
-    if (options.config) params.config = JSON.stringify(options.config);
-    if (options.secrets) params.secrets = JSON.stringify(options.secrets);
+    // No longer sending config or secrets - they're stored server-side
 
     return this.http.get<{ objects: any[]; hasMore: boolean; nextOffset?: number }>(
       `${this.apiUrl}/api/connectors/${type}/list`,
       { params }
     );
+  }
+
+  // OAuth operations
+  startOAuthFlow(type: 'dropbox' | 'gdrive'): void {
+    const url = `${this.apiUrl}/api/connectors/${type}/oauth/start`;
+    window.open(url, 'oauth', 'width=600,height=700');
+  }
+
+  disconnectConnector(type: string): Observable<{ success: boolean }> {
+    return this.http.post<{ success: boolean }>(`${this.apiUrl}/api/connectors/${type}/disconnect`, {});
+  }
+
+  // S3 connection
+  connectS3(config: {
+    mode: 'ASSUME_ROLE' | 'STATIC_KEYS';
+    bucket: string;
+    region: string;
+    prefix?: string;
+    roleArn?: string;
+    externalId?: string;
+    accessKeyId?: string;
+    secretAccessKey?: string;
+  }): Observable<{ success: boolean }> {
+    return this.http.post<{ success: boolean }>(`${this.apiUrl}/api/connectors/s3/connect`, config);
   }
 
   createBatchFromSelection(type: string, selection: any[], config?: BatchIngestionConfig): Observable<{ success: boolean; batch: Batch }> {
