@@ -243,7 +243,19 @@ export class BatchIngestionComponent implements OnInit, OnDestroy {
     
     // For OAuth connectors, start OAuth flow
     if (typeUpper === 'DROPBOX' || typeUpper === 'GDRIVE') {
-      this.batchService.startOAuthFlow(typeUpper.toLowerCase() as 'dropbox' | 'gdrive');
+      try {
+        const response = await firstValueFrom(
+          this.batchService.startOAuthFlow(typeUpper.toLowerCase() as 'dropbox' | 'gdrive')
+        );
+        if (response?.oauthUrl) {
+          // Open OAuth URL in popup window
+          window.open(response.oauthUrl, 'oauth', 'width=600,height=700');
+        }
+      } catch (error: any) {
+        this.snackBar.open('Failed to start OAuth flow: ' + (error.error?.error || error.message), 'Close', {
+          duration: 5000
+        });
+      }
       return;
     }
     

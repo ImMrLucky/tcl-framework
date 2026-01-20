@@ -139,9 +139,9 @@ export class BatchIngestionService {
   }
 
   // OAuth operations
-  startOAuthFlow(type: 'dropbox' | 'gdrive'): void {
-    const url = `${this.apiUrl}/api/connectors/${type}/oauth/start`;
-    window.open(url, 'oauth', 'width=600,height=700');
+  startOAuthFlow(type: 'dropbox' | 'gdrive'): Observable<{ oauthUrl: string }> {
+    // Make authenticated request to get OAuth URL
+    return this.http.get<{ oauthUrl: string }>(`${this.apiUrl}/api/connectors/${type}/oauth/start`);
   }
 
   disconnectConnector(type: string): Observable<{ success: boolean }> {

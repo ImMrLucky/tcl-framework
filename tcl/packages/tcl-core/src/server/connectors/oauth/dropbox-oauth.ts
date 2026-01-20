@@ -74,8 +74,8 @@ export function setupDropboxOAuthRoutes(app: express.Application) {
         authUrl.searchParams.set('state', stateToken);
         authUrl.searchParams.set('token_access_type', 'offline'); // Request refresh token
 
-        // Redirect to Dropbox
-        res.redirect(authUrl.toString());
+        // Return OAuth URL as JSON (for popup window)
+        res.json({ oauthUrl: authUrl.toString() });
       } catch (error: any) {
         console.error('Dropbox OAuth start error:', error);
         res.status(500).json({ error: error.message || 'Unknown error' });

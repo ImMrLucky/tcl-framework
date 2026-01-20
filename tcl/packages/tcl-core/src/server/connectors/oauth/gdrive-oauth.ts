@@ -76,8 +76,8 @@ export function setupGDriveOAuthRoutes(app: express.Application) {
         authUrl.searchParams.set('prompt', 'consent'); // Force consent to get refresh token
         authUrl.searchParams.set('state', stateToken);
 
-        // Redirect to Google
-        res.redirect(authUrl.toString());
+        // Return OAuth URL as JSON (for popup window)
+        res.json({ oauthUrl: authUrl.toString() });
       } catch (error: any) {
         console.error('Google Drive OAuth start error:', error);
         res.status(500).json({ error: error.message || 'Unknown error' });
