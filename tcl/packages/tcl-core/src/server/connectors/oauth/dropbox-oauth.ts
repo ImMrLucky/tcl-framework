@@ -46,6 +46,9 @@ export function setupDropboxOAuthRoutes(app: express.Application) {
           return res.status(503).json({ error: 'Supabase not configured' });
         }
 
+        // Log redirect URI for debugging
+        console.log('[Dropbox OAuth] Using redirect URI:', DROPBOX_REDIRECT_URI);
+
         // Generate state token
         const stateToken = generateStateToken();
 

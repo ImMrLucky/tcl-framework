@@ -46,6 +46,9 @@ export function setupGDriveOAuthRoutes(app: express.Application) {
           return res.status(503).json({ error: 'Supabase not configured' });
         }
 
+        // Log redirect URI for debugging
+        console.log('[Google Drive OAuth] Using redirect URI:', GDRIVE_REDIRECT_URI);
+
         // Generate state token
         const stateToken = generateStateToken();
 
