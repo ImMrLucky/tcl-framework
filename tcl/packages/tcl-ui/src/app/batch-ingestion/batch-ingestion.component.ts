@@ -135,12 +135,32 @@ export class BatchIngestionComponent implements OnInit, OnDestroy {
     
     // Listen for OAuth callbacks
     window.addEventListener('message', (event) => {
+      // Verify origin for security (allow same origin and API domain)
+      const apiUrl = (window as any).__TCL_API_URL || window.location.origin;
+      const allowedOrigins = [window.location.origin, apiUrl, new URL(apiUrl).origin].filter(Boolean);
+      
+      if (!allowedOrigins.some(origin => event.origin === origin || event.origin === new URL(origin).origin)) {
+        console.warn('[OAuth] Rejected postMessage from unauthorized origin:', event.origin);
+        return;
+      }
+
       if (event.data?.type === 'dropbox_oauth_success' || event.data?.type === 'gdrive_oauth_success') {
         const type = event.data.type === 'dropbox_oauth_success' ? 'DROPBOX' : 'GDRIVE';
+        console.log('[OAuth] Received success message for:', type);
         this.snackBar.open(`${type} connected successfully!`, 'Close', { duration: 3000 });
-        this.checkConnectorStatus(type);
+        
+        // Update status and load files
+        await this.checkConnectorStatus(type);
+        
+        // If this connector is active, load its files
         if (this.activeConnector === type) {
-          this.loadConnectorObjects(type);
+          this.browsingPath = ''; // Reset to root
+          await this.loadConnectorObjects(type);
+        } else {
+          // If not active, switch to it and load files
+          this.activeConnector = type;
+          this.browsingPath = '';
+          await this.loadConnectorObjects(type);
         }
       }
     });
@@ -230,6 +250,12 @@ export class BatchIngestionComponent implements OnInit, OnDestroy {
     try {
       const status = await firstValueFrom(this.batchService.getConnectorStatus(type));
       this.connectorStatus[type] = status;
+      
+      // If connector just became connected and is active, load files automatically
+      if (status.connected && this.activeConnector === type && this.connectorObjects.length === 0) {
+        this.browsingPath = '';
+        await this.loadConnectorObjects(type);
+      }
     } catch (error: any) {
       console.error(`Failed to check ${type} status:`, error);
       this.connectorStatus[type] = { connected: false, error: error.error?.error || error.message };

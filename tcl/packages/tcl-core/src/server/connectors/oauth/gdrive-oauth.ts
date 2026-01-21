@@ -271,16 +271,39 @@ export function setupGDriveOAuthRoutes(app: express.Application) {
         const redirectUrl = stateData.redirect_url || '/bulk-ingest';
         return res.send(`
           <html>
-            <body>
-              <h1>Success!</h1>
+            <head>
+              <title>Google Drive Connected</title>
+            </head>
+            <body style="font-family: Arial, sans-serif; text-align: center; padding: 40px;">
+              <h1 style="color: #4caf50;">✓ Success!</h1>
               <p>Google Drive connection successful. This window will close automatically.</p>
               <script>
-                if (window.opener) {
-                  window.opener.postMessage({ type: 'gdrive_oauth_success' }, '*');
-                  setTimeout(() => window.close(), 1000);
-                } else {
-                  window.location.href = '${redirectUrl}';
-                }
+                (function() {
+                  // Send postMessage immediately
+                  if (window.opener && !window.opener.closed) {
+                    try {
+                      window.opener.postMessage({ type: 'gdrive_oauth_success' }, '*');
+                      console.log('[OAuth Callback] Sent postMessage to parent window');
+                    } catch (e) {
+                      console.error('[OAuth Callback] Failed to send postMessage:', e);
+                    }
+                  }
+                  
+                  // Close window immediately (browser may block if not opened by script, but try anyway)
+                  setTimeout(function() {
+                    try {
+                      window.close();
+                      // If close() didn't work, try focusing the opener and closing
+                      if (window.opener && !window.opener.closed) {
+                        window.opener.focus();
+                      }
+                    } catch (e) {
+                      console.log('[OAuth Callback] Could not close window automatically:', e);
+                      // Fallback: show a close button
+                      document.body.innerHTML += '<p><button onclick="window.close()" style="padding: 10px 20px; font-size: 16px; cursor: pointer;">Close Window</button></p>';
+                    }
+                  }, 500);
+                })();
               </script>
             </body>
           </html>

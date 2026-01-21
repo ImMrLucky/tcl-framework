@@ -399,14 +399,23 @@
 
               <!-- File Browser -->
               <div *ngIf="activeConnector === connector.type && isConnectorConnected(connector.type)" class="file-browser">
-                <div class="browser-header">
-                  <button mat-icon-button (click)="navigateBack()" *ngIf="browsingPath">
+                <div class="browser-header" style="display: flex; align-items: center; gap: 8px; margin-bottom: 16px;">
+                  <button mat-icon-button (click)="navigateBack()" *ngIf="browsingPath" title="Go back">
                     <mat-icon>arrow_back</mat-icon>
                   </button>
-                  <span class="current-path">{{ browsingPath || 'Root' }}</span>
+                  <span class="current-path" style="flex: 1;">{{ browsingPath || 'Root' }}</span>
+                  <button mat-icon-button (click)="loadConnectorObjects(connector.type, browsingPath)" title="Refresh">
+                    <mat-icon>refresh</mat-icon>
+                  </button>
                 </div>
                 
-                <table mat-table [dataSource]="connectorObjects" class="connector-table">
+                <div *ngIf="connectorObjects.length === 0" style="padding: 40px; text-align: center; color: #666;">
+                  <mat-icon style="font-size: 48px; width: 48px; height: 48px; color: #ccc;">folder_open</mat-icon>
+                  <p style="margin-top: 16px;">No files or folders found in this location.</p>
+                  <p style="font-size: 12px; margin-top: 8px;">Navigate to a folder by clicking on folder names above.</p>
+                </div>
+                
+                <table mat-table [dataSource]="connectorObjects" class="connector-table" *ngIf="connectorObjects.length > 0">
                   <ng-container matColumnDef="select">
                     <th mat-header-cell *matHeaderCellDef>
                       <mat-checkbox 
@@ -427,8 +436,16 @@
                     <th mat-header-cell *matHeaderCellDef>Name</th>
                     <td mat-cell *matCellDef="let object">
                       <mat-icon>{{ object.isDirectory ? 'folder' : 'insert_drive_file' }}</mat-icon>
-                      <span (click)="navigateToFolder(object)" [class.folder-link]="object.isDirectory">
+                      <span 
+                        (click)="navigateToFolder(object)" 
+                        [class.folder-link]="object.isDirectory"
+                        [style.cursor]="object.isDirectory ? 'pointer' : 'default'"
+                        [style.color]="object.isDirectory ? '#1976d2' : 'inherit'"
+                        [style.text-decoration]="object.isDirectory ? 'underline' : 'none'">
                         {{ object.name }}
+                      </span>
+                      <span *ngIf="object.isDirectory" style="color: #666; font-size: 12px; margin-left: 8px;">
+                        (click to open)
                       </span>
                     </td>
                   </ng-container>

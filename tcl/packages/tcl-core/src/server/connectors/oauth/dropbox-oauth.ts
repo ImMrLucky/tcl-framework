@@ -138,6 +138,7 @@ export function setupDropboxOAuthRoutes(app: express.Application) {
         }
 
         // Verify state token
+        console.log('[Dropbox OAuth] Verifying state token:', state);
         const { data: stateData, error: stateError } = await supabaseAdmin
           .from('oauth_states')
           .select('*')
@@ -145,12 +146,29 @@ export function setupDropboxOAuthRoutes(app: express.Application) {
           .gt('expires_at', new Date().toISOString())
           .single();
 
+        if (stateError) {
+          console.error('[Dropbox OAuth] State lookup error:', stateError);
+          // Try to find the state even if expired for debugging
+          const { data: expiredState } = await supabaseAdmin
+            .from('oauth_states')
+            .select('*')
+            .eq('state_token', state as string)
+            .single();
+          
+          if (expiredState) {
+            console.error('[Dropbox OAuth] State found but expired. Expires at:', expiredState.expires_at, 'Current time:', new Date().toISOString());
+          } else {
+            console.error('[Dropbox OAuth] State token not found in database');
+          }
+        }
+
         if (stateError || !stateData) {
           return res.send(`
             <html>
               <body>
                 <h1>OAuth Error</h1>
                 <p>Invalid or expired state token</p>
+                <p style="font-size: 12px; color: #666;">State: ${typeof state === 'string' ? state.substring(0, 20) : String(state)}...</p>
                 <script>
                   setTimeout(() => window.close(), 3000);
                 </script>
@@ -158,6 +176,8 @@ export function setupDropboxOAuthRoutes(app: express.Application) {
             </html>
           `);
         }
+
+        console.log('[Dropbox OAuth] State token verified for org:', stateData.org_id, 'user:', stateData.user_id);
 
         // Delete used state token
         await supabaseAdmin
@@ -267,18 +287,42 @@ export function setupDropboxOAuthRoutes(app: express.Application) {
 
         // Return success page that closes window
         const redirectUrl = stateData.redirect_url || '/bulk-ingest';
+        const apiUrl = process.env.__TCL_API_URL || 'https://protectqa.com';
         return res.send(`
           <html>
-            <body>
-              <h1>Success!</h1>
+            <head>
+              <title>Dropbox Connected</title>
+            </head>
+            <body style="font-family: Arial, sans-serif; text-align: center; padding: 40px;">
+              <h1 style="color: #4caf50;">✓ Success!</h1>
               <p>Dropbox connection successful. This window will close automatically.</p>
               <script>
-                if (window.opener) {
-                  window.opener.postMessage({ type: 'dropbox_oauth_success' }, '*');
-                  setTimeout(() => window.close(), 1000);
-                } else {
-                  window.location.href = '${redirectUrl}';
-                }
+                (function() {
+                  // Send postMessage immediately
+                  if (window.opener && !window.opener.closed) {
+                    try {
+                      window.opener.postMessage({ type: 'dropbox_oauth_success' }, '*');
+                      console.log('[OAuth Callback] Sent postMessage to parent window');
+                    } catch (e) {
+                      console.error('[OAuth Callback] Failed to send postMessage:', e);
+                    }
+                  }
+                  
+                  // Close window immediately (browser may block if not opened by script, but try anyway)
+                  setTimeout(function() {
+                    try {
+                      window.close();
+                      // If close() didn't work, try focusing the opener and closing
+                      if (window.opener && !window.opener.closed) {
+                        window.opener.focus();
+                      }
+                    } catch (e) {
+                      console.log('[OAuth Callback] Could not close window automatically:', e);
+                      // Fallback: show a close button
+                      document.body.innerHTML += '<p><button onclick="window.close()" style="padding: 10px 20px; font-size: 16px; cursor: pointer;">Close Window</button></p>';
+                    }
+                  }, 500);
+                })();
               </script>
             </body>
           </html>
