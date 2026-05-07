@@ -21,6 +21,8 @@ export declare function detectComplianceIssues(claims: Array<{
     text: string;
     meta?: {
         speaker?: string;
+        speakerType?: string;
+        speakerLabel?: string;
         turnIndex?: number;
     };
 }>, runId: string, conversationId: string, evidenceMode: 'TRANSCRIPT_ONLY' | 'TRANSCRIPT_PLUS_EXTERNAL'): ComplianceDetectorResult;

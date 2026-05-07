@@ -31,38 +31,51 @@ export function assignTopicIds(claims) {
 // SLOT-BASED SEGMENTATION (Primary method)
 // =============================================================================
 function segmentBySlot(claims) {
-    // E2: Improved slot-based segmentation with semantic slot families
+    const config = getTemplateConfig();
     const clusterMap = new Map();
     for (const claim of claims) {
         const slot = claim.slot;
-        let key = `${slot.slotType}`;
-        // E2: If slotType is one of {REFUND, FEE, PLAN_PRICE, RECORDING, PAYMENT_METHOD}, enforce stable topic IDs
-        const semanticSlotTypes = new Set(['refund', 'fee', 'plan_price', 'recording', 'payment_method', 'commitment']);
-        if (semanticSlotTypes.has(slot.slotType)) {
-            // Use entityKey to create stable topic clusters
-            // e.g., "FEE:LATE_FEE" vs "FEE:CANCELLATION_FEE" should be different topics
-            key = `${slot.slotType}:${slot.entityKey || 'unknown'}`;
+        let key;
+        // Handle misc slots: cluster by turn window to prevent topic explosion
+        if (slot.slotType === 'misc' && slot.entityKey === 'unclassified') {
+            const turn = parseTurnIndex(claim.span.turnId);
+            const windowSize = config.topicSegmentation.turnWindow || 10;
+            const windowBucket = Math.floor(turn / windowSize);
+            key = `misc:window:${windowBucket}`;
         }
-        else if (slot.slotType === 'amount' && slot.entityKey) {
-            // Group similar amounts together (within 10% tolerance)
-            const amountMatch = slot.entityKey.match(/AMOUNT:(\d+\.?\d*)/);
-            if (amountMatch) {
-                const amount = parseFloat(amountMatch[1]);
-                // Round to nearest 10% bucket for clustering
-                const bucket = Math.round(amount / (amount * 0.1 || 1));
-                key = `amount:${bucket}`;
+        else {
+            // E2: If slotType is one of {REFUND, FEE, PLAN_PRICE, RECORDING, PAYMENT_METHOD}, enforce stable topic IDs
+            const semanticSlotTypes = new Set(['refund', 'fee', 'plan_price', 'recording', 'payment_method', 'commitment']);
+            if (semanticSlotTypes.has(slot.slotType)) {
+                // Use entityKey to create stable topic clusters
+                // e.g., "FEE:LATE_FEE" vs "FEE:CANCELLATION_FEE" should be different topics
+                key = `${slot.slotType}:${slot.entityKey || 'unknown'}`;
             }
-            else {
+            else if (slot.slotType === 'amount' && slot.entityKey) {
+                // Group similar amounts together (within 10% tolerance)
+                const amountMatch = slot.entityKey.match(/AMOUNT:(\d+\.?\d*)/);
+                if (amountMatch) {
+                    const amount = parseFloat(amountMatch[1]);
+                    // Round to nearest 10% bucket for clustering
+                    const bucket = Math.round(amount / (amount * 0.1 || 1));
+                    key = `amount:${bucket}`;
+                }
+                else {
+                    key = `${slot.slotType}:${slot.entityKey}`;
+                }
+            }
+            else if (slot.slotType === 'timeframe' && slot.entityKey) {
+                // Group similar timeframes together
                 key = `${slot.slotType}:${slot.entityKey}`;
             }
-        }
-        else if (slot.slotType === 'timeframe' && slot.entityKey) {
-            // Group similar timeframes together
-            key = `${slot.slotType}:${slot.entityKey}`;
-        }
-        else if (slot.entityKey && slot.entityKey !== 'unknown' && slot.entityKey !== 'general') {
-            // Use entityKey for better clustering
-            key = `${slot.slotType}:${slot.entityKey}`;
+            else if (slot.entityKey && slot.entityKey !== 'unknown' && slot.entityKey !== 'general' && slot.entityKey !== 'unclassified') {
+                // Use entityKey for better clustering
+                key = `${slot.slotType}:${slot.entityKey}`;
+            }
+            else {
+                // Fallback: use slotType only
+                key = `${slot.slotType}`;
+            }
         }
         if (!clusterMap.has(key)) {
             clusterMap.set(key, []);
@@ -146,19 +159,29 @@ function segmentHybrid(claims, config) {
     // Step 1: Initial clustering (slot + anchor based)
     const slotClusters = new Map();
     for (const claim of claims) {
-        // Primary key: slotType:entityKey
-        let key = `${claim.slot.slotType}:${claim.slot.entityKey}`;
-        // 6.1: If claim has strong anchors, use anchor-based clustering
-        const strongAnchors = (claim.anchors ?? []).filter(a => ['MONEY', 'DATE', 'TIMEFRAME', 'PAYMENT_CARD', 'SSN_LAST4'].includes(a.type));
-        if (strongAnchors.length > 0) {
-            const primaryAnchor = strongAnchors[0];
-            // Sensitive anchors get their own cluster
-            if (primaryAnchor.type === 'PAYMENT_CARD' || primaryAnchor.type === 'SSN_LAST4') {
-                key = `sensitive:${primaryAnchor.type}:${primaryAnchor.key}`;
-            }
-            else {
-                // MONEY/DATE/TIMEFRAME cluster by anchor key
-                key = `${claim.slot.slotType}:${primaryAnchor.type}:${primaryAnchor.key}`;
+        const slot = claim.slot;
+        let key;
+        // Handle misc slots: cluster by turn window to prevent topic explosion
+        if (slot.slotType === 'misc' && slot.entityKey === 'unclassified') {
+            const turn = parseTurnIndex(claim.span.turnId);
+            const windowBucket = Math.floor(turn / config.turnWindow);
+            key = `misc:window:${windowBucket}`;
+        }
+        else {
+            // Primary key: slotType:entityKey
+            key = `${slot.slotType}:${slot.entityKey}`;
+            // 6.1: If claim has strong anchors, use anchor-based clustering
+            const strongAnchors = (claim.anchors ?? []).filter(a => ['MONEY', 'DATE', 'TIMEFRAME', 'PAYMENT_CARD', 'SSN_LAST4'].includes(a.type));
+            if (strongAnchors.length > 0) {
+                const primaryAnchor = strongAnchors[0];
+                // Sensitive anchors get their own cluster
+                if (primaryAnchor.type === 'PAYMENT_CARD' || primaryAnchor.type === 'SSN_LAST4') {
+                    key = `sensitive:${primaryAnchor.type}:${primaryAnchor.key}`;
+                }
+                else {
+                    // MONEY/DATE/TIMEFRAME cluster by anchor key
+                    key = `${slot.slotType}:${primaryAnchor.type}:${primaryAnchor.key}`;
+                }
             }
         }
         if (!slotClusters.has(key)) {

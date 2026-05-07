@@ -134,6 +134,139 @@
       </mat-card-content>
     </mat-card>
 
+    <!-- Conversation Truth & Risk Intelligence (TCL / ProtectQA dashboards) -->
+    <mat-card class="conversation-intelligence-card" *ngIf="showConversationIntelligenceCard()">
+      <mat-card-header>
+        <mat-card-title>
+          <mat-icon>shield_with_heart</mat-icon>
+          {{ getEvaluationDashboardSummary()?.title || 'Conversation Truth & Risk' }}
+        </mat-card-title>
+        <mat-card-subtitle>{{ getEvaluationDashboardSummary()?.subtitle || 'Truth, compliance, drift, hallucination risk, and business signals — beyond coaching-only QA.' }}</mat-card-subtitle>
+      </mat-card-header>
+      <mat-card-content>
+        <div class="trust-hero">
+          <div class="trust-score-block">
+            <div class="trust-label">{{ getConversationTrustPresentation().label }}</div>
+            <div class="trust-score-main" *ngIf="getConversationTrustPresentation().score !== null">
+              {{ getConversationTrustPresentation().score }}<span class="trust-denom">/100</span>
+            </div>
+            <div class="trust-sub">{{ getConversationTrustPresentation().subtitle }}</div>
+          </div>
+          <div class="risk-pill-strip" *ngIf="getEvaluationRiskBlock() as risk">
+            <mat-chip-set>
+              <mat-chip class="risk-level-chip" *ngIf="risk.level">{{ (risk.level || '').toUpperCase() }} risk</mat-chip>
+              <mat-chip *ngIf="risk.reviewRequired" color="warn">Review required</mat-chip>
+              <mat-chip *ngIf="risk.primaryRisk" [matTooltip]="risk.primaryRisk || ''">{{ risk.primaryRisk }}</mat-chip>
+            </mat-chip-set>
+            <p class="risk-detail" *ngIf="risk.businessImpact"><strong>Business impact:</strong> {{ risk.businessImpact }}</p>
+            <p class="risk-detail" *ngIf="risk.recommendedAction"><strong>Recommended action:</strong> {{ risk.recommendedAction }}</p>
+            <div class="sev-counts" *ngIf="risk.criticalCount != null || risk.highCount != null">
+              <span *ngIf="risk.criticalCount != null">Critical: {{ risk.criticalCount }}</span>
+              <span *ngIf="risk.highCount != null"> · High: {{ risk.highCount }}</span>
+              <span *ngIf="risk.mediumCount != null"> · Medium: {{ risk.mediumCount }}</span>
+              <span *ngIf="risk.lowCount != null"> · Low: {{ risk.lowCount }}</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="extended-score-grid" *ngIf="hasExtendedScoreRow()">
+          <h4>Score breakdown</h4>
+          <div class="ext-scores-row">
+            <div class="ext-sc" *ngIf="getMergedEvaluationScores().truth != null"><span class="k">Truth (factual / supported)</span><span class="v">{{ formatMetricScore(getMergedEvaluationScores().truth) }}</span></div>
+            <div class="ext-sc" *ngIf="getMergedEvaluationScores().transcriptGrounding != null"><span class="k">Transcript grounding</span><span class="v">{{ formatMetricScore(getMergedEvaluationScores().transcriptGrounding) }}</span></div>
+            <div class="ext-sc" *ngIf="getMergedEvaluationScores().compliance != null"><span class="k">Compliance</span><span class="v">{{ formatMetricScore(getMergedEvaluationScores().compliance) }}</span></div>
+            <div class="ext-sc" *ngIf="getMergedEvaluationScores().hallucination != null"><span class="k">Hallucination safety</span><span class="v">{{ formatMetricScore(getMergedEvaluationScores().hallucination) }}</span></div>
+            <div class="ext-sc" *ngIf="getMergedEvaluationScores().drift != null"><span class="k">Drift control</span><span class="v">{{ formatMetricScore(getMergedEvaluationScores().drift) }}</span></div>
+            <div class="ext-sc" *ngIf="getMergedEvaluationScores().consistency != null"><span class="k">Consistency</span><span class="v">{{ formatMetricScore(getMergedEvaluationScores().consistency) }}</span></div>
+            <div class="ext-sc" *ngIf="getMergedEvaluationScores().evidenceSupport != null"><span class="k">Evidence support</span><span class="v">{{ formatMetricScore(getMergedEvaluationScores().evidenceSupport) }}</span></div>
+            <div class="ext-sc" *ngIf="getMergedEvaluationScores().speakerConfidence != null"><span class="k">Speaker confidence</span><span class="v">{{ formatMetricScore(getMergedEvaluationScores().speakerConfidence) }}</span></div>
+            <div class="ext-sc" *ngIf="getMergedEvaluationScores().businessValue != null"><span class="k">Business value</span><span class="v">{{ formatMetricScore(getMergedEvaluationScores().businessValue) }}</span></div>
+          </div>
+          <p class="explain-note"><strong>Note:</strong> High transcript grounding means the claim was attributed in the conversation — it does <em>not</em> prove the claim was true or compliant.</p>
+        </div>
+
+        <div class="plain-summary-box" *ngIf="getEvaluationDashboardSummary()?.plainEnglishSummary">
+          <h4>What happened</h4>
+          <p>{{ getEvaluationDashboardSummary()?.plainEnglishSummary }}</p>
+        </div>
+
+        <mat-expansion-panel class="five-questions-panel">
+          <mat-expansion-panel-header>
+            <mat-panel-title>How we read every conversation</mat-panel-title>
+            <mat-panel-description>Who said it · What was claimed · True &amp; supported · Safe &amp; consistent · What is next</mat-panel-description>
+          </mat-expansion-panel-header>
+          <ol class="five-q-list">
+            <li><strong>Who said it?</strong> Speaker attribution and confidence.</li>
+            <li><strong>What was claimed?</strong> Claims, promises, approvals, pricing, disclosures.</li>
+            <li><strong>Was it true and supported?</strong> Truth reflects support and safety — not “said in transcript” alone.</li>
+            <li><strong>Was it compliant and consistent?</strong> Policies, disclosures, contradiction across turns.</li>
+            <li><strong>What should happen next?</strong> Compliance review, AI or script updates, knowledge-base fixes — coaching is one option, not the only outcome.</li>
+          </ol>
+        </mat-expansion-panel>
+
+        <div class="ci-subsection" *ngIf="(getEvaluationDashboardSummary()?.topRisks?.length || 0) > 0">
+          <h4>What was risky</h4>
+          <div class="ci-item" *ngFor="let tr of getEvaluationDashboardSummary()?.topRisks; let idx = index">
+            <div class="ci-item-head"><strong>#{{ idx + 1 }}</strong><span class="severity-pill">{{ tr.severity }}</span></div>
+            <p class="ci-quote" *ngIf="tr.quote">“{{ tr.quote }}”</p>
+            <p><strong>{{ tr.title }}</strong></p>
+            <p class="muted" *ngIf="tr.whyItMatters">{{ tr.whyItMatters }}</p>
+            <p class="muted" *ngIf="tr.speaker != null"><strong>Speaker:</strong> {{ tr.speaker }} <span *ngIf="tr.turnIndex !== undefined">· Turn {{ tr.turnIndex }}</span></p>
+            <p class="fix-line" *ngIf="tr.recommendedFix"><strong>Fix:</strong> {{ tr.recommendedFix }}</p>
+          </div>
+        </div>
+
+        <div class="ci-subsection" *ngIf="(getEvaluationDashboardSummary()?.topUnsupportedClaims?.length || 0) > 0">
+          <h4>What was unsupported</h4>
+          <div class="ci-item" *ngFor="let u of getEvaluationDashboardSummary()?.topUnsupportedClaims">
+            <p class="ci-quote">“{{ u.claimText }}”</p>
+            <p *ngIf="u.missingEvidence?.length"><strong>Missing evidence:</strong> {{ u.missingEvidence!.join(', ') }}</p>
+            <p class="muted" *ngIf="u.requiredSource"><strong>Required:</strong> {{ u.requiredSource }}</p>
+          </div>
+        </div>
+
+        <div class="ci-subsection" *ngIf="(getEvaluationDashboardSummary()?.topDriftEvents?.length || 0) > 0">
+          <h4>Where drift showed up</h4>
+          <div class="ci-item" *ngFor="let d of getEvaluationDashboardSummary()?.topDriftEvents">
+            <p><strong>{{ d.driftType }}</strong></p>
+            <p class="muted smaller" *ngIf="d.earlierQuote">Earlier: “{{ d.earlierQuote }}”</p>
+            <p class="muted smaller" *ngIf="d.laterQuote">Later: “{{ d.laterQuote }}”</p>
+            <p class="fix-line" *ngIf="d.recommendedFix">{{ d.recommendedFix }}</p>
+          </div>
+        </div>
+
+        <div class="ci-subsection" *ngIf="getEvaluationBusinessInsightsMerged().length > 0">
+          <h4>What the business can learn</h4>
+          <p class="muted intro">TCL surfaces value beyond violations: objections, confusion, churn signals, KB gaps.</p>
+          <div class="ci-item" *ngFor="let bi of getEvaluationBusinessInsightsMerged()">
+            <p><strong>{{ bi.type }}</strong> — {{ bi.summary }}</p>
+            <p class="ci-quote" *ngIf="bi.evidenceQuote">“{{ bi.evidenceQuote }}”</p>
+            <p class="muted" *ngIf="bi.recommendedAction">{{ bi.recommendedAction }} · {{ bi.businessImpact }}</p>
+          </div>
+        </div>
+
+        <div class="ci-subsection" *ngIf="getEvaluationNextActionsMerged().length > 0">
+          <h4>Recommended actions</h4>
+          <ul class="action-list">
+            <li *ngFor="let a of getEvaluationNextActionsMerged()">{{ a }}</li>
+          </ul>
+        </div>
+
+        <mat-expansion-panel *ngIf="getEvaluationDiagnostics() as dg" class="diagnostics-panel">
+          <mat-expansion-panel-header>
+            <mat-panel-title>Diagnostics</mat-panel-title>
+          </mat-expansion-panel-header>
+          <div class="diag-grid">
+            <div *ngIf="dg.evidenceGapCount != null"><strong>Evidence gaps</strong> {{ dg.evidenceGapCount }}</div>
+            <div *ngIf="dg.driftIssueCount != null"><strong>Drift issues</strong> {{ dg.driftIssueCount }}</div>
+            <div *ngIf="dg.hallucinationIssueCount != null"><strong>Hallucination flags</strong> {{ dg.hallucinationIssueCount }}</div>
+            <div *ngIf="dg.complianceIssueCount != null"><strong>Compliance issues</strong> {{ dg.complianceIssueCount }}</div>
+            <div *ngIf="dg.unknownSpeakerLines != null"><strong>Unknown speaker lines</strong> {{ dg.unknownSpeakerLines }}</div>
+          </div>
+        </mat-expansion-panel>
+      </mat-card-content>
+    </mat-card>
+
     <!-- A) Executive Summary (Manager-grade) -->
     <mat-card class="audit-summary-card executive-summary">
       <mat-card-header>
@@ -141,15 +274,15 @@
           <mat-icon>dashboard</mat-icon>
           Executive Summary
         </mat-card-title>
-        <mat-card-subtitle>What compliance needs to know at a glance</mat-card-subtitle>
+        <mat-card-subtitle>Truth, compliance, and risk at a glance</mat-card-subtitle>
       </mat-card-header>
       <mat-card-content>
         <!-- Clean Transcript Banner - show when 0 issues -->
         <div class="clean-transcript-banner" *ngIf="(issueSummaryV2?.totalIssues || 0) === 0">
           <mat-icon>check_circle</mat-icon>
           <div class="banner-content">
-            <strong>Clean Transcript</strong>
-            <span>No compliance issues detected in this conversation</span>
+            <strong>No prioritized risk flags</strong>
+            <span>No claim-level compliance or truth issues were flagged — still review the TCL / ProtectQA score and disclosures for your workflow.</span>
           </div>
         </div>
 
@@ -518,8 +651,8 @@
           <mat-card-content>
             <div class="no-issues-state">
               <mat-icon class="success-icon">check_circle</mat-icon>
-              <h3>No Issues Detected</h3>
-              <p>This conversation passed all quality checks. All claims are supported and grounded in the transcript.</p>
+              <h3>No issues in this view</h3>
+              <p>No claim-level problems were surfaced in the issue list. Claims may still need evidence beyond the transcript — see scores, disclosures, and business insights when present.</p>
               <div class="summary-stats" *ngIf="evaluation?.report?.claims?.length">
                 <div class="stat">
                   <strong>{{ evaluation.report.claims.length }}</strong>

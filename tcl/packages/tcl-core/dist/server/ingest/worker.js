@@ -7,6 +7,8 @@ import { downloadFileFromSupabase } from './storage-supabase.js';
 import { readAsset } from './storage.js'; // Keep for backward compatibility
 import { normalizeTranscriptBuffer } from '../transcripts/normalize.js';
 import { transcribeAudio } from '../transcription.js';
+import { buildSpeakerRoleMap } from '../../graph/speaker-role-mapper.js';
+import { normalizeTranscript } from '../../graph/transcript-normalizer.js';
 import { computeVerificationDiff } from '../verify/diff.js';
 import { withTranscriptionSlot } from '../asr/limit.js';
 import { resolveEvidenceSet } from '../evidence/service.js';
@@ -178,8 +180,15 @@ async function processTranscriptOnly(job, transcriptAsset) {
     const normalized = await normalizeTranscriptBuffer(transcriptBuffer, transcriptAsset.metadata_json?.filename || 'transcript.txt');
     // Update progress
     await updateJobProgress(job.id, 'ANALYZING', 30);
+    // Build speakerRoleMap from transcript
+    const normalizedTurns = normalizeTranscript(normalized.text);
+    const turns = normalizedTurns.map(t => ({
+        speaker: t.speakerLabelRaw,
+        text: t.text
+    }));
+    const speakerRoleMap = buildSpeakerRoleMap(turns);
     // Create conversation
-    const conversationId = await createConversation(job.org_id, job.project_id, job.env, normalized.text, job.created_by_user_id);
+    const conversationId = await createConversation(job.org_id, job.project_id, job.env, normalized.text, job.created_by_user_id, job.representative_id, speakerRoleMap);
     // Get conversation-level evidence items (attached to this job/conversation)
     let conversationEvidenceIds = [];
     try {
@@ -292,8 +301,15 @@ async function processAudioOnly(job, audioAsset) {
     }
     // Update progress
     await updateJobProgress(job.id, 'ANALYZING', 60);
+    // Build speakerRoleMap from transcript
+    const normalizedTurns = normalizeTranscript(transcriptText);
+    const turns = normalizedTurns.map(t => ({
+        speaker: t.speakerLabelRaw,
+        text: t.text
+    }));
+    const speakerRoleMap = buildSpeakerRoleMap(turns);
     // Create conversation
-    const conversationId = await createConversation(job.org_id, job.project_id, job.env, transcriptText, job.created_by_user_id);
+    const conversationId = await createConversation(job.org_id, job.project_id, job.env, transcriptText, job.created_by_user_id, job.representative_id, speakerRoleMap);
     // Rule 0: Build provenance for AUDIO_ONLY_TRANSCRIBED mode
     const provenance = {
         ingestionMode: 'AUDIO_ONLY_TRANSCRIBED',
@@ -359,8 +375,15 @@ async function processAudioPlusTranscript(job, audioAsset, transcriptAsset) {
     await updateJobProgress(job.id, 'ANALYZING', 20);
     const transcriptBuffer = await readAssetContent(transcriptAsset);
     const normalized = await normalizeTranscriptBuffer(transcriptBuffer, transcriptAsset.metadata_json?.filename || 'transcript.txt');
+    // Build speakerRoleMap from transcript
+    const normalizedTurns = normalizeTranscript(normalized.text);
+    const turns = normalizedTurns.map(t => ({
+        speaker: t.speakerLabelRaw,
+        text: t.text
+    }));
+    const speakerRoleMap = buildSpeakerRoleMap(turns);
     // Create conversation
-    const conversationId = await createConversation(job.org_id, job.project_id, job.env, normalized.text, job.created_by_user_id);
+    const conversationId = await createConversation(job.org_id, job.project_id, job.env, normalized.text, job.created_by_user_id, job.representative_id, speakerRoleMap);
     // Get conversation-level evidence items (attached to this job/conversation)
     let conversationEvidenceIds = [];
     try {
@@ -467,7 +490,11 @@ async function processAudioPlusTranscript(job, audioAsset, transcriptAsset) {
 /**
  * Helper: Create conversation
  */
-async function createConversation(orgId, projectId, env, content, userId) {
+async function createConversation(orgId, projectId, env, content, userId, representativeId, speakerRoleMap) {
+    const metadata = {};
+    if (speakerRoleMap) {
+        metadata.speakerRoleMap = speakerRoleMap;
+    }
     const { data, error } = await supabaseAdmin
         .from('conversations')
         .insert({
@@ -476,6 +503,8 @@ async function createConversation(orgId, projectId, env, content, userId) {
         env,
         content,
         created_by: userId,
+        representative_id: representativeId || null,
+        metadata: Object.keys(metadata).length > 0 ? metadata : undefined,
     })
         .select('id')
         .single();
@@ -488,7 +517,7 @@ async function createConversation(orgId, projectId, env, content, userId) {
  * Helper: Run analysis from transcript
  * Extracts claims and runs the full analysis pipeline
  */
-async function runAnalysis(input) {
+export async function runAnalysis(input) {
     // Use the existing validate function to run the full pipeline
     // This ensures consistency with the /validate endpoint
     const { validate } = await import('../../orchestrator.js');
@@ -575,6 +604,23 @@ async function runAnalysis(input) {
     // 3.2: Evidence mode must be derived from actual evidence presence
     const hasExternalSources = allSources.length > 0;
     const evidenceMode = hasExternalSources ? 'TRANSCRIPT_PLUS_EXTERNAL' : 'TRANSCRIPT_ONLY';
+    // Get speakerRoleMap from conversation metadata if available
+    let speakerRoleMap;
+    if (supabaseAdmin) {
+        try {
+            const { data: conversation } = await supabaseAdmin
+                .from('conversations')
+                .select('metadata')
+                .eq('id', input.conversationId)
+                .single();
+            if (conversation?.metadata?.speakerRoleMap) {
+                speakerRoleMap = conversation.metadata.speakerRoleMap;
+            }
+        }
+        catch (error) {
+            console.warn(`[Worker] Failed to fetch conversation metadata for speakerRoleMap:`, error);
+        }
+    }
     const validateInput = {
         question: input.transcript,
         answer: '',
@@ -583,16 +629,26 @@ async function runAnalysis(input) {
             conversationId: input.conversationId,
             evidenceMode, // Pass evidence mode to orchestrator
             normalizedConversation: input.normalizedConversation, // CRITICAL: Pass structured turns with speaker info
+            speakerRoleMap, // Pass speaker role map to graph builder
         },
     };
     const validateOutput = await validate(validateInput);
     // The validate function does NOT create evaluations - we need to create it ourselves
     // Format scores for database (similar to /validate endpoint)
+    const s = validateOutput.scores;
     const scoresForDb = {
-        truth: validateOutput.scores.truth ?? null,
-        consistency: validateOutput.scores.consistency ?? null,
-        coherence: validateOutput.scores.coherence ?? null,
-        overall: validateOutput.scores.overall ?? null,
+        tcl: s.tcl ?? s.overall ?? null,
+        truth: s.truth ?? null,
+        transcriptGrounding: s.transcriptGrounding ?? null,
+        compliance: s.compliance ?? null,
+        hallucination: s.hallucination ?? null,
+        drift: s.drift ?? null,
+        consistency: s.consistency ?? null,
+        coherence: s.coherence ?? null,
+        evidenceSupport: s.evidenceSupport ?? null,
+        speakerConfidence: s.speakerConfidence ?? null,
+        businessValue: s.businessValue ?? null,
+        overall: s.overall ?? null,
     };
     // Build proper IssueV2 objects using expandIssueCandidates and rankIssuesV2
     // This matches what the /validate endpoint does
@@ -653,8 +709,16 @@ async function runAnalysis(input) {
         // D: Detect compliance issues (PCI, recording consent, PII)
         const { detectComplianceIssues } = await import('../../analysis/compliance-detectors.js');
         const complianceResult = detectComplianceIssues(claimsForIssues, 'pending', input.conversationId, evidenceMode);
-        // Combine graph issues with compliance issues
-        const allAtomicIssues = [...expansionResult.allIssues, ...complianceResult.issues];
+        // Combine graph issues with compliance issues AND the new moat detectors
+        // (final-expense, hallucination, drift, cross-turn, domain packs) which are
+        // produced inside the orchestrator's runUnifiedGraphPath and surfaced via
+        // report.allIssuesV2.
+        const orchestratorDetectorIssues = validateOutput.report?.allIssuesV2 ?? [];
+        const allAtomicIssues = [
+            ...expansionResult.allIssues,
+            ...complianceResult.issues,
+            ...orchestratorDetectorIssues,
+        ];
         // Rank issues (deterministic) with scoring context
         const scoringContext = {
             mode: (evidenceMode === 'TRANSCRIPT_ONLY' ? 'transcript_only' : 'with_evidence'),
@@ -695,6 +759,22 @@ async function runAnalysis(input) {
             allIssuesV2,
             topIssuesV2, // Top grouped issues (has rollup structure)
             issueSummaryV2,
+            // Carry the moat-pipeline outputs through to persistence
+            crossTurn: validateOutput.report?.crossTurn,
+            drift: validateOutput.report?.drift,
+            domainPacksApplied: validateOutput.report?.domainPacksApplied,
+            executiveSummary: validateOutput?.executiveSummary,
+            diagnostics: validateOutput?.diagnostics,
+            risk: validateOutput?.risk,
+            productContext: validateOutput?.productContext,
+            dashboardSummary: validateOutput?.dashboardSummary,
+            claimsAnalysis: validateOutput?.claimsAnalysis,
+            evidenceDependencyGraph: validateOutput?.evidenceDependencyGraph,
+            issuesBySeverity: validateOutput?.issuesBySeverity,
+            businessInsights: validateOutput?.businessInsights,
+            recommendedActions: validateOutput?.recommendedActions,
+            enhancedClientScores: validateOutput?.scores,
+            enhancedScores: validateOutput?.enhancedScores,
             // A1: Add EvalMode to report
             evalMode,
             // Rule 0: Add provenance to report
@@ -719,6 +799,23 @@ async function runAnalysis(input) {
             issueSummaryV2: null,
         };
     }
+    // Get representative_id from conversation
+    let representativeId = null;
+    if (input.conversationId && supabaseAdmin) {
+        try {
+            const { data: conversation } = await supabaseAdmin
+                .from('conversations')
+                .select('representative_id')
+                .eq('id', input.conversationId)
+                .single();
+            if (conversation?.representative_id) {
+                representativeId = conversation.representative_id;
+            }
+        }
+        catch (error) {
+            console.warn(`[Worker] Failed to fetch conversation representative_id:`, error);
+        }
+    }
     // Create the evaluation in the database
     const { data: insertedEvaluation, error: dbError } = await supabaseAdmin
         .from('evaluations')
@@ -726,6 +823,7 @@ async function runAnalysis(input) {
         org_id: input.orgId,
         project_id: input.projectId || null,
         conversation_id: input.conversationId || null,
+        representative_id: representativeId,
         env: input.env,
         scores: scoresForDb,
         refusal: validateOutput.refusal || false,

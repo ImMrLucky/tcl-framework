@@ -7,6 +7,7 @@
  * Templates are domain-specific (telco, loans, ai_chat, generic)
  * but the graph construction logic is universal.
  */
+import { getGlobalSlotLexicon, getTemplateSlotLexicon } from './slot-registry.js';
 // =============================================================================
 // DEFAULT TEMPLATE (Generic - works for any domain)
 // =============================================================================
@@ -180,6 +181,25 @@ const TEMPLATE_REGISTRY = {
 // GET TEMPLATE (with environment/runtime override support)
 // =============================================================================
 let _activeTemplate = DEFAULT_TEMPLATE_CONFIG;
+/**
+ * Resolve slot lexicon for a template by merging:
+ * 1. Template's static slotLexicon (highest precedence)
+ * 2. Template overlay from slot-registry.templates.json
+ * 3. Global lexicon from slot-registry.global.json (lowest precedence)
+ */
+function resolveSlotLexiconForTemplate(templateId, current) {
+    // Start with global lexicon
+    const globalLexicon = getGlobalSlotLexicon();
+    // Add template overlay
+    const templateOverlay = getTemplateSlotLexicon(templateId);
+    // Merge: template static > template overlay > global
+    // This preserves existing template-specific entries while adding registry entries
+    return {
+        ...globalLexicon,
+        ...templateOverlay,
+        ...current.slotLexicon, // Template static entries win
+    };
+}
 export function getTemplateConfig() {
     const config = _activeTemplate;
     // SAFEGUARD: Ensure truthDerivation.minContradictionWeight is aligned with edge creation threshold
@@ -197,10 +217,25 @@ export function setTemplateConfig(templateIdOrConfig) {
         if (!template) {
             throw new Error(`Unknown template: ${templateIdOrConfig}. Available: ${Object.keys(TEMPLATE_REGISTRY).join(', ')}`);
         }
-        _activeTemplate = template;
+        // Merge slot lexicon with registry
+        const mergedLexicon = resolveSlotLexiconForTemplate(templateIdOrConfig, template);
+        _activeTemplate = {
+            ...template,
+            slotLexicon: mergedLexicon,
+        };
     }
     else {
-        _activeTemplate = templateIdOrConfig;
+        // For custom config objects, merge lexicon if templateId is present
+        if (templateIdOrConfig.templateId) {
+            const mergedLexicon = resolveSlotLexiconForTemplate(templateIdOrConfig.templateId, templateIdOrConfig);
+            _activeTemplate = {
+                ...templateIdOrConfig,
+                slotLexicon: mergedLexicon,
+            };
+        }
+        else {
+            _activeTemplate = templateIdOrConfig;
+        }
     }
 }
 export function registerTemplate(config) {

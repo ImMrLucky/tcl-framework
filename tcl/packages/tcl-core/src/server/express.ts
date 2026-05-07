@@ -1609,7 +1609,12 @@ app.post("/validate/batch", async (req, res) => {
     const failed = results.length - passed;
     const averageScore = results
       .filter(r => r.scores && !r.error)
-      .reduce((sum, r) => sum + (r.scores?.overall || 0), 0) / Math.max(1, results.filter(r => !r.error).length);
+      .reduce(
+        (sum, r) =>
+          sum + (((r.scores as any)?.tcl ?? r.scores?.overall ?? 0) as number),
+        0
+      ) /
+      Math.max(1, results.filter(r => !r.error).length);
     const averageLatency = latencies.length > 0
       ? latencies.reduce((sum, l) => sum + l, 0) / latencies.length
       : 0;

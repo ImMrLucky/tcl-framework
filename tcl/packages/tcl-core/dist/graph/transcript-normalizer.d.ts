@@ -6,7 +6,7 @@
  *
  * Part B: Fix speaker attribution
  */
-export type SpeakerType = "agent" | "customer" | "unknown";
+export type SpeakerType = "agent" | "customer" | "supervisor" | "bot" | "system" | "unknown";
 export type SpeakerRole = "AGENT" | "CUSTOMER" | "MIXED" | "UNKNOWN";
 export interface NormalizedTurn {
     turnIndex: number;

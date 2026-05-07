@@ -68,7 +68,7 @@ export function registerIngestEndpoints(app) {
                 return res.status(503).json({ error: "Database not configured" });
             }
             // Ensure project exists - create default if missing
-            let projectId = context.projectId;
+            let projectId = context.projectId || '';
             if (!projectId || projectId.trim() === '') {
                 // Check if org has any projects
                 const { data: existingProjects } = await supabaseAdmin

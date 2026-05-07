@@ -72,6 +72,11 @@ export interface GraphBuilderInput {
      * Conversation/interaction ID for traceability.
      */
     conversationId?: string;
+    /**
+     * Speaker role map (from conversation.metadata.speakerRoleMap)
+     * Maps transcript speaker labels to normalized roles: REPRESENTATIVE | CUSTOMER | THIRD_PARTY | UNKNOWN
+     */
+    speakerRoleMap?: Record<string, 'REPRESENTATIVE' | 'CUSTOMER' | 'THIRD_PARTY' | 'UNKNOWN'>;
 }
 export interface GraphBuilderOutput {
     /** The complete claim graph */
@@ -117,6 +122,8 @@ export interface GraphBuilderOutput {
             rejectedByTopicGating: number;
             rejectedByPolarityGating: number;
             rejectedByThreshold: number;
+            rejectedByIneligibleSlot: number;
+            rejectedByValueTypeMismatch: number;
             sampleRejections: Array<{
                 claimA: string;
                 claimB: string;
@@ -133,9 +140,31 @@ export interface GraphBuilderOutput {
             claimsWithZeroCandidates: number;
             budgetExhausted: boolean;
         };
+        /** Slot mapping diagnostics */
+        slotMapping?: {
+            registryVersion: string;
+            totalClaims: number;
+            counts: {
+                HARD: number;
+                SOFT: number;
+                NONE: number;
+            };
+            miscClaims: number;
+            topSlotKeys: Array<{
+                slotKey: string;
+                count: number;
+            }>;
+        };
     };
 }
+/**
+ * Build graph synchronously (uses regex entities, backwards compatible).
+ */
 export declare function buildGraph(input: GraphBuilderInput): GraphBuilderOutput;
+/**
+ * Build graph asynchronously (uses spaCy entities if available, better quality).
+ */
+export declare function buildGraphAsync(input: GraphBuilderInput): Promise<GraphBuilderOutput>;
 export interface SpectralInput {
     claims: Array<{
         id: string;

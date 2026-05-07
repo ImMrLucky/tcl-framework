@@ -10,9 +10,25 @@
  * 2. Match entities to slot lexicon
  * 3. Derive slotType and entityKey
  * 4. Normalize values if present
+ *
+ * Now supports spaCy-enhanced extraction for better entity quality.
  */
 import { SubjectSlot, ExtractedEntity, ClaimModality, ClaimAnchor } from './types.js';
+/**
+ * Extract entities using regex patterns (synchronous, backwards compatible).
+ */
 export declare function extractEntities(text: string): ExtractedEntity[];
+/**
+ * Extract entities using spaCy if available, otherwise falls back to regex (async).
+ *
+ * This provides enhanced entity extraction with:
+ * - Better NER accuracy
+ * - Coreference resolution ("it" → "the fee")
+ * - Domain-specific patterns
+ *
+ * Converts spaCy Entity format to ExtractedEntity format.
+ */
+export declare function extractEntitiesAsync(text: string): Promise<ExtractedEntity[]>;
 export declare function computeSubjectSlot(text: string, entities: ExtractedEntity[], modality?: ClaimModality): SubjectSlot;
 /**
  * 2.1: Check if a slot is meaningful (not unknown/general)

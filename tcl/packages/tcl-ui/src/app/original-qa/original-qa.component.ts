@@ -41,7 +41,7 @@ import { LogoComponent } from '../shared/logo.component';
           <div class="header-actions">
             <a mat-button routerLink="/call-center-qa" routerLinkActive="active">
               <mat-icon>swap_horiz</mat-icon>
-              Switch to Call Center QA
+              Switch to conversation review (ProtectQA / TCL)
             </a>
             <button
               *ngIf="result"

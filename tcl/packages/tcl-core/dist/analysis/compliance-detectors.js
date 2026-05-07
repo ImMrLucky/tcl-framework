@@ -10,6 +10,7 @@
  * - PII handling based on templates (SSN collection etc.)
  */
 import { createHash } from 'crypto';
+import { detectFinalExpenseComplianceIssues } from './domain/final-expense-detectors.js';
 /**
  * D: Detect compliance issues from claims
  */
@@ -24,6 +25,8 @@ export function detectComplianceIssues(claims, runId, conversationId, evidenceMo
     // D3: PII Collection Detection
     const piiIssues = detectPIICollection(claims, runId, conversationId, evidenceMode);
     issues.push(...piiIssues);
+    const finalExpenseIssues = detectFinalExpenseComplianceIssues(claims, { runId, conversationId, evidenceMode });
+    issues.push(...finalExpenseIssues);
     return { issues };
 }
 /**

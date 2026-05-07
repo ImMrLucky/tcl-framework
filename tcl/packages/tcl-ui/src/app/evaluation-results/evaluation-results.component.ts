@@ -25,6 +25,12 @@ import { SimulationDialogComponent, SimulationModifications } from '../simulatio
 import { IssueDetailModalComponent } from '../issue-detail-modal/issue-detail-modal.component';
 import { IssueV2DetailModalComponent } from '../issue-v2-detail-modal/issue-v2-detail-modal.component';
 import { SensitiveActionService } from '../sensitive-action.service';
+import type {
+  BusinessInsightUi,
+  DashboardSummaryUi,
+  TclDiagnosticsUi,
+  TclRiskBlockUi,
+} from '../tcl-intelligence.types';
 
 // Issue Narrative type (QA-Manager Grade)
 interface IssueNarrative {
@@ -1630,7 +1636,10 @@ getMetricTooltip(metric: string): string {
     
     // Fallback to default definitions
     const definitions: Record<string, string> = {
-      'coherenceScore': 'Measures overall consistency of claims. Higher scores indicate fewer contradictions and better logical flow.',
+      'tclScore': 'Primary TCL / ProtectQA score shown to clients — trust, compliance, reliability, disclosures, drift, hallucination posture, speaker confidence (not “coherence only”).',
+      'truthScore': 'Whether claims appear accurate, supported, and non-contradicted — separate from transcript grounding.',
+      'transcriptGrounding': 'Claims are present and attributed in the transcript. High grounding does NOT mean the claim was true or compliant.',
+      'coherenceScore': 'Graph coherence / flow — supplementary. Do not use alone to infer compliance.',
       'contradictionEnergy': 'Sum of contradiction edge weights. Higher values indicate more conflicting information.',
       'supportEnergy': 'Sum of support edge weights. Higher values indicate more supporting relationships.',
       'spectralGap': 'Difference between truth and falsehood propagation. Larger gaps indicate clearer truth/falsehood separation.',
@@ -1915,7 +1924,101 @@ getMetricTooltip(metric: string): string {
   }
 
   getSubtitle(): string {
-    return this.evaluation ? `Evaluation ID: ${this.evaluationId}` : '';
+    if (!this.evaluation) return '';
+    const trust = this.getConversationTrustPresentation();
+    const id = `Evaluation ID: ${this.evaluationId}`;
+    if (trust.score === null) return id;
+    return `${trust.label}: ${trust.score}/100 · ${id}`;
+  }
+
+  /** Raw report object (includes ingest-merged intelligence fields). */
+  private getEvaluationReportRaw(): any {
+    return this.evaluation?.report ?? null;
+  }
+
+  getMergedEvaluationScores(): any {
+    const base = (this.evaluation?.scores as any) ?? {};
+    const r = this.getEvaluationReportRaw() as any;
+    const enhanced = r?.enhancedClientScores ?? {};
+    return { ...base, ...enhanced };
+  }
+
+  showConversationIntelligenceCard(): boolean {
+    if (!this.evaluation) return false;
+    const r: any = this.getEvaluationReportRaw();
+    if (!r) return false;
+    return !!(
+      r.dashboardSummary ||
+      r.risk ||
+      (Array.isArray(r.businessInsights) && r.businessInsights.length > 0) ||
+      r.enhancedClientScores?.tcl != null ||
+      r.diagnostics
+    );
+  }
+
+  getConversationTrustPresentation(): {
+    label: string;
+    score: number | null;
+    subtitle: string;
+  } {
+    const ds = this.getEvaluationReportRaw()?.dashboardSummary as DashboardSummaryUi | undefined;
+    const m = this.getMergedEvaluationScores() as any;
+    const raw =
+      ds?.conversationTrustScore?.score ?? m.tcl ?? m.overall ?? (this.evaluation?.scores as any)?.overall;
+    const score = raw === undefined || raw === null || Number.isNaN(Number(raw)) ? null : Math.round(Number(raw));
+    return {
+      label:
+        ds?.conversationTrustScore?.label ??
+        (ds?.dashboardMode === 'protectqa' ? 'ProtectQA Risk Score' : 'TCL Score'),
+      score,
+      subtitle:
+        ds?.conversationTrustScore?.subtitle ??
+        'How trustworthy, compliant, grounded, and useful this conversation was.',
+    };
+  }
+
+  getEvaluationRiskBlock(): TclRiskBlockUi | null {
+    const r = this.getEvaluationReportRaw()?.risk as TclRiskBlockUi | undefined;
+    return r ?? null;
+  }
+
+  getEvaluationDashboardSummary(): DashboardSummaryUi | null {
+    return (this.getEvaluationReportRaw()?.dashboardSummary as DashboardSummaryUi) ?? null;
+  }
+
+  getEvaluationDiagnostics(): TclDiagnosticsUi | null {
+    return (this.getEvaluationReportRaw()?.diagnostics as TclDiagnosticsUi) ?? null;
+  }
+
+  getEvaluationBusinessInsightsMerged(): BusinessInsightUi[] {
+    const r = this.getEvaluationReportRaw();
+    const raw = r?.businessInsights as BusinessInsightUi[] | undefined;
+    const fromDash = (r?.dashboardSummary as DashboardSummaryUi)?.topBusinessInsights;
+    if (Array.isArray(raw) && raw.length > 0) return raw;
+    if (Array.isArray(fromDash) && fromDash.length > 0) return fromDash;
+    return [];
+  }
+
+  getEvaluationNextActionsMerged(): string[] {
+    const r = this.getEvaluationReportRaw();
+    const dash = r?.dashboardSummary as DashboardSummaryUi | undefined;
+    const n = dash?.nextBestActions;
+    const ra = r?.recommendedActions as string[] | undefined;
+    if (Array.isArray(n) && n.length > 0) return n;
+    if (Array.isArray(ra) && ra.length > 0) return ra;
+    return [];
+  }
+
+  formatMetricScore(v: number | null | undefined): string {
+    if (v === null || v === undefined || Number.isNaN(Number(v))) return '—';
+    return String(Math.round(Number(v)));
+  }
+
+  hasExtendedScoreRow(): boolean {
+    const m = this.getMergedEvaluationScores() as any;
+    return ['transcriptGrounding', 'compliance', 'hallucination', 'drift', 'evidenceSupport', 'speakerConfidence', 'businessValue'].some(
+      (k: string) => m[k] != null && !Number.isNaN(Number(m[k]))
+    );
   }
 
   goToDashboard() {

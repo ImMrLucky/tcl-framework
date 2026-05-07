@@ -1,6 +1,7 @@
 {
   "name": "tcl-ui",
   "version": "0.1.0",
+  "description": "ProtectQA & TCL — Angular UI for Conversation Truth & Risk Intelligence (compliance, drift, hallucinations, business insights).",
   "scripts": {
     "ng": "ng",
     "start": "ng serve",

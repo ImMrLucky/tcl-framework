@@ -1,0 +1,50 @@
+{
+  "description": "Example validate() response highlights — full payloads include legacy fields for backward compatibility.",
+  "scores": {
+    "tcl": 84,
+    "overall": 84,
+    "truth": 76,
+    "transcriptGrounding": 96,
+    "compliance": 88,
+    "hallucination": 91,
+    "drift": 86,
+    "consistency": 89,
+    "evidenceSupport": 72,
+    "speakerConfidence": 94,
+    "businessValue": 61
+  },
+  "risk": {
+    "level": "medium",
+    "primaryRisk": "Missing carrier underwriting disclosure after approval-framed language",
+    "reviewRequired": true,
+    "recommendedAction": "ProtectQA compliance review and script alignment",
+    "businessImpact": "Customer dispute / regulatory exposure",
+    "criticalCount": 0,
+    "highCount": 1,
+    "mediumCount": 2,
+    "lowCount": 4
+  },
+  "diagnostics": {
+    "status": "complete",
+    "speakerConfidence": 0.94,
+    "unknownSpeakerLines": 0,
+    "evidenceGapCount": 3,
+    "driftIssueCount": 1,
+    "hallucinationIssueCount": 0,
+    "complianceIssueCount": 2
+  },
+  "dashboardSummary": {
+    "dashboardMode": "protectqa",
+    "title": "ProtectQA Conversation Review",
+    "plainEnglishSummary": "The conversation framed outcomes strongly; underwriting and carrier dependence should be reiterated.",
+    "topRisks": [],
+    "topUnsupportedClaims": [],
+    "topDriftEvents": [],
+    "topBusinessInsights": [],
+    "nextBestActions": []
+  },
+  "productContext": {
+    "defaultDomain": "protectqa_final_expense",
+    "message": "Conversation Truth & Risk Intelligence — ProtectQA-first final expense scoring when no domain is supplied."
+  }
+}

@@ -12,6 +12,7 @@
  *   - "Agent - text"
  */
 import { NORMALIZED_SCHEMA_VERSION, mapSpeakerToRole, generateChecksum, } from "../types.js";
+import { sanitizeTranscriptForScoring } from "../../../ingestion/transcript-sanitizer.js";
 /**
  * Regex patterns to detect speaker-prefixed lines
  */
@@ -63,9 +64,11 @@ export class TxtSpeakerPrefixedNormalizer {
         return matchCount >= Math.min(3, lines.length * 0.3);
     }
     async normalize(content, options) {
-        const text = typeof content === "string" ? content : content.toString("utf-8");
+        const rawText = typeof content === "string" ? content : content.toString("utf-8");
+        const sanitized = sanitizeTranscriptForScoring(rawText);
+        const text = sanitized.text;
         const lines = text.split("\n");
-        const warnings = [];
+        const warnings = [...sanitized.diagnostics];
         const turns = [];
         const participantsMap = new Map();
         let currentTurn = null;
@@ -139,7 +142,12 @@ export class TxtSpeakerPrefixedNormalizer {
                 ingestedAt: new Date().toISOString(),
                 originalFilename: "",
                 encoding: "utf-8",
-                heuristicsApplied: ["speaker-prefix-detection"],
+                heuristicsApplied: ["speaker-prefix-detection", "transcript-sanitization"],
+                inferredValues: {
+                    removedAnnotationLines: sanitized.removedAnnotationLines,
+                    normalizedInlineSpeakerBoundaries: sanitized.normalizedInlineSpeakerBoundaries,
+                    unknownSpeakerLines: sanitized.unknownSpeakerLines,
+                },
             },
         };
         return {

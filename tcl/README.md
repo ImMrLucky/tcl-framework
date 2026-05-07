@@ -1,91 +1,30 @@
-# TCL (Truth & Consistency Layer) — Production-leaning Starter Repo
+# TCL — Conversation Truth & Risk Intelligence
 
-- `packages/tcl-core` (TypeScript): truth/consistency middleware + graph builder (edge_builder) + model adapters.
-- `packages/tcl-spectral` (Python/FastAPI): spectral coherence engine (signed Laplacian + directed-cycle penalties + grounding-aware circularity).
+**TCL helps organizations understand whether conversations are truthful, compliant, consistent, grounded, useful, and safe**—across human calls, support lines, insurance and healthcare intake, financial services, AI agents, chatbots, internal copilots, and compliance review workflows.
 
-## Local quick start
+It is **not** positioned as “agent training” or “call coaching only.” Coaching can be one recommended action; the core value is **compliance, AI reliability, risk reduction, and auditable conversation intelligence**.
 
-### Spectral service
-```bash
-cd packages/tcl-spectral
-python -m venv .venv && source .venv/bin/activate
-pip install -r requirements.txt
-uvicorn app.main:app --host 0.0.0.0 --port 8080
-```
+> *TCL turns human and AI conversations into truth, compliance, hallucination, drift, and business-value intelligence.*
 
-### Core service
-```bash
-cd packages/tcl-core
-npm i
-export OPENAI_API_KEY="..."
-export TCL_SPECTRAL_URL="http://localhost:8080"
-npm run dev
-```
+## Packages
 
-POST `http://localhost:8787/validate`
+| Package | Role |
+|--------|------|
+| [`packages/tcl-core`](packages/tcl-core) | Analysis engine, domain packs, API server (`validate`, scoring, issues, dashboard summaries). **ProtectQA / final expense is the default domain** when none is specified. |
+| [`packages/tcl-nlp`](packages/tcl-nlp) | Optional spaCy-backed entity extraction service. |
 
+## Documentation
 
-## Production NLI scorer (for pruning+batching)
+- [Product positioning & five-question framework](packages/tcl-core/docs/PRODUCT_POSITIONING.md)  
+- [Generic use-case notes & sample response fields](packages/tcl-core/docs/use-cases/README.md)  
+- [Package README (API defaults, `scores.tcl`)](packages/tcl-core/README.md)
 
+## Quick mental model
 
-`tcl-core` can call a separate NLI scoring service (recommended for production).
-Configure in request `options`:
+1. Who said it?  
+2. What was claimed?  
+3. Was it true and supported (not just “in the transcript”)?  
+4. Was it compliant and consistent?  
+5. What should happen next (compliance, AI policy, KB, product insight—not only coaching)?  
 
-- `nliEndpoint`: base URL of your scorer service (must implement POST /score)
-- `nliApiKey`: optional bearer token
-- `maxPairwiseEdges`, `neighborK`, `batchSize`
-
-### Endpoint contract
-POST `/score`
-
-```json
-{
-  "pairs": [
-    { "task": "entailment", "a": "premise", "b": "hypothesis", "key": "..." },
-    { "task": "contradiction", "a": "textA", "b": "textB", "key": "..." },
-    { "task": "grounding", "a": "claim", "b": "source text", "key": "..." }
-  ]
-}
-```
-
-Response:
-```json
-{
-  "scores": [
-    { "key": "...", "score": 0.83, "quote": "optional short supporting span" }
-  ]
-}
-```
-
-
-## ANN + Cache (production)
-
-
-TCL uses ANN candidate retrieval to avoid O(n^2) claim pairing.
-
-- Default embedding provider: `SparseHashEmbeddingProvider` (no deps, ok for dev).
-- Default index: `HnswIndex` if `hnswlib-node` is installed; otherwise falls back to brute-force.
-
-### Enable HNSW (recommended)
-```bash
-cd packages/tcl-core
-npm i hnswlib-node
-```
-
-### Cache
-Semantic scoring results are cached using a versioned, model-aware SHA-256 key.
-You can persist the cache as JSONL (portable):
-
-- Set `cache.persistPath` to something like `.tcl_cache/semantic.jsonl`
-- Default TTL is 7 days
-
-Example options in a `/validate` request:
-```json
-{
-  "spectral": true,
-  "maxPairwiseEdges": 6000,
-  "neighborK": 12,
-  "batchSize": 256,
-  "cachePersistPath": ".tcl_cache/semantic.jsonl"
-}
-```
+For implementation details, tests, and fixtures, start in `packages/tcl-core`.

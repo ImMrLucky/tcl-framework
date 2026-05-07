@@ -19,8 +19,22 @@ import { generateReproducibilityMetadata, getEngineVersion } from "./analysis/re
 import { computeTruthFromGraph } from "./analysis/compute-truth-from-graph.js";
 import { getEngineConfig } from "./config/engine-config.js";
 import { log } from "./server/utils/logger.js";
+import { mapSpeakerToRole, speakerRoleToDisplay } from "./ingestion/speaker-role.js";
+import { countSpeakerLabelsInClaim, isContaminatedClaimText, sanitizeTranscriptForScoring } from "./ingestion/transcript-sanitizer.js";
+import { detectFinalExpenseComplianceIssues } from "./analysis/domain/final-expense-detectors.js";
+import { detectHallucinations } from "./analysis/hallucination-detector.js";
+import { evaluateFactualTruth } from "./analysis/factual-truth-detector.js";
+import { detectDrift } from "./analysis/drift-detector.js";
+import { computeRiskAdjustedScores } from "./analysis/risk-adjusted-scoring.js";
+import { runCrossTurnConsistency } from "./analysis/cross-turn-consistency.js";
+import { selectDomainPacks, runDomainPacks } from "./domain-packs/registry.js";
+import { buildExecutiveSummary } from "./analysis/executive-summary.js";
+import { mineBusinessInsights } from "./analysis/business-value-mining.js";
+import { buildEvidenceDependencyGraph, averageEvidenceSupportScore, evidenceGapCount } from "./analysis/evidence-dependency-graph.js";
+import { detectAiConversationIssues } from "./analysis/ai-conversation-detectors.js";
+import { buildDashboardSummary } from "./analysis/dashboard-summary-builder.js";
 // NEW: Unified Graph Builder (3-stage pipeline with subject slots)
-import { buildGraph as buildUnifiedGraph, toSpectralInput, setTemplateConfig } from "./graph/graph-builder.js";
+import { buildGraph as buildUnifiedGraph, buildGraphAsync as buildUnifiedGraphAsync, toSpectralInput, setTemplateConfig } from "./graph/graph-builder.js";
 import { getTemplateConfig } from "./graph/template-config.js";
 // Cache for scorer to avoid re-initialization on every request
 let cachedScorer = null;
@@ -120,7 +134,9 @@ async function runUnifiedGraphPath(input, timer, validationStartTime, adapter) {
     timer.start('unified_graph');
     console.log("🏗️ Using Unified Graph Builder (slot-first edges)");
     // Determine the transcript
-    const transcript = answer && answer.trim().length > 0 ? answer : question;
+    const rawTranscript = answer && answer.trim().length > 0 ? answer : question;
+    const sanitizerResult = sanitizeTranscriptForScoring(rawTranscript);
+    const transcript = sanitizerResult.text || rawTranscript;
     // Set template based on content or options
     const templateId = options?.template ?? detectTemplate(transcript);
     setTemplateConfig(templateId);
@@ -138,38 +154,51 @@ async function runUnifiedGraphPath(input, timer, validationStartTime, adapter) {
             if (!turn.text || turn.text.trim().length < 8)
                 continue;
             // Get participant info for speaker attribution
-            const participant = normalizedConversation.participants?.find((p) => p.id === turn.participantId);
-            const speakerRole = turn.role || participant?.role || 'unknown';
-            const speakerLabel = turn.speakerLabel || participant?.displayName;
+            const participant = normalizedConversation.participants?.find((p) => p.id === turn.participantId || p.participantId === turn.participantId);
+            let speakerRole = turn.role || turn.speakerType || participant?.role || participant?.speakerType || 'unknown';
+            const speakerLabel = turn.speakerLabel || turn.speakerLabelRaw || participant?.displayName || turn.meta?.rawSpeaker;
+            const rawSpeaker = turn.meta?.rawSpeaker || speakerLabel;
+            if ((speakerRole === 'unknown' || !speakerRole) && speakerLabel) {
+                speakerRole = mapSpeakerToRole(speakerLabel).role;
+            }
             // Map role to speaker string format
-            let speaker;
-            if (speakerRole === 'agent' || speakerRole === 'AGENT') {
-                speaker = 'Agent';
-            }
-            else if (speakerRole === 'customer' || speakerRole === 'CUSTOMER' || speakerRole === 'caller') {
-                speaker = 'Customer';
-            }
-            // Extract claim type
-            const claimType = classifyClaimType(turn.text, speaker);
-            const isAuditable = isAuditableClaimType(claimType);
-            if (isAuditable) {
-                extractedClaims.push({
-                    id: `c${claimIdx++}`,
-                    text: turn.text,
-                    confidence: 0, // Will be computed from graph
-                    evidence: [],
-                    meta: {
-                        speaker,
-                        speakerType: speakerRole === 'agent' ? 'agent' : speakerRole === 'customer' ? 'customer' : 'unknown',
-                        speakerLabel,
-                        turnIndex: turn.turnIndex,
-                    },
-                    claimType,
-                    isAuditable: true,
-                    topicTags: extractTopics(turn.text),
-                    hasAbsoluteLanguage: hasAbsoluteLanguage(turn.text),
-                    hasMoney: hasMoney(turn.text),
-                });
+            const normalizedRole = typeof speakerRole === 'string' ? speakerRole.toLowerCase() : 'unknown';
+            const speaker = speakerRoleToDisplay(normalizedRole === 'agent' || normalizedRole === 'customer' || normalizedRole === 'supervisor' || normalizedRole === 'bot' || normalizedRole === 'system'
+                ? normalizedRole
+                : normalizedRole === 'caller'
+                    ? 'customer'
+                    : 'unknown');
+            const sentences = turn.text
+                .replace(/\s+/g, ' ')
+                .split(/(?<=[.!?])\s+/)
+                .map((s) => s.trim())
+                .filter((s) => s.length >= 8);
+            for (const sentence of sentences) {
+                if (isContaminatedClaimText(sentence) || countSpeakerLabelsInClaim(sentence) > 0)
+                    continue;
+                const claimType = classifyClaimType(sentence, speaker);
+                const isAuditable = isAuditableClaimType(claimType);
+                if (isAuditable) {
+                    extractedClaims.push({
+                        id: `c${claimIdx++}`,
+                        text: sentence,
+                        confidence: 0, // Will be computed from graph
+                        evidence: [],
+                        meta: {
+                            speaker,
+                            speakerType: speakerRole === 'agent' || speakerRole === 'customer' || speakerRole === 'supervisor' || speakerRole === 'bot' || speakerRole === 'system' ? speakerRole : 'unknown',
+                            speakerLabel,
+                            rawSpeaker,
+                            turnIndex: turn.turnIndex,
+                            participantId: turn.participantId,
+                        },
+                        claimType,
+                        isAuditable: true,
+                        topicTags: extractTopics(sentence),
+                        hasAbsoluteLanguage: hasAbsoluteLanguage(sentence),
+                        hasMoney: hasMoney(sentence),
+                    });
+                }
             }
         }
         log('debug', 'Orchestrator', `Extracted ${extractedClaims.length} claims from normalized turns`);
@@ -188,13 +217,16 @@ async function runUnifiedGraphPath(input, timer, validationStartTime, adapter) {
         timer.end('unified_graph');
         return createEmptyResult(input, timer, validationStartTime);
     }
+    const contaminatedClaims = extractedClaims.filter(c => isContaminatedClaimText(c.text) || countSpeakerLabelsInClaim(c.text) > 0).length;
+    extractedClaims = extractedClaims.filter(c => !isContaminatedClaimText(c.text) && countSpeakerLabelsInClaim(c.text) === 0);
     // Convert to raw claims format for graph builder
     const rawClaims = extractedClaims.map((c, i) => ({
         id: c.id || `c${i}`,
         text: c.text,
-        speakerRole: c.meta?.speakerType === 'agent' ? 'agent' :
+        speakerRole: c.meta?.speakerType === 'agent' || c.meta?.speakerType === 'supervisor' ? 'agent' :
             c.meta?.speakerType === 'customer' ? 'customer' :
-                normalizeSpeaker(c.meta?.speaker),
+                c.meta?.speakerType === 'bot' || c.meta?.speakerType === 'system' ? 'system' :
+                    normalizeSpeaker(c.meta?.speaker),
         span: {
             turnId: `turn-${c.meta?.turnIndex ?? i}`,
             startChar: 0,
@@ -203,21 +235,46 @@ async function runUnifiedGraphPath(input, timer, validationStartTime, adapter) {
         modality: undefined, // Will be detected by graph builder
         meta: c.meta, // CRITICAL: Preserve all meta including speakerType and speakerLabel
     }));
+    const claimTypeLookup = new Map();
+    for (const ec of extractedClaims) {
+        if (ec.id)
+            claimTypeLookup.set(ec.id, ec.claimType);
+    }
     // Build the unified graph
     // CRITICAL: Pass transcript so graph-builder can create transcript EvidenceNodes for grounding
+    // Use spaCy-enhanced extraction if available (better entity quality → better edges)
     timer.start('graph_build');
-    const graphResult = buildUnifiedGraph({
-        transcript, // ✅ Required for grounding edges
-        rawClaims,
-        evidence: externalSources?.map(s => ({
-            id: s.id,
-            kind: 'document',
-            content: s.text,
-        })),
-        template: templateId,
-        conversationId: options?.conversationId,
-    });
+    const useSpacy = process.env.ENABLE_SPACY !== 'false' && process.env.TCL_NLP_URL;
+    const speakerRoleMap = options?.speakerRoleMap;
+    const graphResult = useSpacy
+        ? await buildUnifiedGraphAsync({
+            transcript, // ✅ Required for grounding edges
+            rawClaims,
+            evidence: externalSources?.map(s => ({
+                id: s.id,
+                kind: 'document',
+                content: s.text,
+            })),
+            template: templateId,
+            conversationId: options?.conversationId,
+            speakerRoleMap, // Pass speaker role map to graph builder
+        })
+        : buildUnifiedGraph({
+            transcript, // ✅ Required for grounding edges
+            rawClaims,
+            evidence: externalSources?.map(s => ({
+                id: s.id,
+                kind: 'document',
+                content: s.text,
+            })),
+            template: templateId,
+            conversationId: options?.conversationId,
+            speakerRoleMap, // Pass speaker role map to graph builder
+        });
     timer.end('graph_build');
+    if (useSpacy) {
+        log('debug', 'Orchestrator', 'Graph built with spaCy-enhanced entities');
+    }
     log('debug', 'Orchestrator', `Graph built`, {
         totalEdges: graphResult.metrics.totalEdges,
         duration: timer.duration('graph_build'),
@@ -268,21 +325,12 @@ async function runUnifiedGraphPath(input, timer, validationStartTime, adapter) {
         // Try to get speakerType from meta first, then derive from speakerRole or speaker string
         let speakerType = nodeMeta.speakerType;
         if (!speakerType) {
-            if (c.speakerRole === 'agent' || c.speakerRole === 'customer') {
+            if (c.speakerRole === 'agent' || c.speakerRole === 'customer' || c.speakerRole === 'system') {
                 speakerType = c.speakerRole;
             }
             else if (nodeMeta.speaker) {
                 // Derive from speaker string (e.g., "Agent" -> "agent", "Customer" -> "customer")
-                const speakerLower = nodeMeta.speaker.toLowerCase();
-                if (speakerLower === 'agent' || speakerLower === 'agnt') {
-                    speakerType = 'agent';
-                }
-                else if (speakerLower === 'customer' || speakerLower === 'cust' || speakerLower === 'caller') {
-                    speakerType = 'customer';
-                }
-                else {
-                    speakerType = 'unknown';
-                }
+                speakerType = mapSpeakerToRole(nodeMeta.speaker).role;
             }
             else {
                 speakerType = 'unknown';
@@ -293,8 +341,7 @@ async function runUnifiedGraphPath(input, timer, validationStartTime, adapter) {
             (nodeMeta.speaker && nodeMeta.speaker !== 'Agent' && nodeMeta.speaker !== 'Customer' ? nodeMeta.speaker : undefined);
         // Set speaker in standard format (Agent/Customer/undefined)
         const speaker = nodeMeta.speaker ||
-            (speakerType === 'agent' ? 'Agent' :
-                speakerType === 'customer' ? 'Customer' : undefined);
+            speakerRoleToDisplay(speakerType);
         return {
             id: c.id,
             text: c.text,
@@ -306,7 +353,10 @@ async function runUnifiedGraphPath(input, timer, validationStartTime, adapter) {
                 speaker,
                 speakerType,
                 speakerLabel,
+                rawSpeaker: nodeMeta.rawSpeaker || speakerLabel,
                 turnIndex: parseInt(c.span.turnId.replace(/[^\d]/g, ''), 10) || 0,
+                participantId: nodeMeta.participantId,
+                claimType: claimTypeLookup.get(c.id) ?? claimTypeLookup.get(`${c.id}`),
             },
             claimKind: c.modality === 'question' ? 'question' :
                 c.modality === 'promise' ? 'promise' :
@@ -335,6 +385,19 @@ async function runUnifiedGraphPath(input, timer, validationStartTime, adapter) {
         }
         if (!graphResult.graph.diagnostics.reasons.includes('NO_GROUNDING_EDGES')) {
             graphResult.graph.diagnostics.reasons.push('NO_GROUNDING_EDGES');
+        }
+    }
+    if (contaminatedClaims > 0) {
+        graphResult.graph.diagnostics.status = 'DEGRADED';
+        if (!graphResult.graph.diagnostics.reasons.includes('CONTAMINATED_CLAIMS_DROPPED')) {
+            graphResult.graph.diagnostics.reasons.push('CONTAMINATED_CLAIMS_DROPPED');
+        }
+    }
+    const sanitizedLineCount = Math.max(1, transcript.split(/\n+/).filter(Boolean).length + sanitizerResult.unknownSpeakerLines);
+    if (sanitizerResult.unknownSpeakerLines / sanitizedLineCount > 0.2) {
+        graphResult.graph.diagnostics.status = 'DEGRADED';
+        if (!graphResult.graph.diagnostics.reasons.includes('LOW_SPEAKER_CONFIDENCE')) {
+            graphResult.graph.diagnostics.reasons.push('LOW_SPEAKER_CONFIDENCE');
         }
     }
     if (spectralEnabled && spectralServiceUrl && claims.length > 0) {
@@ -370,13 +433,138 @@ async function runUnifiedGraphPath(input, timer, validationStartTime, adapter) {
     timer.end('unified_graph');
     // Build the result
     const totalLatency = Date.now() - validationStartTime;
-    // Compute scores from graph result
-    const truthScore = graphResult.truthScores.auditTruth;
-    const consistencyScore = graphResult.truthScores.consistency;
-    const overall = blendScores(truthScore, consistencyScore, coherenceScore);
-    // Assess run quality
     const hasExternalEvidence = (externalSources?.length ?? 0) > 0;
-    const runQualityResult = assessRunQuality(overall, truthScore, consistencyScore, {
+    // Compute risk-adjusted scores. Transcript grounding is audit traceability, not factual truth.
+    const runId = options?.runId || options?.evaluationId || 'pending';
+    const conversationId = options?.conversationId || '';
+    const evidenceMode = hasExternalEvidence ? 'TRANSCRIPT_PLUS_EXTERNAL' : 'TRANSCRIPT_ONLY';
+    const skipProtectqaDefault = options?.skipProtectqaDefault === true;
+    const explicitPackIds = options?.domainPackIds ?? [];
+    const inferredPackIds = inferDomainPackIds(transcript, options?.template);
+    let mergedPackIds = [...new Set([...explicitPackIds, ...inferredPackIds])];
+    if (!skipProtectqaDefault) {
+        mergedPackIds = ["protectqa_final_expense", ...mergedPackIds.filter(id => id !== "protectqa_final_expense")];
+        mergedPackIds = [...new Set(mergedPackIds)];
+    }
+    const domainPacks = mergedPackIds.length > 0 ? selectDomainPacks({ packIds: mergedPackIds }) : selectDomainPacks({ templateId });
+    const domainPackIssues = runDomainPacks(domainPacks, claims, { runId, conversationId, evidenceMode });
+    const finalExpenseIssues = domainPacks.length === 0
+        ? detectFinalExpenseComplianceIssues(claims, { runId, conversationId, evidenceMode })
+        : [];
+    const hallucinationResult = detectHallucinations(claims, { runId, conversationId, hasExternalEvidence, evidenceMode });
+    const driftResult = detectDrift(claims, { runId, conversationId, evidenceMode });
+    const crossTurnResult = runCrossTurnConsistency(claims, { runId, conversationId, evidenceMode });
+    const aiConversationIssues = detectAiConversationIssues(claims, {
+        runId,
+        conversationId,
+        evidenceMode,
+        toolResultsByTurn: options?.toolResultsByTurn instanceof Set ? options.toolResultsByTurn : undefined,
+    });
+    const detectorIssues = [
+        ...domainPackIssues,
+        ...finalExpenseIssues,
+        ...hallucinationResult.issues,
+        ...driftResult.driftIssues,
+        ...crossTurnResult.issues,
+        ...aiConversationIssues,
+    ];
+    const factualTruthResult = evaluateFactualTruth(claims, detectorIssues, { hasExternalEvidence });
+    const criticalComplianceIssues = detectorIssues.filter(i => i.category === 'compliance' && i.severity === 'critical').length;
+    const highComplianceIssues = detectorIssues.filter(i => i.category === 'compliance' && i.severity === 'high').length;
+    const complianceScore = Math.max(0, Math.round(100 - criticalComplianceIssues * 28 - highComplianceIssues * 11));
+    const graphConsistency = graphResult.truthScores.consistency ?? 0;
+    const consistencyScore = Math.round((graphConsistency + crossTurnResult.consistencyScore) / 2);
+    const disclosureMissCount = detectorIssues.filter(i => /MISSING|DISCLOSURE/i.test(i.type) ||
+        /disclosure|carrier approval|waiting period|policy terms/i.test(`${i.what.issueSummary} ${i.type}`)).length;
+    const disclosureCoverage = Math.max(0, Math.min(100, 100 - disclosureMissCount * 14));
+    const evidenceNodes = buildEvidenceDependencyGraph(claims, detectorIssues, { hasExternalEvidence });
+    const evidenceSupport = averageEvidenceSupportScore(evidenceNodes, hasExternalEvidence);
+    const evGapCount = evidenceGapCount(evidenceNodes);
+    const { insights: businessInsights, businessValueScore } = mineBusinessInsights(claims);
+    const sanitizedLineCountGraph = Math.max(1, transcript.split(/\n+/).filter(Boolean).length + sanitizerResult.unknownSpeakerLines);
+    const unknownSpeakerRatio = sanitizerResult.unknownSpeakerLines / sanitizedLineCountGraph;
+    const agentClaimCount = claims.filter(c => c.meta?.speakerType === 'agent' || c.meta?.speaker === 'Agent').length;
+    const customerClaimCount = claims.filter(c => c.meta?.speakerType === 'customer' || c.meta?.speaker === 'Customer').length;
+    const aiClaimCount = claims.filter(c => c.meta?.speakerType === 'bot').length;
+    const systemClaimCount = claims.filter(c => c.meta?.speakerType === 'system').length;
+    const mappedClaimCount = claims.filter(c => c.meta?.speakerType && c.meta.speakerType !== 'unknown').length;
+    const speakerMappingConfidence = claims.length > 0 ? Math.round((mappedClaimCount / claims.length) * 100) : 100;
+    const riskAdjusted = computeRiskAdjustedScores({
+        profile: "protectqa",
+        transcriptGrounding: graphResult.truthScores.transcriptGrounding,
+        factualTruth: factualTruthResult.factualTruthScore,
+        compliance: complianceScore,
+        disclosureCoverage,
+        evidenceSupport,
+        speakerConfidence: speakerMappingConfidence,
+        businessValueScore,
+        consistency: consistencyScore,
+        coherence: coherenceScore,
+        hallucination: hallucinationResult.hallucinationScore,
+        drift: driftResult.driftScore,
+        issues: detectorIssues,
+        contaminatedClaims,
+        unknownSpeakerRatio,
+    });
+    const truthScore = riskAdjusted.scores.factualTruth;
+    const tclScore = riskAdjusted.scores.tcl;
+    const overall = tclScore;
+    const diagStatus = graphResult.graph.diagnostics.status === "FAILED"
+        ? "failed"
+        : graphResult.graph.diagnostics.status === "DEGRADED" || contaminatedClaims > 0 || unknownSpeakerRatio > 0.2
+            ? "degraded"
+            : "ok";
+    const claimsAnalysis = claims.map(c => {
+        const node = evidenceNodes.find(n => n.claimId === c.id);
+        return {
+            id: c.id,
+            speaker: c.meta?.speaker,
+            speakerType: c.meta?.speakerType,
+            turnIndex: c.meta?.turnIndex,
+            text: c.text,
+            claimType: c.meta?.claimType ?? classifyClaimType(c.text, c.meta?.speaker ?? ""),
+            truthState: c.truthState,
+            evidenceStatus: node?.status ?? "unverifiable",
+            requiredEvidence: node?.requiredEvidenceTypes ?? [],
+            missingEvidence: node?.missingEvidenceTypes ?? [],
+            riskScore: detectorIssues.filter(i => i.what.primaryClaimId === c.id).length * 12,
+            businessValueTags: businessInsights.filter(ins => ins.turnIndex === c.meta?.turnIndex).map(i => i.type),
+        };
+    });
+    const issuesBySeverity = {
+        critical: detectorIssues.filter(i => i.severity === "critical"),
+        high: detectorIssues.filter(i => i.severity === "high"),
+        medium: detectorIssues.filter(i => i.severity === "medium"),
+        low: detectorIssues.filter(i => i.severity === "low"),
+    };
+    const unsupportedForDashboard = evidenceNodes
+        .filter(n => n.status === "unsupported" || n.status === "unverifiable" || n.missingEvidenceTypes.length > 1)
+        .map(n => ({
+        claimText: n.claimText,
+        missing: n.missingEvidenceTypes,
+    }));
+    const dashboardSummary = buildDashboardSummary({
+        tclScore,
+        mode: domainPacks.some(p => p.id === "protectqa_final_expense") ? "protectqa" : "tcl",
+        transcriptHint: transcript.slice(0, 2000),
+        claims,
+        insights: businessInsights,
+        issues: detectorIssues,
+        drift: driftResult,
+        topUnsupported: unsupportedForDashboard,
+        nextActions: [
+            ...new Set(detectorIssues
+                .map(i => i.what.recommendedActionLabel)
+                .filter((x) => Boolean(x))
+                .slice(0, 8)),
+        ],
+    });
+    const recommendedActions = [
+        ...(riskAdjusted.risk.recommendedAction ? [{ label: riskAdjusted.risk.recommendedAction, rationale: riskAdjusted.risk.primaryRisk }] : []),
+        ...businessInsights.slice(0, 4).map(ins => ({ label: ins.recommendedAction, rationale: ins.summary })),
+    ];
+    // Assess run quality
+    const runQualityResult = assessRunQuality(tclScore, truthScore, consistencyScore, {
         claimsCount: claims.length,
         supportsCount: graphResult.legacy.supports.length,
         contradictionsCount: graphResult.legacy.contradictions.length,
@@ -401,10 +589,23 @@ async function runUnifiedGraphPath(input, timer, validationStartTime, adapter) {
             truth: truthScore,
             consistency: consistencyScore,
             coherence: coherenceScore,
-            overall
+            overall,
+            tcl: tclScore,
+            transcriptGrounding: riskAdjusted.scores.transcriptGrounding,
+            compliance: riskAdjusted.scores.compliance,
+            hallucination: riskAdjusted.scores.hallucination,
+            drift: riskAdjusted.scores.drift,
+            evidenceSupport: riskAdjusted.scores.evidenceSupport,
+            speakerConfidence: riskAdjusted.scores.speakerConfidence,
+            businessValue: riskAdjusted.scores.businessValue,
         },
         enhancedScores: {
             groundednessScore: graphResult.truthScores.transcriptGrounding,
+            transcriptGrounding: riskAdjusted.scores.transcriptGrounding,
+            factualTruth: riskAdjusted.scores.factualTruth,
+            compliance: riskAdjusted.scores.compliance,
+            hallucination: riskAdjusted.scores.hallucination,
+            drift: riskAdjusted.scores.drift,
             verificationScore: graphResult.truthScores.externalVerification,
             consistencyScore: graphResult.truthScores.consistency,
             coherenceScore,
@@ -412,9 +613,68 @@ async function runUnifiedGraphPath(input, timer, validationStartTime, adapter) {
             consistency: consistencyScore,
             coherence: coherenceScore,
             overall,
-            // Mode-aware scores (separated for clarity)
+            tcl: tclScore,
+            evidenceSupport: riskAdjusted.scores.evidenceSupport,
+            speakerConfidence: riskAdjusted.scores.speakerConfidence,
+            businessValue: riskAdjusted.scores.businessValue,
+            disclosureCoverage: riskAdjusted.scores.disclosureCoverage,
             modeAware: graphResult.truthScores.modeAware,
         },
+        diagnostics: {
+            status: diagStatus,
+            sanitizedTranscript: sanitizerResult.text !== rawTranscript,
+            removedAnnotationLines: sanitizerResult.removedAnnotationLines,
+            normalizedInlineSpeakerBoundaries: sanitizerResult.normalizedInlineSpeakerBoundaries,
+            contaminatedClaims,
+            unknownSpeakerLines: sanitizerResult.unknownSpeakerLines,
+            speakerConfidence: speakerMappingConfidence,
+            speakerMappingConfidence,
+            claimContaminationIndex: claims.length > 0 ? contaminatedClaims / claims.length : 0,
+            agentClaimCount,
+            customerClaimCount,
+            aiClaimCount,
+            systemClaimCount,
+            evidenceGapCount: evGapCount,
+            complianceIssueCount: domainPackIssues.length + finalExpenseIssues.length,
+            hallucinationIssueCount: hallucinationResult.issues.length,
+            driftIssueCount: driftResult.driftIssues.length,
+            crossTurnIssueCount: crossTurnResult.issues.length,
+            domainPacksApplied: domainPacks.map(p => `${p.id}@${p.version}`),
+            scoringCapsApplied: riskAdjusted.scoringCapsApplied,
+        },
+        risk: riskAdjusted.risk,
+        productContext: {
+            positioning: "TCL turns conversations into defensible truth, compliance, hallucination drift, and business-value intelligence.",
+            defaultDomain: "protectqa_final_expense",
+            domainPacksApplied: domainPacks.map(p => p.id),
+        },
+        businessInsights,
+        recommendedActions,
+        dashboardSummary,
+        claimsAnalysis,
+        issuesBySeverity,
+        evidenceDependencyGraph: evidenceNodes,
+        executiveSummary: buildExecutiveSummary({
+            scores: {
+                transcriptGrounding: riskAdjusted.scores.transcriptGrounding,
+                factualTruth: riskAdjusted.scores.factualTruth,
+                compliance: riskAdjusted.scores.compliance,
+                consistency: consistencyScore,
+                coherence: coherenceScore,
+                hallucination: riskAdjusted.scores.hallucination,
+                drift: riskAdjusted.scores.drift,
+                overall: riskAdjusted.scores.tcl,
+                tcl: riskAdjusted.scores.tcl,
+                disclosureCoverage: riskAdjusted.scores.disclosureCoverage,
+                evidenceSupport: riskAdjusted.scores.evidenceSupport,
+                businessValue: riskAdjusted.scores.businessValue,
+            },
+            risk: riskAdjusted.risk,
+            issues: detectorIssues,
+            claims,
+            scoringCapsApplied: riskAdjusted.scoringCapsApplied,
+            diagnostics: { contaminatedClaims, unknownSpeakerLines: sanitizerResult.unknownSpeakerLines, speakerMappingConfidence },
+        }),
         summaryStats: {
             totalClaims: claims.length,
             groundedClaims: graphResult.truthDerivation.summary.unverified + graphResult.truthDerivation.summary.supported,
@@ -487,6 +747,20 @@ async function runUnifiedGraphPath(input, timer, validationStartTime, adapter) {
                 },
             },
             destructiveClaims,
+            issues: {
+                atomic: detectorIssues,
+            },
+            allIssuesV2: detectorIssues,
+            drift: {
+                driftScore: driftResult.driftScore,
+                driftTimeline: driftResult.driftTimeline,
+            },
+            crossTurn: {
+                consistencyScore: crossTurnResult.consistencyScore,
+                events: crossTurnResult.events,
+                pairs: crossTurnResult.pairs,
+            },
+            domainPacksApplied: domainPacks.map(p => ({ id: p.id, version: p.version })),
             suggestions: generateSuggestions(claims, [], // violations
             graphResult.legacy.contradictions.map(c => ({
                 claimA: c.claimA,
@@ -534,22 +808,47 @@ async function runUnifiedGraphPath(input, timer, validationStartTime, adapter) {
 // Helper: Detect template from transcript content
 function detectTemplate(transcript) {
     const lower = transcript.toLowerCase();
-    // Telco indicators
-    if (lower.includes('router') || lower.includes('billing') || lower.includes('plan') ||
-        lower.includes('streaming') || lower.includes('cable') || lower.includes('internet')) {
+    // Telco indicators (word-boundary matched)
+    if (/\b(router|billing plan|streaming|cable|internet plan|wifi)\b/.test(lower)) {
         return 'telco';
     }
     // Loans indicators
-    if (lower.includes('loan') || lower.includes('mortgage') || lower.includes('interest rate') ||
-        lower.includes('apr') || lower.includes('principal') || lower.includes('underwriting')) {
+    if (/\b(loan|mortgage|interest rate|apr|principal balance|underwriting officer)\b/.test(lower)) {
         return 'loans';
     }
-    // AI chat indicators
-    if (lower.includes('assistant') || lower.includes('ai') || lower.includes('chatbot') ||
-        lower.includes('tool call') || lower.includes('api')) {
+    // AI chat indicators (word-boundary matched to avoid "wait", "claim", etc. triggering)
+    if (/\b(ai assistant|chatbot|chat bot|virtual assistant|tool call|prompt|llm)\b/.test(lower)) {
         return 'ai_chat';
     }
     return 'generic';
+}
+/**
+ * Infer which domain packs to apply based on transcript content. This is
+ * decoupled from `detectTemplate` (which feeds template-config) so we can add
+ * vertical packs without touching the template registry.
+ */
+function inferDomainPackIds(transcript, explicitTemplateId) {
+    const lower = transcript.toLowerCase();
+    const packs = new Set();
+    if (/\b(final expense|burial insurance|death benefit|graded benefit|guaranteed approval|every carrier|protectqa|guaranteed issue|underwriting|waiting period)\b/.test(lower)) {
+        packs.add('protectqa_final_expense');
+    }
+    if (/\b(ai assistant|chatbot|chat bot|virtual assistant|tool call|prompt injection|llm|i am a (?:doctor|attorney|financial advisor))\b/.test(lower)) {
+        packs.add('ai_chatbot');
+    }
+    if (/\b(support ticket|refund policy|tracking number|escalat)\b/.test(lower))
+        packs.add('customer_support');
+    if (/\b(soc 2|soc2|hipaa|integration|sales demo)\b/.test(lower))
+        packs.add('saas_sales');
+    if (/\b(diagnos|prescription|clinical|intake)\b/.test(lower))
+        packs.add('healthcare');
+    if (/\b(loan|apr|investment return|portfolio)\b/.test(lower))
+        packs.add('financial_services');
+    if (explicitTemplateId === 'final_expense' || explicitTemplateId === 'insurance' || explicitTemplateId === 'protectqa')
+        packs.add('protectqa_final_expense');
+    if (explicitTemplateId === 'ai_chat' || explicitTemplateId === 'chatbot' || explicitTemplateId === 'assistant')
+        packs.add('ai_chatbot');
+    return Array.from(packs);
 }
 // Helper: Normalize speaker to SpeakerRole
 function normalizeSpeaker(speaker) {

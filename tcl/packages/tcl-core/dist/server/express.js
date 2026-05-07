@@ -8,6 +8,20 @@ import { inviteMember, updateMemberRole, removeMember } from "./member-managemen
 import { setupIntegrationRoutes } from "./integrations/routes.js";
 import { setupAuditRoutes } from "./audit/routes.js";
 import { setupIssueWorkflowRoutes } from "./issues/routes.js";
+import { setupIssueDecisionsRoutes } from "./issues/decisions-routes.js";
+import { setupIssueSignoffsRoutes } from "./issues/signoffs-routes.js";
+import { setupIssueSnapshotsRoutes } from "./issues/snapshots-routes.js";
+import { setupCasesRoutes } from "./cases/routes.js";
+import { setupWebhooksRoutes } from "./integrations/webhooks-routes.js";
+import { setupJiraRoutes } from "./integrations/jira-routes.js";
+import { setupBatchIngestionRoutes } from "./batch-ingestion/routes.js";
+import { setupBatchUploadRoutes } from "./ingestion/batch-upload-routes.js";
+import { setupIngestionConfigRoutes } from "./ingestion/config-routes.js";
+import { setupScheduledIngestionRoutes } from "./ingestion/scheduled-routes.js";
+import { startSchedulerWorker } from "./ingestion/scheduler-worker.js";
+import { setupConnectorRoutes } from "./connectors/routes.js";
+import { setupDropboxOAuthRoutes } from "./connectors/oauth/dropbox-oauth.js";
+import { setupGDriveOAuthRoutes } from "./connectors/oauth/gdrive-oauth.js";
 import { setupAnalyticsRoutes } from "./analytics/routes.js";
 import { setupExportRoutes } from "./exports/routes.js";
 import { setupEvaluationSearchRoutes } from "./evaluations/search.js";
@@ -17,6 +31,7 @@ import { setupOrgRoutes } from "./orgs/routes.js";
 import { setupProjectRoutes } from "./projects/routes.js";
 import { setupTemplateRoutes } from "./templates/routes.js";
 import { setupConversationRoutes } from "./conversations/routes.js";
+import { setupRepresentativeRoutes } from "./representatives/routes.js";
 import { resolveEvidenceSet } from "./evidence/service.js";
 import { startIndexingWorker } from "./evidence/indexing-worker.js";
 import { setupScoringProfilesRoutes } from "./admin/scoring-profiles.js";
@@ -41,6 +56,8 @@ import { registerIngestionJobRoutes } from "./ingest/jobs.js";
 import { planService } from "./plans/plan-service.js";
 import { requireCapability } from "./plans/capability-middleware.js";
 import { Capability } from "./plans/capabilities.js";
+import { entitlementsService } from "./entitlements/entitlements-service.js";
+import { requireEntitlement } from "./entitlements/middleware.js";
 const app = express();
 // CORS middleware - allows frontend to call Railway directly
 // This is necessary when the frontend calls Railway directly for /validate
@@ -62,12 +79,14 @@ app.use((req, res, next) => {
         // For development, allow any origin
         res.setHeader('Access-Control-Allow-Origin', origin);
     }
-    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
-    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS, PATCH');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Active-Org-Id');
     res.setHeader('Access-Control-Allow-Credentials', 'true');
     res.setHeader('Access-Control-Max-Age', '86400'); // 24 hours
     // Handle preflight requests
     if (req.method === 'OPTIONS') {
+        // Log preflight request to debug CORS
+        console.log('[CORS] Preflight request received. Requested headers:', req.headers['access-control-request-headers']);
         return res.status(200).end();
     }
     next();
@@ -1414,7 +1433,8 @@ app.post("/validate/batch", async (req, res) => {
         const failed = results.length - passed;
         const averageScore = results
             .filter(r => r.scores && !r.error)
-            .reduce((sum, r) => sum + (r.scores?.overall || 0), 0) / Math.max(1, results.filter(r => !r.error).length);
+            .reduce((sum, r) => sum + (r.scores?.tcl ?? r.scores?.overall ?? 0), 0) /
+            Math.max(1, results.filter(r => !r.error).length);
         const averageLatency = latencies.length > 0
             ? latencies.reduce((sum, l) => sum + l, 0) / latencies.length
             : 0;
@@ -1590,7 +1610,26 @@ setupAdminRoutes(app);
 console.log("Admin routes registered successfully");
 app.get("/api/me", async (req, res) => {
     try {
+        // Check for active org ID in query parameter (fallback if header is stripped by proxy/CDN)
+        const activeOrgIdFromQuery = req.query.activeOrgId;
+        // If we have it in query, temporarily add it to headers so getOrgContext can use it
+        if (activeOrgIdFromQuery && !req.headers['x-active-org-id']) {
+            req.headers['x-active-org-id'] = activeOrgIdFromQuery;
+            console.log('[API/me] Using activeOrgId from query parameter (header was stripped):', activeOrgIdFromQuery);
+        }
+        // Debug: Log headers for /api/me requests
+        console.log('[API/me] Request headers:', {
+            'x-active-org-id': req.headers['x-active-org-id'],
+            'X-Active-Org-Id': req.headers['X-Active-Org-Id'],
+            'activeOrgId (query)': activeOrgIdFromQuery,
+            'all-header-keys': Object.keys(req.headers)
+        });
         const context = await getOrgContext(req);
+        // Debug: Log the context that was returned
+        console.log('[API/me] Context returned:', {
+            orgId: context?.orgId,
+            error: context?.error
+        });
         if (!context || context.error || !context.orgId) {
             return res.status(401).json({ error: context?.error || "Authorization required" });
         }
@@ -1621,8 +1660,39 @@ app.get("/api/me", async (req, res) => {
         // Get admin context to check if superuser
         const { getAdminContext } = await import('./admin/middleware.js');
         const adminContext = await getAdminContext(req);
+        // Get base entitlements from database
+        const baseEntitlements = await entitlementsService.getOrgEntitlements(context.orgId);
+        // If emulation is active and tier differs, override entitlements for emulated tier
+        let entitlements = baseEntitlements;
+        if (emulation?.enabled && emulation?.planTier && planContext.effectivePlanTier) {
+            // Get entitlements for the emulated tier
+            const emulatedEntitlements = await entitlementsService.getEntitlementsForTier(planContext.effectivePlanTier);
+            entitlements = {
+                ...baseEntitlements,
+                tier: planContext.effectivePlanTier,
+                features: emulatedEntitlements.features,
+            };
+            console.log('[API/me] Emulation active, overriding entitlements:', {
+                orgId: context.orgId,
+                realTier: baseEntitlements.tier,
+                emulatedTier: planContext.effectivePlanTier,
+                batchIngestion: emulatedEntitlements.features.batchIngestion,
+            });
+        }
+        // Get user's role in the org
+        let role = null;
+        if (userId) {
+            const { data: member } = await supabaseAdmin
+                .from('org_members')
+                .select('role')
+                .eq('org_id', context.orgId)
+                .eq('user_id', userId)
+                .maybeSingle();
+            role = member?.role || null;
+        }
         res.json({
             user: userId ? { id: userId } : undefined,
+            role: role || null,
             org: {
                 id: org.id,
                 name: org.name,
@@ -1643,11 +1713,61 @@ app.get("/api/me", async (req, res) => {
                     effectivePlanTier: planContext.effectivePlanTier,
                 }),
             },
+            entitlements: {
+                orgId: entitlements.orgId,
+                tier: entitlements.tier,
+                features: entitlements.features,
+            },
             isSuperuser: adminContext?.isSuperuser || false,
         });
     }
     catch (e) {
         console.error("Get /api/me error:", e);
+        res.status(500).json({
+            error: e?.message ?? "unknown error"
+        });
+    }
+});
+// Get entitlements endpoint
+app.get("/api/entitlements", async (req, res) => {
+    try {
+        const context = await getOrgContext(req);
+        if (!context || context.error || !context.orgId) {
+            return res.status(401).json({ error: context?.error || "Authorization required" });
+        }
+        // Check for emulation (superuser only)
+        const emulation = req.emulation;
+        // Get plan context to determine effective tier (respects emulation)
+        const planContext = await planService.getOrgPlanContext(context.orgId, emulation);
+        // Get base entitlements from database
+        const baseEntitlements = await entitlementsService.getOrgEntitlements(context.orgId);
+        // If emulation is active and tier differs, override entitlements for emulated tier
+        let entitlements = baseEntitlements;
+        if (emulation?.enabled && emulation?.planTier && planContext.effectivePlanTier) {
+            // Get entitlements for the emulated tier
+            const emulatedEntitlements = await entitlementsService.getEntitlementsForTier(planContext.effectivePlanTier);
+            entitlements = {
+                ...baseEntitlements,
+                tier: planContext.effectivePlanTier,
+                features: emulatedEntitlements.features,
+            };
+            console.log('[API/entitlements] Emulation active:', {
+                orgId: context.orgId,
+                realTier: baseEntitlements.tier,
+                emulatedTier: planContext.effectivePlanTier,
+                batchIngestion: emulatedEntitlements.features.batchIngestion,
+            });
+        }
+        res.json({
+            entitlements: {
+                orgId: entitlements.orgId,
+                tier: entitlements.tier,
+                features: entitlements.features,
+            },
+        });
+    }
+    catch (e) {
+        console.error("Get /api/entitlements error:", e);
         res.status(500).json({
             error: e?.message ?? "unknown error"
         });
@@ -1715,8 +1835,8 @@ app.post("/api/orgs/:orgId/members/invite", async (req, res) => {
         res.status(500).json({ error: e?.message ?? "unknown error" });
     }
 });
-// Update a member's role
-app.patch("/api/orgs/:orgId/members/:memberUserId", async (req, res) => {
+// Update a member's role (requires enterpriseGovernance entitlement for role changes)
+app.patch("/api/orgs/:orgId/members/:memberUserId", requireEntitlement('enterpriseGovernance'), async (req, res) => {
     try {
         const { orgId, memberUserId } = req.params;
         const { role } = req.body;
@@ -2729,11 +2849,14 @@ app.post("/api/orgs/:orgId/projects/:projectId/api-keys/:keyId/revoke", async (r
         });
     }
 });
-// Setup conversation routes (drafts, transcription) BEFORE general /api/conversations routes
+// Setup conversation routes (drafts, transcription) RIGHT BEFORE general /api/conversations route
 // This ensures more specific routes like /api/conversations/drafts/audio are matched first
-console.log("Registering conversation routes...");
+// Registered here (after middleware setup) to avoid initialization issues
+console.log("Registering conversation routes (before /api/conversations)...");
 setupConversationRoutes(app);
 console.log("Conversation routes registered successfully");
+setupRepresentativeRoutes(app);
+console.log("Representative routes registered successfully");
 // Create conversation (ingest transcript)
 app.post("/api/conversations", async (req, res) => {
     try {
@@ -2982,7 +3105,39 @@ app.post("/api/transcribe", upload.single('audio'), async (req, res) => {
     }
 });
 // Setup integration routes
+console.log("Registering integration routes...");
 setupIntegrationRoutes(app);
+console.log("Integration routes registered successfully");
+// Setup webhooks routes
+console.log("Registering webhooks routes...");
+setupWebhooksRoutes(app);
+console.log("Webhooks routes registered successfully");
+// Setup Jira routes
+console.log("Registering Jira routes...");
+setupJiraRoutes(app);
+console.log("Jira routes registered successfully");
+// Setup batch ingestion routes
+console.log("Registering batch ingestion routes...");
+setupBatchIngestionRoutes(app);
+console.log("Batch ingestion routes registered successfully");
+// Setup batch upload routes (new batch file upload API)
+console.log("Registering batch upload routes...");
+setupBatchUploadRoutes(app);
+console.log("Batch upload routes registered successfully");
+// Setup ingestion configuration routes
+console.log("Registering ingestion config routes...");
+setupIngestionConfigRoutes(app);
+console.log("Ingestion config routes registered successfully");
+// Setup scheduled ingestion routes
+console.log("Registering scheduled ingestion routes...");
+setupScheduledIngestionRoutes(app);
+console.log("Scheduled ingestion routes registered successfully");
+// Setup connector routes
+console.log("Registering connector routes...");
+setupConnectorRoutes(app);
+setupDropboxOAuthRoutes(app);
+setupGDriveOAuthRoutes(app);
+console.log("Connector routes registered successfully");
 // Setup evaluation search routes FIRST (before /api/evaluations)
 // This ensures /api/evaluations/search matches before the more general /api/evaluations route
 console.log("Registering evaluation search routes...");
@@ -2996,6 +3151,22 @@ console.log("Audit routes registered successfully");
 console.log("Registering issue workflow routes...");
 setupIssueWorkflowRoutes(app);
 console.log("Issue workflow routes registered successfully");
+// Setup issue decisions routes
+console.log("Registering issue decisions routes...");
+setupIssueDecisionsRoutes(app);
+console.log("Issue decisions routes registered successfully");
+// Setup issue signoffs routes
+console.log("Registering issue signoffs routes...");
+setupIssueSignoffsRoutes(app);
+console.log("Issue signoffs routes registered successfully");
+// Setup issue snapshots routes
+console.log("Registering issue snapshots routes...");
+setupIssueSnapshotsRoutes(app);
+console.log("Issue snapshots routes registered successfully");
+// Setup cases routes
+console.log("Registering cases routes...");
+setupCasesRoutes(app);
+console.log("Cases routes registered successfully");
 // Setup analytics routes
 console.log("Registering analytics routes...");
 setupAnalyticsRoutes(app);
@@ -3093,6 +3264,14 @@ else {
 }
 // Start server with error handling
 try {
+    // Start scheduler worker for scheduled ingestion
+    try {
+        startSchedulerWorker();
+        console.log('✅ Scheduled ingestion worker started');
+    }
+    catch (error) {
+        console.error('❌ Failed to start scheduler worker:', error);
+    }
     const server = app.listen(port, '0.0.0.0', () => {
         console.log(`✅ TCL-Core listening on ${port}`);
         console.log(`Health check available at http://0.0.0.0:${port}/health`);

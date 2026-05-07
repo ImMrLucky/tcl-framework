@@ -321,11 +321,11 @@ export class CallCenterQaComponent implements OnInit {
     if (!this.result) return;
     // Implementation from app.component.ts
     const rows: string[] = [];
-    rows.push('Call ID,Agent ID,Customer ID,Call Date,Duration (min),Compliance Score,Risk Level,Contradictions,Ungrounded Claims,Timestamp');
+    rows.push('Call ID,Agent ID,Customer ID,Call Date,Duration (min),TCL_Overall_Score,Risk Level,Contradictions,Evidence_Gaps,Timestamp');
     const callId = this.currentCallMetadata?.agentId ? `CALL-${this.currentCallMetadata.agentId}-${Date.now()}` : 'CALL-UNKNOWN';
-    const complianceScore = this.result.scores.overall;
-    const riskLevel = complianceScore >= 80 ? 'Low' : complianceScore >= 60 ? 'Medium' : complianceScore >= 40 ? 'High' : 'Critical';
-    rows.push(`${callId},${this.currentCallMetadata?.agentId || 'N/A'},${this.currentCallMetadata?.customerId || 'N/A'},${this.currentCallMetadata?.callDate || new Date().toISOString().split('T')[0]},${this.currentCallMetadata?.duration || 'N/A'},${complianceScore},${riskLevel},${this.result.report.contradictions.length},${this.result.report.missingEvidence.length},${new Date().toISOString()}`);
+    const tclOrOverall = this.result.scores.tcl ?? this.result.scores.overall;
+    const riskLevel = tclOrOverall >= 80 ? 'Low' : tclOrOverall >= 60 ? 'Medium' : tclOrOverall >= 40 ? 'High' : 'Critical';
+    rows.push(`${callId},${this.currentCallMetadata?.agentId || 'N/A'},${this.currentCallMetadata?.customerId || 'N/A'},${this.currentCallMetadata?.callDate || new Date().toISOString().split('T')[0]},${this.currentCallMetadata?.duration || 'N/A'},${tclOrOverall},${riskLevel},${this.result.report.contradictions.length},${this.result.report.missingEvidence.length},${new Date().toISOString()}`);
     const csv = rows.join('\n');
     const blob = new Blob([csv], { type: 'text/csv' });
     const url = window.URL.createObjectURL(blob);
@@ -348,13 +348,13 @@ export class CallCenterQaComponent implements OnInit {
       alert('Please allow popups to generate PDF');
       return;
     }
-    const complianceScore = this.result.scores.overall;
-    const riskLevel = complianceScore >= 80 ? 'Low' : complianceScore >= 60 ? 'Medium' : complianceScore >= 40 ? 'High' : 'Critical';
+    const tclOrOverall = this.result.scores.tcl ?? this.result.scores.overall;
+    const riskLevel = tclOrOverall >= 80 ? 'Low' : tclOrOverall >= 60 ? 'Medium' : tclOrOverall >= 40 ? 'High' : 'Critical';
     printWindow.document.write(`
       <!DOCTYPE html>
       <html>
       <head>
-        <title>Call QA Report</title>
+        <title>Conversation truth & risk report</title>
         <style>
           body { font-family: Arial, sans-serif; padding: 20px; }
           h1 { color: #1976d2; }
@@ -366,21 +366,26 @@ export class CallCenterQaComponent implements OnInit {
         </style>
       </head>
       <body>
-        <h1>Call Center QA Report</h1>
+        <h1>ProtectQA / TCL conversation report</h1>
         <p><strong>Agent ID:</strong> ${this.currentCallMetadata?.agentId || 'N/A'}</p>
         <p><strong>Customer ID:</strong> ${this.currentCallMetadata?.customerId || 'N/A'}</p>
         <p><strong>Call Date:</strong> ${this.currentCallMetadata?.callDate || new Date().toISOString().split('T')[0]}</p>
         <p><strong>Duration:</strong> ${this.currentCallMetadata?.duration || 'N/A'} minutes</p>
-        <h2>Compliance Score</h2>
-        <div class="score risk-${riskLevel.toLowerCase()}">${complianceScore}</div>
-        <p><strong>Risk Level:</strong> ${riskLevel}</p>
-        <h2>Score Breakdown</h2>
+        <h2>TCL / ProtectQA score</h2>
+        <div class="score risk-${riskLevel.toLowerCase()}">${tclOrOverall}</div>
+        <p><strong>Risk band (from score):</strong> ${riskLevel}</p>
+        ${this.result.risk?.primaryRisk ? `<p><strong>Primary risk:</strong> ${this.result.risk.primaryRisk}</p>` : ''}
+        <h2>Score breakdown</h2>
         <table>
           <tr><th>Metric</th><th>Score</th></tr>
-          <tr><td>Truth</td><td>${this.result.scores.truth}</td></tr>
+          <tr><td>Truth (factual / supported)</td><td>${this.result.scores.truth}</td></tr>
+          ${this.result.scores.transcriptGrounding != null ? `<tr><td>Transcript grounding</td><td>${this.result.scores.transcriptGrounding}</td></tr>` : ''}
+          ${this.result.scores.compliance != null ? `<tr><td>Compliance</td><td>${this.result.scores.compliance}</td></tr>` : ''}
+          ${this.result.scores.hallucination != null ? `<tr><td>Hallucination safety</td><td>${this.result.scores.hallucination}</td></tr>` : ''}
+          ${this.result.scores.drift != null ? `<tr><td>Drift</td><td>${this.result.scores.drift}</td></tr>` : ''}
           <tr><td>Consistency</td><td>${this.result.scores.consistency}</td></tr>
           <tr><td>Coherence</td><td>${this.result.scores.coherence}</td></tr>
-          <tr><td><strong>Overall Compliance</strong></td><td><strong>${this.result.scores.overall}</strong></td></tr>
+          <tr><td><strong>TCL / overall</strong></td><td><strong>${this.result.scores.tcl ?? this.result.scores.overall}</strong></td></tr>
         </table>
         <h2>Issues Found</h2>
         <p><strong>Contradictions:</strong> ${this.result.report.contradictions.length}</p>

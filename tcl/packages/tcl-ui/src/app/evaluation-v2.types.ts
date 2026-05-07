@@ -16,10 +16,18 @@ export interface EvaluationV2 {
   env: string;
   conversation_id: string | null;
   scores: {
-    truth?: number;
+    tcl?: number;
     overall?: number;
+    truth?: number;
+    transcriptGrounding?: number;
+    compliance?: number;
+    hallucination?: number;
+    drift?: number;
     coherence?: number;
     consistency?: number;
+    evidenceSupport?: number;
+    speakerConfidence?: number;
+    businessValue?: number;
     spectral?: {
       coherenceScore?: number;
       contradictionEnergy?: number;
@@ -61,6 +69,17 @@ export interface EvaluationReportV2 {
   spectral?: any;
   executiveSummary?: any;
   evalMode?: any;
+  /** Merged validate scores (tcl, compliance, drift, …) */
+  enhancedClientScores?: Record<string, number | null | undefined>;
+  diagnostics?: Record<string, unknown>;
+  risk?: Record<string, unknown>;
+  productContext?: Record<string, unknown>;
+  dashboardSummary?: Record<string, unknown>;
+  businessInsights?: unknown[];
+  recommendedActions?: string[];
+  issuesBySeverity?: Record<string, IssueV2[]>;
+  claimsAnalysis?: unknown[];
+  evidenceDependencyGraph?: unknown[];
 }
 
 export interface IssueV2 {

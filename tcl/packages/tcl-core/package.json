@@ -1,6 +1,7 @@
 {
   "name": "tcl-core",
   "version": "0.2.0",
+  "description": "Conversation Truth & Risk Intelligence — compliance, hallucination, drift, evidence, and business insights (ProtectQA-first defaults).",
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",

@@ -7,6 +7,8 @@
  * The mapping is computed once and stored in conversation.metadata.speakerRoleMap.
  */
 
+import { mapSpeakerToRole } from '../ingestion/speaker-role.js';
+
 export type Role = 'REPRESENTATIVE' | 'CUSTOMER' | 'THIRD_PARTY' | 'UNKNOWN';
 
 export interface TranscriptTurn {
@@ -78,85 +80,10 @@ export function buildSpeakerRoleMap(
  * Infer role from speaker label (explicit patterns)
  */
 function inferRoleFromLabel(speaker: string): Role {
-  const normalized = speaker.toLowerCase().trim();
-  
-  // REPRESENTATIVE patterns
-  const repPatterns = [
-    /\bagent\b/i,
-    /\brep\b/i,
-    /\brepresentative\b/i,
-    /\bcollector\b/i,
-    /\bcsr\b/i,
-    /\bcustomer\s*service\b/i,
-    /\bsupport\b/i,
-    /\badvisor\b/i,
-    /\bconsultant\b/i,
-    /\bassociate\b/i,
-    /\boperator\b/i,
-    /\bspecialist\b/i,
-    /\bstaff\b/i,
-    /\bemployee\b/i,
-    /\bteam\s*member\b/i,
-    /\bsales\b/i,
-    /\baccount\s*manager\b/i,
-    /\baccount\s*exec\b/i,
-    /\bae\b/i,
-    /\bsdr\b/i,
-    /\bbdr\b/i,
-    /\binside\s*sales\b/i,
-    /\bsupervisor\b/i,
-    /\bmanager\b/i,
-    /\blead\b/i,
-    /\bsenior\b/i,
-    /\bdirector\b/i,
-    /\bteam\s*lead\b/i,
-  ];
-  
-  // CUSTOMER patterns
-  const customerPatterns = [
-    /\bcustomer\b/i,
-    /\bclient\b/i,
-    /\bdebtor\b/i,
-    /\bpatient\b/i,
-    /\bcaller\b/i,
-    /\bmember\b/i,
-    /\buser\b/i,
-    /\bguest\b/i,
-    /\bvisitor\b/i,
-    /\bsubscriber\b/i,
-    /\bprospect\b/i,
-    /\blead\b/i,
-    /\bbuyer\b/i,
-    /\bpurchaser\b/i,
-  ];
-  
-  // THIRD_PARTY patterns
-  const thirdPartyPatterns = [
-    /\bthird\s*party\b/i,
-    /\bexternal\b/i,
-    /\bvendor\b/i,
-    /\bsupplier\b/i,
-  ];
-  
-  // Check patterns in order
-  for (const pattern of repPatterns) {
-    if (pattern.test(normalized)) {
-      return 'REPRESENTATIVE';
-    }
-  }
-  
-  for (const pattern of customerPatterns) {
-    if (pattern.test(normalized)) {
-      return 'CUSTOMER';
-    }
-  }
-  
-  for (const pattern of thirdPartyPatterns) {
-    if (pattern.test(normalized)) {
-      return 'THIRD_PARTY';
-    }
-  }
-  
+  const mapped = mapSpeakerToRole(speaker);
+  if (mapped.role === 'agent' || mapped.role === 'supervisor') return 'REPRESENTATIVE';
+  if (mapped.role === 'customer') return 'CUSTOMER';
+  if (mapped.role === 'bot' || mapped.role === 'system') return 'THIRD_PARTY';
   return 'UNKNOWN';
 }
 

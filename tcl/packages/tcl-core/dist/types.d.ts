@@ -54,9 +54,13 @@ export type Claim = {
     };
     meta?: {
         speaker?: string;
-        speakerType?: "agent" | "customer" | "unknown";
+        speakerType?: "agent" | "customer" | "supervisor" | "bot" | "system" | "unknown";
         speakerLabel?: string;
+        rawSpeaker?: string;
         turnIndex?: number;
+        participantId?: string;
+        /** Speech-act type from claim extractor (ASSERTION, PROMISE, …) */
+        claimType?: string;
     };
     truthState?: "SUPPORTED" | "CONTRADICTED" | "UNVERIFIED" | "UNGROUNDED" | "Supported" | "Contradicted" | "Ungrounded" | "Inconclusive";
     whyFlagged?: {
@@ -142,7 +146,13 @@ export type IssueNarrative = {
         rationale: string[];
     };
 };
-export type IssueTypeV2 = "CONTRADICTION" | "UNVERIFIED_CLAIM" | "UNSUPPORTED_CLAIM" | "UNGROUNDED" | "RISK_SIGNAL" | "POLICY" | "NUMERIC_MISMATCH" | "COMMITMENT_INCONSISTENCY" | "FEE_DISCLOSURE_RISK" | "DATA_INTEGRITY" | "OTHER";
+export type IssueTypeV2 = "CONTRADICTION" | "UNVERIFIED_CLAIM" | "UNSUPPORTED_CLAIM" | "UNGROUNDED" | "RISK_SIGNAL" | "POLICY" | "NUMERIC_MISMATCH" | "COMMITMENT_INCONSISTENCY" | "FEE_DISCLOSURE_RISK" | "DATA_INTEGRITY" | "GUARANTEED_APPROVAL" | "APPROVAL_BEFORE_APPLICATION" | "GUARANTEED_PAYOUT" | "DAY_ONE_FULL_BENEFIT" | "HEALTH_UNDERWRITING_MISREPRESENTATION" | "CARRIER_OVERGENERALIZATION" | "BEST_RATE_CLAIM" | "NO_EXAM_ABSOLUTE" | "PRIVACY_ABSOLUTE" | "LICENSE_CLAIM_UNVERIFIED" | "HALLUCINATED_AUTHORITY" | "UNSUPPORTED_PRODUCT_CLAIM" | "MISSING_REQUIRED_DISCLOSURE" | "COMMITMENT_ESCALATION_DRIFT" | "DISCLOSURE_OMISSION_DRIFT" | "SPEAKER_ATTRIBUTION_FAILURE" | "CONTAMINATED_CLAIM"
+/** AI / automation conversation risk */
+ | "AI_HALLUCINATION" | "AI_UNSUPPORTED_CLAIM" | "AI_POLICY_DRIFT" | "AI_KNOWLEDGE_DRIFT" | "AI_INSTRUCTION_DRIFT" | "AI_TOOL_USE_DRIFT" | "AI_CONTRADICTORY_ANSWER" | "AI_OVERCONFIDENT_ANSWER" | "AI_MISSING_CITATION" | "AI_SOURCE_MISMATCH" | "AI_UNSAFE_RECOMMENDATION" | "AI_PRIVACY_OVERCLAIM" | "AI_ACTION_WITHOUT_PERMISSION"
+/** Human speaker compliance surface (maps from domain rules + detectors) */
+ | "HUMAN_MISLEADING_CLAIM" | "HUMAN_UNSUPPORTED_CLAIM" | "HUMAN_COMPLIANCE_RISK" | "HUMAN_MISSING_DISCLOSURE" | "HUMAN_GUARANTEE_LANGUAGE" | "HUMAN_PRIVACY_OVERCLAIM" | "HUMAN_PRICING_OVERCLAIM" | "HUMAN_PRODUCT_OVERCLAIM" | "HUMAN_LICENSE_OVERCLAIM" | "HUMAN_POLICY_DRIFT" | "HUMAN_CONTRADICTION"
+/** ProtectQA final expense — client-visible labels */
+ | "PROTECTQA_GUARANTEED_APPROVAL" | "PROTECTQA_APPROVAL_BEFORE_APPLICATION" | "PROTECTQA_NO_RISK_OF_DENIAL" | "PROTECTQA_CARRIER_OVERGENERALIZATION" | "PROTECTQA_HEALTH_DOES_NOT_MATTER" | "PROTECTQA_BEST_RATE_OVERCLAIM" | "PROTECTQA_DAY_ONE_FULL_BENEFIT_OVERCLAIM" | "PROTECTQA_GUARANTEED_PAYOUT" | "PROTECTQA_NO_EXAM_ABSOLUTE" | "PROTECTQA_PREMIUM_NEVER_INCREASES_ABSOLUTE" | "PROTECTQA_CANCELLATION_OVERCLAIM" | "PROTECTQA_PRIVACY_ABSOLUTE" | "PROTECTQA_LICENSE_UNVERIFIED" | "PROTECTQA_MISSING_CARRIER_APPROVAL_DISCLOSURE" | "PROTECTQA_MISSING_WAITING_PERIOD_DISCLOSURE" | "PROTECTQA_MISSING_POLICY_TERMS_DISCLOSURE" | "PROTECTQA_UNSUPPORTED_QUALIFICATION_RECOMMENDATION" | "PROTECTQA_AI_QUALIFICATION_DRIFT" | "PROTECTQA_AI_UNSUPPORTED_CARRIER_CLAIM" | "PROTECTQA_AI_UNSUPPORTED_HEALTH_ELIGIBILITY_CLAIM" | "PROTECTQA_AI_FINAL_APPROVAL_OVERCLAIM" | "PROTECTQA_AI_CARRIER_RULE_HALLUCINATION" | "PROTECTQA_AI_RATE_HALLUCINATION" | "PROTECTQA_AI_HEALTH_ANSWER_CONTRADICTION" | "PROTECTQA_AI_MISSING_UNDERWRITING_DISCLOSURE" | "PROTECTQA_AI_POLICY_DRIFT" | "OTHER";
 export type IssueCategoryV2 = "evidence" | "consistency" | "compliance" | "billing" | "disclosure" | "data_integrity" | "other";
 export type SeverityV2 = "low" | "medium" | "high" | "critical";
 export type ImpactV2 = "low" | "medium" | "high";
@@ -283,6 +293,14 @@ export interface IssueV2 {
         claimText?: string;
         issueSummary: string;
         issueDetail: string;
+        saferVersion?: string;
+        /** Plain English for clients — what was said and why it matters */
+        plainEnglishSummary?: string;
+        whyItMatters?: string;
+        missingEvidence?: string[];
+        recommendedActionLabel?: string;
+        businessImpact?: string;
+        expectedSource?: string;
     };
     evidence: {
         refs?: Array<{
@@ -339,7 +357,7 @@ export interface IssueV2 {
 }
 export interface IssueSummaryV2 {
     totalIssues: number;
-    byType: Record<IssueTypeV2, number>;
+    byType: Partial<Record<IssueTypeV2, number>> & Record<string, number>;
     bySeverity: Record<SeverityV2, number>;
     byCategory: Record<IssueCategoryV2, number>;
     topIssuesCount: number;
@@ -686,9 +704,78 @@ export type ReviewItem = {
         reasonCodes?: string[];
     };
 };
+/** Evidence linkage per claim — powers evidenceSupport score & dashboards */
+export type EvidenceDependencyStatus = "supported" | "partially_supported" | "transcript_only" | "unsupported" | "contradicted" | "false_by_rule" | "unverifiable";
+/** Conversation value mining — objections, churn risk, KB gaps, etc. */
+export type BusinessInsightType = "CUSTOMER_OBJECTION" | "FEATURE_REQUEST" | "PRICING_CONFUSION" | "PRODUCT_CONFUSION" | "COMPETITOR_MENTION" | "BUYING_INTENT" | "CHURN_RISK" | "COMPLAINT_RISK" | "PROCESS_FRICTION" | "POLICY_CONFUSION" | "KB_GAP" | "SCRIPT_GAP" | "AI_PROMPT_GAP" | "TRAINING_GAP" | "REVENUE_OPPORTUNITY" | "PROTECTQA_LEAD_QUALITY_SIGNAL" | "PROTECTQA_HEALTH_CONDITION_SIGNAL" | "PROTECTQA_QUALIFICATION_BLOCKER" | "PROTECTQA_COVERAGE_AMOUNT_INTENT" | "PROTECTQA_PRICE_SENSITIVITY" | "PROTECTQA_BENEFICIARY_CONCERN" | "PROTECTQA_BURIAL_COST_CONCERN" | "PROTECTQA_TRUST_OBJECTION" | "PROTECTQA_NO_PRESSURE_SIGNAL" | "PROTECTQA_CALL_BACK_REQUEST" | "PROTECTQA_CARRIER_CONFUSION" | "PROTECTQA_WAITING_PERIOD_CONFUSION" | "PROTECTQA_POLICY_TYPE_CONFUSION" | "PROTECTQA_APPLICATION_READINESS" | "PROTECTQA_AGENT_SCRIPT_GAP" | "PROTECTQA_AI_KNOWLEDGE_GAP";
+export interface BusinessInsight {
+    type: BusinessInsightType;
+    summary: string;
+    evidenceQuote?: string;
+    speaker?: string;
+    turnIndex?: number;
+    confidence: number;
+    recommendedAction: string;
+    businessImpact: string;
+}
+export type ClaimSpeakerRole = NonNullable<Claim["meta"]>["speakerType"];
+export interface ClientClaimSnapshot {
+    id: string;
+    speaker?: string;
+    speakerType?: ClaimSpeakerRole;
+    turnIndex?: number;
+    text: string;
+    claimType?: string;
+    truthState?: Claim["truthState"];
+    evidenceStatus: EvidenceDependencyStatus;
+    requiredEvidence: string[];
+    missingEvidence: string[];
+    riskScore?: number;
+    businessValueTags?: string[];
+}
+export interface DashboardSummary {
+    title: string;
+    subtitle?: string;
+    /** dashboardMode: broader TCL vs ProtectQA-specific framing */
+    dashboardMode?: "tcl" | "protectqa";
+    plainEnglishSummary: string;
+    conversationTrustScore?: {
+        label: string;
+        score: number;
+        subtitle: string;
+    };
+    topRisks: Array<{
+        title: string;
+        quote: string;
+        speaker?: string;
+        turnIndex?: number;
+        whyItMatters: string;
+        recommendedFix: string;
+        severity: SeverityV2;
+    }>;
+    topUnsupportedClaims: Array<{
+        claimText: string;
+        missingEvidence: string[];
+        requiredSource: string;
+        recommendedEvidenceSource?: string;
+    }>;
+    topDriftEvents: Array<{
+        earlierQuote: string;
+        laterQuote: string;
+        driftType: string;
+        recommendedFix: string;
+    }>;
+    topBusinessInsights: BusinessInsight[];
+    nextBestActions: string[];
+}
 /** Enhanced scores that reflect reality */
 export type EnhancedScores = {
     groundednessScore: number | null;
+    transcriptGrounding?: number | null;
+    factualTruth?: number | null;
+    compliance?: number | null;
+    hallucination?: number | null;
+    drift?: number | null;
     verificationScore: number | null;
     consistencyScore: number | null;
     coherenceScore: number | null;
@@ -697,6 +784,12 @@ export type EnhancedScores = {
     consistency: number | null;
     coherence: number | null;
     overall: number | null;
+    /** Conversation Truth & Risk primary score — aligns with weighted compliance + truth + disclosures + evidence */
+    tcl?: number | null;
+    evidenceSupport?: number | null;
+    speakerConfidence?: number | null;
+    businessValue?: number | null;
+    disclosureCoverage?: number | null;
     modeAware?: {
         consistencyScore: number | null;
         groundingScore: number;
@@ -858,11 +951,20 @@ export type RunManifest = {
 export type ValidateOutput = {
     answer: string;
     refusal: boolean;
+    /** Scoring model: truth = factual/supported safety; tcl = primary client score; overall = alias of tcl */
     scores: {
         truth: number | null;
         consistency: number | null;
         coherence: number | null;
         overall: number | null;
+        tcl?: number | null;
+        transcriptGrounding?: number | null;
+        compliance?: number | null;
+        hallucination?: number | null;
+        drift?: number | null;
+        evidenceSupport?: number | null;
+        speakerConfidence?: number | null;
+        businessValue?: number | null;
     };
     enhancedScores?: EnhancedScores;
     summaryStats?: SummaryStats;
@@ -870,6 +972,107 @@ export type ValidateOutput = {
     latency?: number;
     cacheHitRate?: number;
     engineVersion?: string;
+    diagnostics?: {
+        status?: "ok" | "degraded" | "failed";
+        sanitizedTranscript: boolean;
+        removedAnnotationLines: number;
+        normalizedInlineSpeakerBoundaries: number;
+        contaminatedClaims: number;
+        unknownSpeakerLines: number;
+        speakerConfidence: number;
+        /** @deprecated Prefer speakerConfidence */
+        speakerMappingConfidence: number;
+        claimContaminationIndex?: number;
+        agentClaimCount: number;
+        customerClaimCount: number;
+        aiClaimCount?: number;
+        systemClaimCount?: number;
+        evidenceGapCount?: number;
+        complianceIssueCount: number;
+        hallucinationIssueCount: number;
+        driftIssueCount: number;
+        crossTurnIssueCount?: number;
+        domainPacksApplied?: string[];
+        scoringCapsApplied: string[];
+    };
+    risk?: {
+        level: "low" | "medium" | "high" | "critical";
+        criticalCount: number;
+        highCount: number;
+        mediumCount: number;
+        lowCount: number;
+        reviewRequired: boolean;
+        /** Single headline risk label for executives */
+        primaryRisk?: string;
+        recommendedAction?: string;
+        businessImpact?: string;
+    };
+    /** Applied domain packs and default ProtectQA posture */
+    productContext?: {
+        positioning: string;
+        defaultDomain: string;
+        domainPacksApplied: string[];
+    };
+    businessInsights?: BusinessInsight[];
+    /** Cross-cutting recommendations (compliance review, KB update, etc.) */
+    recommendedActions?: Array<{
+        label: string;
+        rationale?: string;
+    }>;
+    /** Client dashboard sections — pre-structured narrative */
+    dashboardSummary?: DashboardSummary;
+    /** Claim-level snapshots with evidence dependency */
+    claimsAnalysis?: ClientClaimSnapshot[];
+    /** Issues grouped by severity for dashboards */
+    issuesBySeverity?: {
+        critical: IssueV2[];
+        high: IssueV2[];
+        medium: IssueV2[];
+        low: IssueV2[];
+    };
+    evidenceDependencyGraph?: Array<{
+        claimId: string;
+        speakerType?: ClaimSpeakerRole;
+        turnIndex?: number;
+        claimText: string;
+        claimKind?: ClaimKind | string;
+        requiredEvidenceTypes: string[];
+        presentEvidenceTypes: string[];
+        missingEvidenceTypes: string[];
+        status: EvidenceDependencyStatus;
+    }>;
+    executiveSummary?: {
+        trustGrade: "A" | "B" | "C" | "D" | "F";
+        headline: string;
+        oneLineVerdict: string;
+        topIssues: Array<{
+            title: string;
+            severity: "low" | "medium" | "high" | "critical";
+            speakerLabel?: string;
+            turnIndex?: number;
+            quote: string;
+            saferVersion?: string;
+            why: string;
+        }>;
+        highlights: string[];
+        recommendedActions: Array<{
+            kind: "COACHING" | "COMPLIANCE" | "PROCESS" | "LEGAL";
+            action: string;
+            priority: "high" | "medium" | "low";
+        }>;
+        riskByCategory: Record<string, number>;
+        scoreBreakdown: Array<{
+            label: string;
+            value: number | null;
+            description: string;
+        }>;
+        callQualityIndicators: {
+            speakerMappingConfidence: number;
+            contaminatedClaims: number;
+            unknownSpeakerLines: number;
+            capsApplied: string[];
+        };
+    };
     report: {
         claims: Claim[];
         violations: Violation[];
@@ -901,6 +1104,54 @@ export type ValidateOutput = {
         suggestions?: Suggestion[];
         destructiveClaims?: DestructiveClaim[];
         trajectory?: TrajectoryReport;
+        drift?: {
+            driftScore: number;
+            driftTimeline: Array<{
+                turnIndex?: number;
+                claimId: string;
+                marker: string;
+                text: string;
+                topic?: string;
+                strength?: number;
+                band?: string;
+            }>;
+        };
+        crossTurn?: {
+            consistencyScore: number;
+            events: Array<{
+                kind: "customer_fact" | "agent_assertion" | "agent_dismissal" | "numeric" | "commitment";
+                topic: string;
+                turnIndex?: number;
+                claimId: string;
+                text: string;
+                entities: string[];
+                numbers?: number[];
+            }>;
+            pairs: Array<{
+                earlier: {
+                    claimId: string;
+                    turnIndex?: number;
+                    text: string;
+                    topic: string;
+                };
+                later: {
+                    claimId: string;
+                    turnIndex?: number;
+                    text: string;
+                    topic: string;
+                };
+                reason: string;
+            }>;
+        };
+        domainPacksApplied?: Array<{
+            id: string;
+            version: string;
+        }>;
+        issues?: {
+            atomic: IssueV2[];
+            grouped?: unknown[];
+        };
+        allIssuesV2?: IssueV2[];
         manifest?: RunManifest;
     };
 };

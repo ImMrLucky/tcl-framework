@@ -1,0 +1,237 @@
+/**
+ * ProtectQA-first final expense / burial insurance domain pack.
+ * Issue types are PROTECTQA_* for clear client labeling in ProtectQA dashboards.
+ */
+import type { DomainPack } from "./types.js";
+
+export const protectqaFinalExpensePack: DomainPack = {
+  id: "protectqa_final_expense",
+  name: "ProtectQA Final Expense",
+  domain: "protectqa_final_expense",
+  version: "2.0.0",
+  description: "ProtectQA final-expense qualification, compliance, and disclosure rules.",
+  appliesToRoles: ["agent", "supervisor", "bot"],
+  templates: ["final_expense", "insurance", "protectqa", "protectqa_final_expense"],
+  rules: [
+    {
+      type: "PROTECTQA_GUARANTEED_APPROVAL",
+      severity: "critical",
+      patterns: [
+        /guaranteed approval/i,
+        /definitely approved/i,
+        /\bdefinitely (?:going to )?approve/i,
+        /we can get you approved today/i,
+        /promise you will qualify/i,
+        /everyone qualifies/i,
+        /automatically eligible/i,
+      ],
+      summary: "Final expense approval-language risk — guaranteed approval",
+      detail:
+        "ProtectQA/software can assist with qualification but cannot guarantee approval before carrier underwriting and application review. This wording creates regulatory and customer-dispute risk.",
+      saferVersion: "You may have options that fit your goals, but final approval depends on the carrier application and underwriting process.",
+      tags: ["protectqa", "guaranteed_approval", "underwriting"],
+    },
+    {
+      type: "PROTECTQA_APPROVAL_BEFORE_APPLICATION",
+      severity: "critical",
+      patterns: [/approved before you apply/i, /whether you are approved before applying/i, /approved without carrier review/i],
+      summary: "ProtectQA approval-before-application risk",
+      detail: "Approval cannot truthfully be given before carrier review.",
+      saferVersion: "We can discuss possible eligibility, but approval requires an application and carrier underwriting.",
+      tags: ["protectqa", "approval", "carrier_review"],
+    },
+    {
+      type: "PROTECTQA_NO_RISK_OF_DENIAL",
+      severity: "critical",
+      patterns: [/no risk of denial/i, /\bno denial\b/i, /cannot be denied/i, /won'?t be turned down/i],
+      summary: "ProtectQA approval-language risk — no risk of denial",
+      detail: "Denials or declines can occur depending on underwriting; absolute language is misleading.",
+      saferVersion: "Outcomes depend on carrier underwriting and the information on the application.",
+      tags: ["protectqa", "denial", "risk"],
+    },
+    {
+      type: "PROTECTQA_DAY_ONE_FULL_BENEFIT_OVERCLAIM",
+      severity: "critical",
+      patterns: [/full death benefit from day one/i, /full payout immediately/i, /all policies start immediately/i, /immediate full coverage for everyone/i],
+      summary: "ProtectQA death-benefit timing overclaim — day-one full benefit",
+      detail: "Products may include graded, modified, or waiting-period structures; overstating timing is misleading.",
+      saferVersion: "When benefits begin and at what amount depends on the product, carrier, and policy terms.",
+      tags: ["protectqa", "death_benefit", "waiting_period"],
+    },
+    {
+      type: "PROTECTQA_GUARANTEED_PAYOUT",
+      severity: "critical",
+      patterns: [
+        /family will absolutely receive (?:the )?payout/i,
+        /guarantee your family will receive money/i,
+        /death benefit is guaranteed no matter what/i,
+        /\bfamily will get paid\b/i,
+      ],
+      summary: "ProtectQA payout guarantee risk",
+      detail:
+        "Payout depends on premiums, exclusions, contestability, policy terms, application accuracy, and claim circumstances.",
+      saferVersion:
+        "If the policy is in force and the claim qualifies under the policy contract, eligible benefits are paid according to policy terms.",
+      tags: ["protectqa", "payout", "beneficiary"],
+    },
+    {
+      type: "PROTECTQA_HEALTH_DOES_NOT_MATTER",
+      severity: "critical",
+      patterns: [
+        /health does not matter/i,
+        /diabetes does not matter/i,
+        /oxygen does not matter/i,
+        /regardless of health/i,
+        /cancer automatically eligible/i,
+        /heart attack automatically accepted/i,
+      ],
+      summary: "ProtectQA health eligibility overclaim",
+      detail: "Medical history affects eligibility, product type (level vs graded/modified), pricing, and carrier availability.",
+      saferVersion:
+        "Your health answers help determine which carriers and benefit types might fit — options vary by underwriting rules.",
+      tags: ["protectqa", "health", "underwriting"],
+    },
+    {
+      type: "PROTECTQA_CARRIER_OVERGENERALIZATION",
+      severity: "high",
+      patterns: [/every carrier will accept/i, /every carrier should accept/i, /all carriers accept/i, /any carrier will approve/i],
+      summary: "ProtectQA carrier overgeneralization risk",
+      detail: "Carrier acceptance rules vary by state, product, underwriting, and applicant facts.",
+      saferVersion:
+        "What is available depends on carrier guidelines in your situation; we compare options accordingly.",
+      tags: ["protectqa", "carrier"],
+    },
+    {
+      type: "PROTECTQA_BEST_RATE_OVERCLAIM",
+      severity: "high",
+      patterns: [/best rate/i, /lowest rate guaranteed/i, /best plan regardless of health/i],
+      summary: "ProtectQA best-rate / pricing confidence risk",
+      detail: "\"Best rate\" requires carrier-rate evidence for the applicant’s specifics and should not be absolute.",
+      saferVersion: "We can compare carriers and premiums based on approved quotes and underwriting results.",
+      tags: ["protectqa", "rate", "pricing"],
+    },
+    {
+      type: "PROTECTQA_NO_EXAM_ABSOLUTE",
+      severity: "high",
+      patterns: [/no final expense policies ever require exams/i, /no medical exam ever/i, /all policies are no[- ]exam/i],
+      summary: "ProtectQA no-exam absolute claim",
+      detail: "\"No exam\" is not universally true across all carriers and products without evidence.",
+      saferVersion:
+        "Some products may not require a physical exam depending on carrier and product rules; specifics apply at application.",
+      tags: ["protectqa", "medical_exam"],
+    },
+    {
+      type: "PROTECTQA_PREMIUM_NEVER_INCREASES_ABSOLUTE",
+      severity: "high",
+      patterns: [/premium never (?:goes up|increases|changes)/i, /premium will never/i, /rate will never/i],
+      summary: "ProtectQA premium permanence overclaim",
+      detail: "Premium behavior depends on product type, carrier, and policy terms; absolute claims need policy evidence.",
+      saferVersion: "Premium and rate rules are defined in the policy contract and carrier materials for the specific product.",
+      tags: ["protectqa", "premium"],
+    },
+    {
+      type: "PROTECTQA_CANCELLATION_OVERCLAIM",
+      severity: "high",
+      patterns: [/cancel anytime (?:with )?no (?:fee|penalty|cost)/i, /full refund guaranteed/i, /money back guarantee/i],
+      summary: "ProtectQA cancellation / refund overclaim",
+      detail: "Cancellation and refund rights depend on contract, state law, and carrier policy — not universal guarantees.",
+      saferVersion: "Your free look and cancellation rules are shown in your policy disclosures and carrier materials.",
+      tags: ["protectqa", "cancellation"],
+    },
+    {
+      type: "PROTECTQA_PRIVACY_ABSOLUTE",
+      severity: "high",
+      patterns: [/never share under any circumstances/i, /answers are just between us/i, /never sell or share anything/i],
+      summary: "ProtectQA privacy/security overclaim risk",
+      detail:
+        "Privacy assertions must align with ProtectQA’s privacy policy and legal obligations; absolute \"never share\" invites dispute.",
+      saferVersion: "We handle personal information according to our published privacy practices and applicable law.",
+      tags: ["protectqa", "privacy"],
+    },
+    {
+      type: "PROTECTQA_LICENSE_UNVERIFIED",
+      severity: "high",
+      patterns: [/i am licensed in your state/i, /licensed in all states/i],
+      summary: "ProtectQA licensed-agent boundary — unverified license claim",
+      detail: "Licensing assertions should be verified for the jurisdiction before being stated.",
+      saferVersion:
+        "I can confirm my license status for your state using our licensing verification process before proceeding.",
+      tags: ["protectqa", "license"],
+    },
+    {
+      type: "PROTECTQA_AI_FINAL_APPROVAL_OVERCLAIM",
+      severity: "critical",
+      appliesToSpeakerTypes: ["bot"],
+      patterns: [/you(?:'re| are) (?:finally )?approved/i, /final approval (?:has been )?granted/i, /\bai (?:approved|guaranteed)\b/i],
+      summary: "ProtectQA AI final-approval overclaim",
+      detail: "ProtectQA AI must not replace carrier approval; only qualification guidance is appropriate without underwriting evidence.",
+      saferVersion: "Based on your answers, you may be a candidate for certain products — final approval belongs to the carrier.",
+      tags: ["protectqa", "ai", "approval"],
+    },
+    {
+      type: "PROTECTQA_AI_UNSUPPORTED_CARRIER_CLAIM",
+      severity: "high",
+      appliesToSpeakerTypes: ["bot", "agent"],
+      patterns: [/special access to carrier rules/i, /underwriting rules consumers can'?t get anywhere else/i],
+      summary: "ProtectQA AI/support unsupported carrier-rule claim",
+      detail: "Invented or non-verifiable underwriting \"special access\" claims are hallucination/high-risk sales conduct.",
+      saferVersion:
+        "We follow carrier-published guidelines available for this program; specifics are verified at application time.",
+      tags: ["protectqa", "ai", "carrier_evidence_gap"],
+    },
+    {
+      type: "PROTECTQA_AI_UNSUPPORTED_HEALTH_ELIGIBILITY_CLAIM",
+      severity: "high",
+      appliesToSpeakerTypes: ["bot", "agent"],
+      patterns: [/you(?:'re| are) cleared for level benefit/i, /health answers don'?t affect this product\b/i],
+      summary: "ProtectQA unsupported health/eligibility assertion",
+      detail: "Eligibility conclusions require carrier rules and questionnaire alignment — unsupported absolutes mislead applicants.",
+      saferVersion:
+        "Eligibility depends on carrier underwriting and complete health disclosures; answers can change outcomes.",
+      tags: ["protectqa", "health", "eligibility"],
+    },
+  ],
+  requiredDisclosures: [
+    {
+      trigger: /\b(approval|approved|qualify|eligible|eligibility)\b/i,
+      disclosure: /(final approval depends on (?:the )?carrier|carrier underwriting applies|policy terms apply)/i,
+      type: "PROTECTQA_MISSING_CARRIER_APPROVAL_DISCLOSURE",
+      severity: "high",
+      summary: "ProtectQA missing carrier-approval dependency disclosure",
+      detail:
+        "After approval or eligibility language, the conversation should state that final approval depends on carrier underwriting and policy terms.",
+      saferVersion: "Final approval depends on carrier underwriting and policy terms.",
+      tags: ["protectqa", "missing_disclosure", "carrier_approval"],
+    },
+    {
+      trigger: /\b(death benefit|coverage start|payout|immediate benefit|benefit pays)\b/i,
+      disclosure: /(waiting period|graded|modified|policy terms)/i,
+      type: "PROTECTQA_MISSING_WAITING_PERIOD_DISCLOSURE",
+      severity: "high",
+      summary: "ProtectQA missing waiting-period / graded-benefit framing",
+      detail:
+        "When discussing payout timing or benefit certainty, callers should disclose that graded, modified, or waiting-period provisions may apply per policy.",
+      saferVersion: "Benefit timing and amounts depend on policy terms — waiting periods or graded/modified benefits may apply.",
+      tags: ["protectqa", "missing_disclosure", "waiting_period"],
+    },
+    {
+      trigger: /\b(coverage|premium|premium amount|premium due|premium payment)\b/i,
+      disclosure: /(policy terms|exclusions|contestability|premiums?\s+(?:must|need to)|may lapse)/i,
+      type: "PROTECTQA_MISSING_POLICY_TERMS_DISCLOSURE",
+      severity: "medium",
+      summary: "ProtectQA missing policy-terms framing",
+      detail:
+        "When discussing premiums or ongoing coverage, policy terms — including lapse, exclusions, and contestability where relevant — should be acknowledged.",
+      saferVersion: "Policy terms, lapse rules, exclusions, and premium payment obligations apply according to the contract.",
+      tags: ["protectqa", "missing_disclosure", "policy_terms"],
+    },
+  ],
+  forbiddenPhrases: [],
+  highStakesVocabulary: [
+    /\b(approval|approved|denied|denial|qualify|eligibility|carrier|underwriting)\b/i,
+    /\b(coverage|death benefit|payout|beneficiary|premium|policy|waiting period)\b/i,
+    /\b(graded|modified|guaranteed issue|level benefit|medical exam|prescription)\b/i,
+    /\b(health condition|diabetes|cancer|heart attack|oxygen|hospitalization)\b/i,
+    /\b(claim|contestability|lapse|licensed|state license|privacy|data sharing)\b/i,
+  ],
+};

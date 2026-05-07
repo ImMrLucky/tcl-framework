@@ -1,70 +1,107 @@
 <mat-card class="summary-panel">
   <mat-card-header>
-    <mat-card-title>Compliance Score</mat-card-title>
+    <mat-card-title>{{ primaryScoreLabel }}</mat-card-title>
+    <mat-card-subtitle>{{ trustSubtitle }}</mat-card-subtitle>
   </mat-card-header>
   <mat-card-content>
     <div *ngIf="loading" class="loading-container">
       <mat-spinner diameter="40"></mat-spinner>
-      <p>Analyzing call...</p>
+      <p>Analyzing conversation…</p>
     </div>
 
     <div *ngIf="!loading && result" class="summary-content">
       <div class="compliance-score">
-        <div class="score-circle" [class]="getComplianceScoreClass(result.scores.overall)">
-          <span class="score-value">{{ result.scores.overall }}</span>
-          <span class="score-label">Compliance</span>
-          <span class="risk-badge" [class]="getRiskLevelClass(result.scores.overall)" *ngIf="result.scores.overall !== null">
-            {{ getRiskLevel(result.scores.overall) }}
+        <div class="score-circle" [class]="getComplianceScoreClass(primaryNumericScore ?? 0)">
+          <span class="score-value">{{ primaryNumericScore ?? '—' }}</span>
+          <span class="score-label">/ 100</span>
+          <span class="risk-badge" [class]="getRiskLevelClass(primaryNumericScore ?? 0)" *ngIf="primaryNumericScore !== null">
+            {{ getRiskLevel(primaryNumericScore!) }}
           </span>
         </div>
       </div>
 
+      <div class="risk-api-row" *ngIf="result.risk as r">
+        <p *ngIf="r.primaryRisk"><strong>Top risk:</strong> {{ r.primaryRisk }}</p>
+        <p *ngIf="r.recommendedAction"><strong>Suggested next step:</strong> {{ r.recommendedAction }}</p>
+        <mat-chip *ngIf="r.level" class="level-chip">{{ r.level | uppercase }} risk</mat-chip>
+        <mat-chip *ngIf="r.reviewRequired" color="warn">Review required</mat-chip>
+      </div>
+
       <div class="flags-section">
-        <h3>Compliance Flags</h3>
+        <h3>Risk flags</h3>
         <div class="flags-grid">
           <div class="flag-item" *ngIf="hasContradictions()">
             <mat-icon class="flag-icon error">gavel</mat-icon>
-            <span>Policy Violations ({{ result.report.contradictions.length }})</span>
+            <span>Contradictions / policy tension ({{ result.report.contradictions.length }})</span>
           </div>
           <div class="flag-item" *ngIf="hasUngroundedClaims()">
             <mat-icon class="flag-icon warning">warning</mat-icon>
-            <span>Risky Statements ({{ result.report.missingEvidence.length }})</span>
+            <span>Evidence gaps ({{ result.report.missingEvidence.length }})</span>
           </div>
           <div class="flag-item" *ngIf="hasCircularReasoning()">
             <mat-icon class="flag-icon circular">refresh</mat-icon>
-            <span>Circular Reasoning</span>
+            <span>Circular reasoning signal</span>
           </div>
         </div>
       </div>
 
       <div class="status-section">
-        <mat-chip [class]="getStatusClass()">
-          {{ getStatusText() }}
+        <mat-chip [class]="getStatusClassForPrimary()">
+          {{ getStatusTextForPrimary() }}
         </mat-chip>
       </div>
 
       <div class="scores-breakdown">
-        <h3>Score Breakdown</h3>
-        <div class="score-item">
-          <span class="score-name">Truth (Evidence):</span>
-          <span class="score-value-small">{{ result.scores.truth }}</span>
+        <h3>Scores</h3>
+        <p class="score-hint" *ngIf="hasExtendedScores()">Truth reflects support &amp; safety — not merely that something appeared in the transcript.</p>
+        <div class="score-item" *ngIf="result.scores.truth != null">
+          <span class="score-name">Truth (supported / factual safety):</span>
+          <span class="score-value-small">{{ formatScore(result.scores.truth) }}</span>
+        </div>
+        <div class="score-item" *ngIf="result.scores.transcriptGrounding != null">
+          <span class="score-name">Transcript grounding:</span>
+          <span class="score-value-small">{{ formatScore(result.scores.transcriptGrounding) }}</span>
+        </div>
+        <div class="score-item" *ngIf="result.scores.compliance != null">
+          <span class="score-name">Compliance:</span>
+          <span class="score-value-small">{{ formatScore(result.scores.compliance) }}</span>
+        </div>
+        <div class="score-item" *ngIf="result.scores.hallucination != null">
+          <span class="score-name">Hallucination safety:</span>
+          <span class="score-value-small">{{ formatScore(result.scores.hallucination) }}</span>
+        </div>
+        <div class="score-item" *ngIf="result.scores.drift != null">
+          <span class="score-name">Drift control:</span>
+          <span class="score-value-small">{{ formatScore(result.scores.drift) }}</span>
+        </div>
+        <div class="score-item" *ngIf="result.scores.evidenceSupport != null">
+          <span class="score-name">Evidence support:</span>
+          <span class="score-value-small">{{ formatScore(result.scores.evidenceSupport) }}</span>
+        </div>
+        <div class="score-item" *ngIf="result.scores.speakerConfidence != null">
+          <span class="score-name">Speaker confidence:</span>
+          <span class="score-value-small">{{ formatScore(result.scores.speakerConfidence) }}</span>
+        </div>
+        <div class="score-item" *ngIf="result.scores.businessValue != null">
+          <span class="score-name">Business value:</span>
+          <span class="score-value-small">{{ formatScore(result.scores.businessValue) }}</span>
         </div>
         <div class="score-item">
           <span class="score-name">Consistency:</span>
-          <span class="score-value-small">{{ result.scores.consistency }}</span>
+          <span class="score-value-small">{{ formatScore(result.scores.consistency) }}</span>
         </div>
         <div class="score-item">
           <span class="score-name">Coherence:</span>
-          <span class="score-value-small">{{ result.scores.coherence }}</span>
+          <span class="score-value-small">{{ formatScore(result.scores.coherence) }}</span>
         </div>
         <div class="score-item overall">
-          <span class="score-name">Compliance Score:</span>
-          <span class="score-value-small">{{ result.scores.overall }}</span>
+          <span class="score-name">TCL / overall (legacy):</span>
+          <span class="score-value-small">{{ formatScore(result.scores.tcl ?? result.scores.overall) }}</span>
         </div>
       </div>
 
       <div class="nli-info" *ngIf="result.scorerId">
-        <h3>NLI Scorer</h3>
+        <h3>Scorer</h3>
         <div class="scorer-badge" [class]="getScorerClass(result.scorerId)">
           <mat-icon class="scorer-icon">{{ getScorerIcon(result.scorerId) }}</mat-icon>
           <span>{{ getScorerName(result.scorerId) }}</span>
@@ -73,9 +110,8 @@
     </div>
 
     <div *ngIf="!loading && !result" class="empty-state">
-      <mat-icon>phone</mat-icon>
-      <p>Upload a call transcript to see compliance analysis</p>
+      <mat-icon>chat</mat-icon>
+      <p>Paste or upload a conversation for truth, compliance, and risk analysis</p>
     </div>
   </mat-card-content>
 </mat-card>
-

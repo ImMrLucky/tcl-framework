@@ -23,6 +23,41 @@ export class SummaryPanelComponent {
   @Input() result: ValidateOutput | null = null;
   @Input() loading = false;
 
+  get primaryNumericScore(): number | null {
+    if (!this.result?.scores) return null;
+    const s = this.result.scores;
+    const v = s.tcl ?? s.overall;
+    return v === undefined || v === null ? null : Math.round(Number(v));
+  }
+
+  get primaryScoreLabel(): string {
+    const ds = this.result?.dashboardSummary;
+    return (
+      ds?.conversationTrustScore?.label ??
+      (ds?.dashboardMode === 'protectqa' ? 'ProtectQA risk score' : 'TCL score')
+    );
+  }
+
+  get trustSubtitle(): string {
+    return (
+      this.result?.dashboardSummary?.conversationTrustScore?.subtitle ??
+      'How trustworthy, compliant, grounded, and useful this conversation was.'
+    );
+  }
+
+  formatScore(v: number | null | undefined): string {
+    if (v === undefined || v === null || Number.isNaN(Number(v))) return '—';
+    return String(Math.round(Number(v)));
+  }
+
+  hasExtendedScores(): boolean {
+    if (!this.result?.scores) return false;
+    const s = this.result.scores as unknown as Record<string, unknown>;
+    return ['transcriptGrounding', 'compliance', 'hallucination', 'drift', 'evidenceSupport'].some(
+      k => s[k] != null && !Number.isNaN(Number(s[k]))
+    );
+  }
+
   hasContradictions(): boolean {
     return (this.result?.report.contradictions?.length ?? 0) > 0;
   }
@@ -62,17 +97,17 @@ export class SummaryPanelComponent {
     return 'critical';
   }
 
-  getStatusClass(): string {
-    if (!this.result) return '';
-    const overall = this.result.scores.overall;
+  getStatusClassForPrimary(): string {
+    if (!this.result || this.primaryNumericScore === null) return '';
+    const overall = this.primaryNumericScore;
     if (overall >= 70) return 'status-pass';
     if (overall >= 50) return 'status-warn';
     return 'status-fail';
   }
 
-  getStatusText(): string {
-    if (!this.result) return '';
-    const overall = this.result.scores.overall;
+  getStatusTextForPrimary(): string {
+    if (!this.result || this.primaryNumericScore === null) return '';
+    const overall = this.primaryNumericScore;
     if (overall >= 70) return 'Pass';
     if (overall >= 50) return 'Warn';
     return 'Fail';

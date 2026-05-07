@@ -62,7 +62,7 @@ export function computeEnhancedScores(input) {
         consistencyScore,
         coherenceScore,
         // LEGACY (for backwards compatibility)
-        truth: groundednessScore, // Map truth to groundedness
+        truth: verificationScore ?? consistencyScore, // Truth is factual support/safety, not transcript grounding
         consistency: consistencyScore,
         coherence: coherenceScore,
         overall,

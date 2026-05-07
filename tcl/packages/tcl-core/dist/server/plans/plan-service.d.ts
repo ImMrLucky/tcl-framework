@@ -5,7 +5,8 @@ export interface OrgPlanContext {
     capabilities: Capability[];
     limits: PlanLimits;
     remainingToday: {
-        analyses: number;
+        analysisRuns: number;
+        analyses?: number;
         apiCalls: number;
         uploads: number;
     };

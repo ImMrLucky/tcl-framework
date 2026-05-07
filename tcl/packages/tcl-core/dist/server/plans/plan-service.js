@@ -45,7 +45,12 @@ export class PlanService {
             }
         }
         // Get limits for effective tier from config
-        const limits = { ...getLimitsForTier(effectiveTier) };
+        // Backend uses analysesPerDay, frontend expects analysisRunsPerDay
+        const rawLimits = getLimitsForTier(effectiveTier);
+        const limits = {
+            ...rawLimits,
+            analysisRunsPerDay: rawLimits.analysesPerDay, // Frontend field name
+        };
         // Get today's usage
         const { data: usage } = await supabaseAdmin
             .from('org_usage_daily')
@@ -59,10 +64,13 @@ export class PlanService {
             uploads_count: 0,
         };
         // Calculate remaining quotas
+        // Frontend expects analysisRuns, but we also provide analyses for backwards compatibility
+        const analysesRemaining = limits.analysesPerDay === -1
+            ? -1
+            : Math.max(0, limits.analysesPerDay - todayUsage.analysis_runs);
         const remainingToday = {
-            analyses: limits.analysesPerDay === -1
-                ? -1
-                : Math.max(0, limits.analysesPerDay - todayUsage.analysis_runs),
+            analysisRuns: analysesRemaining, // Frontend field name
+            analyses: analysesRemaining, // Backwards compatibility
             apiCalls: limits.apiCallsPerDay === -1
                 ? -1
                 : Math.max(0, limits.apiCallsPerDay - todayUsage.api_calls),

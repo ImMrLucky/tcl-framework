@@ -1,11 +1,13 @@
-# TCL UI
+# TCL UI (ProtectQA Experience)
 
-Angular-based UI for demonstrating the TCL (Truth & Consistency Layer) framework.
+Angular app for **ProtectQA** and broader **Conversation Truth & Risk Intelligence** — compliance, drift, hallucination posture, disclosures, speaker confidence, evidence gaps, business insights (`dashboardSummary`), and client risk labels (`risk`). Not positioning as coaching-only tooling.
+
+Powered by TCL Core `@/validate`, evaluation history (`/evaluations/:id`), and ingest workflows.
 
 ## Features
 
-- **Input Panel**: Enter questions, answers, and optional sources with validation toggles (Spectral, ANN, Cache)
-- **Summary Panel**: Shows coherence score (0-100), flags (contradictions, ungrounded claims, circular reasoning), and Pass/Warn/Fail status
+- **Input Panel**: Paste transcripts or Q+A with validation toggles (Spectral, ANN, Cache)
+- **Summary Panel**: **TCL / ProtectQA primary score**, optional extended metrics (truth vs transcript grounding, compliance, hallucination safety, drift, evidence support…), API `risk` strip, coherence/consistency legacy fields
 - **Claim Table**: Displays all claims with their grounded status, support/contradiction counts, and cycle information
 - **Graph View**: Interactive D3.js visualization showing claim relationships with colored edges:
   - Green → support

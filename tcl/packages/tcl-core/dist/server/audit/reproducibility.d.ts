@@ -26,8 +26,9 @@ export interface DefensibleIssue {
         claimType?: ClaimType;
     };
     who: {
-        speaker: "AGENT" | "CUSTOMER" | "SYSTEM" | "UNKNOWN";
-        speakerLabel?: string;
+        speaker: string;
+        speakerLabel: string;
+        role: "REPRESENTATIVE" | "CUSTOMER" | "THIRD_PARTY" | "UNKNOWN";
     };
     where: {
         turnStartIdx?: number;
@@ -262,6 +263,7 @@ export declare function calculateImportance(params: {
     speaker?: string;
     hasPolicyTag?: boolean;
     claimConfidence?: number;
+    role?: "REPRESENTATIVE" | "CUSTOMER" | "THIRD_PARTY" | "UNKNOWN";
 }): number;
 /**
  * Build issues list from spectral output and claims

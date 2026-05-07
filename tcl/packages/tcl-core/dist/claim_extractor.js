@@ -1,3 +1,5 @@
+import { mapSpeakerToRole, speakerRoleToDisplay } from "./ingestion/speaker-role.js";
+import { countSpeakerLabelsInClaim, isContaminatedClaimText, sanitizeTranscriptForScoring } from "./ingestion/transcript-sanitizer.js";
 // Claims that should be included in the graph for NLI/Spectral analysis
 const AUDITABLE_CLAIM_TYPES = [
     "ASSERTION",
@@ -72,13 +74,20 @@ const HIGH_STAKES_PATTERNS = [
     /\b(free|no charge|no fee|no cost|at no)\b/i,
     /\b(always|never|guaranteed|definitely|absolutely)\b/i, // Absolute language
     /\b(rate|rates|plan|plans|pricing)\b/i,
+    /\b(approval|approved|denied|denial|qualify|eligibility|carrier|underwriting)\b/i,
+    /\b(coverage|death benefit|payout|beneficiary|premium|policy|waiting period)\b/i,
+    /\b(graded|modified|guaranteed issue|level benefit|medical exam|prescription)\b/i,
+    /\b(health condition|diabetes|cancer|heart attack|oxygen|hospitalization)\b/i,
+    /\b(claim|contestability|lapse|licensed|state license|privacy|data sharing)\b/i,
 ];
 // ============================================================================
 // CLASSIFICATION FUNCTION
 // ============================================================================
 export function classifyClaimType(text, speaker) {
     const trimmed = text.trim();
-    const isAgent = speaker === "Agent" || speaker === "agent" || speaker === "AGENT";
+    const mappedSpeaker = speaker ? mapSpeakerToRole(speaker) : undefined;
+    const isAgent = mappedSpeaker?.role === "agent" || mappedSpeaker?.role === "supervisor";
+    const hasHighStakesContent = HIGH_STAKES_PATTERNS.some(pattern => pattern.test(trimmed));
     // 1. Check for questions first (highest priority for non-auditable)
     for (const pattern of QUESTION_PATTERNS) {
         if (pattern.test(trimmed)) {
@@ -93,7 +102,7 @@ export function classifyClaimType(text, speaker) {
     }
     // 3. Check for acknowledgements (short empathy phrases)
     // Only classify as acknowledgement if the text is relatively short
-    if (trimmed.length < 60) {
+    if (trimmed.length < 60 && !hasHighStakesContent) {
         for (const pattern of ACKNOWLEDGEMENT_PATTERNS) {
             if (pattern.test(trimmed)) {
                 return "ACKNOWLEDGEMENT";
@@ -101,7 +110,7 @@ export function classifyClaimType(text, speaker) {
         }
     }
     // 4. Check for filler (greetings, pleasantries)
-    if (trimmed.length < 80) {
+    if (trimmed.length < 80 && !hasHighStakesContent) {
         for (const pattern of FILLER_PATTERNS) {
             if (pattern.test(trimmed)) {
                 return "FILLER";
@@ -131,15 +140,12 @@ export function classifyClaimType(text, speaker) {
     }
     // 8. Default: if it's a declarative statement (not too short), it's an assertion
     // Very short statements without high-stakes content are likely filler
-    if (trimmed.length < 15) {
+    if (trimmed.length < 15 && !hasHighStakesContent) {
         return "FILLER";
     }
     // Check if it contains high-stakes content
-    for (const pattern of HIGH_STAKES_PATTERNS) {
-        if (pattern.test(trimmed)) {
-            return "ASSERTION";
-        }
-    }
+    if (hasHighStakesContent)
+        return "ASSERTION";
     // If agent makes a declarative statement, treat as assertion
     if (isAgent && trimmed.length > 20) {
         return "ASSERTION";
@@ -162,6 +168,11 @@ const TOPIC_PATTERNS = {
     plan: /\b(plan|plans|rate|rates|subscription)\b/i,
     promise: /\b(promise|guarantee|assured|assure)\b/i,
     account: /\b(account|profile|settings)\b/i,
+    final_expense: /\b(final expense|burial|funeral|death benefit|beneficiary|payout)\b/i,
+    insurance_approval: /\b(approval|approved|qualify|eligibility|denial|denied|underwriting|carrier)\b/i,
+    insurance_policy: /\b(policy|premium|coverage|waiting period|graded|modified|level benefit|guaranteed issue)\b/i,
+    health_underwriting: /\b(diabetes|cancer|heart attack|oxygen|hospitalization|prescription|medical exam|health condition)\b/i,
+    privacy_license: /\b(licensed|state license|privacy|data sharing)\b/i,
 };
 export function extractTopics(text) {
     const topics = [];
@@ -186,32 +197,38 @@ function splitSentences(text) {
         .filter((s) => s.length > 0);
 }
 function splitTurns(text) {
-    const lines = text.split(/\n+/).map(l => l.trim()).filter(Boolean);
+    const sanitized = sanitizeTranscriptForScoring(text);
+    const lines = sanitized.text.split(/\n+/).map(l => l.trim()).filter(Boolean);
     const turns = [];
     let t = 0;
     for (const ln of lines) {
         let speaker = "Other";
         let body = ln;
-        if (/^agent:/i.test(ln)) {
-            speaker = "Agent";
-            body = ln.replace(/^agent:\s*/i, "");
-        }
-        else if (/^customer:/i.test(ln)) {
-            speaker = "Customer";
-            body = ln.replace(/^customer:\s*/i, "");
-        }
-        else if (/^rep:/i.test(ln) || /^caller:/i.test(ln)) {
-            speaker = "Agent"; // Treat rep/caller as agent
-            body = ln.replace(/^(rep|caller):\s*/i, "");
+        let speakerType = "unknown";
+        let speakerLabel = "Unknown";
+        let rawSpeaker = "Unknown";
+        const match = ln.match(/^([A-Za-z][A-Za-z0-9_ -]{0,30})\s*:\s*(.*)$/);
+        if (match) {
+            rawSpeaker = match[1].trim();
+            body = match[2].trim();
+            const mapped = mapSpeakerToRole(rawSpeaker);
+            speakerType = mapped.role;
+            speakerLabel = rawSpeaker;
+            const display = speakerRoleToDisplay(speakerType);
+            speaker = display === "Agent" || display === "Supervisor"
+                ? "Agent"
+                : display === "Customer"
+                    ? "Customer"
+                    : "Other";
         }
         if (body.length > 0) {
-            turns.push({ speaker, turnIndex: t++, text: body });
+            turns.push({ speaker, speakerType, speakerLabel, rawSpeaker, turnIndex: t++, text: body });
         }
     }
     return turns;
 }
 function isTranscript(text) {
-    return /^(Agent|Customer|Rep|Caller):/im.test(text);
+    return /^(Agent|Customer|Rep|Representative|Advisor|Producer|Caller|Client|Prospect|Lead|Consumer|Senior|Bot|System):/im.test(text);
 }
 /**
  * Extract claims from text with speech-act classification.
@@ -224,8 +241,10 @@ function isTranscript(text) {
  * - Topic tags and risk signals are extracted
  */
 export function extractClaimsWithTypes(text) {
-    const isTrans = isTranscript(text);
-    console.log(`📝 Extracting claims: isTranscript=${isTrans}, text length=${text.length}`);
+    const sanitized = sanitizeTranscriptForScoring(text);
+    const sourceText = sanitized.text || text;
+    const isTrans = isTranscript(sourceText);
+    console.log(`📝 Extracting claims: isTranscript=${isTrans}, text length=${sourceText.length}`);
     const allItems = [];
     const stats = {
         total: 0,
@@ -244,13 +263,15 @@ export function extractClaimsWithTypes(text) {
     };
     let claimIdx = 1;
     if (isTrans) {
-        const turns = splitTurns(text);
+        const turns = splitTurns(sourceText);
         console.log(`  Found ${turns.length} turns`);
         for (const turn of turns) {
             const sentences = splitSentences(turn.text);
             for (const sentence of sentences) {
                 // Skip extremely short content
                 if (sentence.length < 8)
+                    continue;
+                if (isContaminatedClaimText(sentence) || countSpeakerLabelsInClaim(sentence) > 0)
                     continue;
                 const claimType = classifyClaimType(sentence, turn.speaker);
                 const isAuditable = isAuditableClaimType(claimType);
@@ -265,6 +286,9 @@ export function extractClaimsWithTypes(text) {
                     evidence: [],
                     meta: {
                         speaker: turn.speaker,
+                        speakerType: turn.speakerType,
+                        speakerLabel: turn.speakerLabel,
+                        rawSpeaker: turn.rawSpeaker,
                         turnIndex: turn.turnIndex
                     },
                     claimType,
@@ -285,9 +309,11 @@ export function extractClaimsWithTypes(text) {
     }
     else {
         // Non-transcript text extraction
-        const sentences = splitSentences(text);
+        const sentences = splitSentences(sourceText);
         for (const sentence of sentences) {
             if (sentence.length < 8)
+                continue;
+            if (isContaminatedClaimText(sentence) || countSpeakerLabelsInClaim(sentence) > 0)
                 continue;
             const claimType = classifyClaimType(sentence);
             const isAuditable = isAuditableClaimType(claimType);

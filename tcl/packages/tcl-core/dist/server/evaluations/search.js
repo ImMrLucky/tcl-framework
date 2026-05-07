@@ -33,9 +33,25 @@ export function setupEvaluationSearchRoutes(app) {
             const env = req.query.env || context.env;
             // Build base query - we need 'report' for filtering, but we'll only load what we need
             // For large datasets, we should paginate the database query first
+            // Join with conversations to get audio and transcript asset IDs
+            // Use !conversation_id to specify which foreign key relationship to use
+            // (there are two relationships: evaluations.conversation_id and conversations.evaluation_id)
             let query = supabaseAdmin
                 .from('evaluations')
-                .select('id, org_id, project_id, env, conversation_id, scores, engine_version, latency_ms, report, created_at', { count: 'exact' })
+                .select(`
+          id, 
+          org_id, 
+          project_id, 
+          env, 
+          conversation_id, 
+          scores, 
+          engine_version, 
+          latency_ms, 
+          report, 
+          created_at,
+          transcript_asset_id,
+          conversations!conversation_id(audio_asset_id, transcript_asset_id)
+        `, { count: 'exact' })
                 .eq('org_id', context.orgId)
                 .order('created_at', { ascending: false })
                 .limit(1000); // Limit to prevent loading too many reports at once
@@ -170,6 +186,13 @@ export function setupEvaluationSearchRoutes(app) {
                     const metadata = report?.run?.metadata || report?.metadata || {};
                     const convMetadata = metadata.conversationMetadata || {};
                     const agentId = metadata.agentId || convMetadata.agentId || metadata.agent_id || 'N/A';
+                    // Get audio and transcript asset IDs from conversation or evaluation
+                    // Prefer evaluation's transcript_asset_id, fall back to conversation's
+                    const conversation = Array.isArray(eval_.conversations)
+                        ? eval_.conversations[0]
+                        : eval_.conversations;
+                    const audioAssetId = conversation?.audio_asset_id || null;
+                    const transcriptAssetId = eval_.transcript_asset_id || conversation?.transcript_asset_id || null;
                     filteredEvaluations.push({
                         evaluationId: eval_.id,
                         createdAt: eval_.created_at,
@@ -181,6 +204,8 @@ export function setupEvaluationSearchRoutes(app) {
                         conversationId: eval_.conversation_id,
                         env: eval_.env,
                         scores: eval_.scores,
+                        audioAssetId,
+                        transcriptAssetId,
                         report: {
                             // Include minimal report data for display
                             source: report?.source,

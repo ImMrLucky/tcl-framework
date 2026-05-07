@@ -134,7 +134,7 @@ export class BatchIngestionComponent implements OnInit, OnDestroy {
     this.checkConnectorStatuses();
     
     // Listen for OAuth callbacks
-    window.addEventListener('message', (event) => {
+    window.addEventListener('message', async (event) => {
       // Verify origin for security (allow same origin and API domain)
       const apiUrl = (window as any).__TCL_API_URL || window.location.origin;
       const allowedOrigins = [window.location.origin, apiUrl, new URL(apiUrl).origin].filter(Boolean);

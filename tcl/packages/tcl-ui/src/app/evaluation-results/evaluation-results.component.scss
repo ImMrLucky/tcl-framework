@@ -1659,3 +1659,208 @@
     tr { cursor: pointer; &:hover { background: #f9f9f9; } }
   }
 }
+
+/* Conversation Truth & Risk Intelligence card */
+.conversation-intelligence-card {
+  margin-bottom: 24px;
+  border-left: 4px solid #4338ca;
+
+  .trust-hero {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 24px;
+    align-items: flex-start;
+    margin-bottom: 20px;
+  }
+
+  .trust-score-block {
+    flex: 1 1 220px;
+
+    .trust-label {
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: #64748b;
+      font-weight: 600;
+    }
+
+    .trust-score-main {
+      font-size: 3rem;
+      font-weight: 800;
+      line-height: 1.1;
+      color: #1e1b4b;
+
+      .trust-denom {
+        font-size: 1.25rem;
+        font-weight: 600;
+        color: #64748b;
+        margin-left: 4px;
+      }
+    }
+
+    .trust-sub {
+      color: #475569;
+      margin-top: 8px;
+      max-width: 420px;
+      line-height: 1.45;
+    }
+  }
+
+  .risk-pill-strip {
+    flex: 2 1 280px;
+
+    .risk-detail {
+      margin: 8px 0 0;
+      line-height: 1.4;
+    }
+
+    .sev-counts {
+      font-size: 13px;
+      color: #64748b;
+      margin-top: 8px;
+    }
+  }
+
+  .extended-score-grid {
+    margin: 16px 0;
+
+    h4 {
+      margin: 0 0 12px;
+      color: #334155;
+    }
+
+    .ext-scores-row {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+      gap: 10px;
+    }
+
+    .ext-sc {
+      display: flex;
+      justify-content: space-between;
+      gap: 8px;
+      padding: 10px 12px;
+      background: #f8fafc;
+      border-radius: 8px;
+      border: 1px solid #e2e8f0;
+      font-size: 13px;
+
+      .k {
+        color: #64748b;
+      }
+
+      .v {
+        font-weight: 700;
+        color: #0f172a;
+      }
+    }
+
+    .explain-note {
+      font-size: 12px;
+      color: #64748b;
+      margin-top: 12px;
+    }
+  }
+
+  .plain-summary-box {
+    padding: 16px;
+    background: #f1f5f9;
+    border-radius: 10px;
+    margin-bottom: 16px;
+
+    h4 {
+      margin: 0 0 8px;
+    }
+
+    p {
+      margin: 0;
+      line-height: 1.5;
+      color: #334155;
+    }
+  }
+
+  .five-questions-panel {
+    margin-bottom: 16px;
+  }
+
+  .five-q-list {
+    margin: 0;
+    padding-left: 20px;
+    line-height: 1.55;
+    color: #334155;
+
+    li {
+      margin-bottom: 8px;
+    }
+  }
+
+  .ci-subsection {
+    margin-top: 20px;
+    padding-top: 16px;
+    border-top: 1px solid #e2e8f0;
+
+    h4 {
+      margin: 0 0 12px;
+      color: #1e293b;
+    }
+
+    .intro {
+      margin: 0 0 12px;
+    }
+
+    .ci-item {
+      padding: 12px 0;
+      border-bottom: 1px solid #f1f5f9;
+
+      &:last-child {
+        border-bottom: none;
+      }
+    }
+
+    .ci-quote {
+      font-style: italic;
+      color: #475569;
+      margin: 8px 0;
+    }
+
+    .muted {
+      color: #64748b;
+      font-size: 14px;
+    }
+
+    .smaller {
+      font-size: 13px;
+    }
+
+    .fix-line {
+      margin-top: 8px;
+      color: #0f766e;
+    }
+
+    .severity-pill {
+      margin-left: 8px;
+      font-size: 11px;
+      text-transform: uppercase;
+      color: #b45309;
+      font-weight: 600;
+    }
+  }
+
+  .action-list {
+    margin: 0;
+    padding-left: 20px;
+    line-height: 1.6;
+    color: #334155;
+  }
+
+  .diagnostics-panel {
+    margin-top: 12px;
+  }
+
+  .diag-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+    gap: 10px;
+    font-size: 14px;
+  }
+}

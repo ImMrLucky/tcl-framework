@@ -181,7 +181,7 @@ export function getModelFingerprint() {
  * Calculate importance score for an issue
  */
 export function calculateImportance(params) {
-    const { nodeBlameNorm = 0, truthState, speaker, hasPolicyTag = false, claimConfidence } = params;
+    const { nodeBlameNorm = 0, truthState, speaker, hasPolicyTag = false, claimConfidence, role } = params;
     // Base importance - if no nodeBlameNorm, use truth state and other factors
     let baseImportance = nodeBlameNorm;
     // If nodeBlameNorm is 0 or undefined (spectral skipped), compute a base importance from truth state
@@ -205,8 +205,10 @@ export function calculateImportance(params) {
         "Inconclusive": 1.05,
         "Supported": 0.75
     }[truthState || "Inconclusive"] || 1.0;
-    // Agent multiplier - agent statements are more important for compliance
-    const agentMultiplier = speaker === "AGENT" ? 1.15 : 1.0;
+    // Representative multiplier - representative statements are more important for compliance
+    // Check role from params if available, otherwise fallback to old speaker format
+    const isRepresentative = role === "REPRESENTATIVE" || speaker === "AGENT";
+    const agentMultiplier = isRepresentative ? 1.15 : 1.0;
     // Policy multiplier - policy-related issues are more important
     const policyMultiplier = hasPolicyTag ? 1.25 : 1.0;
     // Calculate final importance, capped at 1.0
@@ -239,9 +241,14 @@ function getSeverity(truthState, issueType, nodeBlameNorm) {
 /**
  * Generate human-readable issue description (short summary)
  */
-function generateIssueDescription(truthState, issueType, speaker, conflictsCount) {
-    const speakerLabel = speaker === "AGENT" ? "Agent" :
-        speaker === "CUSTOMER" ? "Customer" : "Speaker";
+function generateIssueDescription(truthState, issueType, speaker, conflictsCount, role) {
+    // Use role if provided, otherwise fallback to speaker string
+    const speakerLabel = role === "REPRESENTATIVE" ? "Representative" :
+        role === "CUSTOMER" ? "Customer" :
+            role === "THIRD_PARTY" ? "Third Party" :
+                speaker === "AGENT" || speaker === "Agent" ? "Agent" :
+                    speaker === "CUSTOMER" || speaker === "Customer" ? "Customer" :
+                        speaker || "Speaker";
     switch (issueType) {
         case "CONTRADICTION":
             return `${speakerLabel} statement contradicts ${conflictsCount > 1 ? `${conflictsCount} other claims` : 'another claim'}`;
@@ -317,8 +324,9 @@ function generateWhyFlagged(issueType, speaker, claimText, conflicts) {
 /**
  * Generate risk explanation
  */
-function generateRiskExplanation(issueType, severity, speaker) {
-    const agentContext = speaker === "AGENT" ? " by an agent" : "";
+function generateRiskExplanation(issueType, severity, speaker, role) {
+    const isRepresentative = role === "REPRESENTATIVE" || speaker === "AGENT";
+    const agentContext = isRepresentative ? " by a representative" : "";
     switch (issueType) {
         case "CONTRADICTION":
             return `Contradictory statements${agentContext} can undermine customer trust, create liability exposure, and may indicate miscommunication or intentional misinformation.`;
@@ -485,11 +493,11 @@ export function buildIssuesList(spectral, claims, destructiveClaims, evaluationI
         if (!shouldFlag) {
             continue;
         }
-        // Determine speaker
-        const speakerRaw = claim.meta?.speaker;
-        const speaker = speakerRaw === "Agent" || speakerRaw === "AGENT" ? "AGENT" :
-            speakerRaw === "Customer" || speakerRaw === "CUSTOMER" ? "CUSTOMER" :
-                speakerRaw === "System" || speakerRaw === "SYSTEM" ? "SYSTEM" : "UNKNOWN";
+        // Determine speaker and role from claim.who (normalized) or fallback to meta
+        const claimWho = claim.who; // ClaimNode.who field
+        const speaker = claimWho?.speaker || claim.meta?.speakerLabel || claim.meta?.speaker || "Unknown";
+        const speakerLabel = claimWho?.speakerLabel || claim.meta?.speakerLabel || claim.meta?.speaker || "Unknown";
+        const role = claimWho?.role || "UNKNOWN";
         // Determine issue type using new risk scoring module
         const circularityScore = spectral.circularityScore || 0;
         const cycleMass = spectral.cycleMass || 0;
@@ -563,15 +571,14 @@ export function buildIssuesList(spectral, claims, destructiveClaims, evaluationI
                 claimSummary,
                 issueType,
                 truthState,
-                description: generateIssueDescription(truthState, issueType, speaker, conflicts.length),
+                description: generateIssueDescription(truthState, issueType, speaker, conflicts.length, role),
                 whyFlagged,
                 claimType: claim.claimType
             },
             who: {
                 speaker,
-                speakerLabel: speaker === "AGENT" ? "Agent" :
-                    speaker === "CUSTOMER" ? "Customer" :
-                        speaker === "SYSTEM" ? "System" : "Unknown"
+                speakerLabel,
+                role: role
             },
             where: {
                 turnStartIdx: claim.meta?.turnIndex,
@@ -587,7 +594,7 @@ export function buildIssuesList(spectral, claims, destructiveClaims, evaluationI
                         issueType === "CIRCULAR" ? "reasoning" :
                             issueType === "PROMISE_RISK" || issueType === "ABSOLUTE_CLAIM" ? "commitment" :
                                 "compliance",
-                explanation: generateRiskExplanation(issueType, severity, speaker),
+                explanation: generateRiskExplanation(issueType, severity, speaker, role),
                 policyRuleIds: undefined
             },
             confidence: {

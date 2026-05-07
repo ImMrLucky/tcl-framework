@@ -771,11 +771,20 @@ export async function runAnalysis(input: {
 
   // The validate function does NOT create evaluations - we need to create it ourselves
   // Format scores for database (similar to /validate endpoint)
+  const s = validateOutput.scores as any;
   const scoresForDb = {
-    truth: validateOutput.scores.truth ?? null,
-    consistency: validateOutput.scores.consistency ?? null,
-    coherence: validateOutput.scores.coherence ?? null,
-    overall: validateOutput.scores.overall ?? null,
+    tcl: s.tcl ?? s.overall ?? null,
+    truth: s.truth ?? null,
+    transcriptGrounding: s.transcriptGrounding ?? null,
+    compliance: s.compliance ?? null,
+    hallucination: s.hallucination ?? null,
+    drift: s.drift ?? null,
+    consistency: s.consistency ?? null,
+    coherence: s.coherence ?? null,
+    evidenceSupport: s.evidenceSupport ?? null,
+    speakerConfidence: s.speakerConfidence ?? null,
+    businessValue: s.businessValue ?? null,
+    overall: s.overall ?? null,
   };
 
   // Build proper IssueV2 objects using expandIssueCandidates and rankIssuesV2
@@ -850,8 +859,16 @@ export async function runAnalysis(input: {
       evidenceMode
     );
     
-    // Combine graph issues with compliance issues
-    const allAtomicIssues = [...expansionResult.allIssues, ...complianceResult.issues];
+    // Combine graph issues with compliance issues AND the new moat detectors
+    // (final-expense, hallucination, drift, cross-turn, domain packs) which are
+    // produced inside the orchestrator's runUnifiedGraphPath and surfaced via
+    // report.allIssuesV2.
+    const orchestratorDetectorIssues = (validateOutput.report as any)?.allIssuesV2 ?? [];
+    const allAtomicIssues = [
+      ...expansionResult.allIssues,
+      ...complianceResult.issues,
+      ...orchestratorDetectorIssues,
+    ];
 
     // Rank issues (deterministic) with scoring context
     const scoringContext = {
@@ -898,6 +915,22 @@ export async function runAnalysis(input: {
       allIssuesV2,
       topIssuesV2, // Top grouped issues (has rollup structure)
       issueSummaryV2,
+      // Carry the moat-pipeline outputs through to persistence
+      crossTurn: (validateOutput.report as any)?.crossTurn,
+      drift: (validateOutput.report as any)?.drift,
+      domainPacksApplied: (validateOutput.report as any)?.domainPacksApplied,
+      executiveSummary: (validateOutput as any)?.executiveSummary,
+      diagnostics: (validateOutput as any)?.diagnostics,
+      risk: (validateOutput as any)?.risk,
+      productContext: (validateOutput as any)?.productContext,
+      dashboardSummary: (validateOutput as any)?.dashboardSummary,
+      claimsAnalysis: (validateOutput as any)?.claimsAnalysis,
+      evidenceDependencyGraph: (validateOutput as any)?.evidenceDependencyGraph,
+      issuesBySeverity: (validateOutput as any)?.issuesBySeverity,
+      businessInsights: (validateOutput as any)?.businessInsights,
+      recommendedActions: (validateOutput as any)?.recommendedActions,
+      enhancedClientScores: (validateOutput as any)?.scores,
+      enhancedScores: (validateOutput as any)?.enhancedScores,
       // A1: Add EvalMode to report
       evalMode,
       // Rule 0: Add provenance to report

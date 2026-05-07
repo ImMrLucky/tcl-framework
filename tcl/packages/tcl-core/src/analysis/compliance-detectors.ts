@@ -12,6 +12,7 @@
 
 import type { IssueV2, IssueTypeV2, IssueCategoryV2, SpeakerV2, VerificationLevelV2 } from '../types.js';
 import { createHash } from 'crypto';
+import { detectFinalExpenseComplianceIssues } from './domain/final-expense-detectors.js';
 
 export interface ComplianceDetectorResult {
   issues: IssueV2[];
@@ -21,7 +22,7 @@ export interface ComplianceDetectorResult {
  * D: Detect compliance issues from claims
  */
 export function detectComplianceIssues(
-  claims: Array<{ id: string; text: string; meta?: { speaker?: string; turnIndex?: number } }>,
+  claims: Array<{ id: string; text: string; meta?: { speaker?: string; speakerType?: string; speakerLabel?: string; turnIndex?: number } }>,
   runId: string,
   conversationId: string,
   evidenceMode: 'TRANSCRIPT_ONLY' | 'TRANSCRIPT_PLUS_EXTERNAL'
@@ -39,6 +40,9 @@ export function detectComplianceIssues(
   // D3: PII Collection Detection
   const piiIssues = detectPIICollection(claims, runId, conversationId, evidenceMode);
   issues.push(...piiIssues);
+  
+  const finalExpenseIssues = detectFinalExpenseComplianceIssues(claims as any, { runId, conversationId, evidenceMode });
+  issues.push(...finalExpenseIssues);
   
   return { issues };
 }

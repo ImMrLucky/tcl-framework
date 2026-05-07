@@ -13,7 +13,7 @@
 export declare const NORMALIZED_SCHEMA_VERSION = "norm.v1";
 export type Channel = "call" | "chat" | "email" | "other";
 export type SourceFormat = "txt" | "csv" | "json" | "vtt" | "srt" | "wav" | "mp3" | "m4a" | "flac" | "ogg" | "opus" | "vendor:amazon_connect" | "vendor:genesys" | "vendor:five9" | "vendor:nice" | "vendor:verint" | "vendor:twilio" | "unknown";
-export type ParticipantRole = "agent" | "customer" | "supervisor" | "bot" | "unknown";
+export type ParticipantRole = "agent" | "customer" | "supervisor" | "bot" | "system" | "unknown";
 export interface Participant {
     /** Unique ID within this conversation (e.g., "p_agent_1") */
     participantId: string;
@@ -221,17 +221,7 @@ export interface Normalizer {
     /** Normalize the file content */
     normalize(content: Buffer | string, options: NormalizerOptions): Promise<NormalizerResult>;
 }
-/**
- * Speaker role mapping rules
- */
-export declare const SPEAKER_ROLE_PATTERNS: Record<ParticipantRole, RegExp[]>;
-/**
- * Map a raw speaker label to a canonical role
- */
-export declare function mapSpeakerToRole(rawSpeaker: string): {
-    role: ParticipantRole;
-    mappingDecision: string;
-};
+export { mapSpeakerToRole } from "../../ingestion/speaker-role.js";
 export declare const CSV_SPEAKER_ALIASES: string[];
 export declare const CSV_TEXT_ALIASES: string[];
 export declare const CSV_TIME_ALIASES: string[];

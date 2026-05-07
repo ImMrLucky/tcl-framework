@@ -6,46 +6,13 @@
  *
  * Part B: Fix speaker attribution
  */
-/**
- * Default speaker label mapping (configurable)
- */
-const DEFAULT_AGENT_LABELS = [
-    'AGENT', 'CSR', 'REP', 'REPRESENTATIVE', 'SUPPORT', 'ASSOCIATE', 'ADVISOR',
-    'OPERATOR', 'SPECIALIST', 'CONSULTANT', 'SERVICE', 'STAFF', 'EMPLOYEE',
-    'TEAM MEMBER', 'SALES', 'ACCOUNT MANAGER', 'ACCOUNT EXEC', 'AE', 'SDR', 'BDR',
-    'INSIDE SALES', 'SUPERVISOR', 'MANAGER', 'LEAD', 'SENIOR', 'DIRECTOR'
-];
-const DEFAULT_CUSTOMER_LABELS = [
-    'CUSTOMER', 'CALLER', 'CLIENT', 'MEMBER', 'PATIENT', 'USER', 'BUYER',
-    'GUEST', 'VISITOR', 'SUBSCRIBER', 'PROSPECT', 'LEAD', 'PURCHASER'
-];
+import { mapSpeakerToRole } from '../ingestion/speaker-role.js';
+import { sanitizeTranscriptForScoring } from '../ingestion/transcript-sanitizer.js';
 /**
  * Normalize speaker label to canonical type
  */
-function normalizeSpeakerLabel(rawLabel, agentLabels = DEFAULT_AGENT_LABELS, customerLabels = DEFAULT_CUSTOMER_LABELS) {
-    const normalized = rawLabel.trim().toUpperCase();
-    // Remove punctuation and extra spaces
-    const cleaned = normalized.replace(/[^\w\s]/g, ' ').replace(/\s+/g, ' ').trim();
-    // Check agent labels
-    for (const agentLabel of agentLabels) {
-        if (cleaned === agentLabel || cleaned.startsWith(agentLabel + ' ') || cleaned.includes(' ' + agentLabel)) {
-            return 'agent';
-        }
-    }
-    // Check customer labels
-    for (const customerLabel of customerLabels) {
-        if (cleaned === customerLabel || cleaned.startsWith(customerLabel + ' ') || cleaned.includes(' ' + customerLabel)) {
-            return 'customer';
-        }
-    }
-    // Pattern matching for common variations
-    if (/^AGENT\s*\d*$/i.test(cleaned) || /^REP\s*\d*$/i.test(cleaned) || /^CSR\s*\d*$/i.test(cleaned)) {
-        return 'agent';
-    }
-    if (/^CUSTOMER\s*\d*$/i.test(cleaned) || /^CALLER\s*\d*$/i.test(cleaned) || /^CLIENT\s*\d*$/i.test(cleaned)) {
-        return 'customer';
-    }
-    return 'unknown';
+function normalizeSpeakerLabel(rawLabel) {
+    return mapSpeakerToRole(rawLabel).role;
 }
 /**
  * Normalize transcript into structured turns
@@ -54,9 +21,8 @@ function normalizeSpeakerLabel(rawLabel, agentLabels = DEFAULT_AGENT_LABELS, cus
  * Output: Array of normalized turns with speaker information
  */
 export function normalizeTranscript(transcript, options) {
-    const agentLabels = options?.agentLabels || DEFAULT_AGENT_LABELS;
-    const customerLabels = options?.customerLabels || DEFAULT_CUSTOMER_LABELS;
-    const lines = transcript.split(/\n+/).map(l => l.trim()).filter(Boolean);
+    const sanitized = sanitizeTranscriptForScoring(transcript);
+    const lines = sanitized.text.split(/\n+/).map(l => l.trim()).filter(Boolean);
     const turns = [];
     let currentTurn = null;
     let turnIndex = 0;
@@ -70,7 +36,7 @@ export function normalizeTranscript(transcript, options) {
             currentTurn = {
                 turnIndex: turnIndex++,
                 speakerLabelRaw: rawSpeaker,
-                speakerType: normalizeSpeakerLabel(rawSpeaker, agentLabels, customerLabels),
+                speakerType: normalizeSpeakerLabel(rawSpeaker),
                 text: text,
             };
             turns.push(currentTurn);
@@ -84,7 +50,7 @@ export function normalizeTranscript(transcript, options) {
             currentTurn = {
                 turnIndex: turnIndex++,
                 speakerLabelRaw: rawSpeaker,
-                speakerType: normalizeSpeakerLabel(rawSpeaker, agentLabels, customerLabels),
+                speakerType: normalizeSpeakerLabel(rawSpeaker),
                 text: text,
             };
             turns.push(currentTurn);
@@ -98,7 +64,7 @@ export function normalizeTranscript(transcript, options) {
             currentTurn = {
                 turnIndex: turnIndex++,
                 speakerLabelRaw: rawSpeaker,
-                speakerType: normalizeSpeakerLabel(rawSpeaker, agentLabels, customerLabels),
+                speakerType: normalizeSpeakerLabel(rawSpeaker),
                 text: text,
             };
             turns.push(currentTurn);
@@ -112,7 +78,7 @@ export function normalizeTranscript(transcript, options) {
             currentTurn = {
                 turnIndex: turnIndex++,
                 speakerLabelRaw: rawSpeaker,
-                speakerType: normalizeSpeakerLabel(rawSpeaker, agentLabels, customerLabels),
+                speakerType: normalizeSpeakerLabel(rawSpeaker),
                 text: text,
             };
             turns.push(currentTurn);
@@ -126,7 +92,7 @@ export function normalizeTranscript(transcript, options) {
             currentTurn = {
                 turnIndex: turnIndex++,
                 speakerLabelRaw: rawSpeaker,
-                speakerType: normalizeSpeakerLabel(rawSpeaker, agentLabels, customerLabels),
+                speakerType: normalizeSpeakerLabel(rawSpeaker),
                 text: text,
             };
             turns.push(currentTurn);
@@ -170,6 +136,7 @@ export function normalizeTranscript(transcript, options) {
 export function speakerTypeToRole(speakerType) {
     switch (speakerType) {
         case 'agent':
+        case 'supervisor':
             return 'AGENT';
         case 'customer':
             return 'CUSTOMER';

@@ -455,6 +455,54 @@ export function setupEvidenceRoutes(app) {
         }
     });
     // ============================================================================
+    // GET /api/evidence/resolve - Resolve evidence set for evaluation
+    // MUST BE BEFORE /api/evidence/:id to avoid route collision
+    // ============================================================================
+    app.get('/api/evidence/resolve', async (req, res) => {
+        try {
+            const context = await getOrgContext(req);
+            if (!context || context.error) {
+                return res.status(401).json({ error: context?.error || 'Authorization required' });
+            }
+            const { projectId, templateId, conversationId, simulationMode, includeOrg, includeProject, includeTemplate, } = req.query;
+            // Normalize simulationMode to boolean
+            const isSimulationMode = simulationMode === 'true' ||
+                simulationMode === '1' ||
+                (typeof simulationMode === 'boolean' && simulationMode) ||
+                (typeof simulationMode === 'number' && simulationMode === 1);
+            const evidenceSet = await resolveEvidenceSet(context.orgId, projectId || context.projectId, templateId, conversationId, isSimulationMode, includeOrg !== 'false', includeProject !== 'false', includeTemplate !== 'false');
+            res.json(evidenceSet);
+        }
+        catch (e) {
+            console.error('Resolve evidence set error:', e);
+            res.status(500).json({ error: e?.message ?? 'unknown error' });
+        }
+    });
+    // ============================================================================
+    // GET /api/evidence/resolve - Resolve evidence set for evaluation
+    // MUST BE BEFORE /api/evidence/:id to avoid route collision
+    // ============================================================================
+    app.get('/api/evidence/resolve', async (req, res) => {
+        try {
+            const context = await getOrgContext(req);
+            if (!context || context.error) {
+                return res.status(401).json({ error: context?.error || 'Authorization required' });
+            }
+            const { projectId, templateId, conversationId, simulationMode, includeOrg, includeProject, includeTemplate, } = req.query;
+            // Normalize simulationMode to boolean
+            const isSimulationMode = simulationMode === 'true' ||
+                simulationMode === '1' ||
+                (typeof simulationMode === 'boolean' && simulationMode) ||
+                (typeof simulationMode === 'number' && simulationMode === 1);
+            const evidenceSet = await resolveEvidenceSet(context.orgId, projectId || context.projectId, templateId, conversationId, isSimulationMode, includeOrg !== 'false', includeProject !== 'false', includeTemplate !== 'false');
+            res.json(evidenceSet);
+        }
+        catch (e) {
+            console.error('Resolve evidence set error:', e);
+            res.status(500).json({ error: e?.message ?? 'unknown error' });
+        }
+    });
+    // ============================================================================
     // GET /api/evidence - List evidence items
     // ============================================================================
     app.get('/api/evidence', async (req, res) => {
@@ -647,29 +695,6 @@ export function setupEvidenceRoutes(app) {
         }
         catch (e) {
             console.error('Get evidence download URL error:', e);
-            res.status(500).json({ error: e?.message ?? 'unknown error' });
-        }
-    });
-    // ============================================================================
-    // GET /api/evidence/resolve - Resolve evidence set for evaluation
-    // ============================================================================
-    app.get('/api/evidence/resolve', async (req, res) => {
-        try {
-            const context = await getOrgContext(req);
-            if (!context || context.error) {
-                return res.status(401).json({ error: context?.error || 'Authorization required' });
-            }
-            const { projectId, templateId, conversationId, simulationMode, includeOrg, includeProject, includeTemplate, } = req.query;
-            // Normalize simulationMode to boolean
-            const isSimulationMode = simulationMode === 'true' ||
-                simulationMode === '1' ||
-                (typeof simulationMode === 'boolean' && simulationMode) ||
-                (typeof simulationMode === 'number' && simulationMode === 1);
-            const evidenceSet = await resolveEvidenceSet(context.orgId, projectId || context.projectId, templateId, conversationId, isSimulationMode, includeOrg !== 'false', includeProject !== 'false', includeTemplate !== 'false');
-            res.json(evidenceSet);
-        }
-        catch (e) {
-            console.error('Resolve evidence set error:', e);
             res.status(500).json({ error: e?.message ?? 'unknown error' });
         }
     });

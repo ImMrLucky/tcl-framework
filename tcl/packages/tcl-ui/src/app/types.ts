@@ -1,3 +1,11 @@
+import type {
+  BusinessInsightUi,
+  DashboardSummaryUi,
+  TclDiagnosticsUi,
+  TclExtendedScoresUi,
+  TclRiskBlockUi,
+} from './tcl-intelligence.types';
+
 // Types matching TCL framework output
 export type Source = { id: string; text: string };
 
@@ -32,11 +40,23 @@ export type GroundingEdge = { claimId: string; sourceId: string; weight: number;
 export type ValidateOutput = {
   answer: string;
   refusal: boolean;
-  scores: { truth: number; consistency: number; coherence: number; overall: number };
+  scores: TclExtendedScoresUi & {
+    truth: number;
+    consistency: number;
+    coherence: number;
+    overall: number;
+  };
   scorerId?: string; // ID of the NLI scorer used
   latency?: number; // Request latency in milliseconds
   cacheHitRate?: number; // Cache hit rate percentage (0-100)
   engineVersion?: string; // Engine version/commit hash
+  /** Conversation Truth & Risk Intelligence */
+  risk?: TclRiskBlockUi;
+  diagnostics?: TclDiagnosticsUi;
+  dashboardSummary?: DashboardSummaryUi;
+  businessInsights?: BusinessInsightUi[];
+  recommendedActions?: string[];
+  productContext?: { defaultDomain?: string; scoringProfile?: string };
   report: {
     claims: Claim[];
     violations: any[];

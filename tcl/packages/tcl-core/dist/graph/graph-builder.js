@@ -19,9 +19,10 @@
  * - Contradictions require same subject slot
  * - All thresholds are config-driven
  */
-import { extractEntities, computeSubjectSlot, extractAnchors } from './subject-slot.js';
+import { extractEntities, extractEntitiesAsync, computeSubjectSlot, extractAnchors } from './subject-slot.js';
 import { getTemplateConfig, setTemplateConfig } from './template-config.js';
 import { normalizeTranscript } from './transcript-normalizer.js';
+import { buildSpeakerRoleMap, getRoleForSpeaker } from './speaker-role-mapper.js';
 // Re-export for convenience
 export { setTemplateConfig, getTemplateConfig };
 import { assignTopicIds } from './topic-segmentation.js';
@@ -32,9 +33,13 @@ import { deriveTruthStatesFromGraph, computeTruthScores } from './truth-state-de
 import { buildRunDiagnostics, validateGraphIntegrity } from './run-diagnostics.js';
 import { createHash } from 'crypto';
 import { logGraph } from '../server/utils/logger.js';
+import { getSlotRegistryVersion, getSlotMetaWithTemplate } from './slot-registry.js';
 // =============================================================================
 // MAIN GRAPH BUILDER
 // =============================================================================
+/**
+ * Build graph synchronously (uses regex entities, backwards compatible).
+ */
 export function buildGraph(input) {
     const startTime = Date.now();
     const pipelineSteps = {};
@@ -51,11 +56,44 @@ export function buildGraph(input) {
         }
     }
     const config = getTemplateConfig();
-    // Step 1: Build ClaimNodes
+    // Step 1: Build ClaimNodes (sync with regex)
     const step1Start = Date.now();
     const claimNodes = buildClaimNodes(input);
     pipelineSteps['claimNodes'] = Date.now() - step1Start;
     logGraph('debug', `Claim nodes: ${claimNodes.length}`, { count: claimNodes.length, duration: pipelineSteps['claimNodes'] });
+    return buildGraphFromNodes(input, claimNodes, startTime, pipelineSteps);
+}
+/**
+ * Build graph asynchronously (uses spaCy entities if available, better quality).
+ */
+export async function buildGraphAsync(input) {
+    const startTime = Date.now();
+    const pipelineSteps = {};
+    // Step 0: Set template config
+    if (input.template) {
+        if (typeof input.template === 'string') {
+            setTemplateConfig(input.template);
+        }
+        else {
+            setTemplateConfig({
+                ...getTemplateConfig(),
+                ...input.template,
+            });
+        }
+    }
+    const config = getTemplateConfig();
+    // Step 1: Build ClaimNodes (async with spaCy)
+    const step1Start = Date.now();
+    const claimNodes = await buildClaimNodesAsync(input);
+    pipelineSteps['claimNodes'] = Date.now() - step1Start;
+    logGraph('debug', `Claim nodes: ${claimNodes.length} (spaCy-enhanced)`, { count: claimNodes.length, duration: pipelineSteps['claimNodes'] });
+    return buildGraphFromNodes(input, claimNodes, startTime, pipelineSteps);
+}
+/**
+ * Common graph building logic (used by both sync and async versions).
+ */
+function buildGraphFromNodes(input, claimNodes, startTime, pipelineSteps) {
+    const config = getTemplateConfig();
     // Step 2: Build EvidenceNodes
     const step2Start = Date.now();
     const evidenceNodes = buildEvidenceNodes(input);
@@ -66,6 +104,8 @@ export function buildGraph(input) {
     const segmentation = assignTopicIds(claimNodes);
     pipelineSteps['topicSegmentation'] = Date.now() - step3Start;
     logGraph('debug', `Topic clusters: ${segmentation.clusters.length}`, { count: segmentation.clusters.length, duration: pipelineSteps['topicSegmentation'] });
+    // Compute slot mapping diagnostics
+    const slotMapping = computeSlotMappingDiagnostics(claimNodes, config.templateId);
     // Step 4: Candidate Generation
     const step4Start = Date.now();
     const transcriptEvidenceCount = evidenceNodes.filter(e => e.evidenceKind === 'transcript').length;
@@ -220,6 +260,8 @@ export function buildGraph(input) {
                 rejectedByTopicGating: classified.diagnostics.rejectedByTopicGating,
                 rejectedByPolarityGating: classified.diagnostics.rejectedByPolarityGating,
                 rejectedByThreshold: classified.diagnostics.rejectedByThreshold,
+                rejectedByIneligibleSlot: classified.diagnostics.rejectedByIneligibleSlot,
+                rejectedByValueTypeMismatch: classified.diagnostics.rejectedByValueTypeMismatch,
                 sampleRejections: classified.diagnostics.sampleRejections,
             },
             // Candidate generation diagnostics
@@ -228,7 +270,51 @@ export function buildGraph(input) {
                 claimsWithZeroCandidates: candidates.diagnostics.claimsWithZeroCandidates,
                 budgetExhausted: candidates.diagnostics.budgetExhausted,
             },
+            // Slot mapping diagnostics
+            slotMapping,
         },
+    };
+}
+/**
+ * Compute slot mapping diagnostics for claims
+ */
+function computeSlotMappingDiagnostics(claimNodes, templateId) {
+    const registryVersion = getSlotRegistryVersion();
+    const counts = { HARD: 0, SOFT: 0, NONE: 0 };
+    let miscClaims = 0;
+    const slotKeyCounts = new Map();
+    for (const claim of claimNodes) {
+        const slot = claim.slot;
+        const slotKey = `${slot.slotType}:${slot.entityKey}`;
+        // Count by slot key
+        slotKeyCounts.set(slotKey, (slotKeyCounts.get(slotKey) || 0) + 1);
+        // Count misc claims
+        if (slot.slotType === 'misc' && slot.entityKey === 'unclassified') {
+            miscClaims++;
+        }
+        // Count by edge eligibility
+        const meta = getSlotMetaWithTemplate(slot.slotType, slot.entityKey, templateId);
+        if (meta.edgeEligibility === 'HARD') {
+            counts.HARD++;
+        }
+        else if (meta.edgeEligibility === 'SOFT') {
+            counts.SOFT++;
+        }
+        else {
+            counts.NONE++;
+        }
+    }
+    // Get top 10 slot keys
+    const topSlotKeys = Array.from(slotKeyCounts.entries())
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 10)
+        .map(([slotKey, count]) => ({ slotKey, count }));
+    return {
+        registryVersion,
+        totalClaims: claimNodes.length,
+        counts,
+        miscClaims,
+        topSlotKeys,
     };
 }
 // =============================================================================
@@ -236,17 +322,35 @@ export function buildGraph(input) {
 // =============================================================================
 function buildClaimNodes(input) {
     const claimNodes = [];
+    // Build or use speakerRoleMap
+    let speakerRoleMap = input.speakerRoleMap || {};
     if (input.rawClaims) {
         // Use pre-extracted claims
+        // If speakerRoleMap not provided, try to build from rawClaims
+        if (!input.speakerRoleMap && input.rawClaims.length > 0) {
+            const turns = input.rawClaims.map(c => ({
+                speaker: c.meta?.speakerLabel || c.meta?.speaker || 'unknown',
+                text: c.text
+            }));
+            const config = getTemplateConfig();
+            speakerRoleMap = buildSpeakerRoleMap(turns, config.templateId);
+        }
         for (const raw of input.rawClaims) {
-            const entities = extractEntities(raw.text);
+            const entities = extractEntities(raw.text); // Sync regex extraction
             const slot = computeSubjectSlot(raw.text, entities, raw.modality);
             const anchors = extractAnchors(entities, raw.text); // 1.2: Extract industry-agnostic anchors
+            const speakerLabel = raw.meta?.speakerLabel || raw.meta?.speaker || 'unknown';
+            const role = getRoleForSpeaker(speakerLabel, speakerRoleMap);
             const node = {
                 id: raw.id,
                 type: 'CLAIM',
                 text: raw.text,
                 speakerRole: raw.speakerRole,
+                who: {
+                    speaker: speakerLabel,
+                    speakerLabel: speakerLabel,
+                    role: role,
+                },
                 span: raw.span,
                 timestamp: raw.timestamp,
                 modality: raw.modality || detectModality(raw.text),
@@ -270,15 +374,30 @@ function buildClaimNodes(input) {
     else if (input.transcript) {
         // B1: Normalize transcript into structured turns with speaker info
         const normalizedTurns = normalizeTranscript(input.transcript);
+        // Build speakerRoleMap if not provided
+        if (!input.speakerRoleMap) {
+            const config = getTemplateConfig();
+            const turns = normalizedTurns.map(t => ({
+                speaker: t.speakerLabelRaw,
+                text: t.text
+            }));
+            speakerRoleMap = buildSpeakerRoleMap(turns, config.templateId);
+        }
         for (const turn of normalizedTurns) {
             const entities = extractEntities(turn.text);
             const slot = computeSubjectSlot(turn.text, entities);
             const anchors = extractAnchors(entities, turn.text); // 1.2: Extract industry-agnostic anchors
+            const role = getRoleForSpeaker(turn.speakerLabelRaw, speakerRoleMap);
             const node = {
                 id: `c${turn.turnIndex}`,
                 type: 'CLAIM',
                 text: turn.text,
                 speakerRole: turn.speakerType === 'agent' ? 'agent' : turn.speakerType === 'customer' ? 'customer' : 'unknown',
+                who: {
+                    speaker: turn.speakerLabelRaw,
+                    speakerLabel: turn.speakerLabelRaw,
+                    role: role,
+                },
                 span: {
                     turnId: `turn-${turn.turnIndex}`,
                     startChar: 0,
@@ -294,6 +413,117 @@ function buildClaimNodes(input) {
                 anchors, // 1.2: Add anchors to claim node
                 createdAt: new Date().toISOString(),
                 // B2: Attach speaker info to claim
+                meta: {
+                    speakerType: turn.speakerType,
+                    speakerLabel: turn.speakerLabelRaw,
+                    turnIndex: turn.turnIndex,
+                },
+            };
+            claimNodes.push(node);
+        }
+    }
+    return claimNodes;
+}
+/**
+ * Build claim nodes asynchronously using spaCy-enhanced entity extraction.
+ */
+async function buildClaimNodesAsync(input) {
+    const claimNodes = [];
+    // Build or use speakerRoleMap
+    let speakerRoleMap = input.speakerRoleMap || {};
+    if (input.rawClaims) {
+        // Use pre-extracted claims
+        // If speakerRoleMap not provided, try to build from rawClaims
+        if (!input.speakerRoleMap && input.rawClaims.length > 0) {
+            const turns = input.rawClaims.map(c => ({
+                speaker: c.meta?.speakerLabel || c.meta?.speaker || 'unknown',
+                text: c.text
+            }));
+            const config = getTemplateConfig();
+            speakerRoleMap = buildSpeakerRoleMap(turns, config.templateId);
+        }
+        for (const raw of input.rawClaims) {
+            const entities = await extractEntitiesAsync(raw.text); // Async spaCy extraction
+            const slot = computeSubjectSlot(raw.text, entities, raw.modality);
+            const anchors = extractAnchors(entities, raw.text);
+            const speakerLabel = raw.meta?.speakerLabel || raw.meta?.speaker || 'unknown';
+            const role = getRoleForSpeaker(speakerLabel, speakerRoleMap);
+            const node = {
+                id: raw.id,
+                type: 'CLAIM',
+                text: raw.text,
+                speakerRole: raw.speakerRole,
+                who: {
+                    speaker: speakerLabel,
+                    speakerLabel: speakerLabel,
+                    role: role,
+                },
+                span: raw.span,
+                timestamp: raw.timestamp,
+                modality: raw.modality || detectModality(raw.text),
+                claimType: raw.claimType,
+                entities,
+                normalized: {
+                    amount: entities.find(e => e.type === 'MONEY')?.normalized,
+                    date: entities.find(e => e.type === 'DATE')?.normalized,
+                    duration: entities.find(e => e.type === 'DURATION')?.normalized,
+                    percentage: entities.find(e => e.type === 'PERCENT')?.normalized,
+                },
+                slot,
+                anchors,
+                confidence: raw.confidence,
+                createdAt: new Date().toISOString(),
+                meta: raw.meta,
+            };
+            claimNodes.push(node);
+        }
+    }
+    else if (input.transcript) {
+        // B1: Normalize transcript into structured turns with speaker info
+        const normalizedTurns = normalizeTranscript(input.transcript);
+        // Build speakerRoleMap if not provided
+        if (!input.speakerRoleMap) {
+            const config = getTemplateConfig();
+            const turns = normalizedTurns.map(t => ({
+                speaker: t.speakerLabelRaw,
+                text: t.text
+            }));
+            speakerRoleMap = buildSpeakerRoleMap(turns, config.templateId);
+        }
+        // Batch extract entities for all turns (more efficient)
+        const texts = normalizedTurns.map(t => t.text);
+        const entitiesPromises = texts.map(text => extractEntitiesAsync(text));
+        const allEntities = await Promise.all(entitiesPromises);
+        for (let i = 0; i < normalizedTurns.length; i++) {
+            const turn = normalizedTurns[i];
+            const entities = allEntities[i];
+            const slot = computeSubjectSlot(turn.text, entities);
+            const anchors = extractAnchors(entities, turn.text);
+            const role = getRoleForSpeaker(turn.speakerLabelRaw, speakerRoleMap);
+            const node = {
+                id: `c${turn.turnIndex}`,
+                type: 'CLAIM',
+                text: turn.text,
+                speakerRole: turn.speakerType === 'agent' ? 'agent' : turn.speakerType === 'customer' ? 'customer' : 'unknown',
+                who: {
+                    speaker: turn.speakerLabelRaw,
+                    speakerLabel: turn.speakerLabelRaw,
+                    role: role,
+                },
+                span: {
+                    turnId: `turn-${turn.turnIndex}`,
+                    startChar: 0,
+                    endChar: turn.text.length,
+                },
+                modality: detectModality(turn.text),
+                entities,
+                normalized: {
+                    amount: entities.find(e => e.type === 'MONEY')?.normalized,
+                    date: entities.find(e => e.type === 'DATE')?.normalized,
+                },
+                slot,
+                anchors,
+                createdAt: new Date().toISOString(),
                 meta: {
                     speakerType: turn.speakerType,
                     speakerLabel: turn.speakerLabelRaw,
@@ -523,8 +753,8 @@ export function assertGraphInvariants(graph) {
     const failures = [];
     // Invariant 1: All contradiction edges must have same slotType/entityKey
     for (const edge of graph.edges.contradiction) {
-        if (!edge.slot || edge.slot.slotType === 'unknown') {
-            failures.push(`Contradiction edge ${edge.id} has unknown slot`);
+        if (!edge.slot || edge.slot.slotType === 'misc' || edge.slot.entityKey === 'unclassified') {
+            failures.push(`Contradiction edge ${edge.id} has misc/unclassified slot`);
         }
     }
     // Invariant 2: All edges must have rationale

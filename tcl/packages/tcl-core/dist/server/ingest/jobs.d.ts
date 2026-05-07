@@ -9,6 +9,7 @@ export interface CreateJobRequest {
     mode: IngestionMode;
     title?: string;
     channel?: string;
+    representativeId?: string | null;
     options?: {
         analyzeImmediately?: boolean;
     };
@@ -37,7 +38,7 @@ export interface JobStatusResponse {
 /**
  * Create a new ingestion job
  */
-export declare function createIngestionJob(orgId: string, projectId: string, env: string, userId: string, mode: IngestionMode, title?: string, channel?: string): Promise<string>;
+export declare function createIngestionJob(orgId: string, projectId: string, env: string, userId: string, mode: IngestionMode, title?: string, channel?: string, representativeId?: string | null): Promise<string>;
 /**
  * Upload files for a job
  * Uses Supabase Storage (streaming, no RAM buffering)

@@ -86,11 +86,11 @@ const upload = multer({
 /**
  * Create a new ingestion job
  */
-export async function createIngestionJob(orgId, projectId, env, userId, mode, title, channel) {
+export async function createIngestionJob(orgId, projectId, env, userId, mode, title, channel, representativeId) {
     if (!supabaseAdmin) {
         throw new Error('Database not configured');
     }
-    logUpload('debug', 'Creating job', { orgId, projectId, env, userId, mode, title, channel });
+    logUpload('debug', 'Creating job', { orgId, projectId, env, userId, mode, title, channel, representativeId });
     const { data, error } = await supabaseAdmin
         .from('ingestion_jobs')
         .insert({
@@ -101,6 +101,7 @@ export async function createIngestionJob(orgId, projectId, env, userId, mode, ti
         mode,
         title: title || null,
         channel: channel || null,
+        representative_id: representativeId || null,
         status: 'UPLOADED',
         progress_json: { stage: null, pct: 0 },
         result_json: { analysisRunId: null, verificationReportId: null },
@@ -452,13 +453,71 @@ export function registerIngestionJobRoutes(app) {
                 console.error('[CreateJob] Missing userId in context');
                 return res.status(401).json({ error: 'User ID not found in context' });
             }
-            if (!context.projectId) {
-                console.error('[CreateJob] Missing projectId in context');
-                return res.status(400).json({ error: 'Project ID not found in context' });
+            // Ensure project exists - create default if missing
+            let projectId = context.projectId || '';
+            if (!projectId || projectId.trim() === '') {
+                console.log('[CreateJob] No projectId in context, checking for existing projects...');
+                if (!supabaseAdmin) {
+                    return res.status(503).json({ error: 'Database not configured' });
+                }
+                // Check if org has any projects
+                const { data: existingProjects, error: projectsError } = await supabaseAdmin
+                    .from('projects')
+                    .select('id')
+                    .eq('org_id', context.orgId)
+                    .limit(1);
+                if (projectsError) {
+                    console.error('[CreateJob] Error checking for existing projects:', projectsError);
+                    return res.status(500).json({
+                        error: 'Failed to check for existing projects',
+                        details: projectsError.message
+                    });
+                }
+                if (existingProjects && existingProjects.length > 0) {
+                    projectId = existingProjects[0].id;
+                    console.log('[CreateJob] Using existing project:', projectId);
+                }
+                else {
+                    // Create default project
+                    console.log('[CreateJob] Creating default project for org:', context.orgId);
+                    const { data: newProject, error: projectError } = await supabaseAdmin
+                        .from('projects')
+                        .insert({
+                        org_id: context.orgId,
+                        name: 'Default Project',
+                        slug: 'default',
+                        is_default: true,
+                        description: 'Default project created automatically'
+                    })
+                        .select('id')
+                        .single();
+                    if (projectError || !newProject) {
+                        console.error('[CreateJob] Failed to create default project:', projectError);
+                        return res.status(500).json({
+                            error: 'Failed to create default project',
+                            details: projectError?.message || 'Unknown error'
+                        });
+                    }
+                    projectId = newProject.id;
+                    console.log('[CreateJob] Created default project:', projectId);
+                    // Create default environment for the project
+                    const { error: envError } = await supabaseAdmin
+                        .from('project_envs')
+                        .insert({
+                        project_id: projectId,
+                        env: 'sandbox',
+                        is_default: true,
+                        limits: { evaluations_per_month: 1000, conversations_per_month: 500 }
+                    });
+                    if (envError) {
+                        console.error('[CreateJob] Failed to create default environment:', envError);
+                        // Don't fail the request - project was created successfully
+                    }
+                }
             }
             console.log('[CreateJob] Context:', {
                 orgId: context.orgId,
-                projectId: context.projectId,
+                projectId: projectId,
                 env: context.env,
                 userId: context.userId,
             });
@@ -468,7 +527,7 @@ export function registerIngestionJobRoutes(app) {
                 return res.status(400).json({ error: `Invalid mode: ${body.mode}. Must be one of: TRANSCRIPT_ONLY, AUDIO_ONLY, AUDIO_PLUS_TRANSCRIPT` });
             }
             console.log('[CreateJob] Creating job with mode:', body.mode);
-            const jobId = await createIngestionJob(context.orgId, context.projectId, context.env || 'sandbox', context.userId, body.mode, body.title, body.channel);
+            const jobId = await createIngestionJob(context.orgId, projectId, context.env || 'sandbox', context.userId, body.mode, body.title, body.channel);
             console.log('[CreateJob] Job created successfully:', jobId);
             res.json({ jobId });
         }
@@ -772,37 +831,66 @@ export function registerIngestionJobRoutes(app) {
                 });
                 return res.status(403).json({ error: 'Access denied. Job belongs to a different organization.' });
             }
-            // Verify file exists in storage using download (strongest verification)
-            // This ensures the file is actually accessible, not just listed
-            const { data: fileContent, error: dlError } = await supabaseAdmin
-                .storage
-                .from(bucket)
-                .download(objectPath);
-            if (dlError) {
-                logError('FinalizeUpload', 'File not downloadable in storage', {
+            // Verify file exists in storage using a lightweight HEAD request
+            // This avoids downloading large files which can cause timeouts
+            // We'll use the storage API's info endpoint if available, otherwise skip verification
+            // (The frontend already verified the upload succeeded before calling this endpoint)
+            try {
+                // Try to get file info without downloading - use list with exact path match
+                const pathParts = objectPath.split('/');
+                const fileName = pathParts.pop() || '';
+                const directoryPath = pathParts.join('/') || '';
+                const { data: files, error: listError } = await supabaseAdmin
+                    .storage
+                    .from(bucket)
+                    .list(directoryPath, {
+                    limit: 1000,
+                });
+                if (!listError && files) {
+                    const fileExists = files.some((f) => f.name === fileName);
+                    if (!fileExists) {
+                        logError('FinalizeUpload', 'File not found in storage list', {
+                            bucket,
+                            objectPath,
+                            fileName,
+                            directoryPath
+                        });
+                        return res.status(400).json({
+                            error: 'STORAGE_VERIFY_FAILED',
+                            message: `File not found at ${bucket}/${objectPath}. Upload may have failed.`,
+                        });
+                    }
+                    const fileInfo = files.find((f) => f.name === fileName);
+                    if (fileInfo && fileInfo.metadata?.size === 0) {
+                        logError('FinalizeUpload', 'File exists but is empty', { bucket, objectPath });
+                        return res.status(400).json({
+                            error: 'STORAGE_VERIFY_FAILED',
+                            message: `File at ${bucket}/${objectPath} exists but is empty. Upload may have failed.`,
+                        });
+                    }
+                    logUpload('debug', 'File verified in storage', {
+                        bucket,
+                        objectPath,
+                        size: fileInfo?.metadata?.size || 'unknown',
+                    });
+                }
+                else {
+                    // If list fails, log warning but continue (frontend already verified upload)
+                    logUpload('warn', 'Could not verify file via list, continuing anyway', {
+                        bucket,
+                        objectPath,
+                        error: listError?.message,
+                    });
+                }
+            }
+            catch (verifyError) {
+                // If verification fails, log but continue (frontend already verified upload succeeded)
+                logUpload('warn', 'File verification error, continuing anyway', {
                     bucket,
                     objectPath,
-                    error: dlError.message,
-                });
-                return res.status(400).json({
-                    error: 'STORAGE_VERIFY_FAILED',
-                    message: `File not downloadable at ${bucket}/${objectPath}: ${dlError.message}. Upload likely failed or used wrong path encoding.`,
+                    error: verifyError.message,
                 });
             }
-            // Verify we got actual content (not empty)
-            if (!fileContent || (fileContent instanceof Blob && fileContent.size === 0)) {
-                logError('FinalizeUpload', 'File exists but is empty', { bucket, objectPath });
-                return res.status(400).json({
-                    error: 'STORAGE_VERIFY_FAILED',
-                    message: `File at ${bucket}/${objectPath} exists but is empty. Upload may have failed.`,
-                });
-            }
-            // File verified successfully
-            logUpload('debug', 'File verified in storage', {
-                bucket,
-                objectPath,
-                size: fileContent instanceof Blob ? fileContent.size : 'unknown',
-            });
             // Create asset record
             const assetType = kind === 'audio' ? 'AUDIO' : 'TRANSCRIPT_UPLOADED';
             const insertData = {
