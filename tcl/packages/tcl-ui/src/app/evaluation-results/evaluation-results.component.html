@@ -400,6 +400,24 @@
           </div>
         </div>
 
+        <div class="risk-detected-banner" *ngIf="(issueSummaryV2?.totalIssues || 0) > 0">
+          <mat-icon color="warn">warning</mat-icon>
+          <div class="banner-content">
+            <strong>High-risk truth / compliance issues detected</strong>
+            <span>{{ issueSummaryV2?.totalIssues }} issue(s) — review contradictions, unsupported policy language, and consent sequencing below.</span>
+          </div>
+        </div>
+
+        <div class="ci-subsection" *ngIf="getContradictionDisplayRows().length > 0">
+          <h4>Contradiction chains</h4>
+          <p class="muted intro">Claim pairs that conflict on coverage, approval, documents, or benefits.</p>
+          <div class="ci-item" *ngFor="let row of getContradictionDisplayRows()">
+            <p><strong>Earlier / A:</strong> “{{ row.textA | slice:0:220 }}{{ row.textA.length > 220 ? '…' : '' }}”</p>
+            <p><strong>Later / B:</strong> “{{ row.textB | slice:0:220 }}{{ row.textB.length > 220 ? '…' : '' }}”</p>
+            <p class="muted">Edge weight {{ row.weight | number:'1.2-2' }}</p>
+          </div>
+        </div>
+
         <!-- Issue Summary Grid (use issueSummaryV2) -->
         <div class="executive-grid" *ngIf="issueSummaryV2">
           <div class="exec-metric total" [class.zero-issues]="(issueSummaryV2?.totalIssues || 0) === 0">

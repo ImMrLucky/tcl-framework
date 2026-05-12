@@ -63,6 +63,17 @@ function isProtectqaCritical(t: string): boolean {
   return t.startsWith("PROTECTQA_") && /GUARANTEE|NO_RISK|APPROVAL_BEFORE|DAY_ONE|GUARANTEED_PAYOUT|HEALTH_DOES|AI_FINAL_APPROVAL/i.test(t);
 }
 
+/** Strongest of canonical severity vs display severity (post rankIssuesV2 both are meaningful). */
+function headlineSeverity(i: IssueV2): "low" | "medium" | "high" | "critical" {
+  const order: Record<string, number> = { low: 1, medium: 2, high: 3, critical: 4 };
+  const disp = i.severityDisplay ?? i.severity;
+  const rank = Math.max(order[i.severity] ?? 0, order[String(disp)] ?? 0);
+  if (rank >= 4) return "critical";
+  if (rank >= 3) return "high";
+  if (rank >= 2) return "medium";
+  return "low";
+}
+
 export function computeRiskAdjustedScores(input: RiskAdjustedScoreInput): RiskAdjustedScoreResult {
   const profile = input.profile ?? "generic";
   const disclosureCoverageRaw = clamp(input.disclosureCoverage ?? 100);
@@ -70,22 +81,24 @@ export function computeRiskAdjustedScores(input: RiskAdjustedScoreInput): RiskAd
   const speakerConfidenceRaw = clamp(input.speakerConfidence ?? 95);
   const businessValueScoreRaw = clamp(input.businessValueScore ?? 42);
   const unknownSpeakerRatio = input.unknownSpeakerRatio ?? 0;
-  const criticalCount = input.issues.filter(i => i.severity === "critical").length;
-  const highCount = input.issues.filter(i => i.severity === "high").length;
-  const mediumCount = input.issues.filter(i => i.severity === "medium").length;
-  const lowCount = input.issues.filter(i => i.severity === "low").length;
-  const protectqaCriticalCount = input.issues.filter(i => isProtectqaCritical(i.type) && i.severity === "critical").length;
+  const criticalCount = input.issues.filter(i => headlineSeverity(i) === "critical").length;
+  const highCount = input.issues.filter(i => headlineSeverity(i) === "high").length;
+  const mediumCount = input.issues.filter(i => headlineSeverity(i) === "medium").length;
+  const lowCount = input.issues.filter(i => headlineSeverity(i) === "low").length;
+  const protectqaCriticalCount = input.issues.filter(i => isProtectqaCritical(i.type) && headlineSeverity(i) === "critical").length;
   const criticalHallucination = input.issues.some(
-    i => i.severity === "critical" && /HALLUCIN|AI_HALLUCINATION|AI_UNSUPPORTED|HALLUCINATED_AUTHORITY/i.test(i.type)
+    i => headlineSeverity(i) === "critical" && /HALLUCIN|AI_HALLUCINATION|AI_UNSUPPORTED|HALLUCINATED_AUTHORITY/i.test(i.type)
   );
   const missingCarrierDisclosure = input.issues.some(
     i => i.type === "PROTECTQA_MISSING_CARRIER_APPROVAL_DISCLOSURE" || /MISSING.*CARRIER|carrier approval disclosure/i.test(i.what.issueSummary)
   );
   const guaranteedApprovalOrPayout = input.issues.some(
     i =>
-      i.severity === "critical" &&
+      headlineSeverity(i) === "critical" &&
       /GUARANTEED_APPROVAL|GUARANTEED_PAYOUT|PROTECTQA_GUARANTEED_APPROVAL|PROTECTQA_GUARANTEED_PAYOUT|PROTECTQA_NO_RISK_OF_DENIAL/i.test(i.type)
   );
+
+  const contradictionIssueCount = input.issues.filter(i => i.type === "CONTRADICTION").length;
 
   const scoringCapsApplied: string[] = [];
 
@@ -168,6 +181,17 @@ export function computeRiskAdjustedScores(input: RiskAdjustedScoreInput): RiskAd
   if (guaranteedApprovalOrPayout) {
     compliance = Math.min(compliance, 35);
     scoringCapsApplied.push("GUARANTEED_APPROVAL_OR_PAYOUT_COMPLIANCE_CAP");
+  }
+
+  if (contradictionIssueCount >= 2) {
+    factualTruth = Math.min(factualTruth, 52);
+    compliance = Math.min(compliance, 48);
+    tcl = Math.min(tcl, 48);
+    scoringCapsApplied.push("CONTRADICTION_ISSUES_GE_2");
+  } else if (contradictionIssueCount === 1) {
+    factualTruth = Math.min(factualTruth, 72);
+    compliance = Math.min(compliance, 68);
+    scoringCapsApplied.push("CONTRADICTION_ISSUES_EQ_1");
   }
 
   const level =

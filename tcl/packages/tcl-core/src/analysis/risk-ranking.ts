@@ -279,15 +279,27 @@ function scoreIssue(
   }
   
   // Apply category-based minimums (e.g., CONTRADICTION involving MONEY/FEES/REFUND => min "high")
-  severity = applyCategoryMinimums(severity, issue, config);
-  
-  // Step 7: Compute final severity (may be downgraded for transcript-only unverified claims)
-  const finalSeverity = computeSeverityDisplay(
-    severity,
+  let canonicalSeverity = applyCategoryMinimums(severity, issue, config);
+
+  // Domain packs attach explicit regulatory severities; do not let score-only derivation erase them.
+  const reasonsJoin = (issue.scoring?.reasons ?? []).join(" ");
+  if (/DOMAIN_PACK:/i.test(reasonsJoin)) {
+    const order: Record<string, number> = { low: 1, medium: 2, high: 3, critical: 4 };
+    const fromScore = order[canonicalSeverity] ?? 0;
+    const fromRule = order[issue.severity] ?? 0;
+    if (fromRule > fromScore) {
+      canonicalSeverity = issue.severity;
+    }
+  }
+
+  // Step 7: Display severity (may differ from canonical for transcript-only UNVERIFIED, etc.)
+  const severityDisplay = computeSeverityDisplay(
+    canonicalSeverity,
     issue.verification.level,
     issue.type,
     issue.compliance,
-    scoringContext
+    scoringContext,
+    issue
   );
   
   // MODE SAFETY: impact is UNCHANGED in transcript-only mode
@@ -305,9 +317,9 @@ function scoreIssue(
   // Step 8: Build scoring explanation (enterprise requirement)
   // scoringReasons already initialized above
   
-  // B2: Add reason if impact != severity
-  if (finalImpact === 'high' && finalSeverity !== 'high') {
-    scoringReasons.push(`High impact but ${finalSeverity} severity due to ${issue.verification.level === 'TRANSCRIPT_ONLY' ? 'transcript-only evidence level' : 'evidence limitations'}`);
+  // B2: Add reason if high impact but UI severity display is capped
+  if (finalImpact === 'high' && severityDisplay !== 'high') {
+    scoringReasons.push(`High impact but ${severityDisplay} display severity due to ${issue.verification.level === 'TRANSCRIPT_ONLY' ? 'transcript-only evidence level' : 'evidence limitations'}`);
   }
   
   // Impact reason
@@ -343,8 +355,8 @@ function scoreIssue(
   
   // Severity downgrade reason (only for UNVERIFIED types in transcript-only)
   if (scoringContext?.mode === 'transcript_only' && issue.verification.level === 'TRANSCRIPT_ONLY' && issue.type === 'UNVERIFIED_CLAIM') {
-    if (finalSeverity !== severity.toLowerCase() && finalSeverity !== severity) {
-      scoringReasons.push('Severity downgraded for unverified claim in transcript-only mode');
+    if (severityDisplay !== canonicalSeverity) {
+      scoringReasons.push('Display severity downgraded for unverified claim in transcript-only mode');
     }
   }
   
@@ -354,7 +366,8 @@ function scoreIssue(
     impact: finalImpact,
     riskScore,
     score,
-    severity: finalSeverity, // Canonical severity (may be downgraded for transcript-only unverified)
+    severity: canonicalSeverity,
+    severityDisplay,
     scoring: {
       components: {
         impact01: Math.round(impact01 * 1000) / 1000, // Round to 3 decimals

@@ -77,6 +77,12 @@ export type Claim = {
     participantId?: string;
     /** Speech-act type from claim extractor (ASSERTION, PROMISE, …) */
     claimType?: string;
+    /** Bracket timestamp from line prefix e.g. "[00:10]" */
+    timestamp?: string;
+    timestampMs?: number;
+    salienceScore?: number;
+    isSalient?: boolean;
+    dropReason?: string;
   };
   
   // Truth state derived from graph topology
@@ -397,7 +403,9 @@ export interface IssueV2 {
   type: IssueTypeV2;
   category: IssueCategoryV2;       // Legacy category (for backward compatibility)
   primaryCategory?: CanonicalCategory; // NEW: Canonical category (compliance, privacy_security, billing_financial, etc.)
-  severity: SeverityV2;            // Canonical severity (high/medium/low)
+  severity: SeverityV2;            // Canonical severity (impact + ranking; may include critical)
+  /** UI-oriented severity (maps critical→high; transcript-only may downshift UNVERIFIED) */
+  severityDisplay?: SeverityDisplayV2;
   impact: ImpactV2;                // How bad if true (not affected by mode)
   riskScore: number;               // 0..1 normalized (computed)
   score: number;                   // Numeric for sorting (0..100)
@@ -1334,6 +1342,12 @@ export interface AnalysisResultPayload {
     rulesSignalsApplied: string[];
     confidenceImpactNote: string;
   };
+  /** Full graph contradiction edges (claim id pairs) for UI chains */
+  contradictionEdgePairs?: ContradictionEdge[];
+  /** Count of salient claims sent to the graph */
+  salientClaimCount?: number;
+  /** High-risk agent claims without external documents in transcript-only mode */
+  unsupportedProductClaimIssues?: number;
 }
 
 export type ValidateOutput = {

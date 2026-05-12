@@ -1,6 +1,8 @@
 import { Claim } from "./types.js";
 import { mapSpeakerToRole, speakerRoleToDisplay, type SpeakerRole } from "./ingestion/speaker-role.js";
 import { countSpeakerLabelsInClaim, isContaminatedClaimText, sanitizeTranscriptForScoring } from "./ingestion/transcript-sanitizer.js";
+import { normalizeTranscript } from "./graph/transcript-normalizer.js";
+import { evaluateClaimSalience } from "./analysis/claim-salience.js";
 
 // ============================================================================
 // CLAIM TYPES: Speech-Act Classification
@@ -259,6 +261,8 @@ type Turn = {
   rawSpeaker: string;
   turnIndex: number;
   text: string;
+  timestampBracket?: string;
+  timestampMs?: number;
 };
 
 function splitSentences(text: string): string[] {
@@ -270,43 +274,51 @@ function splitSentences(text: string): string[] {
 }
 
 function splitTurns(text: string): Turn[] {
-  const sanitized = sanitizeTranscriptForScoring(text);
-  const lines = sanitized.text.split(/\n+/).map(l => l.trim()).filter(Boolean);
-  const turns: Turn[] = [];
-  let t = 0;
-
-  for (const ln of lines) {
-    let speaker: Speaker = "Other";
-    let body = ln;
-    let speakerType: SpeakerRole = "unknown";
-    let speakerLabel = "Unknown";
-    let rawSpeaker = "Unknown";
-
-    const match = ln.match(/^([A-Za-z][A-Za-z0-9_ -]{0,30})\s*:\s*(.*)$/);
-    if (match) {
-      rawSpeaker = match[1].trim();
-      body = match[2].trim();
-      const mapped = mapSpeakerToRole(rawSpeaker);
-      speakerType = mapped.role;
-      speakerLabel = rawSpeaker;
-      const display = speakerRoleToDisplay(speakerType);
-      speaker = display === "Agent" || display === "Supervisor"
-        ? "Agent"
-        : display === "Customer"
-          ? "Customer"
-          : "Other";
-    }
-
-    if (body.length > 0) {
-      turns.push({ speaker, speakerType, speakerLabel, rawSpeaker, turnIndex: t++, text: body });
-    }
-  }
-
-  return turns;
+  const normalized = normalizeTranscript(text);
+  return normalized
+    .map(n => {
+      const st = n.speakerType;
+      const display = speakerRoleToDisplay(
+        st === "supervisor"
+          ? "supervisor"
+          : st === "bot"
+            ? "bot"
+            : st === "system"
+              ? "system"
+              : st === "customer"
+                ? "customer"
+                : st === "agent"
+                  ? "agent"
+                  : "unknown"
+      );
+      const speaker: Speaker =
+        display === "Agent" || display === "Supervisor" ? "Agent" : display === "Customer" ? "Customer" : "Other";
+      return {
+        speaker,
+        speakerType: st,
+        speakerLabel: n.speakerLabelRaw,
+        rawSpeaker: n.speakerLabelRaw,
+        turnIndex: n.turnIndex,
+        text: n.text,
+        timestampBracket: n.timestampBracket,
+        timestampMs: n.timestampMs,
+      };
+    })
+    .filter(t => t.text.length > 0);
 }
 
 function isTranscript(text: string): boolean {
-  return /^(Agent|Customer|Rep|Representative|Advisor|Producer|Caller|Client|Prospect|Lead|Consumer|Senior|Bot|System):/im.test(text);
+  const lines = (text || "")
+    .split(/\n+/)
+    .map(l => l.trim())
+    .filter(Boolean);
+  if (lines.length === 0) return false;
+  let labeled = 0;
+  for (const ln of lines.slice(0, 40)) {
+    if (/^\[[\d:]+\]\s*[^:]+:\s*\S/.test(ln)) labeled++;
+    else if (/^[A-Za-z][^:\n]{0,80}:\s*\S/.test(ln)) labeled++;
+  }
+  return labeled >= 1;
 }
 
 // ============================================================================
@@ -374,28 +386,34 @@ export function extractClaimsWithTypes(text: string): ExtractClaimsResult {
         const claimType = classifyClaimType(sentence, turn.speaker);
         const isAuditable = isAuditableClaimType(claimType);
         const topics = extractTopics(sentence);
-        
+        const salience = evaluateClaimSalience(sentence, claimType);
+
         stats.total++;
         stats.byType[claimType]++;
-        
+
         const item: ExtractedClaim = {
           id: `c${claimIdx++}`,
           text: sentence,
           // NO hard-coded confidence - will be computed by NLI/graph
-          confidence: 0,  // Placeholder, computed later from NLI scores
+          confidence: 0, // Placeholder, computed later from NLI scores
           evidence: [],
           meta: {
             speaker: turn.speaker,
             speakerType: turn.speakerType,
             speakerLabel: turn.speakerLabel,
             rawSpeaker: turn.rawSpeaker,
-            turnIndex: turn.turnIndex
+            turnIndex: turn.turnIndex,
+            timestamp: turn.timestampBracket,
+            timestampMs: turn.timestampMs,
+            isSalient: salience.isSalient,
+            salienceScore: salience.salienceScore,
+            dropReason: salience.dropReason,
           },
           claimType,
           isAuditable,
           topicTags: topics,
           hasAbsoluteLanguage: hasAbsoluteLanguage(sentence),
-          hasMoney: hasMoney(sentence)
+          hasMoney: hasMoney(sentence),
         };
         
         allItems.push(item);
@@ -418,20 +436,26 @@ export function extractClaimsWithTypes(text: string): ExtractClaimsResult {
       const claimType = classifyClaimType(sentence);
       const isAuditable = isAuditableClaimType(claimType);
       const topics = extractTopics(sentence);
-      
+      const salience = evaluateClaimSalience(sentence, claimType);
+
       stats.total++;
       stats.byType[claimType]++;
-      
+
       const item: ExtractedClaim = {
         id: `c${claimIdx++}`,
         text: sentence,
-        confidence: 0,  // Computed later
+        confidence: 0, // Computed later
         evidence: [],
+        meta: {
+          isSalient: salience.isSalient,
+          salienceScore: salience.salienceScore,
+          dropReason: salience.dropReason,
+        },
         claimType,
         isAuditable,
         topicTags: topics,
         hasAbsoluteLanguage: hasAbsoluteLanguage(sentence),
-        hasMoney: hasMoney(sentence)
+        hasMoney: hasMoney(sentence),
       };
       
       allItems.push(item);
@@ -444,8 +468,8 @@ export function extractClaimsWithTypes(text: string): ExtractClaimsResult {
     }
   }
   
-  // Only include auditable claims in the main output
-  const claims = allItems.filter(c => c.isAuditable);
+  // Auditable + salient claims feed the graph; non-salient stays in allItems for diagnostics only
+  const claims = allItems.filter(c => c.isAuditable && c.meta?.isSalient !== false);
   
   console.log(`  Extracted ${stats.total} items total`);
   console.log(`  Auditable claims: ${stats.auditable} (for graph)`);

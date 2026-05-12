@@ -1875,6 +1875,21 @@ getMetricTooltip(metric: string): string {
     };
   }
 
+  getContradictionDisplayRows(): Array<{ textA: string; textB: string; weight: number }> {
+    const edges = (this.evaluation?.report?.graph?.contradictions || []) as Array<{
+      claimA: string;
+      claimB: string;
+      weight?: number;
+    }>;
+    const claims = (this.evaluation?.report?.claims || []) as Array<{ id: string; text: string }>;
+    const byId = new Map(claims.map(c => [c.id, c.text]));
+    return edges.slice(0, 40).map(e => ({
+      textA: (byId.get(e.claimA) as string) || e.claimA,
+      textB: (byId.get(e.claimB) as string) || e.claimB,
+      weight: typeof e.weight === "number" ? e.weight : 0,
+    }));
+  }
+
   getCounts() {
     const counts = this.evaluation?.scores?.counts || {};
     
@@ -1883,8 +1898,19 @@ getMetricTooltip(metric: string): string {
       const claims = this.evaluation?.report?.inputs?.claims || 
                      this.evaluation?.report?.claims || [];
       // Use IssueV2 data if available, otherwise use report counts
-      const contradictedCount = this.allIssuesV2.filter(i => i.type === 'CONTRADICTION').length;
-      const ungroundedCount = this.allIssuesV2.filter(i => i.verification?.level === 'NONE' || !i.verification).length;
+      const contradictedCount = Math.max(
+        this.allIssuesV2.filter(i => i.type === "CONTRADICTION").length,
+        (this.evaluation?.report?.graph?.contradictions || []).length
+      );
+      const ungroundedCount = this.allIssuesV2.filter(i => {
+        const t = String(i.type);
+        return (
+          t === "UNGROUNDED" ||
+          t === "UNSUPPORTED_PRODUCT_CLAIM" ||
+          t === "UNSUPPORTED_CLAIM" ||
+          i.verification?.level === "NONE"
+        );
+      }).length;
       const reportCounts = this.evaluation?.report?.scores?.counts || {};
       const contradictedIssues = { length: contradictedCount || reportCounts.contradicted || 0 };
       const ungroundedIssues = { length: ungroundedCount || reportCounts.ungrounded || 0 };

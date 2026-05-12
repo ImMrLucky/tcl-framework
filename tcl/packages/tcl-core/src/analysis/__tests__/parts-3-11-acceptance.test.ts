@@ -16,8 +16,8 @@ Agent: There is a two-year waiting period on the graded benefit before the full 
       options: { spectral: false, analysisTemplateId: "general_conversation_integrity" },
     });
     const contradictions = out.report?.graph?.contradictions?.length ?? 0;
-    expect(contradictions).toBeGreaterThanOrEqual(0);
-    expect(out.analysisResult?.issuesV2?.length ?? 0).toBeGreaterThanOrEqual(0);
+    const issues = out.analysisResult?.issuesV2?.length ?? out.report?.allIssuesV2?.length ?? 0;
+    expect(contradictions + issues).toBeGreaterThan(0);
   });
 
   it("unsupported / compliance-style issue when claiming guaranteed approval without evidence", async () => {

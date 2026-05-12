@@ -44,6 +44,8 @@ export interface User {
 })
 export class AuthService {
   private supabase: SupabaseClient;
+  /** Must match `createClient` `auth.storageKey` for the lifetime of this service (never re-read URL per call). */
+  private readonly authStorageKey: string;
   private currentUserSubject = new BehaviorSubject<User | null>(null);
   public currentUser$ = this.currentUserSubject.asObservable();
   private inactivityTimer: any = null;
@@ -60,6 +62,7 @@ export class AuthService {
   constructor(private router: Router, private http: HttpClient) {
     const supabaseUrl = readWindowSupabaseUrl();
     const supabaseAnonKey = readWindowSupabaseAnonKey();
+    this.authStorageKey = supabaseUrl ? supabaseStorageKeyFromUrl(supabaseUrl) : 'sb-auth-token';
     if (!supabaseUrl || !supabaseAnonKey) {
       console.warn(
         '[Auth] Missing window.__SUPABASE_URL or window.__SUPABASE_ANON_KEY. For Netlify set SUPABASE_URL + SUPABASE_ANON_KEY env vars (build generates src/assets/supabase-env.js). Locally use packages/tcl-ui/.env.supabase or export those vars before npm start. See packages/tcl-ui/README.md.'
@@ -78,7 +81,7 @@ export class AuthService {
           autoRefreshToken: true,
           persistSession: true,
           detectSessionInUrl: true,
-          storageKey: supabaseUrl ? supabaseStorageKeyFromUrl(supabaseUrl) : 'sb-auth-token',
+          storageKey: this.authStorageKey,
           // Use localStorage for persistent sessions (recommended for better UX)
           // Change to sessionStorage if you want session-only auth
           storage: typeof window !== 'undefined' ? window.localStorage : undefined,
@@ -114,42 +117,48 @@ export class AuthService {
     this.setupActivityTracking();
 
     this.supabase.auth.onAuthStateChange(async (event, session) => {
-      // Handle SIGNED_OUT event explicitly
-      if (event === 'SIGNED_OUT' || !session) {
+      if (event === 'SIGNED_OUT') {
+        this.clearInactivityTimer();
         this.currentUserSubject.next(null);
         return;
       }
-      
-      if (session?.user) {
-        // User is logged in, start inactivity timer
+
+      if (!session) {
+        // Only treat INITIAL_SESSION + no session as logged out. Other events can briefly pass null;
+        // clearing here races with password login and breaks AuthGuard / redirect.
+        if (event === 'INITIAL_SESSION') {
+          this.clearInactivityTimer();
+          this.currentUserSubject.next(null);
+        }
+        return;
+      }
+
+      if (session.user) {
         this.resetInactivityTimer();
-        
-        // Set basic user immediately so UI updates right away
+
         const basicUser: User = {
           id: session.user.id,
           email: session.user.email || undefined,
-          fullName: session.user.user_metadata?.['full_name'] as string | undefined
+          fullName: session.user.user_metadata?.['full_name'] as string | undefined,
         };
         this.currentUserSubject.next(basicUser);
-        
-        // Ensure session is persisted to localStorage
-        // Supabase should do this automatically, but we'll verify
-        if (session.access_token) {
-          // Session is available, it should be in localStorage
-          // The getAccessToken() method will retrieve it from there
-        }
-        
-        // Then load full profile in background
+
         try {
           await this.loadUserProfile(session.user.id);
-        } catch (err: any) {
-          // Keep the basic user even if profile load fails
-          // User is still logged in, just without profile data
+        } catch {
+          /* keep basic user */
         }
-      } else {
-        // No session - clear user state and timer
-        this.clearInactivityTimer();
-        this.currentUserSubject.next(null);
+      } else if (session.access_token) {
+        const who = this.userFromAccessToken(session.access_token);
+        if (who) {
+          this.resetInactivityTimer();
+          this.currentUserSubject.next({ id: who.id, email: who.email });
+          try {
+            await this.loadUserProfile(who.id);
+          } catch {
+            /* keep minimal user */
+          }
+        }
       }
     });
 
@@ -212,10 +221,9 @@ export class AuthService {
     }, 100);
   }
 
-  /** Must match `createClient` auth.storageKey so localStorage reads/writes align. */
+  /** Same key the Supabase client was constructed with. */
   private getAuthStorageKey(): string {
-    const supabaseUrl = readWindowSupabaseUrl();
-    return supabaseUrl ? supabaseStorageKeyFromUrl(supabaseUrl) : 'sb-auth-token';
+    return this.authStorageKey;
   }
 
   /**
@@ -315,6 +323,11 @@ export class AuthService {
    * Returns true if user has a valid session, false otherwise
    */
   async checkSession(): Promise<boolean> {
+    // Right after signIn, in-memory user is set before navigation; avoid slow getSession if storage is valid.
+    if (this.currentUserSubject.value?.id && this.getValidSessionFromStorage()?.access_token) {
+      return true;
+    }
+
     if (this.hydrateUserFromStorageIfPresent()) {
       return true;
     }
@@ -518,7 +531,7 @@ export class AuthService {
       this.resetSessionTimer();
       this.ensureUserProvisioned(fromJwt.id, fromJwt.email || email);
       this.loadUserProfileAsync(fromJwt.id);
-      await this.syncSupabaseSessionProbe(5000);
+      void this.syncSupabaseSessionProbe(5000);
       return { error: null, duplicateAccount: false };
     }
 
@@ -535,7 +548,7 @@ export class AuthService {
     this.ensureUserProvisioned(user.id, user.email || '');
     this.loadUserProfileAsync(user.id);
 
-    await this.syncSupabaseSessionProbe(5000);
+    void this.syncSupabaseSessionProbe(5000);
 
     return { error: null, duplicateAccount: false };
   }
@@ -1080,9 +1093,11 @@ export class AuthService {
         return session.access_token;
       }
     } catch (err: any) {
-      // Error getting session or timeout - clear expired session
       console.warn('[Auth] getSession failed or timed out in getAccessToken:', err?.message);
-      this.clearExpiredSession();
+      const cached = this.getValidSessionFromStorage();
+      if (cached?.access_token) {
+        return cached.access_token;
+      }
     }
     
     return null;

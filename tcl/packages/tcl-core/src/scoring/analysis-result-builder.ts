@@ -3,6 +3,7 @@ import type {
   AnalysisResultPayload,
   Claim,
   ClaimTimelineEventV2,
+  ContradictionEdge,
   EvidenceCoverageStatsV2,
   EvidenceRefViewV2,
   IssueV2,
@@ -101,6 +102,9 @@ export function buildAnalysisResultPayload(args: {
   transcriptQuality01: number;
   speakerConfidence01: number;
   contradictionClarity01: number;
+  contradictionEdgePairs?: ContradictionEdge[];
+  salientClaimCount?: number;
+  unsupportedProductClaimIssueCount?: number;
 }): AnalysisResultPayload {
   const enriched = enrichIssuesWithEvidence(args.detectorIssues, args.claims);
   const criticalCompliance = enriched.filter(i => i.severity === "critical" && i.category === "compliance").length;
@@ -199,5 +203,8 @@ export function buildAnalysisResultPayload(args: {
       confidenceImpactNote:
         "Template weights adjust how much compliance vs. integrity moves the composite; they do not inject fixed confidence constants.",
     },
+    contradictionEdgePairs: args.contradictionEdgePairs,
+    salientClaimCount: args.salientClaimCount ?? args.claims.filter(c => c.meta?.isSalient !== false).length,
+    unsupportedProductClaimIssues: args.unsupportedProductClaimIssueCount ?? 0,
   };
 }

@@ -1360,6 +1360,40 @@
   opacity: 0.9;
 }
 
+.risk-detected-banner {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 16px 20px;
+  background: linear-gradient(135deg, #b45309, #92400e);
+  color: #fffbeb;
+  border-radius: 12px;
+  margin-bottom: 20px;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+}
+
+.risk-detected-banner mat-icon {
+  font-size: 32px;
+  width: 32px;
+  height: 32px;
+}
+
+.risk-detected-banner .banner-content {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.risk-detected-banner .banner-content strong {
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.risk-detected-banner .banner-content span {
+  font-size: 14px;
+  opacity: 0.95;
+}
+
 /* Zero Issues Styling */
 .exec-metric.zero-issues .exec-value {
   color: #10b981;
