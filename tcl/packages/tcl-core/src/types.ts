@@ -1309,14 +1309,29 @@ export interface EvidenceCoverageStatsV2 {
   /** No grounding edge to transcript evidence */
   ungrounded: number;
   contradicted: number;
+  /** Salient claims sent to graph / risk detectors */
+  salientClaims?: number;
+  /** High-risk unsupported product / transcript-only policy issues (issue count) */
+  unsupportedHighRisk?: number;
   sourcesUsed: Array<{ sourceType: string; count: number }>;
 }
 
 export interface ClaimTimelineEventV2 {
   claimId: string;
   turnIndex?: number;
+  /** Raw or display speaker label when available */
+  speaker?: string;
+  speakerLabel?: string;
+  timestamp?: string;
   label: "claimed" | "repeated" | "contradicted" | "drifted" | "unsupported" | "flagged";
   textPreview: string;
+  isSalient?: boolean;
+}
+
+export interface AnalysisRunConfidenceV2 {
+  confidence: number;
+  confidenceBand: "low" | "medium" | "high";
+  confidenceComponents: Array<{ name: string; value: number; weight: number; reason: string }>;
 }
 
 export interface AnalysisResultPayload {
@@ -1348,6 +1363,8 @@ export interface AnalysisResultPayload {
   salientClaimCount?: number;
   /** High-risk agent claims without external documents in transcript-only mode */
   unsupportedProductClaimIssues?: number;
+  /** Run-level analysis confidence (inputs explicit; matches calibration formula) */
+  runConfidence?: AnalysisRunConfidenceV2;
 }
 
 export type ValidateOutput = {

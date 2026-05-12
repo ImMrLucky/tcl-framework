@@ -10,7 +10,7 @@ import type {
 } from "../types.js";
 import type { IndustryTemplateDefinition } from "../templates/template-types.js";
 import type { RiskAdjustedScoreResult } from "../analysis/risk-adjusted-scoring.js";
-import { calibrateAnalysisConfidence } from "./confidence-calibration.js";
+import { calibrateAnalysisConfidence, buildRunConfidenceCalibration } from "./confidence-calibration.js";
 import { buildComplianceMetric } from "./compliance-score.js";
 import { buildContradictionMetric } from "./contradiction-score.js";
 import { buildDriftMetric } from "./drift-score.js";
@@ -75,11 +75,19 @@ function buildClaimTimeline(issues: IssueV2[], claims: Claim[]): ClaimTimelineEv
     else if (related.some(i => /DRIFT|COMMITMENT_ESCALATION/i.test(i.type))) label = "drifted";
     else if (related.some(i => /UNSUPPORTED|UNVERIFIED|UNGROUNDED/i.test(i.type))) label = "unsupported";
     else if (related.length > 1) label = "flagged";
+
+    const salient = c.meta?.isSalient !== false;
+    if (!salient && label === "claimed") continue;
+
     out.push({
       claimId: c.id,
       turnIndex: c.meta?.turnIndex,
+      speaker: c.meta?.speaker,
+      speakerLabel: c.meta?.speakerLabel ?? c.meta?.rawSpeaker,
+      timestamp: c.meta?.timestamp,
       label,
       textPreview: c.text.length > 120 ? `${c.text.slice(0, 117)}…` : c.text,
+      isSalient: salient,
     });
   }
   return out.slice(0, 80);
@@ -122,12 +130,34 @@ export function buildAnalysisResultPayload(args: {
     conflictingSignals: args.truthSummary.contradicted + args.contradictionEdges,
   });
 
+  const runConfidence = buildRunConfidenceCalibration({
+    transcriptQuality01: args.transcriptQuality01,
+    speakerConfidence01: args.speakerConfidence01,
+    hasExternalEvidence: args.hasExternalEvidence,
+    evidenceMatchStrength01: Math.min(
+      1,
+      args.truthSummary.supported / Math.max(1, args.truthSummary.total) + (args.hasExternalEvidence ? 0.25 : 0)
+    ),
+    contradictionClarity01: args.contradictionClarity01,
+    ruleSpecificity01: Math.min(1, Object.keys(args.industry.scoringWeights).length / 6),
+    supportingSignals: args.truthSummary.supported + args.truthSummary.unverified,
+    conflictingSignals: args.truthSummary.contradicted + args.contradictionEdges,
+  });
+
+  const salientCount =
+    args.salientClaimCount ?? args.claims.filter(c => c.meta?.isSalient !== false).length;
+  const unsupportedHigh =
+    args.unsupportedProductClaimIssueCount ??
+    enriched.filter(i => /UNSUPPORTED_PRODUCT|UNSUPPORTED_POLICY/i.test(i.type)).length;
+
   const evidenceStats: EvidenceCoverageStatsV2 = {
     claimsExtracted: args.claims.length,
     supported: args.truthSummary.supported,
     unverified: args.truthSummary.unverified,
     ungrounded: args.truthSummary.ungrounded,
     contradicted: args.truthSummary.contradicted,
+    salientClaims: salientCount,
+    unsupportedHighRisk: unsupportedHigh,
     sourcesUsed: [
       { sourceType: "transcript", count: args.truthSummary.total },
       ...(args.hasExternalEvidence ? [{ sourceType: "uploaded_evidence", count: 1 }] : []),
@@ -206,5 +236,6 @@ export function buildAnalysisResultPayload(args: {
     contradictionEdgePairs: args.contradictionEdgePairs,
     salientClaimCount: args.salientClaimCount ?? args.claims.filter(c => c.meta?.isSalient !== false).length,
     unsupportedProductClaimIssues: args.unsupportedProductClaimIssueCount ?? 0,
+    runConfidence,
   };
 }

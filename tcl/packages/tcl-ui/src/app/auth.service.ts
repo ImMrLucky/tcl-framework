@@ -58,6 +58,8 @@ export class AuthService {
   private lastActivityTime = Date.now();
   private sessionStartTime = Date.now();
   private lastReauthTime: number | null = null;
+  /** Same-tab password login: storage can lag behind in-memory session; brief guard bypass. */
+  private loginSessionGraceUntil: { userId: string; until: number } | null = null;
 
   constructor(private router: Router, private http: HttpClient) {
     const supabaseUrl = readWindowSupabaseUrl();
@@ -323,9 +325,65 @@ export class AuthService {
    * Returns true if user has a valid session, false otherwise
    */
   async checkSession(): Promise<boolean> {
-    // Right after signIn, in-memory user is set before navigation; avoid slow getSession if storage is valid.
-    if (this.currentUserSubject.value?.id && this.getValidSessionFromStorage()?.access_token) {
-      return true;
+    const uid = this.currentUserSubject.value?.id;
+    if (uid) {
+      if (this.getValidSessionFromStorage()?.access_token) {
+        return true;
+      }
+
+      const grace = this.loginSessionGraceUntil;
+      if (grace && grace.userId === uid && Date.now() < grace.until) {
+        try {
+          const raced = await Promise.race([
+            this.supabase.auth.getSession(),
+            new Promise<{ data: { session: null } }>((res) =>
+              setTimeout(() => res({ data: { session: null } }), 2500)
+            ),
+          ]);
+          const session = (raced as any)?.data?.session;
+          if (session?.access_token) {
+            return true;
+          }
+        } catch {
+          /* fall through to grace */
+        }
+        return true;
+      }
+
+      try {
+        const raced = await Promise.race([
+          this.supabase.auth.getSession(),
+          new Promise<{ data: { session: null } }>((res) =>
+            setTimeout(() => res({ data: { session: null } }), 2500)
+          ),
+        ]);
+        const session = (raced as any)?.data?.session;
+        if (session?.access_token) {
+          const expiresAt = session.expires_at;
+          if (expiresAt && expiresAt * 1000 < Date.now()) {
+            return false;
+          }
+          if (!this.currentUserSubject.value && session.user) {
+            this.currentUserSubject.next({
+              id: session.user.id,
+              email: session.user.email || undefined,
+            });
+            this.loadUserProfileAsync(session.user.id);
+          } else if (!this.currentUserSubject.value && session.access_token) {
+            const who = this.userFromAccessToken(session.access_token);
+            if (who) {
+              this.currentUserSubject.next({ id: who.id, email: who.email });
+              this.loadUserProfileAsync(who.id);
+            }
+          }
+          return true;
+        }
+      } catch (err) {
+        console.warn('[Auth] Session check failed or timed out in checkSession:', err);
+        if (this.hydrateUserFromStorageIfPresent()) {
+          return true;
+        }
+      }
     }
 
     if (this.hydrateUserFromStorageIfPresent()) {
@@ -528,6 +586,7 @@ export class AuthService {
         id: fromJwt.id,
         email: fromJwt.email,
       });
+      this.loginSessionGraceUntil = { userId: fromJwt.id, until: Date.now() + 120_000 };
       this.resetSessionTimer();
       this.ensureUserProvisioned(fromJwt.id, fromJwt.email || email);
       this.loadUserProfileAsync(fromJwt.id);
@@ -540,6 +599,7 @@ export class AuthService {
       id: user.id,
       email: user.email
     });
+    this.loginSessionGraceUntil = { userId: user.id, until: Date.now() + 120_000 };
 
     // Reset session timers for new login
     this.resetSessionTimer();
@@ -612,6 +672,7 @@ export class AuthService {
     this.clearInactivityTimer();
     
     // STEP 2: Clear user state immediately (UI updates)
+    this.loginSessionGraceUntil = null;
     this.currentUserSubject.next(null);
     
     // STEP 3: Clear all localStorage (including Supabase auth tokens and user-specific data)

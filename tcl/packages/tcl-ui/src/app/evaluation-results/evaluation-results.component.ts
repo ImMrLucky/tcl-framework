@@ -2098,6 +2098,70 @@ getMetricTooltip(metric: string): string {
     return ecs && typeof ecs === 'object' ? (ecs as Record<string, unknown>) : null;
   }
 
+  /** Prefer report atomic issues; fall back to `analysisResult.issuesV2` when API only returns payload. */
+  getIssuesV2Merged(): IssueV2[] {
+    if (this.allIssuesV2.length > 0) return this.allIssuesV2;
+    const raw = this.analysisPayload?.['issuesV2'];
+    return Array.isArray(raw) ? (raw as IssueV2[]) : [];
+  }
+
+  getRunConfidenceRecord(): Record<string, unknown> | null {
+    const rc = this.analysisPayload?.['runConfidence'];
+    return rc && typeof rc === 'object' ? (rc as Record<string, unknown>) : null;
+  }
+
+  getRunConfidenceComponents(): Record<string, unknown>[] {
+    const rc = this.getRunConfidenceRecord();
+    const arr = rc?.['confidenceComponents'];
+    return Array.isArray(arr) ? (arr as Record<string, unknown>[]) : [];
+  }
+
+  /** High-risk transcript-only / unsupported policy rows for the executive panel. */
+  getUnsupportedIssuesForExecutive(): IssueV2[] {
+    const issues = this.getIssuesV2Merged();
+    return issues.filter(i => {
+      const t = String(i.type);
+      return (
+        t.includes('UNSUPPORTED') ||
+        t === 'UNVERIFIED_CLAIM' ||
+        t === 'UNGROUNDED' ||
+        (i.verification?.level === 'TRANSCRIPT_ONLY' &&
+          /guarantee|approval|coverage|waiting|underwriting|policy|premium|enroll|packet|benefit/i.test(
+            `${i.what?.issueSummary || ''} ${i.what?.claimText || ''}`
+          ))
+      );
+    });
+  }
+
+  private severityRank(s: string | undefined): number {
+    const x = (s || '').toLowerCase();
+    if (x === 'critical') return 4;
+    if (x === 'high') return 3;
+    if (x === 'medium') return 2;
+    return 1;
+  }
+
+  /** Top 3 atomic issues for headline summary (severity × score). */
+  getExecutiveTopIssues(): IssueV2[] {
+    const issues = this.getIssuesV2Merged();
+    if (issues.length === 0) return [];
+    const sorted = [...issues].sort((a, b) => {
+      const ra = this.severityRank(a.severity) * 100 + (a.score ?? (a.riskScore ?? 0) * 100);
+      const rb = this.severityRank(b.severity) * 100 + (b.score ?? (b.riskScore ?? 0) * 100);
+      return rb - ra;
+    });
+    return sorted.slice(0, 3);
+  }
+
+  getExecutiveIssueSpeaker(issue: IssueV2): string {
+    const w = issue.who;
+    const label = w?.speakerLabel || w?.speaker;
+    if (label && String(label).trim()) return String(label);
+    if (w?.speaker === 'AGENT') return 'Agent';
+    if (w?.speaker === 'CUSTOMER') return 'Customer';
+    return '—';
+  }
+
   getTemplatePanelRecord(): Record<string, unknown> | null {
     const tp = this.analysisPayload?.['templatePanel'];
     return tp && typeof tp === 'object' ? (tp as Record<string, unknown>) : null;

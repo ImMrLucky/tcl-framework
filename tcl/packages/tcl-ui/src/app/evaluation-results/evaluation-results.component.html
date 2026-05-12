@@ -205,6 +205,20 @@
             </p>
           </div>
 
+          <div class="run-confidence-block" *ngIf="getRunConfidenceRecord() as rc">
+            <h5>Run confidence (calibrated)</h5>
+            <p class="rc-line">
+              Score <strong>{{ formatAnalysisConfidence(rc['confidence']) }}%</strong>
+              · band <strong>{{ rc['confidenceBand'] }}</strong>
+              <span class="muted"> (higher = more trust in automated signals for this run)</span>
+            </p>
+            <ul class="comp-list rc-components" *ngIf="getRunConfidenceComponents().length">
+              <li *ngFor="let comp of getRunConfidenceComponents()">
+                <strong>{{ comp['name'] }}</strong> (w={{ comp['weight'] }}) — {{ comp['reason'] }} → {{ $any(comp['value']) | number:'1.0-2' }}
+              </li>
+            </ul>
+          </div>
+
           <div class="engine-metric-grid">
             <ng-container *ngFor="let row of analysisEnginePanels">
               <div class="metric-wrap" *ngIf="getAnalysisMetric(row.key) as met">
@@ -231,11 +245,13 @@
           <div class="evidence-coverage-block" *ngIf="getEvidenceCoverageStatsRecord() as ecs">
             <h5>Truth &amp; evidence counts</h5>
             <p class="coverage-line">
-              <strong>{{ $any(ecs)['claimsExtracted'] }}</strong> claims ·
+              <strong>{{ $any(ecs)['claimsExtracted'] }}</strong> claims extracted ·
+              <strong>{{ $any(ecs)['salientClaims'] ?? '—' }}</strong> salient ·
               externally supported <strong>{{ $any(ecs)['supported'] }}</strong> ·
               transcript-grounded <strong>{{ $any(ecs)['unverified'] ?? '—' }}</strong> ·
               ungrounded <strong>{{ $any(ecs)['ungrounded'] ?? $any(ecs)['unsupported'] ?? '—' }}</strong> ·
               contradicted <strong>{{ $any(ecs)['contradicted'] }}</strong>
+              <span *ngIf="$any(ecs)['unsupportedHighRisk'] != null"> · high-risk unsupported issues <strong>{{ $any(ecs)['unsupportedHighRisk'] }}</strong></span>
             </p>
             <div class="sources-used" *ngIf="$any(ecs)['sourcesUsed']?.length">
               <span class="muted">Sources in view:</span>
@@ -281,18 +297,19 @@
           <mat-expansion-panel class="claim-timeline-panel" *ngIf="getAnalysisClaimTimeline().length">
             <mat-expansion-panel-header>
               <mat-panel-title>Claim timeline</mat-panel-title>
-              <mat-panel-description>Per-claim label from graph + issues (up to 80)</mat-panel-description>
+              <mat-panel-description>Salient / flagged claims with speaker and status</mat-panel-description>
             </mat-expansion-panel-header>
             <table class="claim-timeline-table">
               <thead>
-                <tr><th>Turn</th><th>Label</th><th>Claim</th><th>Id</th></tr>
+                <tr><th>Time</th><th>Turn</th><th>Speaker</th><th>Label</th><th>Claim</th></tr>
               </thead>
               <tbody>
                 <tr *ngFor="let ev of getAnalysisClaimTimeline()">
+                  <td class="tl-time">{{ ev['timestamp'] || '—' }}</td>
                   <td>{{ ev['turnIndex'] ?? '—' }}</td>
+                  <td>{{ ev['speakerLabel'] || ev['speaker'] || '—' }}</td>
                   <td><span class="tl-label" [attr.data-lbl]="ev['label']">{{ ev['label'] }}</span></td>
                   <td class="tl-text">{{ ev['textPreview'] }}</td>
-                  <td class="tl-id muted">{{ ev['claimId'] }}</td>
                 </tr>
               </tbody>
             </table>
@@ -391,8 +408,8 @@
         <mat-card-subtitle>Truth, compliance, and risk at a glance</mat-card-subtitle>
       </mat-card-header>
       <mat-card-content>
-        <!-- Clean Transcript Banner - show when 0 issues -->
-        <div class="clean-transcript-banner" *ngIf="(issueSummaryV2?.totalIssues || 0) === 0">
+        <!-- Clean Transcript Banner - show when 0 issues (atomic + summary) -->
+        <div class="clean-transcript-banner" *ngIf="(getIssuesV2Merged().length || issueSummaryV2?.totalIssues || 0) === 0">
           <mat-icon>check_circle</mat-icon>
           <div class="banner-content">
             <strong>No prioritized risk flags</strong>
@@ -400,11 +417,43 @@
           </div>
         </div>
 
-        <div class="risk-detected-banner" *ngIf="(issueSummaryV2?.totalIssues || 0) > 0">
+        <div class="risk-detected-banner" *ngIf="(getIssuesV2Merged().length || issueSummaryV2?.totalIssues || 0) > 0">
           <mat-icon color="warn">warning</mat-icon>
           <div class="banner-content">
             <strong>High-risk truth / compliance issues detected</strong>
-            <span>{{ issueSummaryV2?.totalIssues }} issue(s) — review contradictions, unsupported policy language, and consent sequencing below.</span>
+            <span>{{ getIssuesV2Merged().length || issueSummaryV2?.totalIssues || 0 }} issue(s) — review contradictions, unsupported policy language, and consent sequencing below.</span>
+          </div>
+        </div>
+
+        <div class="ci-subsection executive-top-issues" *ngIf="getExecutiveTopIssues().length > 0">
+          <h4>Top issues</h4>
+          <div class="exec-issue-card" *ngFor="let iss of getExecutiveTopIssues()">
+            <div class="exec-issue-head">
+              <span class="sev-pill" [attr.data-sev]="iss.severity">{{ (iss.severity || '').toUpperCase() }}</span>
+              <span class="issue-type-pill">{{ iss.type }}</span>
+              <span class="muted" *ngIf="iss.who?.turnIndex != null">Turn {{ iss.who?.turnIndex }}</span>
+            </div>
+            <p class="exec-issue-title"><strong>{{ iss.what?.issueSummary }}</strong></p>
+            <p class="flagged" *ngIf="iss.what?.claimText"><strong>Flagged claim:</strong> {{ iss.what?.claimText }}</p>
+            <p class="muted small" *ngIf="$any(iss.what)?.recommendedActionLabel"><strong>Recommended:</strong> {{ $any(iss.what)?.recommendedActionLabel }}</p>
+            <p class="muted small"><strong>Speaker:</strong> {{ getExecutiveIssueSpeaker(iss) }}</p>
+          </div>
+        </div>
+
+        <div class="ci-subsection unsupported-issues-block" *ngIf="getUnsupportedIssuesForExecutive().length > 0">
+          <h4>Unsupported / transcript-only material claims</h4>
+          <p class="muted intro">No policy, org rule, or uploaded evidence strongly backs these (transcript-only or unverified).</p>
+          <div class="unsupported-row" *ngFor="let u of getUnsupportedIssuesForExecutive().slice(0, 12)">
+            <div>
+              <span class="sev-pill sm" [attr.data-sev]="u.severity">{{ u.type }}</span>
+              <p class="u-quote" *ngIf="u.what?.claimText">“{{ u.what?.claimText }}”</p>
+              <p class="muted tiny">{{ u.what?.issueSummary }}</p>
+            </div>
+            <div class="u-meta muted tiny">
+              {{ getExecutiveIssueSpeaker(u) }}
+              <span *ngIf="u.who?.turnIndex != null"> · turn {{ u.who?.turnIndex }}</span>
+              <span *ngIf="u.verification?.level"> · {{ u.verification?.level }}</span>
+            </div>
           </div>
         </div>
 

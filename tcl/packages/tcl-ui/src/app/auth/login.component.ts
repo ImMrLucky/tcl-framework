@@ -239,10 +239,14 @@ export class LoginComponent {
           this.errorMessage = result.error.message || 'Authentication failed';
         }
       } else {
-        const navigated = await this.router.navigate(['/dashboard']);
+        const navigated = await this.router.navigateByUrl('/dashboard', { replaceUrl: true });
         if (!navigated) {
-          this.errorMessage =
-            'Login succeeded but the app could not open the dashboard (session check). Try refreshing the page.';
+          if (typeof window !== 'undefined') {
+            window.location.assign('/dashboard');
+          } else {
+            this.errorMessage =
+              'Login succeeded but the app could not open the dashboard (session check). Try refreshing the page.';
+          }
         }
       }
     } catch (error: any) {
