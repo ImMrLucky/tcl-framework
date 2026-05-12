@@ -4,8 +4,11 @@
   "description": "ProtectQA & TCL — Angular UI for Conversation Truth & Risk Intelligence (compliance, drift, hallucinations, business insights).",
   "scripts": {
     "ng": "ng",
+    "prestart": "node scripts/inject-supabase-assets.cjs",
     "start": "ng serve",
+    "prebuild": "node scripts/inject-supabase-assets.cjs",
     "build": "ng build",
+    "postbuild": "node scripts/embed-supabase-in-dist-index.cjs",
     "watch": "ng build --watch --configuration development",
     "test": "ng test"
   },

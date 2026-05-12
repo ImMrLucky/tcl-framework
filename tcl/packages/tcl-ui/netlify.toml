@@ -1,3 +1,10 @@
+# Login requires browser Supabase config baked at BUILD time (postbuild inlines into dist/index.html).
+# In Netlify → Site configuration → Environment variables, add (any ONE naming style is fine):
+#   SUPABASE_URL + SUPABASE_ANON_KEY
+#   OR NEXT_PUBLIC_SUPABASE_URL + NEXT_PUBLIC_SUPABASE_ANON_KEY
+# Scope must include this site's builds (Production + Deploy previews if you use them). "Runtime only" / Functions-only scopes will NOT inject into the Angular bundle.
+# After deploy, open DevTools → Elements → first <script> in <head> should show your project URL (not "").
+
 [build]
   # lockfileVersion 3 needs npm 9+ (Node 18+). Netlify's default Node can be older and makes `npm ci` fail with EUSAGE.
   # Pin NODE_VERSION below, then prefer `npm ci`; if it still fails, fall back to `npm install`.

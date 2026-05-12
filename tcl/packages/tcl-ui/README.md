@@ -36,7 +36,31 @@ Make sure both services are running:
 
 ### Supabase (login / storage)
 
-The Angular app reads **`window.__SUPABASE_URL`** and **`window.__SUPABASE_ANON_KEY`** (set in `src/index.html` for local dev, or inject at deploy time). Use the **anon** key only. **Never** put `SUPABASE_SERVICE_ROLE_KEY` in the UI or commit it to git — server and workers only.
+The app loads **`window.__SUPABASE_URL`** and **`window.__SUPABASE_ANON_KEY`** from **`src/assets/supabase-env.js`**, which is **generated** before each `ng build` / `ng serve` by `scripts/inject-supabase-assets.cjs` (`prebuild` / `prestart` in `package.json`).
+
+**Netlify (or any CI):** set environment variables so they are available during **`npm run build`** (not only for Functions). Supported names (first match wins):
+
+- `SUPABASE_URL` and `SUPABASE_ANON_KEY`, or  
+- `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_ANON_KEY`, or  
+- `VITE_SUPABASE_URL` / `VITE_SUPABASE_ANON_KEY`, or  
+- `PUBLIC_SUPABASE_URL` / `PUBLIC_SUPABASE_ANON_KEY`
+
+The **`postbuild`** step inlines them into **`dist/.../index.html`** so the browser does not depend on loading `/assets/supabase-env.js` separately.
+
+**Verify a deploy:** in the Netlify build log you should see  
+`[embed-supabase-dist] Inlined Supabase URL + anon key into dist index.html`  
+If you see “Inlined **empty** Supabase config”, the build did not receive those variables (wrong name, wrong deploy context, or vars scoped away from builds).
+
+See `netlify.toml` header comment.
+
+**Local:** either export those variables in your shell before `npm start`, or create **`packages/tcl-ui/.env.supabase`** (gitignored) with:
+
+```env
+SUPABASE_URL=https://YOUR_PROJECT.supabase.co
+SUPABASE_ANON_KEY=YOUR_ANON_KEY
+```
+
+**Never** put `SUPABASE_SERVICE_ROLE_KEY` in the UI or commit it to git — server and workers only.
 
 ## Architecture
 

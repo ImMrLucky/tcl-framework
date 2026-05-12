@@ -61,8 +61,8 @@ export class AuthService {
     const supabaseUrl = readWindowSupabaseUrl();
     const supabaseAnonKey = readWindowSupabaseAnonKey();
     if (!supabaseUrl || !supabaseAnonKey) {
-      console.error(
-        '[Auth] Missing window.__SUPABASE_URL or window.__SUPABASE_ANON_KEY. Set them in src/index.html (public anon key only — never the service role). See packages/tcl-ui/README.md.'
+      console.warn(
+        '[Auth] Missing window.__SUPABASE_URL or window.__SUPABASE_ANON_KEY. For Netlify set SUPABASE_URL + SUPABASE_ANON_KEY env vars (build generates src/assets/supabase-env.js). Locally use packages/tcl-ui/.env.supabase or export those vars before npm start. See packages/tcl-ui/README.md.'
       );
     }
 

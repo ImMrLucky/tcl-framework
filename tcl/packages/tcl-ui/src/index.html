@@ -8,6 +8,8 @@
   <link rel="icon" type="image/x-icon" href="favicon.ico">
   <link rel="preconnect" href="https://fonts.gstatic.com">
   <link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet">
+  <!-- Populated by `npm run prebuild` / `prestart` from SUPABASE_* env or packages/tcl-ui/.env.supabase -->
+  <script src="assets/supabase-env.js"></script>
   <script>
     // Allow setting API URL via environment variable or Netlify build-time injection
     if (typeof window !== 'undefined') {
@@ -20,9 +22,6 @@
       if (!window.__TCL_EVALUATION_URL) {
         window.__TCL_EVALUATION_URL = 'https://tcl-framework-production.up.railway.app';
       }
-      // Public Supabase client (anon key only). Set your project values for local auth — never put SUPABASE_SERVICE_ROLE_KEY in the browser.
-      // window.__SUPABASE_URL = 'https://YOUR_PROJECT.supabase.co';
-      // window.__SUPABASE_ANON_KEY = 'YOUR_ANON_KEY';
     }
   </script>
 </head>

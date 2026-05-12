@@ -28,6 +28,10 @@ yarn-error.log
 !.vscode/extensions.json
 .history/*
 
+# Generated Supabase browser config (from env / .env.supabase at build or start)
+/src/assets/supabase-env.js
+.env.supabase
+
 # Miscellaneous
 /.angular/cache
 .sass-cache/
