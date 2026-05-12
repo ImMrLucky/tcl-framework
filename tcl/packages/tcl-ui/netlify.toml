@@ -1,5 +1,6 @@
 [build]
-  command = "npm ci && npm run build -- --configuration production"
+  # npm ci requires package-lock.json in this directory. Use ci when present (reproducible); otherwise install from package.json.
+  command = "if [ -f package-lock.json ]; then npm ci; else npm install --no-audit --no-fund; fi && npm run build -- --configuration production"
   publish = "dist/tcl-ui/browser"
   timeout = 300
 
