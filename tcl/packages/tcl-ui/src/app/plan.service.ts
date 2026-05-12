@@ -92,12 +92,11 @@ export class PlanService {
   private loadingPromise: Promise<void> | null = null;
 
   private get apiUrl(): string {
-    // Use same pattern as other services
-    const apiUrl = (window as any).__TCL_API_URL;
-    if (apiUrl) {
-      return apiUrl;
+    const w = typeof window !== 'undefined' ? (window as unknown as { __TCL_API_URL?: string | null }).__TCL_API_URL : undefined;
+    if (w && typeof w === 'string' && w.trim().length > 0) {
+      return w.trim().replace(/\/$/, '');
     }
-    return 'https://protectqa.com';
+    return '';
   }
 
   constructor(private http: HttpClient) {

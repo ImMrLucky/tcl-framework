@@ -67,7 +67,7 @@ export class AuthInterceptor implements HttpInterceptor {
             console.log('[AuthInterceptor] Headers being set:', headers);
           }
         } else if (req.url.includes('/api/me')) {
-          console.log('[AuthInterceptor] No activeOrgId in localStorage for /api/me request');
+          console.debug('[AuthInterceptor] No activeOrgId in localStorage for /api/me (first load is OK)');
         }
         
         // Always clone the request to ensure headers are set

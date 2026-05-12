@@ -203,7 +203,28 @@ export class AuthService {
     }, 100);
   }
 
-  private static readonly AUTH_STORAGE_KEY = 'sb-uqwcmkyaskyduxuluqrm-auth-token';
+  /** Must match `createClient` auth.storageKey so localStorage reads/writes align. */
+  private getAuthStorageKey(): string {
+    const supabaseUrl = readWindowSupabaseUrl();
+    return supabaseUrl ? supabaseStorageKeyFromUrl(supabaseUrl) : 'sb-auth-token';
+  }
+
+  /**
+   * Best-effort sync after password login. `signInWithPassword` already persists the session;
+   * `getSession()` can hang on Navigator LockManager — never block the login button on it.
+   */
+  private async syncSupabaseSessionProbe(timeoutMs: number): Promise<void> {
+    try {
+      await Promise.race([
+        this.supabase.auth.getSession(),
+        new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error('getSession timeout')), timeoutMs)
+        ),
+      ]);
+    } catch {
+      /* session already in client + localStorage from signInWithPassword */
+    }
+  }
 
   /**
    * Supabase auth-js may store `user` in a sibling key (`{storageKey}-user`) and omit it from the
@@ -257,7 +278,7 @@ export class AuthService {
    */
   async checkSession(): Promise<boolean> {
     // Check localStorage first - this is synchronous and avoids race conditions
-    const storageKey = AuthService.AUTH_STORAGE_KEY;
+    const storageKey = this.getAuthStorageKey();
     const storedSession = typeof window !== 'undefined' ? localStorage.getItem(storageKey) : null;
     
     if (storedSession) {
@@ -484,7 +505,7 @@ export class AuthService {
       this.resetSessionTimer();
       this.ensureUserProvisioned(fromJwt.id, fromJwt.email || email);
       this.loadUserProfileAsync(fromJwt.id);
-      await this.supabase.auth.getSession();
+      await this.syncSupabaseSessionProbe(5000);
       return { error: null, duplicateAccount: false };
     }
 
@@ -501,7 +522,7 @@ export class AuthService {
     this.ensureUserProvisioned(user.id, user.email || '');
     this.loadUserProfileAsync(user.id);
 
-    await this.supabase.auth.getSession();
+    await this.syncSupabaseSessionProbe(5000);
 
     return { error: null, duplicateAccount: false };
   }
@@ -571,7 +592,7 @@ export class AuthService {
     if (typeof window !== 'undefined' && window.localStorage) {
       try {
         // Clear the Supabase auth token
-        localStorage.removeItem('sb-uqwcmkyaskyduxuluqrm-auth-token');
+        localStorage.removeItem(this.getAuthStorageKey());
         // Also clear any other Supabase-related keys (in case of variations)
         const keysToRemove: string[] = [];
         for (let i = 0; i < localStorage.length; i++) {
@@ -948,7 +969,7 @@ export class AuthService {
       return null;
     }
 
-    const storageKey = 'sb-uqwcmkyaskyduxuluqrm-auth-token';
+    const storageKey = this.getAuthStorageKey();
     const stored = window.localStorage.getItem(storageKey);
     if (!stored) {
       return null;
@@ -1026,23 +1047,9 @@ export class AuthService {
     this.lastActivityTime = Date.now();
     this.resetInactivityTimer();
 
-    // Check localStorage first for faster access
-    const storageKey = 'sb-uqwcmkyaskyduxuluqrm-auth-token';
-    const storedSession = typeof window !== 'undefined' ? localStorage.getItem(storageKey) : null;
-    
-    if (storedSession) {
-      try {
-        const parsed = JSON.parse(storedSession);
-        if (parsed.access_token) {
-          // Check expiry
-          const expiresAt = parsed.expires_at;
-          if (!expiresAt || expiresAt * 1000 > Date.now()) {
-            return parsed.access_token;
-          }
-        }
-      } catch {
-        // Invalid JSON - fall through to getSession
-      }
+    const cached = this.getValidSessionFromStorage();
+    if (cached?.access_token) {
+      return cached.access_token;
     }
 
     // Fallback to Supabase getSession - handles token refresh
@@ -1077,7 +1084,7 @@ export class AuthService {
       return;
     }
     
-    const storageKey = 'sb-uqwcmkyaskyduxuluqrm-auth-token';
+    const storageKey = this.getAuthStorageKey();
     const storedSession = localStorage.getItem(storageKey);
     
     if (storedSession) {
@@ -1112,7 +1119,7 @@ export class AuthService {
     
     // Clear storage
     if (typeof window !== 'undefined' && window.localStorage) {
-      window.localStorage.removeItem('sb-uqwcmkyaskyduxuluqrm-auth-token');
+      window.localStorage.removeItem(this.getAuthStorageKey());
     }
 
     // Clear inactivity timer
