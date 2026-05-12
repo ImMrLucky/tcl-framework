@@ -627,6 +627,7 @@ export async function runAnalysis(input) {
         sources: allSources,
         options: {
             conversationId: input.conversationId,
+            analysisTemplateId: input.analysisTemplateId ?? "general_conversation_integrity",
             evidenceMode, // Pass evidence mode to orchestrator
             normalizedConversation: input.normalizedConversation, // CRITICAL: Pass structured turns with speaker info
             speakerRoleMap, // Pass speaker role map to graph builder
@@ -738,12 +739,17 @@ export async function runAnalysis(input) {
         issueSummaryV2 = rankedResult.summary;
         // C4: Keep all grouped issues for the report
         const allGroupedIssues = groupedIssues;
+        const td = validateOutput.report?.manifest?.truthDerivationSummary;
+        const t = Math.max(1, td?.total ?? 0);
+        const evidenceCoverage01 = td && t > 0
+            ? Math.max(0, Math.min(1, ((td.supported ?? 0) + (td.unverified ?? 0)) / t))
+            : 0;
         // Set evalMode for report
         const evalMode = {
             verificationLevel: evidenceMode === 'TRANSCRIPT_ONLY' ? 'TRANSCRIPT_ONLY' :
                 'DOC_BACKED',
             hasExternalEvidence: evidenceMode === 'TRANSCRIPT_PLUS_EXTERNAL',
-            evidenceCoverage01: 0, // TODO: compute from actual evidence coverage
+            evidenceCoverage01,
             transcriptOnlyReasonCodes: evidenceMode === 'TRANSCRIPT_ONLY' ? ['NO_EXTERNAL_EVIDENCE'] : [],
         };
         // Build report with issues (similar to /validate endpoint)

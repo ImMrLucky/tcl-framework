@@ -634,6 +634,8 @@ export async function runAnalysis(input: {
   includeProjectEvidence?: boolean; // Include project-level evidence (default: true)
   includeTemplateEvidence?: boolean; // Include template-level evidence (default: true)
   templateId?: string; // Template ID if using a template
+  /** Industry analysis template slug (e.g. general_conversation_integrity) — do not pass DB UUID as graph template */
+  analysisTemplateId?: string;
   simulationMode?: boolean; // Allow DRAFT evidence (admin-only, default: false)
 }): Promise<string> {
   // Use the existing validate function to run the full pipeline
@@ -761,6 +763,7 @@ export async function runAnalysis(input: {
     sources: allSources,
     options: {
       conversationId: input.conversationId,
+      analysisTemplateId: input.analysisTemplateId ?? "general_conversation_integrity",
       evidenceMode, // Pass evidence mode to orchestrator
       normalizedConversation: input.normalizedConversation, // CRITICAL: Pass structured turns with speaker info
       speakerRoleMap, // Pass speaker role map to graph builder
@@ -893,12 +896,21 @@ export async function runAnalysis(input: {
     // C4: Keep all grouped issues for the report
     const allGroupedIssues = groupedIssues;
     
+    const td = (validateOutput.report as any)?.manifest?.truthDerivationSummary as
+      | { supported?: number; contradicted?: number; unverified?: number; ungrounded?: number; total?: number }
+      | undefined;
+    const t = Math.max(1, td?.total ?? 0);
+    const evidenceCoverage01 =
+      td && t > 0
+        ? Math.max(0, Math.min(1, ((td.supported ?? 0) + (td.unverified ?? 0)) / t))
+        : 0;
+
     // Set evalMode for report
     const evalMode: any = {
       verificationLevel: evidenceMode === 'TRANSCRIPT_ONLY' ? 'TRANSCRIPT_ONLY' : 
                           'DOC_BACKED' as const,
       hasExternalEvidence: evidenceMode === 'TRANSCRIPT_PLUS_EXTERNAL',
-      evidenceCoverage01: 0, // TODO: compute from actual evidence coverage
+      evidenceCoverage01,
       transcriptOnlyReasonCodes: evidenceMode === 'TRANSCRIPT_ONLY' ? ['NO_EXTERNAL_EVIDENCE'] : [],
     };
     

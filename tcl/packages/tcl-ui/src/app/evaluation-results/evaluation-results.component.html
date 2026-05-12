@@ -185,6 +185,120 @@
           <p class="explain-note"><strong>Note:</strong> High transcript grounding means the claim was attributed in the conversation — it does <em>not</em> prove the claim was true or compliant.</p>
         </div>
 
+        <div class="analysis-engine-panel" *ngIf="hasAnalysisPayload()">
+          <h4>Engine analysis (structured)</h4>
+          <p class="engine-note muted">
+            Derived from the same graph and detectors as Issues V2.
+            <strong>Drift</strong> and <strong>conflict load</strong> treat higher values as more risk; other scores treat higher as better posture.
+          </p>
+
+          <div class="template-panel-block" *ngIf="getTemplatePanelRecord() as tp">
+            <p class="template-line">
+              <strong>Template:</strong> {{ $any(tp)['selectedTemplateName'] || $any(tp)['selectedTemplateId'] }}
+              <span class="muted"> · Graph: {{ $any(tp)['graphTemplateId'] }}</span>
+            </p>
+            <mat-chip-set class="rules-chip-row" *ngIf="getTemplateRulesChips().length">
+              <mat-chip *ngFor="let rule of getTemplateRulesChips()" [matTooltip]="rule">{{ rule }}</mat-chip>
+            </mat-chip-set>
+            <p class="confidence-impact muted" *ngIf="$any(tp)['confidenceImpactNote']">
+              {{ $any(tp)['confidenceImpactNote'] }}
+            </p>
+          </div>
+
+          <div class="engine-metric-grid">
+            <ng-container *ngFor="let row of analysisEnginePanels">
+              <div class="metric-wrap" *ngIf="getAnalysisMetric(row.key) as met">
+                <mat-expansion-panel [class.metric-risk-panel]="row.riskHigher">
+                  <mat-expansion-panel-header>
+                    <mat-panel-title>{{ row.title }} — {{ formatMetricScore($any(met)['value']) }}/100</mat-panel-title>
+                    <mat-panel-description>
+                      <span *ngIf="row.riskHigher">Risk · </span>
+                      <span *ngIf="!row.riskHigher">Posture · </span>
+                      Confidence {{ formatAnalysisConfidence($any(met)['confidence']) }}% · {{ formatMetricBand($any(met)) }}
+                    </mat-panel-description>
+                  </mat-expansion-panel-header>
+                  <p class="metric-explain">{{ formatMetricExplanation($any(met)) }}</p>
+                  <ul class="comp-list" *ngIf="$any(met)['components']?.length">
+                    <li *ngFor="let c of $any(met)['components']">
+                      <strong>{{ c.name }}</strong> (w={{ c.weight }}) — {{ c.reason }} → {{ c.value | number:'1.0-2' }}
+                    </li>
+                  </ul>
+                </mat-expansion-panel>
+              </div>
+            </ng-container>
+          </div>
+
+          <div class="evidence-coverage-block" *ngIf="getEvidenceCoverageStatsRecord() as ecs">
+            <h5>Truth &amp; evidence counts</h5>
+            <p class="coverage-line">
+              <strong>{{ $any(ecs)['claimsExtracted'] }}</strong> claims ·
+              externally supported <strong>{{ $any(ecs)['supported'] }}</strong> ·
+              transcript-grounded <strong>{{ $any(ecs)['unverified'] ?? '—' }}</strong> ·
+              ungrounded <strong>{{ $any(ecs)['ungrounded'] ?? $any(ecs)['unsupported'] ?? '—' }}</strong> ·
+              contradicted <strong>{{ $any(ecs)['contradicted'] }}</strong>
+            </p>
+            <div class="sources-used" *ngIf="$any(ecs)['sourcesUsed']?.length">
+              <span class="muted">Sources in view:</span>
+              <span *ngFor="let su of $any(ecs)['sourcesUsed']; let last = last" class="src-pill">
+                {{ su.sourceType }} ({{ su.count }})<span *ngIf="!last"> · </span>
+              </span>
+            </div>
+          </div>
+
+          <mat-expansion-panel class="issues-enriched-panel" *ngIf="getAnalysisIssuesEnriched().length">
+            <mat-expansion-panel-header>
+              <mat-panel-title>Engine issues (enriched)</mat-panel-title>
+              <mat-panel-description>{{ getAnalysisIssuesEnriched().length }} with evidence refs</mat-panel-description>
+            </mat-expansion-panel-header>
+            <div class="issue-enriched-list">
+              <mat-expansion-panel *ngFor="let iss of getAnalysisIssuesEnriched()" class="nested-issue">
+                <mat-expansion-panel-header>
+                  <mat-panel-title>
+                    <span class="sev-tag" [attr.data-sev]="iss['severity']">{{ iss['severity'] }}</span>
+                    {{ iss['title'] }}
+                  </mat-panel-title>
+                  <mat-panel-description>
+                    Score {{ formatMetricScore($any(iss['score'])) }} · Conf {{ formatAnalysisConfidence(iss['confidence']) }}%
+                  </mat-panel-description>
+                </mat-expansion-panel-header>
+                <div class="issue-body">
+                  <p>{{ iss['summary'] }}</p>
+                  <p *ngIf="iss['flaggedClaim']" class="flagged-claim"><strong>Claim:</strong> {{ iss['flaggedClaim'] }}</p>
+                  <p *ngIf="iss['recommendedAction']" class="rec-act"><strong>Recommended:</strong> {{ iss['recommendedAction'] }}</p>
+                  <ul class="evidence-ref-mini" *ngIf="$any(iss['evidenceRefs'])?.length">
+                    <li *ngFor="let ref of $any(iss['evidenceRefs'])">
+                      <span class="ref-type">{{ ref['sourceType'] }}</span>
+                      <span *ngIf="ref['turnIndex'] != null" class="muted"> · turn {{ ref['turnIndex'] }}</span>
+                      — {{ ref['textSnippet'] }}
+                    </li>
+                  </ul>
+                  <p *ngIf="formatGraphSignals(iss['graphSignals'])" class="muted tiny">Signals: {{ formatGraphSignals(iss['graphSignals']) }}</p>
+                </div>
+              </mat-expansion-panel>
+            </div>
+          </mat-expansion-panel>
+
+          <mat-expansion-panel class="claim-timeline-panel" *ngIf="getAnalysisClaimTimeline().length">
+            <mat-expansion-panel-header>
+              <mat-panel-title>Claim timeline</mat-panel-title>
+              <mat-panel-description>Per-claim label from graph + issues (up to 80)</mat-panel-description>
+            </mat-expansion-panel-header>
+            <table class="claim-timeline-table">
+              <thead>
+                <tr><th>Turn</th><th>Label</th><th>Claim</th><th>Id</th></tr>
+              </thead>
+              <tbody>
+                <tr *ngFor="let ev of getAnalysisClaimTimeline()">
+                  <td>{{ ev['turnIndex'] ?? '—' }}</td>
+                  <td><span class="tl-label" [attr.data-lbl]="ev['label']">{{ ev['label'] }}</span></td>
+                  <td class="tl-text">{{ ev['textPreview'] }}</td>
+                  <td class="tl-id muted">{{ ev['claimId'] }}</td>
+                </tr>
+              </tbody>
+            </table>
+          </mat-expansion-panel>
+        </div>
+
         <div class="plain-summary-box" *ngIf="getEvaluationDashboardSummary()?.plainEnglishSummary">
           <h4>What happened</h4>
           <p>{{ getEvaluationDashboardSummary()?.plainEnglishSummary }}</p>

@@ -64,7 +64,7 @@ function isProtectqaCritical(t: string): boolean {
 }
 
 export function computeRiskAdjustedScores(input: RiskAdjustedScoreInput): RiskAdjustedScoreResult {
-  const profile = input.profile ?? "protectqa";
+  const profile = input.profile ?? "generic";
   const disclosureCoverageRaw = clamp(input.disclosureCoverage ?? 100);
   const evidenceSupportRaw = clamp(input.evidenceSupport ?? 55);
   const speakerConfidenceRaw = clamp(input.speakerConfidence ?? 95);

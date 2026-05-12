@@ -1192,6 +1192,10 @@ export type RunManifest = {
   graphBuilderMode?: 'unified' | 'legacy' | 'truth-engine';
   /** Template ID used for unified graph builder */
   templateId?: string;
+  /** Industry / product template (e.g. general_conversation_integrity, final_expense) */
+  industryTemplateId?: string;
+  /** Domain pack ids applied for this run */
+  domainPackIds?: string[];
   /** Timestamp */
   timestamp?: string;
   /** Legacy: createdAt */
@@ -1241,6 +1245,96 @@ export type RunManifest = {
     total: number;
   };
 };
+
+// --- Analysis result contract (shared engine / API / UI) ---
+export type ScoreBandV2 = "low" | "medium" | "high" | "critical";
+
+export interface ScoredMetricV2 {
+  value: number;
+  band: ScoreBandV2;
+  confidence: number;
+  explanation: string;
+  components: Array<{ name: string; value: number; weight: number; reason: string }>;
+}
+
+export interface EvidenceRefViewV2 {
+  id: string;
+  sourceType: string;
+  sourceId?: string;
+  title?: string;
+  textSnippet?: string;
+  speaker?: string;
+  turnIndex?: number;
+  timestamp?: string;
+  chunkIndex?: number;
+  matchType?: "exact" | "semantic" | "entity" | "rule" | "graph";
+  matchScore?: number;
+  supportsOrContradicts?: "supports" | "contradicts" | "neutral";
+}
+
+export interface AnalysisIssueV2 {
+  id: string;
+  title: string;
+  severity: SeverityV2;
+  category: string;
+  issueType: string;
+  score: number;
+  confidence: number;
+  summary: string;
+  flaggedClaim?: string;
+  evidenceRefs: EvidenceRefViewV2[];
+  relatedClaimIds?: string[];
+  graphSignals?: string[];
+  scoringBreakdown?: IssueV2["scoring"];
+  recommendedAction?: string;
+  customerImpact?: string;
+  complianceImpact?: string;
+  modelBehaviorImpact?: string;
+}
+
+export interface EvidenceCoverageStatsV2 {
+  claimsExtracted: number;
+  /** Claims with external / doc-backed support edges */
+  supported: number;
+  /** Transcript-grounded in graph but not externally verified */
+  unverified: number;
+  /** No grounding edge to transcript evidence */
+  ungrounded: number;
+  contradicted: number;
+  sourcesUsed: Array<{ sourceType: string; count: number }>;
+}
+
+export interface ClaimTimelineEventV2 {
+  claimId: string;
+  turnIndex?: number;
+  label: "claimed" | "repeated" | "contradicted" | "drifted" | "unsupported" | "flagged";
+  textPreview: string;
+}
+
+export interface AnalysisResultPayload {
+  schemaVersion: string;
+  industryTemplateId: string;
+  graphTemplateId: string;
+  domainPackIds: string[];
+  integrity: ScoredMetricV2;
+  complianceRisk: ScoredMetricV2;
+  hallucinationRisk: ScoredMetricV2;
+  drift: ScoredMetricV2;
+  evidenceCoverage: ScoredMetricV2;
+  transcriptQuality: ScoredMetricV2;
+  graphConflict: ScoredMetricV2;
+  issuesEnriched: AnalysisIssueV2[];
+  issuesV2: IssueV2[];
+  evidenceCoverageStats: EvidenceCoverageStatsV2;
+  claimTimeline: ClaimTimelineEventV2[];
+  templatePanel: {
+    selectedTemplateId: string;
+    selectedTemplateName: string;
+    graphTemplateId: string;
+    rulesSignalsApplied: string[];
+    confidenceImpactNote: string;
+  };
+}
 
 export type ValidateOutput = {
   answer: string;
@@ -1361,6 +1455,9 @@ export type ValidateOutput = {
     };
   };
   
+  /** Structured analysis contract (scores, issues, evidence, template) for API + UI */
+  analysisResult?: AnalysisResultPayload;
+  
   report: {
     claims: Claim[];
     violations: Violation[];
@@ -1417,6 +1514,8 @@ export type ValidateOutput = {
     
     // AUDIT-CRITICAL: Run manifest for reproducibility
     manifest?: RunManifest;
+    /** Structured analysis payload for UI (scores, enriched issues, template panel) */
+    analysisResult?: AnalysisResultPayload;
   };
 };
 

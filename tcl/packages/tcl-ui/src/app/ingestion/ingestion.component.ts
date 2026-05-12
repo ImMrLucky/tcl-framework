@@ -312,6 +312,22 @@ export class IngestionComponent implements OnInit, OnDestroy {
     }
   }
 
+  /** Map selected org/DB template to TCL industry template id (must match tcl-core template-registry). */
+  resolveAnalysisTemplateId(): string {
+    if (!this.templateId) return 'general_conversation_integrity';
+    const t = this.templates.find(x => x.id === this.templateId);
+    const name = (t?.name || '').toLowerCase();
+    const desc = (t?.description || '').toLowerCase();
+    const blob = `${name} ${desc}`;
+    if (/final expense|burial|protectqa|guaranteed issue/i.test(blob)) return 'final_expense';
+    if (/health|hipaa|clinical|intake/i.test(blob)) return 'healthcare_intake';
+    if (/financial|investment|suitability|wealth/i.test(blob)) return 'financial_services';
+    if (/legal|attorney|law firm/i.test(blob)) return 'legal_intake';
+    if (/support|saas|ticket|refund/i.test(blob)) return 'customer_support';
+    if (/ai|chatbot|voice agent|llm/i.test(blob)) return 'ai_agent_qa';
+    return 'general_conversation_integrity';
+  }
+
   onTemplateChange() {
     // When template changes, preview evidence set again
     if (this.templateId) {
@@ -1230,21 +1246,13 @@ export class IngestionComponent implements OnInit, OnDestroy {
     console.log('[Upload] ✅ Session token available, proceeding with upload');
     
     if (!supabaseAnonKey) {
-      console.error('[Upload] Missing anon key. Client key:', (supabaseClient as any).supabaseKey, 'Window key:', typeof window !== 'undefined' ? (window as any).__SUPABASE_ANON_KEY : 'N/A');
+      console.error('[Upload] Missing public Supabase anon key (set window.__SUPABASE_ANON_KEY in index.html).');
       throw new Error('Missing Supabase anon key for apikey header');
     }
 
     // Encode per segment so slashes remain slashes (canonical encoding)
     const encodedPath = objectPath.split('/').map(encodeURIComponent).join('/');
-    // Use canonical Supabase URL (no .storage. rewriting)
     const uploadUrl = `${supabaseUrl}/storage/v1/object/${bucket}/${encodedPath}`;
-    
-    console.log('[Upload] Upload URL:', uploadUrl);
-    console.log('[Upload] Original path:', objectPath);
-    console.log('[Upload] Encoded path (per segment):', encodedPath);
-    console.log('[Upload] Bucket:', bucket);
-    console.log('[Upload] File size:', file.size, 'bytes');
-    console.log('[Upload] File type:', file.type);
 
     const uploadTimeout = 10 * 60 * 1000; // 10 minutes
     const controller = new AbortController();
@@ -1712,7 +1720,8 @@ export class IngestionComponent implements OnInit, OnDestroy {
             spectral: true,
             spectralMode: 'analyze',
             includeConfidenceMetrics: true,
-            includeSuggestions: true
+            includeSuggestions: true,
+            analysisTemplateId: this.resolveAnalysisTemplateId(),
           },
           conversation_id: conversationId
         })

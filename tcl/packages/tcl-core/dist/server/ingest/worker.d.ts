@@ -28,5 +28,7 @@ export declare function runAnalysis(input: {
     includeProjectEvidence?: boolean;
     includeTemplateEvidence?: boolean;
     templateId?: string;
+    /** Industry analysis template slug (e.g. general_conversation_integrity) — do not pass DB UUID as graph template */
+    analysisTemplateId?: string;
     simulationMode?: boolean;
 }): Promise<string>;

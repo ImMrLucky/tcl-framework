@@ -399,6 +399,9 @@ export class EvaluationResultsComponent implements OnInit {
   topIssuesV2: GroupedIssue[] = []; // Now contains grouped/clustered issues
   issueSummaryV2: IssueSummaryV2 | null = null;
   
+  /** Engine analysisResult payload (structured scores + issues) */
+  analysisPayload: Record<string, unknown> | null = null;
+  
   // G2: Issue Clusters (Top Aggregated Issues)
   issueClustersV2: {
     clusters: AggregatedIssue[];
@@ -492,6 +495,7 @@ export class EvaluationResultsComponent implements OnInit {
 
       // Load IssueV2 (Enterprise-Grade) - PRIMARY
       const report = this.evaluation.report as any;
+      this.analysisPayload = (report?.analysisResult as Record<string, unknown>) ?? null;
       
       // A3: Load issues using canonical structure with fallback to legacy aliases
       const atomicIssues = report?.issues?.atomic ?? report?.allIssuesV2 ?? [];
@@ -1940,7 +1944,24 @@ getMetricTooltip(metric: string): string {
     const base = (this.evaluation?.scores as any) ?? {};
     const r = this.getEvaluationReportRaw() as any;
     const enhanced = r?.enhancedClientScores ?? {};
-    return { ...base, ...enhanced };
+    const merged = { ...base, ...enhanced };
+    const ar = r?.analysisResult as Record<string, unknown> | undefined;
+    const pick = (k: string) => {
+      const m = ar?.[k];
+      if (!m || typeof m !== 'object') return undefined;
+      const v = (m as Record<string, unknown>)['value'];
+      return typeof v === 'number' && !Number.isNaN(v) ? v : undefined;
+    };
+    if (merged.compliance == null) merged.compliance = pick('complianceRisk');
+    if (merged.hallucination == null) merged.hallucination = pick('hallucinationRisk');
+    if (merged.drift == null) merged.drift = pick('drift');
+    if (merged.evidenceSupport == null) merged.evidenceSupport = pick('evidenceCoverage');
+    if (merged.transcriptGrounding == null) merged.transcriptGrounding = pick('transcriptQuality');
+    if (merged.consistency == null) {
+      const gc = pick('graphConflict');
+      if (gc != null) merged.consistency = Math.max(0, 100 - gc);
+    }
+    return merged;
   }
 
   showConversationIntelligenceCard(): boolean {
@@ -1952,7 +1973,8 @@ getMetricTooltip(metric: string): string {
       r.risk ||
       (Array.isArray(r.businessInsights) && r.businessInsights.length > 0) ||
       r.enhancedClientScores?.tcl != null ||
-      r.diagnostics
+      r.diagnostics ||
+      r.analysisResult
     );
   }
 
@@ -1963,8 +1985,14 @@ getMetricTooltip(metric: string): string {
   } {
     const ds = this.getEvaluationReportRaw()?.dashboardSummary as DashboardSummaryUi | undefined;
     const m = this.getMergedEvaluationScores() as any;
+    const integ = this.getAnalysisMetric('integrity')?.['value'];
+    const integN = typeof integ === 'number' && !Number.isNaN(integ) ? Math.round(integ) : null;
     const raw =
-      ds?.conversationTrustScore?.score ?? m.tcl ?? m.overall ?? (this.evaluation?.scores as any)?.overall;
+      ds?.conversationTrustScore?.score ??
+      m.tcl ??
+      m.overall ??
+      integN ??
+      (this.evaluation?.scores as any)?.overall;
     const score = raw === undefined || raw === null || Number.isNaN(Number(raw)) ? null : Math.round(Number(raw));
     return {
       label:
@@ -2007,6 +2035,74 @@ getMetricTooltip(metric: string): string {
     if (Array.isArray(n) && n.length > 0) return n;
     if (Array.isArray(ra) && ra.length > 0) return ra;
     return [];
+  }
+
+  hasAnalysisPayload(): boolean {
+    return this.analysisPayload != null && typeof this.analysisPayload === 'object';
+  }
+
+  getAnalysisMetric(key: string): Record<string, unknown> | null {
+    const m = this.analysisPayload?.[key];
+    return m && typeof m === 'object' ? (m as Record<string, unknown>) : null;
+  }
+
+  /** Ordered panels for structured engine metrics (Part 8). */
+  readonly analysisEnginePanels: ReadonlyArray<{ key: string; title: string; riskHigher: boolean }> = [
+    { key: 'integrity', title: 'TCL integrity', riskHigher: false },
+    { key: 'complianceRisk', title: 'Compliance posture', riskHigher: false },
+    { key: 'hallucinationRisk', title: 'Hallucination safety', riskHigher: false },
+    { key: 'drift', title: 'Drift & commitment tension', riskHigher: true },
+    { key: 'evidenceCoverage', title: 'Evidence & verification posture', riskHigher: false },
+    { key: 'transcriptQuality', title: 'Transcript & speaker clarity', riskHigher: false },
+    { key: 'graphConflict', title: 'Cross-claim conflict load', riskHigher: true },
+  ];
+
+  getAnalysisIssuesEnriched(): Record<string, unknown>[] {
+    const arr = this.analysisPayload?.['issuesEnriched'];
+    return Array.isArray(arr) ? (arr as Record<string, unknown>[]) : [];
+  }
+
+  getAnalysisClaimTimeline(): Record<string, unknown>[] {
+    const arr = this.analysisPayload?.['claimTimeline'];
+    return Array.isArray(arr) ? (arr as Record<string, unknown>[]) : [];
+  }
+
+  getEvidenceCoverageStatsRecord(): Record<string, unknown> | null {
+    const ecs = this.analysisPayload?.['evidenceCoverageStats'];
+    return ecs && typeof ecs === 'object' ? (ecs as Record<string, unknown>) : null;
+  }
+
+  getTemplatePanelRecord(): Record<string, unknown> | null {
+    const tp = this.analysisPayload?.['templatePanel'];
+    return tp && typeof tp === 'object' ? (tp as Record<string, unknown>) : null;
+  }
+
+  getTemplateRulesChips(): string[] {
+    const tp = this.getTemplatePanelRecord();
+    const raw = tp?.['rulesSignalsApplied'];
+    if (!Array.isArray(raw)) return [];
+    return raw.map(x => String(x)).filter(Boolean);
+  }
+
+  formatAnalysisConfidence(conf: unknown): string {
+    const n = Number(conf);
+    if (Number.isNaN(n)) return '—';
+    return String(Math.round(n * 100));
+  }
+
+  formatMetricBand(metric: Record<string, unknown> | null): string {
+    const b = metric?.['band'];
+    return typeof b === 'string' ? b : '—';
+  }
+
+  formatMetricExplanation(metric: Record<string, unknown> | null): string {
+    const e = metric?.['explanation'];
+    return typeof e === 'string' ? e : '';
+  }
+
+  formatGraphSignals(sig: unknown): string {
+    if (!Array.isArray(sig)) return '';
+    return sig.map(s => String(s)).filter(Boolean).join(' · ');
   }
 
   formatMetricScore(v: number | null | undefined): string {

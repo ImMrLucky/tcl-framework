@@ -11,6 +11,7 @@
     "start:direct": "node dist/server/express.js",
     "dev": "node --loader ts-node/esm src/server/express.ts",
     "test": "vitest run",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
     "test:watch": "vitest",
     "check:hardcoded": "bash scripts/check-hardcoded-values.sh",
     "check:hardcoded:ts": "tsx scripts/check-hardcoded-values.ts"

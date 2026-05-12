@@ -1,0 +1,21 @@
+{
+  "name": "tcl-workspace",
+  "private": true,
+  "description": "TCL / ProtectQA monorepo — install from package lockfiles only (do not commit node_modules zips).",
+  "workspaces": [
+    "packages/tcl-core",
+    "packages/tcl-ui"
+  ],
+  "scripts": {
+    "install:all": "npm install",
+    "build": "npm run build -w packages/tcl-core && npm run build -w packages/tcl-ui",
+    "build:core": "npm run build -w packages/tcl-core",
+    "build:ui": "npm run build -w packages/tcl-ui",
+    "test": "npm run test -w packages/tcl-core",
+    "typecheck": "npm run typecheck -w packages/tcl-core",
+    "lint": "echo \"No root lint script; add eslint at workspace level if needed\""
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

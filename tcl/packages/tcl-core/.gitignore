@@ -1,0 +1,8 @@
+# Local secrets — never commit
+.env
+.env.*
+!.env.example
+*.local
+
+# Build output (also in parent ignores)
+dist/

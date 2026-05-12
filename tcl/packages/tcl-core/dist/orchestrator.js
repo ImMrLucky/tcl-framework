@@ -36,6 +36,9 @@ import { buildDashboardSummary } from "./analysis/dashboard-summary-builder.js";
 // NEW: Unified Graph Builder (3-stage pipeline with subject slots)
 import { buildGraph as buildUnifiedGraph, buildGraphAsync as buildUnifiedGraphAsync, toSpectralInput, setTemplateConfig } from "./graph/graph-builder.js";
 import { getTemplateConfig } from "./graph/template-config.js";
+import { getIndustryTemplate } from "./templates/template-registry.js";
+import { resolveGraphTemplateId } from "./templates/graph-template-resolve.js";
+import { buildAnalysisResultPayload } from "./scoring/analysis-result-builder.js";
 // Cache for scorer to avoid re-initialization on every request
 let cachedScorer = null;
 const SCORER_CACHE_TTL = 5 * 60 * 1000; // 5 minutes
@@ -137,10 +140,18 @@ async function runUnifiedGraphPath(input, timer, validationStartTime, adapter) {
     const rawTranscript = answer && answer.trim().length > 0 ? answer : question;
     const sanitizerResult = sanitizeTranscriptForScoring(rawTranscript);
     const transcript = sanitizerResult.text || rawTranscript;
-    // Set template based on content or options
-    const templateId = options?.template ?? detectTemplate(transcript);
+    const industryTemplateId = options?.analysisTemplateId ??
+        options?.industryTemplateId ??
+        "general_conversation_integrity";
+    const industry = getIndustryTemplate(industryTemplateId);
+    const graphTemplateIdResolved = resolveGraphTemplateId({
+        industry,
+        rawTemplateOption: options?.template,
+        detectFromTranscript: () => detectTemplate(transcript),
+    });
+    const templateId = graphTemplateIdResolved;
     setTemplateConfig(templateId);
-    log('debug', 'Orchestrator', `Template: ${templateId}`);
+    log("debug", "Orchestrator", `Industry: ${industryTemplateId}, graph template: ${templateId}`);
     // Extract claims - use normalized turns if available (preserves speaker info), otherwise fall back to text parsing
     timer.start('claim_extraction');
     let extractedClaims = [];
@@ -438,14 +449,11 @@ async function runUnifiedGraphPath(input, timer, validationStartTime, adapter) {
     const runId = options?.runId || options?.evaluationId || 'pending';
     const conversationId = options?.conversationId || '';
     const evidenceMode = hasExternalEvidence ? 'TRANSCRIPT_PLUS_EXTERNAL' : 'TRANSCRIPT_ONLY';
-    const skipProtectqaDefault = options?.skipProtectqaDefault === true;
     const explicitPackIds = options?.domainPackIds ?? [];
-    const inferredPackIds = inferDomainPackIds(transcript, options?.template);
-    let mergedPackIds = [...new Set([...explicitPackIds, ...inferredPackIds])];
-    if (!skipProtectqaDefault) {
-        mergedPackIds = ["protectqa_final_expense", ...mergedPackIds.filter(id => id !== "protectqa_final_expense")];
-        mergedPackIds = [...new Set(mergedPackIds)];
-    }
+    const inferredPackIds = inferDomainPackIds(transcript, industryTemplateId);
+    const mergedPackIds = explicitPackIds.length > 0
+        ? [...new Set([...explicitPackIds, ...inferredPackIds])]
+        : [...new Set([...inferredPackIds, ...industry.additionalDomainPackIds])];
     const domainPacks = mergedPackIds.length > 0 ? selectDomainPacks({ packIds: mergedPackIds }) : selectDomainPacks({ templateId });
     const domainPackIssues = runDomainPacks(domainPacks, claims, { runId, conversationId, evidenceMode });
     const finalExpenseIssues = domainPacks.length === 0
@@ -489,8 +497,9 @@ async function runUnifiedGraphPath(input, timer, validationStartTime, adapter) {
     const systemClaimCount = claims.filter(c => c.meta?.speakerType === 'system').length;
     const mappedClaimCount = claims.filter(c => c.meta?.speakerType && c.meta.speakerType !== 'unknown').length;
     const speakerMappingConfidence = claims.length > 0 ? Math.round((mappedClaimCount / claims.length) * 100) : 100;
+    const riskProfile = domainPacks.some(p => p.id === "protectqa_final_expense") ? "protectqa" : "generic";
     const riskAdjusted = computeRiskAdjustedScores({
-        profile: "protectqa",
+        profile: riskProfile,
         transcriptGrounding: graphResult.truthScores.transcriptGrounding,
         factualTruth: factualTruthResult.factualTruthScore,
         compliance: complianceScore,
@@ -543,10 +552,11 @@ async function runUnifiedGraphPath(input, timer, validationStartTime, adapter) {
         claimText: n.claimText,
         missing: n.missingEvidenceTypes,
     }));
+    const topicProbe = claims.length > 0 ? claims.map(c => c.text).join("\n").slice(0, 2500) : transcript.slice(0, 400);
     const dashboardSummary = buildDashboardSummary({
         tclScore,
         mode: domainPacks.some(p => p.id === "protectqa_final_expense") ? "protectqa" : "tcl",
-        transcriptHint: transcript.slice(0, 2000),
+        transcriptHint: topicProbe,
         claims,
         insights: businessInsights,
         issues: detectorIssues,
@@ -582,6 +592,25 @@ async function runUnifiedGraphPath(input, timer, validationStartTime, adapter) {
             spectral,
         })
         : [];
+    const transcriptLines = Math.max(1, transcript.split(/\n+/).filter(Boolean).length + sanitizerResult.unknownSpeakerLines);
+    const analysisResult = buildAnalysisResultPayload({
+        industry,
+        graphTemplateId: templateId,
+        domainPackIds: domainPacks.map(p => p.id),
+        riskAdjusted,
+        truthSummary: graphResult.truthDerivation.summary,
+        claims,
+        detectorIssues,
+        hasExternalEvidence,
+        contradictionEdges: graphResult.legacy.contradictions.length,
+        crossTurnPairs: crossTurnResult.pairs?.length ?? 0,
+        driftScore: driftResult.driftScore,
+        driftIssues: driftResult.driftIssues.length,
+        hallucinationIssues: hallucinationResult.issues.length,
+        transcriptQuality01: Math.max(0, Math.min(1, 1 - sanitizerResult.unknownSpeakerLines / transcriptLines)),
+        speakerConfidence01: speakerMappingConfidence / 100,
+        contradictionClarity01: Math.min(1, graphResult.legacy.contradictions.length / Math.max(1, claims.length)),
+    });
     return {
         answer: input.answer,
         refusal,
@@ -645,7 +674,7 @@ async function runUnifiedGraphPath(input, timer, validationStartTime, adapter) {
         risk: riskAdjusted.risk,
         productContext: {
             positioning: "TCL turns conversations into defensible truth, compliance, hallucination drift, and business-value intelligence.",
-            defaultDomain: "protectqa_final_expense",
+            defaultDomain: domainPacks[0]?.id ?? "general_conversation_integrity",
             domainPacksApplied: domainPacks.map(p => p.id),
         },
         businessInsights,
@@ -653,6 +682,7 @@ async function runUnifiedGraphPath(input, timer, validationStartTime, adapter) {
         dashboardSummary,
         claimsAnalysis,
         issuesBySeverity,
+        analysisResult,
         evidenceDependencyGraph: evidenceNodes,
         executiveSummary: buildExecutiveSummary({
             scores: {
@@ -761,6 +791,7 @@ async function runUnifiedGraphPath(input, timer, validationStartTime, adapter) {
                 pairs: crossTurnResult.pairs,
             },
             domainPacksApplied: domainPacks.map(p => ({ id: p.id, version: p.version })),
+            analysisResult,
             suggestions: generateSuggestions(claims, [], // violations
             graphResult.legacy.contradictions.map(c => ({
                 claimA: c.claimA,
@@ -776,6 +807,8 @@ async function runUnifiedGraphPath(input, timer, validationStartTime, adapter) {
                 engineVersion: getEngineVersion(),
                 graphBuilderMode: 'unified',
                 templateId,
+                industryTemplateId,
+                domainPackIds: domainPacks.map(p => p.id),
                 inputHash: graphResult.graph.meta.inputHash,
                 configHash: graphResult.graph.meta.configHash,
                 timestamp: new Date().toISOString(),
@@ -830,9 +863,6 @@ function detectTemplate(transcript) {
 function inferDomainPackIds(transcript, explicitTemplateId) {
     const lower = transcript.toLowerCase();
     const packs = new Set();
-    if (/\b(final expense|burial insurance|death benefit|graded benefit|guaranteed approval|every carrier|protectqa|guaranteed issue|underwriting|waiting period)\b/.test(lower)) {
-        packs.add('protectqa_final_expense');
-    }
     if (/\b(ai assistant|chatbot|chat bot|virtual assistant|tool call|prompt injection|llm|i am a (?:doctor|attorney|financial advisor))\b/.test(lower)) {
         packs.add('ai_chatbot');
     }

@@ -85,6 +85,8 @@ export declare const DEFAULT_TEMPLATE_CONFIG: TemplateConfig;
 export declare const TELCO_TEMPLATE_CONFIG: TemplateConfig;
 export declare const LOANS_TEMPLATE_CONFIG: TemplateConfig;
 export declare const AI_CHAT_TEMPLATE_CONFIG: TemplateConfig;
+/** Insurance / final-expense graph lens — same engine, domain-tuned gating for qualification language */
+export declare const FINAL_EXPENSE_TEMPLATE_CONFIG: TemplateConfig;
 export declare function getTemplateConfig(): TemplateConfig;
 export declare function setTemplateConfig(templateIdOrConfig: string | TemplateConfig): void;
 export declare function registerTemplate(config: TemplateConfig): void;

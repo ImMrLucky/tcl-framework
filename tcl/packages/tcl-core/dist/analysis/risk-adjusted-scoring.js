@@ -5,7 +5,7 @@ function isProtectqaCritical(t) {
     return t.startsWith("PROTECTQA_") && /GUARANTEE|NO_RISK|APPROVAL_BEFORE|DAY_ONE|GUARANTEED_PAYOUT|HEALTH_DOES|AI_FINAL_APPROVAL/i.test(t);
 }
 export function computeRiskAdjustedScores(input) {
-    const profile = input.profile ?? "protectqa";
+    const profile = input.profile ?? "generic";
     const disclosureCoverageRaw = clamp(input.disclosureCoverage ?? 100);
     const evidenceSupportRaw = clamp(input.evidenceSupport ?? 55);
     const speakerConfidenceRaw = clamp(input.speakerConfidence ?? 95);

@@ -1,20 +1,22 @@
 /**
  * Domain Pack Registry & Runner — pluggable Conversation Truth & Risk Intelligence.
  *
- * ProtectQA final-expense scoring is always available by default (`protectqa_final_expense`).
- * Additional packs attach from template or explicit `domainPackIds`.
+ * Default pack is **General Conversation Integrity** (`general_conversation_integrity`).
+ * ProtectQA / final-expense rules load when that template or pack is explicitly selected (or template id maps to that pack).
  */
 import { createHash } from "crypto";
 import type { Claim, IssueV2 } from "../types.js";
 import type { DomainPack, DomainRule } from "./types.js";
 import { protectqaFinalExpensePack } from "./protectqa-final-expense.js";
+import { generalConversationIntegrityPack } from "./general-conversation-integrity.js";
 import { aiChatbotPack } from "./ai-chatbot.js";
 import { customerSupportPack, saasSalesPack, healthcareIntakePack, financialServicesPack } from "./vertical-stubs.js";
+import { computePackIssueConfidence, computePackIssueScoringComponents } from "../scoring/pack-issue-scoring.js";
 
 const REGISTRY = new Map<string, DomainPack>();
 
-/** ProtectQA-first default — no configuration required */
-export const DEFAULT_DOMAIN_PACK_IDS = ["protectqa_final_expense"] as const;
+/** Baseline TCL template — no industry-specific compliance rules */
+export const DEFAULT_DOMAIN_PACK_IDS = ["general_conversation_integrity"] as const;
 
 export function registerDomainPack(pack: DomainPack): void {
   REGISTRY.set(pack.id, pack);
@@ -39,13 +41,15 @@ function dedupePacks(packs: DomainPack[]): DomainPack[] {
   return out;
 }
 
-/**
- * Ensure ProtectQA pack is first when present (labeling + dashboard defaults).
- */
-function orderProtectqaFirst(packs: DomainPack[]): DomainPack[] {
-  const pq = packs.filter(p => p.id === "protectqa_final_expense");
-  const rest = packs.filter(p => p.id !== "protectqa_final_expense");
-  return [...pq, ...rest];
+/** General pack first when present so baseline integrity runs before vertical add-ons */
+function orderGeneralFirst(packs: DomainPack[]): DomainPack[] {
+  const g = packs.filter(p => p.id === "general_conversation_integrity");
+  const rest = packs.filter(p => p.id !== "general_conversation_integrity");
+  return [...g, ...rest];
+}
+
+function defaultPack(): DomainPack {
+  return REGISTRY.get("general_conversation_integrity") ?? protectqaFinalExpensePack;
 }
 
 export function selectDomainPacks(options: { templateId?: string; packIds?: string[] }): DomainPack[] {
@@ -53,13 +57,13 @@ export function selectDomainPacks(options: { templateId?: string; packIds?: stri
     const resolved = options.packIds
       .map(id => REGISTRY.get(id))
       .filter((pack): pack is DomainPack => Boolean(pack));
-    return orderProtectqaFirst(dedupePacks(resolved.length > 0 ? resolved : [protectqaFinalExpensePack]));
+    return orderGeneralFirst(dedupePacks(resolved.length > 0 ? resolved : [defaultPack()]));
   }
   if (options.templateId) {
     const matched = getAllDomainPacks().filter(pack => pack.templates?.includes(options.templateId!));
-    if (matched.length > 0) return orderProtectqaFirst(dedupePacks(matched));
+    if (matched.length > 0) return orderGeneralFirst(dedupePacks(matched));
   }
-  return [protectqaFinalExpensePack];
+  return [defaultPack()];
 }
 
 interface RunContext {
@@ -129,6 +133,8 @@ function makeIssue(
   const riskScore = rule.severity === "critical" ? 0.95 : rule.severity === "high" ? 0.85 : rule.severity === "medium" ? 0.6 : 0.4;
   const narr = narrativeFor(rule, claim);
   const missingEvidence = rule.requiredEvidence ?? defaultMissingEvidenceForType(rule.type);
+  const packConfidence = computePackIssueConfidence(rule.severity, context.evidenceMode);
+  const packComponents = computePackIssueScoringComponents(rule.severity, context.evidenceMode, riskScore);
   return {
     issueId: `issue_${issueId}`,
     issueKey,
@@ -144,7 +150,7 @@ function makeIssue(
     impact: rule.severity === "critical" ? "high" : "medium",
     riskScore,
     score: Math.round(riskScore * 100),
-    confidence: 0.88,
+    confidence: packConfidence,
     reviewRequired: rule.severity === "critical" || rule.severity === "high",
     verification: {
       level: context.evidenceMode === "TRANSCRIPT_PLUS_EXTERNAL" ? "EXTERNAL_VERIFIED" : "TRANSCRIPT_ONLY",
@@ -189,7 +195,15 @@ function makeIssue(
         : [],
     },
     scoring: {
-      components: { impact01: 0.9, evidence01: 0.7, signal01: 0.85, category01: 1, verificationMultiplier: 1, risk01Raw: riskScore, risk01Final: riskScore },
+      components: {
+        impact01: packComponents.impact01,
+        evidence01: packComponents.evidence01,
+        signal01: packComponents.signal01,
+        category01: packComponents.category01,
+        verificationMultiplier: packComponents.verificationMultiplier,
+        risk01Raw: packComponents.risk01Raw,
+        risk01Final: Math.min(1, riskScore * packComponents.verificationMultiplier),
+      },
       weights: { impact: 0.4, evidence: 0.3, signal: 0.2, category: 0.1 },
       reasons: [`DOMAIN_PACK:${pack.id}:${rule.type}`],
     },
@@ -241,6 +255,7 @@ export function runDomainPacks(packs: DomainPack[], claims: Claim[], context: Ru
   return packs.flatMap(pack => runDomainPack(pack, claims, context).issues);
 }
 
+registerDomainPack(generalConversationIntegrityPack);
 registerDomainPack(protectqaFinalExpensePack);
 registerDomainPack(aiChatbotPack);
 registerDomainPack(customerSupportPack);

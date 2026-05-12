@@ -34,6 +34,10 @@ Make sure both services are running:
 2. TCL Spectral (if using): `cd packages/tcl-spectral && uvicorn app.main:app --port 8080`
 3. TCL UI: `cd packages/tcl-ui && npm start` (runs on port 4200)
 
+### Supabase (login / storage)
+
+The Angular app reads **`window.__SUPABASE_URL`** and **`window.__SUPABASE_ANON_KEY`** (set in `src/index.html` for local dev, or inject at deploy time). Use the **anon** key only. **Never** put `SUPABASE_SERVICE_ROLE_KEY` in the UI or commit it to git — server and workers only.
+
 ## Architecture
 
 The UI is decoupled from the TCL framework and communicates via HTTP API calls to the `/validate` endpoint. This allows the framework to remain independent and the UI to be easily replaced or extended.

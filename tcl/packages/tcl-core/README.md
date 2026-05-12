@@ -14,13 +14,14 @@ It helps teams answer:
 4. Was it compliant with policy and consistent across the call?  
 5. What should we do next (compliance, AI policy, KB, product, not “coaching only”)?  
 
-## Defaults (ProtectQA-first)
+## Defaults (multi-industry)
 
-- **Default domain pack:** `protectqa_final_expense` runs automatically—no extra setup for ProtectQA teams.  
+- **Default domain pack:** `general_conversation_integrity` runs when no template / pack ids are supplied.  
+- **ProtectQA final expense:** pass `options.template: "final_expense"` (or `insurance` / `protectqa`) or include `protectqa_final_expense` in `options.domainPackIds`.  
 - **`scores.tcl`** / **`scores.overall`:** primary Conversation Truth & Risk composite.  
 - **`scores.truth`:** factual/support/safety (not transcript presence). **`transcriptGrounding`** is tracked separately.  
 
-To opt out of the automatic ProtectQA pack, pass `options.skipProtectqaDefault: true` when calling `validate`.
+`options.skipProtectqaDefault` is no longer required for a non-insurance default; the final-expense pack is not prepended unless you select it or pass explicit pack ids.
 
 ## Key API additions
 

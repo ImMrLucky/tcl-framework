@@ -1,4 +1,5 @@
 export * from "./types.js";
+export * from "./types/analysis-result.js";
 export * from "./orchestrator.js";
 export * from "./graph/edge_builder.js";
 export * from "./adapters/llm_adapter.js";

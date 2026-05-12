@@ -1,7 +1,7 @@
 import type { Claim, IssueV2 } from "../types.js";
 import type { DomainPack } from "./types.js";
-/** ProtectQA-first default — no configuration required */
-export declare const DEFAULT_DOMAIN_PACK_IDS: readonly ["protectqa_final_expense"];
+/** Baseline TCL template — no industry-specific compliance rules */
+export declare const DEFAULT_DOMAIN_PACK_IDS: readonly ["general_conversation_integrity"];
 export declare function registerDomainPack(pack: DomainPack): void;
 export declare function getDomainPack(id: string): DomainPack | undefined;
 export declare function getAllDomainPacks(): DomainPack[];

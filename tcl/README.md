@@ -10,7 +10,7 @@ It is **not** positioned as “agent training” or “call coaching only.” Co
 
 | Package | Role |
 |--------|------|
-| [`packages/tcl-core`](packages/tcl-core) | Analysis engine, domain packs, API server (`validate`, scoring, issues, dashboard summaries). **ProtectQA / final expense is the default domain** when none is specified. |
+| [`packages/tcl-core`](packages/tcl-core) | Analysis engine, domain packs, API server (`validate`, scoring, issues, dashboard summaries). **Default domain pack is General Conversation Integrity**; industry packs (e.g. ProtectQA final expense) attach when you select the matching template or pass `domainPackIds`. |
 | [`packages/tcl-nlp`](packages/tcl-nlp) | Optional spaCy-backed entity extraction service. |
 
 ## Documentation
@@ -28,3 +28,16 @@ It is **not** positioned as “agent training” or “call coaching only.” Co
 5. What should happen next (compliance, AI policy, KB, product insight—not only coaching)?  
 
 For implementation details, tests, and fixtures, start in `packages/tcl-core`.
+
+## Local install (clean checkout)
+
+From this directory:
+
+```bash
+npm install
+npm run build
+npm run test
+npm run typecheck
+```
+
+If dependency resolution is corrupted, remove `node_modules` and `package-lock.json` only when needed, then run `npm install` again. Do not commit `node_modules` or zipped dependencies.

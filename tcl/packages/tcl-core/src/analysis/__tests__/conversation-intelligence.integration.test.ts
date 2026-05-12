@@ -12,7 +12,7 @@ describe("Conversation intelligence (e2e orchestrator)", () => {
     const out = await validate({
       question: "audit",
       answer: text,
-      options: { spectral: false },
+      options: { spectral: false, domainPackIds: ["protectqa_final_expense"] },
     });
 
     expect(out.risk?.level).toBe("critical");
@@ -34,7 +34,7 @@ describe("Conversation intelligence (e2e orchestrator)", () => {
     const out = await validate({
       question: "audit",
       answer: text,
-      options: { spectral: false },
+      options: { spectral: false, domainPackIds: ["protectqa_final_expense"] },
     });
 
     expect(out.risk?.criticalCount).toBe(0);

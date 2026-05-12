@@ -239,8 +239,11 @@ export class LoginComponent {
           this.errorMessage = result.error.message || 'Authentication failed';
         }
       } else {
-        // Success! Redirect to dashboard
-        this.router.navigate(['/dashboard']);
+        const navigated = await this.router.navigate(['/dashboard']);
+        if (!navigated) {
+          this.errorMessage =
+            'Login succeeded but the app could not open the dashboard (session check). Try refreshing the page.';
+        }
       }
     } catch (error: any) {
       this.errorMessage = error.message || 'An unexpected error occurred';

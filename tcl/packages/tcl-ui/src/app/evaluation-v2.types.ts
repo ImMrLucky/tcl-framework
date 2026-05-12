@@ -80,6 +80,8 @@ export interface EvaluationReportV2 {
   issuesBySeverity?: Record<string, IssueV2[]>;
   claimsAnalysis?: unknown[];
   evidenceDependencyGraph?: unknown[];
+  /** Structured engine output (TCL 3.x) */
+  analysisResult?: Record<string, unknown>;
 }
 
 export interface IssueV2 {

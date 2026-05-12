@@ -292,6 +292,32 @@ export const AI_CHAT_TEMPLATE_CONFIG: TemplateConfig = {
   },
 };
 
+/** Insurance / final-expense graph lens — same engine, domain-tuned gating for qualification language */
+export const FINAL_EXPENSE_TEMPLATE_CONFIG: TemplateConfig = {
+  ...DEFAULT_TEMPLATE_CONFIG,
+  templateId: "final_expense",
+  entityPacks: [...DEFAULT_TEMPLATE_CONFIG.entityPacks, "money"],
+  slotLexicon: {
+    ...DEFAULT_TEMPLATE_CONFIG.slotLexicon,
+    death_benefit: {
+      slotType: "coverage",
+      entityKey: "death_benefit",
+      synonyms: ["death benefit", "burial benefit", "face amount", "payout", "graded benefit"],
+    },
+    waiting_period: {
+      slotType: "term",
+      entityKey: "waiting_period",
+      synonyms: ["waiting period", "contestability", "two year", "graded period"],
+    },
+    premium: { slotType: "fee", entityKey: "premium", synonyms: ["premium", "monthly cost", "rate"] },
+    approval: { slotType: "status", entityKey: "approval", synonyms: ["approved", "underwriting", "declined", "eligible"] },
+  },
+  gating: {
+    ...DEFAULT_TEMPLATE_CONFIG.gating,
+    contradictionRequiresSameTopic: false,
+  },
+};
+
 // =============================================================================
 // TEMPLATE REGISTRY
 // =============================================================================
@@ -301,6 +327,9 @@ const TEMPLATE_REGISTRY: Record<string, TemplateConfig> = {
   'telco': TELCO_TEMPLATE_CONFIG,
   'loans': LOANS_TEMPLATE_CONFIG,
   'ai_chat': AI_CHAT_TEMPLATE_CONFIG,
+  final_expense: FINAL_EXPENSE_TEMPLATE_CONFIG,
+  insurance: { ...FINAL_EXPENSE_TEMPLATE_CONFIG, templateId: "insurance" },
+  protectqa: { ...FINAL_EXPENSE_TEMPLATE_CONFIG, templateId: "protectqa" },
 };
 
 // =============================================================================

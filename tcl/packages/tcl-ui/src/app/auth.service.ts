@@ -4,6 +4,28 @@ import { BehaviorSubject, Observable, firstValueFrom } from 'rxjs';
 import { Router } from '@angular/router';
 import { HttpClient } from '@angular/common/http';
 
+function readWindowSupabaseUrl(): string {
+  if (typeof window === 'undefined') return '';
+  const u = (window as unknown as { __SUPABASE_URL?: string }).__SUPABASE_URL;
+  return typeof u === 'string' ? u.trim() : '';
+}
+
+function readWindowSupabaseAnonKey(): string {
+  if (typeof window === 'undefined') return '';
+  const k = (window as unknown as { __SUPABASE_ANON_KEY?: string }).__SUPABASE_ANON_KEY;
+  return typeof k === 'string' ? k.trim() : '';
+}
+
+function supabaseStorageKeyFromUrl(url: string): string {
+  try {
+    const host = new URL(url).hostname;
+    const ref = host.split('.')[0] || 'project';
+    return `sb-${ref}-auth-token`;
+  } catch {
+    return 'sb-auth-token';
+  }
+}
+
 export interface User {
   id: string;
   email?: string;
@@ -36,31 +58,36 @@ export class AuthService {
   private lastReauthTime: number | null = null;
 
   constructor(private router: Router, private http: HttpClient) {
-    // Use environment variables if available, fallback to hardcoded for development
-    const supabaseUrl = (typeof window !== 'undefined' && (window as any).__SUPABASE_URL) 
-      || 'https://uqwcmkyaskyduxuluqrm.supabase.co';
-    const supabaseAnonKey = (typeof window !== 'undefined' && (window as any).__SUPABASE_ANON_KEY)
-      || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InVxd2Nta3lhc2t5ZHV4dWx1cXJtIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjY5NjA4MTQsImV4cCI6MjA4MjUzNjgxNH0.hmH7rX3ujck-3zBj1OsWXE2QB_we2xXlBWCzXr_WOB0';
-    
+    const supabaseUrl = readWindowSupabaseUrl();
+    const supabaseAnonKey = readWindowSupabaseAnonKey();
+    if (!supabaseUrl || !supabaseAnonKey) {
+      console.error(
+        '[Auth] Missing window.__SUPABASE_URL or window.__SUPABASE_ANON_KEY. Set them in src/index.html (public anon key only — never the service role). See packages/tcl-ui/README.md.'
+      );
+    }
+
     // Configure Supabase client to handle lock manager gracefully
     // The lock manager error is usually harmless - it just means another tab is managing the session
     // Using localStorage for persistent sessions (survives browser close)
     // Use sessionStorage if you want session-only (cleared on browser close)
-    this.supabase = createClient(supabaseUrl, supabaseAnonKey, {
-      auth: {
-        autoRefreshToken: true,
-        persistSession: true,
-        detectSessionInUrl: true,
-        // Use a unique storage key
-        storageKey: 'sb-uqwcmkyaskyduxuluqrm-auth-token',
-        // Use localStorage for persistent sessions (recommended for better UX)
-        // Change to sessionStorage if you want session-only auth
-        storage: typeof window !== 'undefined' ? window.localStorage : undefined,
-        flowType: 'pkce',
-        // Suppress lock manager warnings
-        debug: false
+    this.supabase = createClient(
+      supabaseUrl || 'https://missing-supabase-config.invalid',
+      supabaseAnonKey || 'missing-anon-key',
+      {
+        auth: {
+          autoRefreshToken: true,
+          persistSession: true,
+          detectSessionInUrl: true,
+          storageKey: supabaseUrl ? supabaseStorageKeyFromUrl(supabaseUrl) : 'sb-auth-token',
+          // Use localStorage for persistent sessions (recommended for better UX)
+          // Change to sessionStorage if you want session-only auth
+          storage: typeof window !== 'undefined' ? window.localStorage : undefined,
+          flowType: 'pkce',
+          // Suppress lock manager warnings
+          debug: false
+        }
       }
-    });
+    );
     
     // Suppress lock manager console errors (they're informational, not errors)
     if (typeof window !== 'undefined' && 'navigator' in window && 'locks' in navigator) {
@@ -145,16 +172,10 @@ export class AuthService {
           return;
         }
         
-        // Double-check localStorage - if auth token was cleared, don't restore session
-        if (typeof window !== 'undefined' && window.localStorage) {
-          const authToken = localStorage.getItem('sb-uqwcmkyaskyduxuluqrm-auth-token');
-          if (!authToken && session) {
-            await this.supabase.auth.signOut();
-            this.currentUserSubject.next(null);
-            return;
-          }
-        }
-        
+        // Do not sign out when getSession() has a session but the main storage key is empty:
+        // Supabase can split session vs user across keys; races with the lock manager also happen.
+        // Trust the session returned by getSession() here.
+
         if (session?.user) {
           this.resetInactivityTimer();
           
@@ -182,36 +203,82 @@ export class AuthService {
     }, 100);
   }
 
+  private static readonly AUTH_STORAGE_KEY = 'sb-uqwcmkyaskyduxuluqrm-auth-token';
+
+  /**
+   * Supabase auth-js may store `user` in a sibling key (`{storageKey}-user`) and omit it from the
+   * main session blob. AuthGuard must still recognize a valid access_token.
+   */
+  private readUserFromSplitStorage(storageKey: string, sessionJson: Record<string, unknown>): { id: string; email?: string } | null {
+    const embedded = sessionJson['user'] as { id?: string; email?: string } | undefined;
+    if (embedded?.id) {
+      return { id: embedded.id, email: embedded.email };
+    }
+    if (typeof window === 'undefined' || !window.localStorage) return null;
+    try {
+      const raw = window.localStorage.getItem(`${storageKey}-user`);
+      if (!raw) return null;
+      const wrap = JSON.parse(raw) as { user?: { id?: string; email?: string } };
+      if (wrap?.user?.id) {
+        return { id: wrap.user.id, email: wrap.user.email };
+      }
+    } catch {
+      /* noop */
+    }
+    return null;
+  }
+
+  /** Best-effort JWT payload decode for `sub` / `email` when user object is not persisted locally. */
+  private userFromAccessToken(accessToken: string): { id: string; email?: string } | null {
+    try {
+      const parts = accessToken.split('.');
+      if (parts.length !== 3) return null;
+      const base64 = parts[1].replace(/-/g, '+').replace(/_/g, '/');
+      const padded = base64.padEnd(base64.length + ((4 - (base64.length % 4)) % 4), '=');
+      const json = decodeURIComponent(
+        atob(padded)
+          .split('')
+          .map(c => '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2))
+          .join('')
+      );
+      const payload = JSON.parse(json) as { sub?: string; email?: string };
+      if (payload?.sub) {
+        return { id: payload.sub, email: payload.email };
+      }
+    } catch {
+      /* noop */
+    }
+    return null;
+  }
+
   /**
    * Check if there's a valid session - used by AuthGuard
    * Returns true if user has a valid session, false otherwise
    */
   async checkSession(): Promise<boolean> {
     // Check localStorage first - this is synchronous and avoids race conditions
-    const storageKey = 'sb-uqwcmkyaskyduxuluqrm-auth-token';
+    const storageKey = AuthService.AUTH_STORAGE_KEY;
     const storedSession = typeof window !== 'undefined' ? localStorage.getItem(storageKey) : null;
     
     if (storedSession) {
       try {
-        const parsed = JSON.parse(storedSession);
-        if (parsed.access_token && parsed.user) {
-          // Check expiry
-          const expiresAt = parsed.expires_at;
+        const parsed = JSON.parse(storedSession) as Record<string, unknown>;
+        const accessToken = parsed['access_token'] as string | undefined;
+        if (accessToken && typeof accessToken === 'string') {
+          const expiresAt = parsed['expires_at'] as number | undefined;
           if (expiresAt && expiresAt * 1000 < Date.now()) {
-            // Token expired
             return false;
           }
-          
-          // Valid token found - update user subject if needed
-          if (!this.currentUserSubject.value) {
-            this.currentUserSubject.next({
-              id: parsed.user.id,
-              email: parsed.user.email || undefined
-            });
-            // Load full profile in background
-            this.loadUserProfileAsync(parsed.user.id);
+
+          const who =
+            this.readUserFromSplitStorage(storageKey, parsed) ?? this.userFromAccessToken(accessToken);
+          if (who) {
+            if (!this.currentUserSubject.value) {
+              this.currentUserSubject.next({ id: who.id, email: who.email });
+              this.loadUserProfileAsync(who.id);
+            }
+            return true;
           }
-          return true;
         }
       } catch {
         // Invalid JSON in storage - fall through
@@ -219,11 +286,11 @@ export class AuthService {
     }
     
     // Fallback: Try Supabase getSession (handles refresh tokens, etc.)
-    // Add timeout to prevent hanging
+    // Add timeout to prevent hanging (lock manager can delay getSession on some browsers)
     try {
       const sessionPromise = this.supabase.auth.getSession();
       const timeoutPromise = new Promise((_, reject) => 
-        setTimeout(() => reject(new Error('Session check timeout')), 3000)
+        setTimeout(() => reject(new Error('Session check timeout')), 8000)
       );
       
       const result = await Promise.race([sessionPromise, timeoutPromise]) as any;
@@ -241,6 +308,12 @@ export class AuthService {
             email: session.user.email || undefined
           });
           this.loadUserProfileAsync(session.user.id);
+        } else if (!this.currentUserSubject.value && session.access_token) {
+          const who = this.userFromAccessToken(session.access_token);
+          if (who) {
+            this.currentUserSubject.next({ id: who.id, email: who.email });
+            this.loadUserProfileAsync(who.id);
+          }
         }
         
         return true;
@@ -388,17 +461,31 @@ export class AuthService {
     }
 
     // User is authenticated - set user state immediately
-    const user = data.user;
-    if (!user) {
-      await this.supabase.auth.signOut();
-      return { 
-        error: { 
-          message: 'Could not retrieve user information. Please try again.', 
-          name: 'UserError',
-          status: 500
-        } as AuthError, 
-        duplicateAccount: false 
-      };
+    const user = data.user ?? data.session?.user ?? null;
+    if (!user?.id) {
+      const fromJwt = data.session?.access_token
+        ? this.userFromAccessToken(data.session.access_token)
+        : null;
+      if (!fromJwt?.id) {
+        await this.supabase.auth.signOut();
+        return {
+          error: {
+            message: 'Could not retrieve user information. Please try again.',
+            name: 'UserError',
+            status: 500,
+          } as AuthError,
+          duplicateAccount: false,
+        };
+      }
+      this.currentUserSubject.next({
+        id: fromJwt.id,
+        email: fromJwt.email,
+      });
+      this.resetSessionTimer();
+      this.ensureUserProvisioned(fromJwt.id, fromJwt.email || email);
+      this.loadUserProfileAsync(fromJwt.id);
+      await this.supabase.auth.getSession();
+      return { error: null, duplicateAccount: false };
     }
 
     // Set user state immediately so the UI updates
@@ -413,6 +500,8 @@ export class AuthService {
     // Do background tasks without blocking the login flow
     this.ensureUserProvisioned(user.id, user.email || '');
     this.loadUserProfileAsync(user.id);
+
+    await this.supabase.auth.getSession();
 
     return { error: null, duplicateAccount: false };
   }

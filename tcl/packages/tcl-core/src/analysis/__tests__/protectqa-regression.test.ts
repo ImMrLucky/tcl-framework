@@ -35,6 +35,7 @@ Rep: ProtectQA has special access to underwriting rules consumers cannot get any
     const allIssues = [...finalExpenseIssues, ...hallucination.issues, ...drift.driftIssues];
     const factual = evaluateFactualTruth(claims, allIssues, { hasExternalEvidence: false });
     const score = computeRiskAdjustedScores({
+      profile: "protectqa",
       transcriptGrounding: 100,
       factualTruth: factual.factualTruthScore,
       compliance: Math.max(0, 100 - allIssues.filter(i => i.severity === "critical").length * 30 - allIssues.filter(i => i.severity === "high").length * 12),
@@ -70,6 +71,7 @@ Rep: Waiting periods may apply depending on the policy.
     const drift = detectDrift(claims, { runId: "test", conversationId: "c", evidenceMode: "TRANSCRIPT_ONLY" });
     const factual = evaluateFactualTruth(claims, [...issues, ...hallucination.issues, ...drift.driftIssues], { hasExternalEvidence: false });
     const score = computeRiskAdjustedScores({
+      profile: "protectqa",
       transcriptGrounding: 100,
       factualTruth: factual.factualTruthScore,
       compliance: 100,

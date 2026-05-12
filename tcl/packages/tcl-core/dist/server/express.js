@@ -58,6 +58,9 @@ import { requireCapability } from "./plans/capability-middleware.js";
 import { Capability } from "./plans/capabilities.js";
 import { entitlementsService } from "./entitlements/entitlements-service.js";
 import { requireEntitlement } from "./entitlements/middleware.js";
+import { assertCoreServerEnv } from "./env-validation.js";
+import { logJson, summarizeValidateBody } from "./safe-log.js";
+assertCoreServerEnv();
 const app = express();
 // CORS middleware - allows frontend to call Railway directly
 // This is necessary when the frontend calls Railway directly for /validate
@@ -534,8 +537,7 @@ app.post("/validate", requireCapability(Capability.ANALYZE_MANUAL_UPLOAD), async
                 return res.status(503).json({ error: "Service initializing, please try again" });
             }
         }
-        console.log("Received validate request");
-        console.log("Request body:", JSON.stringify(req.body, null, 2));
+        const shape = summarizeValidateBody(req.body);
         const input = req.body;
         // Get org context for plan checks and usage tracking
         const context = await getOrgContext(req);
@@ -543,6 +545,13 @@ app.post("/validate", requireCapability(Capability.ANALYZE_MANUAL_UPLOAD), async
             clearTimeout(timeout);
             return res.status(401).json({ error: context?.error || "Authorization required" });
         }
+        logJson("validate_request", {
+            orgId: context.orgId,
+            questionLen: shape.questionLen,
+            answerLen: shape.answerLen,
+            sourcesCount: shape.sourcesCount,
+            hasOptions: shape.hasOptions,
+        });
         // Get plan context for limits and mode
         const planContext = await planService.getOrgPlanContext(context.orgId);
         // Check file limits for manual uploads (if sources are provided)
@@ -626,52 +635,18 @@ app.post("/validate", requireCapability(Capability.ANALYZE_MANUAL_UPLOAD), async
         const latency = Date.now() - startTime;
         console.log("Validation complete");
         // ========================================================================
-        // DIAGNOSTIC LOGGING - Trace the full pipeline
+        // Pipeline summary (no transcript text, no claim samples)
         // ========================================================================
-        console.log("\n========== PIPELINE DIAGNOSTIC ==========");
-        console.log("1️⃣ CLAIMS:", {
-            count: out.report?.claims?.length || 0,
-            sample: out.report?.claims?.[0]?.text?.substring(0, 60)
+        logJson("validate_pipeline_summary", {
+            orgId: context.orgId,
+            claimsCount: out.report?.claims?.length ?? 0,
+            supportsCount: out.report?.graph?.supports?.length ?? 0,
+            contradictionsCount: out.report?.graph?.contradictions?.length ?? 0,
+            groundingCount: out.report?.graph?.grounding?.length ?? 0,
+            spectralSkipped: Boolean(out.report?.spectral?.spectralSkipped),
+            destructiveClaimsCount: out.report?.destructiveClaims?.length ?? 0,
+            latencyMs: latency,
         });
-        console.log("2️⃣ GRAPH:", {
-            supports: out.report?.graph?.supports?.length || 0,
-            contradictions: out.report?.graph?.contradictions?.length || 0,
-            grounding: out.report?.graph?.grounding?.length || 0,
-            debug: out.report?.graph?.debug ? {
-                pairsGenerated: out.report.graph.debug.pairsGenerated,
-                pairsScored: out.report.graph.debug.pairsScored,
-                scorerId: out.report.graph.debug.model?.scorerId,
-                labelMap: out.report.graph.debug.model?.labelMap,
-                reasonIfEmpty: out.report.graph.debug.reasonIfEmptyGraph
-            } : "no debug info"
-        });
-        console.log("3️⃣ SPECTRAL:", {
-            skipped: out.report?.spectral?.spectralSkipped,
-            debugReason: out.report?.spectral?.debugReason,
-            coherenceScore: out.report?.spectral?.coherenceScore,
-            truthVectorLength: out.report?.spectral?.truthVector?.length || 0,
-            truthStatesLength: out.report?.spectral?.truthStates?.length || 0,
-            nodeBlameNormLength: out.report?.spectral?.nodeBlameNorm?.length || 0,
-            sampleTruthStates: out.report?.spectral?.truthStates?.slice(0, 3),
-            sampleNodeBlame: out.report?.spectral?.nodeBlameNorm?.slice(0, 3),
-            topBadContradictions: out.report?.spectral?.topBadContradictions?.length || 0,
-            topBadSupports: out.report?.spectral?.topBadSupports?.length || 0
-        });
-        console.log("4️⃣ DESTRUCTIVE CLAIMS:", {
-            count: out.report?.destructiveClaims?.length || 0,
-            sample: out.report?.destructiveClaims?.[0] ? {
-                claimId: out.report.destructiveClaims[0].claimId,
-                importance: out.report.destructiveClaims[0].importance,
-                truthState: out.report.destructiveClaims[0].truthState
-            } : "none"
-        });
-        console.log("5️⃣ MANIFEST:", out.report?.manifest ? {
-            inputHash: out.report.manifest.inputHash,
-            nliModelId: out.report.manifest.nliModelId,
-            transcriptSourcesCount: out.report.manifest.transcriptSourcesCount,
-            graphHealth: out.report.manifest.graphHealth
-        } : "no manifest");
-        console.log("==========================================\n");
         // Build issues list from spectral output if available
         // Also build issues from destructive claims even if spectral was skipped
         let issues = [];
@@ -1250,7 +1225,7 @@ app.post("/validate", requireCapability(Capability.ANALYZE_MANUAL_UPLOAD), async
                         orgId: context.orgId,
                         action: 'evaluation.create',
                         targetType: 'evaluation',
-                        meta: { question: input.question.substring(0, 100), latency, env: context.env }
+                        meta: { questionLen: input.question.length, latencyMs: latency, env: context.env }
                     });
                     // Include evaluation ID in response
                     out.evaluationId = insertedEvaluation?.id;
