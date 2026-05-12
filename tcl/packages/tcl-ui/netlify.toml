@@ -1,8 +1,12 @@
 [build]
-  # npm ci requires package-lock.json in this directory. Use ci when present (reproducible); otherwise install from package.json.
-  command = "if [ -f package-lock.json ]; then npm ci; else npm install --no-audit --no-fund; fi && npm run build -- --configuration production"
+  # lockfileVersion 3 needs npm 9+ (Node 18+). Netlify's default Node can be older and makes `npm ci` fail with EUSAGE.
+  # Pin NODE_VERSION below, then prefer `npm ci`; if it still fails, fall back to `npm install`.
+  command = "( npm ci || npm install --no-audit --no-fund ) && npm run build -- --configuration production"
   publish = "dist/tcl-ui/browser"
   timeout = 300
+
+[build.environment]
+  NODE_VERSION = "20"
 
 # Force HTTPS - redirect all HTTP traffic to HTTPS
 [[redirects]]
