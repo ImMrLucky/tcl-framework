@@ -156,50 +156,59 @@ export class AuthService {
     // Load initial session - set user immediately if session exists
     // Use a small delay to ensure localStorage is checked after any signOut operations
     setTimeout(() => {
-      // Clear expired session first to prevent hanging
       this.clearExpiredSession();
-      
-      // Add timeout to getSession to prevent hanging
-      const sessionPromise = this.supabase.auth.getSession();
-      const timeoutPromise = new Promise((_, reject) => 
-        setTimeout(() => reject(new Error('Session check timeout')), 3000)
-      );
-      
-      Promise.race([sessionPromise, timeoutPromise]).then(async (result: any) => {
-        const { data: { session }, error: sessionError } = result || { data: { session: null }, error: null };
-        if (sessionError) {
-          this.currentUserSubject.next(null);
-          return;
-        }
-        
-        // Do not sign out when getSession() has a session but the main storage key is empty:
-        // Supabase can split session vs user across keys; races with the lock manager also happen.
-        // Trust the session returned by getSession() here.
 
-        if (session?.user) {
-          this.resetInactivityTimer();
-          
-          const basicUser: User = {
-            id: session.user.id,
-            email: session.user.email || undefined,
-            fullName: session.user.user_metadata?.['full_name'] as string | undefined
-          };
-          this.currentUserSubject.next(basicUser);
-          
-          try {
-            await this.loadUserProfile(session.user.id);
-          } catch {
-            // Keep the basic user even if profile load fails
+      if (this.hydrateUserFromStorageIfPresent()) {
+        return;
+      }
+
+      const sessionPromise = this.supabase.auth.getSession();
+      const timeoutPromise = new Promise((_, reject) =>
+        setTimeout(() => reject(new Error('Session check timeout')), 12000)
+      );
+
+      Promise.race([sessionPromise, timeoutPromise])
+        .then(async (result: any) => {
+          const {
+            data: { session },
+            error: sessionError,
+          } = result || { data: { session: null }, error: null };
+          if (sessionError) {
+            if (!this.hydrateUserFromStorageIfPresent()) {
+              this.currentUserSubject.next(null);
+            }
+            return;
           }
-        } else {
+
+          if (session?.user) {
+            this.resetInactivityTimer();
+
+            const basicUser: User = {
+              id: session.user.id,
+              email: session.user.email || undefined,
+              fullName: session.user.user_metadata?.['full_name'] as string | undefined,
+            };
+            this.currentUserSubject.next(basicUser);
+
+            try {
+              await this.loadUserProfile(session.user.id);
+            } catch {
+              /* keep basic user */
+            }
+          } else if (this.hydrateUserFromStorageIfPresent()) {
+            return;
+          } else {
+            this.currentUserSubject.next(null);
+          }
+        })
+        .catch((err) => {
+          console.warn('[Auth] Session check failed or timed out:', err?.message);
+          if (this.hydrateUserFromStorageIfPresent()) {
+            return;
+          }
+          this.clearExpiredSession();
           this.currentUserSubject.next(null);
-        }
-      }).catch((err) => {
-        console.warn('[Auth] Session check failed or timed out:', err?.message);
-        // Clear expired session on timeout
-        this.clearExpiredSession();
-        this.currentUserSubject.next(null);
-      });
+        });
     }, 100);
   }
 
@@ -224,6 +233,35 @@ export class AuthService {
     } catch {
       /* session already in client + localStorage from signInWithPassword */
     }
+  }
+
+  /** Restore `currentUser` from persisted Supabase session (handles nested `currentSession` / `session` blobs). */
+  private hydrateUserFromStorageIfPresent(): boolean {
+    const cached = this.getValidSessionFromStorage();
+    if (!cached?.access_token) return false;
+
+    const storageKey = this.getAuthStorageKey();
+    let who: { id: string; email?: string } | null = null;
+    try {
+      const raw = typeof window !== 'undefined' ? window.localStorage?.getItem(storageKey) : null;
+      if (raw) {
+        const parsed = JSON.parse(raw) as Record<string, unknown>;
+        who = this.readUserFromSplitStorage(storageKey, parsed) ?? this.userFromAccessToken(cached.access_token);
+      } else {
+        who = this.userFromAccessToken(cached.access_token);
+      }
+    } catch {
+      who = this.userFromAccessToken(cached.access_token);
+    }
+
+    if (!who?.id) return false;
+
+    if (!this.currentUserSubject.value || this.currentUserSubject.value.id !== who.id) {
+      this.currentUserSubject.next({ id: who.id, email: who.email });
+      this.loadUserProfileAsync(who.id);
+    }
+    this.resetInactivityTimer();
+    return true;
   }
 
   /**
@@ -277,56 +315,29 @@ export class AuthService {
    * Returns true if user has a valid session, false otherwise
    */
   async checkSession(): Promise<boolean> {
-    // Check localStorage first - this is synchronous and avoids race conditions
-    const storageKey = this.getAuthStorageKey();
-    const storedSession = typeof window !== 'undefined' ? localStorage.getItem(storageKey) : null;
-    
-    if (storedSession) {
-      try {
-        const parsed = JSON.parse(storedSession) as Record<string, unknown>;
-        const accessToken = parsed['access_token'] as string | undefined;
-        if (accessToken && typeof accessToken === 'string') {
-          const expiresAt = parsed['expires_at'] as number | undefined;
-          if (expiresAt && expiresAt * 1000 < Date.now()) {
-            return false;
-          }
-
-          const who =
-            this.readUserFromSplitStorage(storageKey, parsed) ?? this.userFromAccessToken(accessToken);
-          if (who) {
-            if (!this.currentUserSubject.value) {
-              this.currentUserSubject.next({ id: who.id, email: who.email });
-              this.loadUserProfileAsync(who.id);
-            }
-            return true;
-          }
-        }
-      } catch {
-        // Invalid JSON in storage - fall through
-      }
+    if (this.hydrateUserFromStorageIfPresent()) {
+      return true;
     }
-    
-    // Fallback: Try Supabase getSession (handles refresh tokens, etc.)
-    // Add timeout to prevent hanging (lock manager can delay getSession on some browsers)
+
     try {
       const sessionPromise = this.supabase.auth.getSession();
-      const timeoutPromise = new Promise((_, reject) => 
-        setTimeout(() => reject(new Error('Session check timeout')), 8000)
+      const timeoutPromise = new Promise((_, reject) =>
+        setTimeout(() => reject(new Error('Session check timeout')), 12000)
       );
-      
-      const result = await Promise.race([sessionPromise, timeoutPromise]) as any;
+
+      const result = (await Promise.race([sessionPromise, timeoutPromise])) as any;
       const { data: { session } } = result || { data: { session: null } };
-      
+
       if (session?.access_token) {
         const expiresAt = session.expires_at;
         if (expiresAt && expiresAt * 1000 < Date.now()) {
           return false;
         }
-        
+
         if (!this.currentUserSubject.value && session.user) {
           this.currentUserSubject.next({
             id: session.user.id,
-            email: session.user.email || undefined
+            email: session.user.email || undefined,
           });
           this.loadUserProfileAsync(session.user.id);
         } else if (!this.currentUserSubject.value && session.access_token) {
@@ -336,14 +347,16 @@ export class AuthService {
             this.loadUserProfileAsync(who.id);
           }
         }
-        
+
         return true;
       }
     } catch (err) {
-      // Supabase error or timeout - already checked localStorage, so return false
       console.warn('[Auth] Session check failed or timed out in checkSession:', err);
+      if (this.hydrateUserFromStorageIfPresent()) {
+        return true;
+      }
     }
-    
+
     return false;
   }
 
