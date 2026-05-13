@@ -229,6 +229,25 @@ function dedupeIssuesByKey(issues: IssueV2[]): IssueV2[] {
   return out;
 }
 
+/**
+ * Ingestion sometimes yields one "Speaker" / unknown blob for bracket-timestamp transcripts
+ * (e.g. "[00:38] Agent Sarah: ..." per line). If normalizeTranscript splits much finer, use it
+ * so claim meta, issues, and speaker confidence are not all stuck at turn 0 / unknown.
+ */
+function shouldPreferEngineParsedTurnsOverIngest(
+  ingestTurns: any[],
+  parsed: ReturnType<typeof normalizeTranscript>
+): boolean {
+  if (parsed.length < 2 || parsed.length <= ingestTurns.length) return false;
+  if (ingestTurns.length !== 1) return false;
+  const t0 = ingestTurns[0];
+  const label = String(t0?.speakerLabel ?? t0?.speakerLabelRaw ?? "").trim().toLowerCase();
+  const body = String(t0?.text ?? "");
+  if (label === "speaker" || label === "") return true;
+  if (/\[[\d:]+\]\s*[^:]+:\s*/m.test(body)) return true;
+  return false;
+}
+
 // =============================================================================
 // UNIFIED GRAPH PATH (DEFAULT - Best for spectral.py)
 // =============================================================================
@@ -273,13 +292,32 @@ async function runUnifiedGraphPath(
   let extractedClaims: ExtractedClaim[] = [];
   
   const normalizedConversation = (options as any)?.normalizedConversation;
+  const parsedFromRaw = normalizeTranscript(transcript);
   let sourceTurns: any[] | null = null;
   if (normalizedConversation?.turns && Array.isArray(normalizedConversation.turns) && normalizedConversation.turns.length > 0) {
     sourceTurns = normalizedConversation.turns;
+    if (shouldPreferEngineParsedTurnsOverIngest(sourceTurns, parsedFromRaw)) {
+      log(
+        "info",
+        "Orchestrator",
+        `Replacing ${normalizedConversation.turns.length} ingest turn(s) with ${parsedFromRaw.length} engine-parsed turns (degenerate ingest / bracket timestamps)`
+      );
+      sourceTurns = parsedFromRaw.map((t) => ({
+        turnIndex: t.turnIndex,
+        text: t.text,
+        speakerLabel: t.speakerLabelRaw,
+        speakerLabelRaw: t.speakerLabelRaw,
+        speakerType: t.speakerType,
+        role: t.speakerType,
+        participantId: undefined,
+        meta: { rawSpeaker: t.speakerLabelRaw },
+        startTimeMs: t.timestampMs,
+        timestampBracket: t.timestampBracket,
+      }));
+    }
   } else {
-    const nt = normalizeTranscript(transcript);
-    if (nt.length > 0) {
-      sourceTurns = nt.map(t => ({
+    if (parsedFromRaw.length > 0) {
+      sourceTurns = parsedFromRaw.map((t) => ({
         turnIndex: t.turnIndex,
         text: t.text,
         speakerLabel: t.speakerLabelRaw,

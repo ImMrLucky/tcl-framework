@@ -50,7 +50,11 @@ function findField(obj: any, keys: string[]): any {
  */
 function parseTime(val: any): number | undefined {
   if (typeof val === "number") {
-    return val < 100000 ? Math.round(val * 1000) : Math.round(val);
+    if (!Number.isFinite(val)) return undefined;
+    // Fractional values are seconds (e.g. 1.25 → 1250ms).
+    if (val % 1 !== 0) return Math.round(val * 1000);
+    // Integer offsets in JSON fixtures are relative milliseconds (1000 = 1s into the call).
+    return Math.round(val);
   }
   if (typeof val === "string") {
     const num = parseFloat(val);

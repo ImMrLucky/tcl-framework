@@ -97,6 +97,20 @@ describe('TXT Speaker-Prefixed Normalizer', () => {
     expect(result.normalized.turns[result.normalized.turns.length - 1].text).toBe(EXPECTED_OUTPUTS.txt.lastTurnText);
   });
 
+  it('should split [mm:ss] Speaker: lines into separate turns (bracket timestamps)', async () => {
+    const bracketTxt =
+      '[00:10] Agent Sarah: Great.\n' +
+      '[00:38] Agent Sarah: And just to make things easier, all plans begin full coverage immediately.\n' +
+      '[02:05] Agent Sarah: Okay I need to correct myself slightly.\n';
+    const result = await normalizeFile(Buffer.from(bracketTxt, 'utf-8'), 'bracket-call.txt');
+    expect(result.success).toBe(true);
+    expect(result.normalized.turns.length).toBe(3);
+    expect(result.normalized.turns[0].text).toContain('Great');
+    expect(result.normalized.turns[0].speakerLabel).toMatch(/Agent Sarah/i);
+    expect(result.normalized.turns[1].turnIndex).toBe(1);
+    expect(result.normalized.participants.length).toBeGreaterThanOrEqual(1);
+  });
+
   it('should produce deterministic output (same hash for same input)', async () => {
     const result1 = await normalizeFile(fixtureBuffer, 'sample.txt');
     const result2 = await normalizeFile(fixtureBuffer, 'sample.txt');

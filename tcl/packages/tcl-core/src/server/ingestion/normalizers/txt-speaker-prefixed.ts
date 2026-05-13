@@ -24,6 +24,7 @@ import {
   generateChecksum,
 } from "../types.js";
 import { sanitizeTranscriptForScoring } from "../../../ingestion/transcript-sanitizer.js";
+import { normalizeTranscript } from "../../../graph/transcript-normalizer.js";
 
 /**
  * Regex patterns to detect speaker-prefixed lines
@@ -140,7 +141,46 @@ export class TxtSpeakerPrefixedNormalizer implements Normalizer {
       );
       turns.push(turn);
     }
-    
+
+    // Bracket timestamps like "[00:38] Agent Sarah: ..." are not matched by SPEAKER_PATTERNS.
+    // .txt files often reach this normalizer via extension fallback with canHandle=false — yielding
+    // zero prefix matches and a single "Speaker" blob. Prefer engine normalizeTranscript when it
+    // clearly splits the transcript better.
+    const singleUnknownSpeakerBlob =
+      turns.length === 1 &&
+      (String(turns[0].speakerLabel).toLowerCase() === "speaker" ||
+        (turns[0].role === "unknown" &&
+          /\[[\d:]+\]\s*[^:]+:\s*/m.test(String(turns[0].text ?? ""))));
+    const ingestCollapsed = turns.length === 0 || singleUnknownSpeakerBlob;
+
+    if (ingestCollapsed) {
+      const nt = normalizeTranscript(text);
+      if (nt.length >= 2 && nt.length > turns.length) {
+        turns.length = 0;
+        participantsMap.clear();
+        let charAcc = 0;
+        for (const t of nt) {
+          const turn = this.createTurn(
+            {
+              speaker: t.speakerLabelRaw,
+              text: t.text,
+              lineStart: turns.length + 1,
+              charStart: charAcc,
+            },
+            turns.length,
+            participantsMap,
+            options,
+            charAcc + t.text.length
+          );
+          turns.push(turn);
+          charAcc += t.text.length + 1;
+        }
+        warnings.push(
+          `Parsed ${turns.length} turns via bracket-timestamp / speaker-line engine (normalizeTranscript)`
+        );
+      }
+    }
+
     if (turns.length === 0) {
       // Fallback: treat entire content as single turn
       warnings.push("No speaker prefixes detected; treating as single-speaker blob");
