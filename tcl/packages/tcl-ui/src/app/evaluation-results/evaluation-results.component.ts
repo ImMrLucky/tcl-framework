@@ -1970,7 +1970,12 @@ getMetricTooltip(metric: string): string {
     const base = (this.evaluation?.scores as any) ?? {};
     const r = this.getEvaluationReportRaw() as any;
     const enhanced = r?.enhancedClientScores ?? {};
-    const merged = { ...base, ...enhanced };
+    // Prefer persisted evaluation.scores for defined numerics so a stale or malformed
+    // report snapshot cannot overwrite canonical DB values (and vice versa: enhanced fills gaps).
+    const merged: Record<string, unknown> = { ...enhanced };
+    for (const [k, v] of Object.entries(base)) {
+      if (v !== null && v !== undefined && Number.isFinite(Number(v))) (merged as any)[k] = v;
+    }
     const ar = r?.analysisResult as Record<string, unknown> | undefined;
     const pick = (k: string) => {
       const m = ar?.[k];

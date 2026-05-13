@@ -193,10 +193,18 @@ export interface EvaluationV2Dto {
   env: string;
   conversation_id: string | null;
   scores: {
-    truth?: number;
-    overall?: number;
-    coherence?: number;
-    consistency?: number;
+    tcl?: number | null;
+    truth?: number | null;
+    overall?: number | null;
+    transcriptGrounding?: number | null;
+    compliance?: number | null;
+    hallucination?: number | null;
+    drift?: number | null;
+    evidenceSupport?: number | null;
+    speakerConfidence?: number | null;
+    businessValue?: number | null;
+    coherence?: number | null;
+    consistency?: number | null;
     spectral?: {
       coherenceScore?: number;
       contradictionEnergy?: number;
@@ -231,10 +239,42 @@ export interface EvaluationV2Dto {
     graph?: {
       contradictions?: any[];
       supports?: any[];
+      grounding?: any[];
+      grounded?: any[];
+      groundedClaimIds?: string[];
+      debug?: any;
     };
     spectral?: any;
     executiveSummary?: any;
     evalMode?: any;
+    /** Structured engine metrics (per-dimension values for the results UI). */
+    analysisResult?: any;
+    /** Snapshot of validate scores at run time (may overlap evaluation.scores). */
+    enhancedClientScores?: any;
+    dashboardSummary?: any;
+    risk?: any;
+    diagnostics?: any;
+    businessInsights?: any[];
+    recommendedActions?: any;
+    productContext?: any;
+    claimsAnalysis?: any;
+    issuesBySeverity?: any;
+    evidenceDependencyGraph?: any;
+    crossTurn?: any;
+    drift?: any;
+    domainPacksApplied?: any;
+    provenance?: any;
+    manifest?: any;
+    run?: any;
+    inputs?: any;
+    frozenInputs?: any;
+    frozenConfig?: any;
+    mode?: string;
+    parentEvaluationId?: string;
+    simulationDescription?: string;
+    issueClustersV2?: any;
+    aggregatedIssues?: any[];
+    topAggregatedIssues?: any[];
   };
 }
 
@@ -319,6 +359,7 @@ export function toEvaluationV2Dto(evaluation: any): EvaluationV2Dto {
       return cleaned;
     });
     
+    const rawReport = evaluation.report;
     dto.report = {
       issues: {
         atomic: atomicIssues,
@@ -327,15 +368,47 @@ export function toEvaluationV2Dto(evaluation: any): EvaluationV2Dto {
       // Legacy aliases for backward compatibility (but cleaned)
       topIssuesV2: groupedIssues,
       allIssuesV2: atomicIssues,
-      issueSummaryV2: evaluation.report.issueSummaryV2,
-      claims: evaluation.report.claims,
-      graph: evaluation.report.graph ? {
-        contradictions: evaluation.report.graph.contradictions,
-        supports: evaluation.report.graph.supports,
-      } : undefined,
-      spectral: evaluation.report.spectral,
-      executiveSummary: evaluation.report.executiveSummary,
-      evalMode: evaluation.report.evalMode,
+      issueSummaryV2: rawReport.issueSummaryV2,
+      claims: rawReport.claims,
+      graph: rawReport.graph
+        ? {
+            contradictions: rawReport.graph.contradictions,
+            supports: rawReport.graph.supports,
+            grounding: rawReport.graph.grounding,
+            grounded: rawReport.graph.grounded,
+            groundedClaimIds: rawReport.graph.groundedClaimIds,
+            debug: rawReport.graph.debug,
+          }
+        : undefined,
+      spectral: rawReport.spectral,
+      executiveSummary: rawReport.executiveSummary,
+      evalMode: rawReport.evalMode,
+      analysisResult: rawReport.analysisResult,
+      enhancedClientScores: rawReport.enhancedClientScores,
+      dashboardSummary: rawReport.dashboardSummary,
+      risk: rawReport.risk,
+      diagnostics: rawReport.diagnostics,
+      businessInsights: rawReport.businessInsights,
+      recommendedActions: rawReport.recommendedActions,
+      productContext: rawReport.productContext,
+      claimsAnalysis: rawReport.claimsAnalysis,
+      issuesBySeverity: rawReport.issuesBySeverity,
+      evidenceDependencyGraph: rawReport.evidenceDependencyGraph,
+      crossTurn: rawReport.crossTurn,
+      drift: rawReport.drift,
+      domainPacksApplied: rawReport.domainPacksApplied,
+      provenance: rawReport.provenance,
+      manifest: rawReport.manifest,
+      run: rawReport.run,
+      inputs: rawReport.inputs,
+      frozenInputs: rawReport.frozenInputs,
+      frozenConfig: rawReport.frozenConfig,
+      mode: rawReport.mode,
+      parentEvaluationId: rawReport.parentEvaluationId,
+      simulationDescription: rawReport.simulationDescription,
+      issueClustersV2: rawReport.issueClustersV2,
+      aggregatedIssues: rawReport.aggregatedIssues,
+      topAggregatedIssues: rawReport.topAggregatedIssues,
     };
   }
 
