@@ -1988,9 +1988,19 @@ getMetricTooltip(metric: string): string {
     if (merged.drift == null) merged.drift = pick('drift');
     if (merged.evidenceSupport == null) merged.evidenceSupport = pick('evidenceCoverage');
     if (merged.transcriptGrounding == null) merged.transcriptGrounding = pick('transcriptQuality');
-    if (merged.consistency == null) {
-      const gc = pick('graphConflict');
-      if (gc != null) merged.consistency = Math.max(0, 100 - gc);
+    const gc = pick('graphConflict');
+    if (gc != null && typeof gc === 'number' && !Number.isNaN(gc)) {
+      const alignmentFromEdges = Math.max(0, 100 - gc);
+      if (merged.consistency == null) {
+        merged.consistency = alignmentFromEdges;
+      } else {
+        const c = Number(merged.consistency);
+        if (Number.isFinite(c)) {
+          // Orchestrator "consistency" blends graph + cross-turn signals and can stay high while
+          // gated contradiction edges still drive issues; cap so the breakdown matches conflict load.
+          merged.consistency = Math.min(c, alignmentFromEdges);
+        }
+      }
     }
     return merged;
   }
@@ -2207,9 +2217,17 @@ getMetricTooltip(metric: string): string {
 
   hasExtendedScoreRow(): boolean {
     const m = this.getMergedEvaluationScores() as any;
-    return ['transcriptGrounding', 'compliance', 'hallucination', 'drift', 'evidenceSupport', 'speakerConfidence', 'businessValue'].some(
-      (k: string) => m[k] != null && !Number.isNaN(Number(m[k]))
-    );
+    return [
+      'truth',
+      'transcriptGrounding',
+      'compliance',
+      'hallucination',
+      'drift',
+      'consistency',
+      'evidenceSupport',
+      'speakerConfidence',
+      'businessValue',
+    ].some((k: string) => m[k] != null && !Number.isNaN(Number(m[k])));
   }
 
   goToDashboard() {

@@ -226,6 +226,25 @@ export interface EvaluationV2Dto {
   engine_version: string;
   latency_ms: number;
   created_at: string;
+
+  /** Copied from DB row for results UI (evidence summary, filters). */
+  evidence_set?: {
+    orgEvidenceIds?: string[];
+    projectEvidenceIds?: string[];
+    conversationEvidenceIds?: string[];
+    templateEvidenceIds?: string[];
+    resolvedEvidenceIds?: string[];
+  };
+  evidence_diagnostics?: {
+    indexingFailures?: Array<{ evidenceItemId: string; error: string }>;
+    missingApprovals?: string[];
+    staleDocsUsed?: string[];
+    snapshotStatus?: Array<{ evidenceItemId: string; status: string }>;
+    error?: string;
+  };
+  template_id?: string | null;
+  simulation_mode?: boolean;
+  representative_id?: string | null;
   
   report?: {
     issues?: {
@@ -328,6 +347,18 @@ export function toEvaluationV2Dto(evaluation: any): EvaluationV2Dto {
     latency_ms: evaluation.latency_ms,
     created_at: evaluation.created_at,
   };
+
+  if (evaluation.evidence_set != null) dto.evidence_set = evaluation.evidence_set;
+  if (evaluation.evidence_diagnostics != null) dto.evidence_diagnostics = evaluation.evidence_diagnostics;
+  if (evaluation.template_id != null && evaluation.template_id !== undefined) {
+    dto.template_id = evaluation.template_id;
+  }
+  if (evaluation.simulation_mode != null && evaluation.simulation_mode !== undefined) {
+    dto.simulation_mode = !!evaluation.simulation_mode;
+  }
+  if (evaluation.representative_id != null && evaluation.representative_id !== undefined) {
+    dto.representative_id = evaluation.representative_id;
+  }
 
   if (evaluation.report) {
     // B2: Clean issues: remove scoreBreakdown and severityDisplay
