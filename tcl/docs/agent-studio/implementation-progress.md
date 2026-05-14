@@ -18,7 +18,7 @@
 | Tenancy | Reuse existing TCL `organizations` / `projects` / `org_members` / RBAC model. All Agent Studio rows are scoped by `org_id`. |
 | BYOK key storage | App-level AES-256-GCM encryption via `packages/tcl-core/src/server/agent-studio/crypto.ts`, keyed by `AGENT_STUDIO_ENC_KEY`. Never plain JSON. |
 | IDE component | Monaco editor + first-party panels (file tree, terminal, output, problems). No code-server / coder integration in MVP. |
-| Plan tier / billing | Agent Studio is its own product. New entitlement key `agentStudio` (off by default). Org-level toggle, separate from TCL plan tier. Future: split billing. |
+| Plan tier / billing | Agent Studio ships with the app for authenticated users; org-level billing split is a future concern. |
 | Audit log | Dedicated `agent_studio_audit_logs` table — independent from TCL `audit_logs`, so we can evolve event shape freely. |
 | Pause controls | First-class fields on `agent_studio_orgs` (global), `agent_studio_teams`, and `agent_studio_agents`: `paused_at`, `paused_by`, `pause_reason`. Enforced by orchestrator gateway, not just UI. |
 
@@ -29,7 +29,7 @@
 ### Data model (Supabase)
 
 - [x] Migration `045_agent_studio.sql` covering all MVP tables + RLS scoped by `org_id` (see `supabase/sql/045_agent_studio.sql`).
-- [x] Migration `046_agent_studio_entitlements.sql` — `agentStudio` on `org_entitlements.features` + updated `init_org_entitlements` default.
+- [x] Migration `046_agent_studio_entitlements.sql` — (historical) added `agentStudio` to `org_entitlements.features`; **product no longer gates Agent Studio on this flag** — API uses auth + RBAC only.
 
 ### Backend (`packages/tcl-core/src/server/agent-studio/`)
 
@@ -82,12 +82,12 @@ These are intentionally minimal — package.json + README + a single `src/index.
 - [x] IDE shell — Monaco Editor loaded via AMD `loader.js` from jsDelivr (avoids bundling `.ttf` / ESM issues) + file tree / terminal / output / problems panels; terminal `dispatch` calls the dispatch API.
 - [x] Templates / Settings placeholders.
 - [x] Integrations list + create form + **Test connection** (Jira / Azure DevOps) via `pingIntegration`.
-- [x] Nav entry gated behind `agentStudio` entitlement.
+- [x] Nav entry visible to all signed-in users (same as other primary nav items).
 
 ### Backend wiring
 
 - [x] `setupAgentStudioRoutes(app)` registered in `packages/tcl-core/src/server/express.ts`.
-- [x] Entitlement key `agentStudio` added to `EntitlementsService` (defaults off; admins enable per-org).
+- [x] Agent Studio routes require session + org context; no separate product entitlement flag.
 
 ---
 

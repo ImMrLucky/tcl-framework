@@ -3,7 +3,7 @@
  *
  * All routes are mounted under `/api/agent-studio/*`. They:
  *   - Reuse `getOrgContext` (same Org / Project / RBAC as the rest of TCL).
- *   - Gate on the `agentStudio` entitlement.
+ *   - Available to any authenticated org member (RBAC still applies per route).
  *   - Honour pause state (org / team / agent) — paused entities can still be
  *     read but cannot be acted on (`POST` / mutating verbs return 423 Locked).
  *   - Write to `agent_studio_audit_logs` (the dedicated Agent Studio audit
@@ -17,7 +17,6 @@
 import express from 'express';
 import { supabaseAdmin } from '../supabase.js';
 import { getOrgContext, type OrgContext } from '../auth-context.js';
-import { entitlementsService } from '../entitlements/entitlements-service.js';
 import { encryptString, decryptString, redact, type EncryptedBlob } from './crypto.js';
 import { logAgentStudioAudit } from './audit.js';
 import { loadRoleTemplates, loadWorkflowTemplates } from './templates.js';
@@ -26,7 +25,6 @@ import { readPauseGate, type PauseGateState } from './pause-gate.js';
 import { handleAgentStudioDispatch } from './dispatch.js';
 import { handleIntegrationPing } from './integration-ping.js';
 
-const AGENT_STUDIO_FEATURE = 'agentStudio' as const;
 const STAFF_ROLES = new Set(['OWNER', 'ADMIN', 'MANAGER']);
 const ANALYST_ROLES = new Set(['OWNER', 'ADMIN', 'MANAGER', 'ANALYST']);
 
@@ -48,29 +46,6 @@ async function ensureContext(
     return null;
   }
   return ctx as AuthedContext;
-}
-
-async function ensureEntitled(
-  req: express.Request,
-  res: express.Response
-): Promise<AuthedContext | null> {
-  const ctx = await ensureContext(req, res);
-  if (!ctx) return null;
-  try {
-    const has = await entitlementsService.has(ctx.orgId, AGENT_STUDIO_FEATURE as any);
-    if (!has) {
-      res.status(403).json({
-        error: 'FEATURE_NOT_AVAILABLE',
-        message: "Agent Studio is not enabled for this organization.",
-        featureKey: AGENT_STUDIO_FEATURE,
-      });
-      return null;
-    }
-  } catch (err: any) {
-    res.status(500).json({ error: 'ENTITLEMENT_CHECK_FAILED', message: err?.message });
-    return null;
-  }
-  return ctx;
 }
 
 function requireStaff(ctx: AuthedContext, res: express.Response): boolean {
@@ -137,7 +112,7 @@ export function setupAgentStudioRoutes(app: express.Application): void {
   // ========================================================================
 
   app.get('/api/agent-studio/settings', async (req, res) => {
-    const ctx = await ensureEntitled(req, res);
+    const ctx = await ensureContext(req, res);
     if (!ctx || dbDown(res)) return;
     await ensureOrgRow(ctx.orgId);
     const { data, error } = await supabaseAdmin!
@@ -150,7 +125,7 @@ export function setupAgentStudioRoutes(app: express.Application): void {
   });
 
   app.patch('/api/agent-studio/settings', async (req, res) => {
-    const ctx = await ensureEntitled(req, res);
+    const ctx = await ensureContext(req, res);
     if (!ctx || !requireOwnerOrAdmin(ctx, res) || dbDown(res)) return;
     await ensureOrgRow(ctx.orgId);
     const allowed: Record<string, unknown> = {};
@@ -176,7 +151,7 @@ export function setupAgentStudioRoutes(app: express.Application): void {
 
   // Global pause / resume.
   app.post('/api/agent-studio/pause', async (req, res) => {
-    const ctx = await ensureEntitled(req, res);
+    const ctx = await ensureContext(req, res);
     if (!ctx || !requireOwnerOrAdmin(ctx, res) || dbDown(res)) return;
     await ensureOrgRow(ctx.orgId);
     const reason = (req.body?.reason as string | undefined) ?? null;
@@ -199,7 +174,7 @@ export function setupAgentStudioRoutes(app: express.Application): void {
   });
 
   app.post('/api/agent-studio/resume', async (req, res) => {
-    const ctx = await ensureEntitled(req, res);
+    const ctx = await ensureContext(req, res);
     if (!ctx || !requireOwnerOrAdmin(ctx, res) || dbDown(res)) return;
     await ensureOrgRow(ctx.orgId);
     const { data, error } = await supabaseAdmin!
@@ -224,13 +199,13 @@ export function setupAgentStudioRoutes(app: express.Application): void {
   // ========================================================================
 
   app.get('/api/agent-studio/templates/roles', async (req, res) => {
-    const ctx = await ensureEntitled(req, res);
+    const ctx = await ensureContext(req, res);
     if (!ctx) return;
     res.json({ templates: loadRoleTemplates() });
   });
 
   app.get('/api/agent-studio/templates/workflows', async (req, res) => {
-    const ctx = await ensureEntitled(req, res);
+    const ctx = await ensureContext(req, res);
     if (!ctx) return;
     res.json({ templates: loadWorkflowTemplates() });
   });
@@ -240,7 +215,7 @@ export function setupAgentStudioRoutes(app: express.Application): void {
   // ========================================================================
 
   app.get('/api/agent-studio/teams', async (req, res) => {
-    const ctx = await ensureEntitled(req, res);
+    const ctx = await ensureContext(req, res);
     if (!ctx || dbDown(res)) return;
     const { data, error } = await supabaseAdmin!
       .from('agent_studio_teams')
@@ -252,7 +227,7 @@ export function setupAgentStudioRoutes(app: express.Application): void {
   });
 
   app.post('/api/agent-studio/teams', async (req, res) => {
-    const ctx = await ensureEntitled(req, res);
+    const ctx = await ensureContext(req, res);
     if (!ctx || !requireStaff(ctx, res) || dbDown(res)) return;
     const { name, description, projectId, workflowTemplateKey } = req.body ?? {};
     if (!name) return res.status(400).json({ error: 'name is required' });
@@ -291,7 +266,7 @@ export function setupAgentStudioRoutes(app: express.Application): void {
   });
 
   app.get('/api/agent-studio/teams/:teamId', async (req, res) => {
-    const ctx = await ensureEntitled(req, res);
+    const ctx = await ensureContext(req, res);
     if (!ctx || dbDown(res)) return;
     const { teamId } = req.params;
     const { data, error } = await supabaseAdmin!
@@ -306,7 +281,7 @@ export function setupAgentStudioRoutes(app: express.Application): void {
   });
 
   app.patch('/api/agent-studio/teams/:teamId', async (req, res) => {
-    const ctx = await ensureEntitled(req, res);
+    const ctx = await ensureContext(req, res);
     if (!ctx || !requireStaff(ctx, res) || dbDown(res)) return;
     const { teamId } = req.params;
     const allowed: Record<string, unknown> = {};
@@ -335,7 +310,7 @@ export function setupAgentStudioRoutes(app: express.Application): void {
   });
 
   app.delete('/api/agent-studio/teams/:teamId', async (req, res) => {
-    const ctx = await ensureEntitled(req, res);
+    const ctx = await ensureContext(req, res);
     if (!ctx || !requireStaff(ctx, res) || dbDown(res)) return;
     const { teamId } = req.params;
     const { error } = await supabaseAdmin!
@@ -357,7 +332,7 @@ export function setupAgentStudioRoutes(app: express.Application): void {
 
   // Team pause / resume.
   app.post('/api/agent-studio/teams/:teamId/pause', async (req, res) => {
-    const ctx = await ensureEntitled(req, res);
+    const ctx = await ensureContext(req, res);
     if (!ctx || !requireStaff(ctx, res) || dbDown(res)) return;
     const { teamId } = req.params;
     const reason = (req.body?.reason as string | undefined) ?? null;
@@ -382,7 +357,7 @@ export function setupAgentStudioRoutes(app: express.Application): void {
   });
 
   app.post('/api/agent-studio/teams/:teamId/resume', async (req, res) => {
-    const ctx = await ensureEntitled(req, res);
+    const ctx = await ensureContext(req, res);
     if (!ctx || !requireStaff(ctx, res) || dbDown(res)) return;
     const { teamId } = req.params;
     const { data, error } = await supabaseAdmin!
@@ -409,7 +384,7 @@ export function setupAgentStudioRoutes(app: express.Application): void {
   // ========================================================================
 
   app.get('/api/agent-studio/teams/:teamId/agents', async (req, res) => {
-    const ctx = await ensureEntitled(req, res);
+    const ctx = await ensureContext(req, res);
     if (!ctx || dbDown(res)) return;
     const { teamId } = req.params;
     const { data, error } = await supabaseAdmin!
@@ -423,7 +398,7 @@ export function setupAgentStudioRoutes(app: express.Application): void {
   });
 
   app.post('/api/agent-studio/teams/:teamId/agents', async (req, res) => {
-    const ctx = await ensureEntitled(req, res);
+    const ctx = await ensureContext(req, res);
     if (!ctx || !requireStaff(ctx, res) || dbDown(res)) return;
     const { teamId } = req.params;
     const {
@@ -467,7 +442,7 @@ export function setupAgentStudioRoutes(app: express.Application): void {
   });
 
   app.get('/api/agent-studio/agents/:agentId', async (req, res) => {
-    const ctx = await ensureEntitled(req, res);
+    const ctx = await ensureContext(req, res);
     if (!ctx || dbDown(res)) return;
     const { agentId } = req.params;
     const { data, error } = await supabaseAdmin!
@@ -482,7 +457,7 @@ export function setupAgentStudioRoutes(app: express.Application): void {
   });
 
   app.patch('/api/agent-studio/agents/:agentId', async (req, res) => {
-    const ctx = await ensureEntitled(req, res);
+    const ctx = await ensureContext(req, res);
     if (!ctx || !requireStaff(ctx, res) || dbDown(res)) return;
     const { agentId } = req.params;
     const allowed: Record<string, unknown> = {};
@@ -521,7 +496,7 @@ export function setupAgentStudioRoutes(app: express.Application): void {
   });
 
   app.delete('/api/agent-studio/agents/:agentId', async (req, res) => {
-    const ctx = await ensureEntitled(req, res);
+    const ctx = await ensureContext(req, res);
     if (!ctx || !requireStaff(ctx, res) || dbDown(res)) return;
     const { agentId } = req.params;
     const { data: existing } = await supabaseAdmin!
@@ -549,7 +524,7 @@ export function setupAgentStudioRoutes(app: express.Application): void {
   });
 
   app.post('/api/agent-studio/agents/:agentId/pause', async (req, res) => {
-    const ctx = await ensureEntitled(req, res);
+    const ctx = await ensureContext(req, res);
     if (!ctx || !requireStaff(ctx, res) || dbDown(res)) return;
     const { agentId } = req.params;
     const reason = (req.body?.reason as string | undefined) ?? null;
@@ -580,7 +555,7 @@ export function setupAgentStudioRoutes(app: express.Application): void {
   });
 
   app.post('/api/agent-studio/agents/:agentId/resume', async (req, res) => {
-    const ctx = await ensureEntitled(req, res);
+    const ctx = await ensureContext(req, res);
     if (!ctx || !requireStaff(ctx, res) || dbDown(res)) return;
     const { agentId } = req.params;
     const { data, error } = await supabaseAdmin!
@@ -613,7 +588,7 @@ export function setupAgentStudioRoutes(app: express.Application): void {
   // ========================================================================
 
   app.get('/api/agent-studio/agents/:agentId/configs', async (req, res) => {
-    const ctx = await ensureEntitled(req, res);
+    const ctx = await ensureContext(req, res);
     if (!ctx || dbDown(res)) return;
     const { agentId } = req.params;
     const { data, error } = await supabaseAdmin!
@@ -627,7 +602,7 @@ export function setupAgentStudioRoutes(app: express.Application): void {
   });
 
   app.post('/api/agent-studio/agents/:agentId/configs', async (req, res) => {
-    const ctx = await ensureEntitled(req, res);
+    const ctx = await ensureContext(req, res);
     if (!ctx || !requireStaff(ctx, res) || dbDown(res)) return;
     const { agentId } = req.params;
     const { config, notes } = req.body ?? {};
@@ -684,7 +659,7 @@ export function setupAgentStudioRoutes(app: express.Application): void {
   // ========================================================================
 
   app.get('/api/agent-studio/teams/:teamId/board', async (req, res) => {
-    const ctx = await ensureEntitled(req, res);
+    const ctx = await ensureContext(req, res);
     if (!ctx || dbDown(res)) return;
     const { teamId } = req.params;
     const { data: board } = await supabaseAdmin!
@@ -709,7 +684,7 @@ export function setupAgentStudioRoutes(app: express.Application): void {
   });
 
   app.post('/api/agent-studio/teams/:teamId/tasks', async (req, res) => {
-    const ctx = await ensureEntitled(req, res);
+    const ctx = await ensureContext(req, res);
     if (!ctx || !requireAnalyst(ctx, res) || dbDown(res)) return;
     const { teamId } = req.params;
     const gate = await readPauseGate({ orgId: ctx.orgId, teamId });
@@ -771,7 +746,7 @@ export function setupAgentStudioRoutes(app: express.Application): void {
   });
 
   app.patch('/api/agent-studio/tasks/:taskId', async (req, res) => {
-    const ctx = await ensureEntitled(req, res);
+    const ctx = await ensureContext(req, res);
     if (!ctx || !requireAnalyst(ctx, res) || dbDown(res)) return;
     const { taskId } = req.params;
 
@@ -832,7 +807,7 @@ export function setupAgentStudioRoutes(app: express.Application): void {
   });
 
   app.delete('/api/agent-studio/tasks/:taskId', async (req, res) => {
-    const ctx = await ensureEntitled(req, res);
+    const ctx = await ensureContext(req, res);
     if (!ctx || !requireAnalyst(ctx, res) || dbDown(res)) return;
     const { taskId } = req.params;
     const { data: existing } = await supabaseAdmin!
@@ -864,7 +839,7 @@ export function setupAgentStudioRoutes(app: express.Application): void {
   // ========================================================================
 
   app.get('/api/agent-studio/tasks/:taskId/review-gates', async (req, res) => {
-    const ctx = await ensureEntitled(req, res);
+    const ctx = await ensureContext(req, res);
     if (!ctx || dbDown(res)) return;
     const { taskId } = req.params;
     const { data, error } = await supabaseAdmin!
@@ -878,7 +853,7 @@ export function setupAgentStudioRoutes(app: express.Application): void {
   });
 
   app.post('/api/agent-studio/tasks/:taskId/review-gates', async (req, res) => {
-    const ctx = await ensureEntitled(req, res);
+    const ctx = await ensureContext(req, res);
     if (!ctx || !requireAnalyst(ctx, res) || dbDown(res)) return;
     const { taskId } = req.params;
     const { gateType, requiredRole, metadata } = req.body ?? {};
@@ -908,7 +883,7 @@ export function setupAgentStudioRoutes(app: express.Application): void {
   });
 
   app.post('/api/agent-studio/review-gates/:gateId/decision', async (req, res) => {
-    const ctx = await ensureEntitled(req, res);
+    const ctx = await ensureContext(req, res);
     if (!ctx || !requireAnalyst(ctx, res) || dbDown(res)) return;
     const { gateId } = req.params;
     const { status, comment } = req.body ?? {};
@@ -945,7 +920,7 @@ export function setupAgentStudioRoutes(app: express.Application): void {
   // ========================================================================
 
   app.get('/api/agent-studio/contexts', async (req, res) => {
-    const ctx = await ensureEntitled(req, res);
+    const ctx = await ensureContext(req, res);
     if (!ctx || dbDown(res)) return;
     let query = supabaseAdmin!.from('agent_studio_contexts').select('*').eq('org_id', ctx.orgId);
     const teamId = (req.query.teamId as string) || undefined;
@@ -960,7 +935,7 @@ export function setupAgentStudioRoutes(app: express.Application): void {
   });
 
   app.post('/api/agent-studio/contexts', async (req, res) => {
-    const ctx = await ensureEntitled(req, res);
+    const ctx = await ensureContext(req, res);
     if (!ctx || !requireAnalyst(ctx, res) || dbDown(res)) return;
     const { scope, teamId, agentId, key, content, data: payloadData, pinned, source } = req.body ?? {};
     if (!scope || !key) return res.status(400).json({ error: 'scope and key are required' });
@@ -997,7 +972,7 @@ export function setupAgentStudioRoutes(app: express.Application): void {
   });
 
   app.patch('/api/agent-studio/contexts/:id', async (req, res) => {
-    const ctx = await ensureEntitled(req, res);
+    const ctx = await ensureContext(req, res);
     if (!ctx || !requireAnalyst(ctx, res) || dbDown(res)) return;
     const { id } = req.params;
     const allowed: Record<string, unknown> = {};
@@ -1026,7 +1001,7 @@ export function setupAgentStudioRoutes(app: express.Application): void {
   });
 
   app.delete('/api/agent-studio/contexts/:id', async (req, res) => {
-    const ctx = await ensureEntitled(req, res);
+    const ctx = await ensureContext(req, res);
     if (!ctx || !requireAnalyst(ctx, res) || dbDown(res)) return;
     const { id } = req.params;
     const { error } = await supabaseAdmin!
@@ -1050,7 +1025,7 @@ export function setupAgentStudioRoutes(app: express.Application): void {
   // ========================================================================
 
   app.get('/api/agent-studio/mistakes', async (req, res) => {
-    const ctx = await ensureEntitled(req, res);
+    const ctx = await ensureContext(req, res);
     if (!ctx || dbDown(res)) return;
     let q = supabaseAdmin!.from('agent_studio_mistakes').select('*').eq('org_id', ctx.orgId);
     const teamId = (req.query.teamId as string) || undefined;
@@ -1063,7 +1038,7 @@ export function setupAgentStudioRoutes(app: express.Application): void {
   });
 
   app.post('/api/agent-studio/mistakes', async (req, res) => {
-    const ctx = await ensureEntitled(req, res);
+    const ctx = await ensureContext(req, res);
     if (!ctx || !requireAnalyst(ctx, res) || dbDown(res)) return;
     const { teamId, agentId, scope, title, description, rule, severity, sourceTaskId } = req.body ?? {};
     if (!teamId || !scope || !title || !rule) {
@@ -1100,7 +1075,7 @@ export function setupAgentStudioRoutes(app: express.Application): void {
   });
 
   app.patch('/api/agent-studio/mistakes/:id', async (req, res) => {
-    const ctx = await ensureEntitled(req, res);
+    const ctx = await ensureContext(req, res);
     if (!ctx || !requireAnalyst(ctx, res) || dbDown(res)) return;
     const { id } = req.params;
     const allowed: Record<string, unknown> = {};
@@ -1134,7 +1109,7 @@ export function setupAgentStudioRoutes(app: express.Application): void {
   // ========================================================================
 
   app.get('/api/agent-studio/provider-keys', async (req, res) => {
-    const ctx = await ensureEntitled(req, res);
+    const ctx = await ensureContext(req, res);
     if (!ctx || !requireStaff(ctx, res) || dbDown(res)) return;
     const { data, error } = await supabaseAdmin!
       .from('agent_studio_provider_keys')
@@ -1146,7 +1121,7 @@ export function setupAgentStudioRoutes(app: express.Application): void {
   });
 
   app.post('/api/agent-studio/provider-keys', async (req, res) => {
-    const ctx = await ensureEntitled(req, res);
+    const ctx = await ensureContext(req, res);
     if (!ctx || !requireOwnerOrAdmin(ctx, res) || dbDown(res)) return;
     const { provider, label, secret, teamId, metadata } = req.body ?? {};
     if (!provider || !label || !secret) {
@@ -1193,7 +1168,7 @@ export function setupAgentStudioRoutes(app: express.Application): void {
   });
 
   app.delete('/api/agent-studio/provider-keys/:id', async (req, res) => {
-    const ctx = await ensureEntitled(req, res);
+    const ctx = await ensureContext(req, res);
     if (!ctx || !requireOwnerOrAdmin(ctx, res) || dbDown(res)) return;
     const { id } = req.params;
     const { error } = await supabaseAdmin!
@@ -1218,7 +1193,7 @@ export function setupAgentStudioRoutes(app: express.Application): void {
    * `decryptString` server-side when actually calling a model.
    */
   app.get('/api/agent-studio/provider-keys/:id/reveal', async (req, res) => {
-    const ctx = await ensureEntitled(req, res);
+    const ctx = await ensureContext(req, res);
     if (!ctx || !requireOwnerOrAdmin(ctx, res) || dbDown(res)) return;
     const { id } = req.params;
     const { data, error } = await supabaseAdmin!
@@ -1262,7 +1237,7 @@ export function setupAgentStudioRoutes(app: express.Application): void {
   // ========================================================================
 
   app.get('/api/agent-studio/model-routing', async (req, res) => {
-    const ctx = await ensureEntitled(req, res);
+    const ctx = await ensureContext(req, res);
     if (!ctx || dbDown(res)) return;
     const { data, error } = await supabaseAdmin!
       .from('agent_studio_model_routing')
@@ -1274,7 +1249,7 @@ export function setupAgentStudioRoutes(app: express.Application): void {
   });
 
   app.post('/api/agent-studio/model-routing', async (req, res) => {
-    const ctx = await ensureEntitled(req, res);
+    const ctx = await ensureContext(req, res);
     if (!ctx || !requireStaff(ctx, res) || dbDown(res)) return;
     const { scope, teamId, agentId, useCase, provider, model, providerKeyId, fallback, params } =
       req.body ?? {};
@@ -1312,7 +1287,7 @@ export function setupAgentStudioRoutes(app: express.Application): void {
   });
 
   app.patch('/api/agent-studio/model-routing/:id', async (req, res) => {
-    const ctx = await ensureEntitled(req, res);
+    const ctx = await ensureContext(req, res);
     if (!ctx || !requireStaff(ctx, res) || dbDown(res)) return;
     const { id } = req.params;
     const allowed: Record<string, unknown> = {};
@@ -1347,7 +1322,7 @@ export function setupAgentStudioRoutes(app: express.Application): void {
   });
 
   app.delete('/api/agent-studio/model-routing/:id', async (req, res) => {
-    const ctx = await ensureEntitled(req, res);
+    const ctx = await ensureContext(req, res);
     if (!ctx || !requireStaff(ctx, res) || dbDown(res)) return;
     const { id } = req.params;
     const { error } = await supabaseAdmin!
@@ -1371,7 +1346,7 @@ export function setupAgentStudioRoutes(app: express.Application): void {
   // ========================================================================
 
   app.get('/api/agent-studio/mcp-servers', async (req, res) => {
-    const ctx = await ensureEntitled(req, res);
+    const ctx = await ensureContext(req, res);
     if (!ctx || dbDown(res)) return;
     const { data, error } = await supabaseAdmin!
       .from('agent_studio_mcp_servers')
@@ -1383,7 +1358,7 @@ export function setupAgentStudioRoutes(app: express.Application): void {
   });
 
   app.post('/api/agent-studio/mcp-servers', async (req, res) => {
-    const ctx = await ensureEntitled(req, res);
+    const ctx = await ensureContext(req, res);
     if (!ctx || !requireStaff(ctx, res) || dbDown(res)) return;
     const { teamId, name, transport, command, url, args, env, enabledTools, headers, metadata } =
       req.body ?? {};
@@ -1437,7 +1412,7 @@ export function setupAgentStudioRoutes(app: express.Application): void {
   });
 
   app.patch('/api/agent-studio/mcp-servers/:id', async (req, res) => {
-    const ctx = await ensureEntitled(req, res);
+    const ctx = await ensureContext(req, res);
     if (!ctx || !requireStaff(ctx, res) || dbDown(res)) return;
     const { id } = req.params;
     const allowed: Record<string, unknown> = {};
@@ -1485,7 +1460,7 @@ export function setupAgentStudioRoutes(app: express.Application): void {
   });
 
   app.delete('/api/agent-studio/mcp-servers/:id', async (req, res) => {
-    const ctx = await ensureEntitled(req, res);
+    const ctx = await ensureContext(req, res);
     if (!ctx || !requireStaff(ctx, res) || dbDown(res)) return;
     const { id } = req.params;
     const { error } = await supabaseAdmin!
@@ -1509,7 +1484,7 @@ export function setupAgentStudioRoutes(app: express.Application): void {
   // ========================================================================
 
   app.get('/api/agent-studio/integrations', async (req, res) => {
-    const ctx = await ensureEntitled(req, res);
+    const ctx = await ensureContext(req, res);
     if (!ctx || dbDown(res)) return;
     const { data, error } = await supabaseAdmin!
       .from('agent_studio_integrations')
@@ -1521,7 +1496,7 @@ export function setupAgentStudioRoutes(app: express.Application): void {
   });
 
   app.post('/api/agent-studio/integrations', async (req, res) => {
-    const ctx = await ensureEntitled(req, res);
+    const ctx = await ensureContext(req, res);
     if (!ctx || !requireStaff(ctx, res) || dbDown(res)) return;
     const { teamId, kind, name, config, credentials } = req.body ?? {};
     if (!kind || !name) return res.status(400).json({ error: 'kind and name are required' });
@@ -1565,7 +1540,7 @@ export function setupAgentStudioRoutes(app: express.Application): void {
   });
 
   app.delete('/api/agent-studio/integrations/:id', async (req, res) => {
-    const ctx = await ensureEntitled(req, res);
+    const ctx = await ensureContext(req, res);
     if (!ctx || !requireStaff(ctx, res) || dbDown(res)) return;
     const { id } = req.params;
     const { error } = await supabaseAdmin!
@@ -1589,7 +1564,7 @@ export function setupAgentStudioRoutes(app: express.Application): void {
   // ========================================================================
 
   app.post('/api/agent-studio/dispatch', async (req, res) => {
-    const ctx = await ensureEntitled(req, res);
+    const ctx = await ensureContext(req, res);
     if (!ctx || !requireAnalyst(ctx, res) || dbDown(res)) return;
     await handleAgentStudioDispatch(req, res, {
       orgId: ctx.orgId,
@@ -1603,7 +1578,7 @@ export function setupAgentStudioRoutes(app: express.Application): void {
   // ========================================================================
 
   app.post('/api/agent-studio/integrations/:id/ping', async (req, res) => {
-    const ctx = await ensureEntitled(req, res);
+    const ctx = await ensureContext(req, res);
     if (!ctx || !requireStaff(ctx, res) || dbDown(res)) return;
     await handleIntegrationPing(req, res, { orgId: ctx.orgId, userId: ctx.userId });
   });
@@ -1613,7 +1588,7 @@ export function setupAgentStudioRoutes(app: express.Application): void {
   // ========================================================================
 
   app.get('/api/agent-studio/audit-logs', async (req, res) => {
-    const ctx = await ensureEntitled(req, res);
+    const ctx = await ensureContext(req, res);
     if (!ctx || !requireStaff(ctx, res) || dbDown(res)) return;
     const limit = Math.min(parseInt(req.query.limit as string) || 100, 500);
     const teamId = (req.query.teamId as string) || undefined;

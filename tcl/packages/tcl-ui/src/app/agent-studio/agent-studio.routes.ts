@@ -5,10 +5,8 @@ import { AuthGuard } from '../auth.guard';
  * Agent Studio sub-routes — mirrors spec §1 exactly.
  *
  * All routes are lazy-loaded; the feature shell + sub-shells are tiny
- * components that exercise the backend. They are gated behind AuthGuard;
- * the entitlement check (`agentStudio`) lives in the nav layer + the
- * backend (`requireEntitlement` equivalent) so a deep-linked user without
- * the feature still gets a sensible "not available" message from the API.
+ * components that exercise the backend. They use AuthGuard; per-route RBAC
+ * (staff / analyst / owner) is enforced on the server.
  */
 export const AGENT_STUDIO_ROUTES: Routes = [
   {

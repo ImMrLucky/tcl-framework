@@ -253,7 +253,7 @@ export class MainLayoutComponent implements OnInit {
     { label: 'Cases', route: '/cases', icon: 'folder_special', permission: 'view_cases' },
     { label: 'Integrations', route: '/integrations', icon: 'link', permission: 'view_integrations' },
     { label: 'Bulk Ingestion', route: '/bulk-ingest', icon: 'upload_file', permission: 'batchIngestion' },
-    { label: 'Agent Studio', route: '/agent-studio', icon: 'smart_toy', permission: 'agentStudio' },
+    { label: 'Agent Studio', route: '/agent-studio', icon: 'smart_toy' },
     { label: 'Admin → Scoring', route: '/admin/scoring', icon: 'tune', adminOnly: true },
   ];
 
