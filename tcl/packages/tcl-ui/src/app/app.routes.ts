@@ -169,7 +169,8 @@ export const routes: Routes = [
   // Spec: docs/specs/agent-studio.md  ·  Implementation: docs/agent-studio/implementation-progress.md
   {
     path: 'agent-studio',
-    loadChildren: () => import('./agent-studio/agent-studio.routes').then(m => m.AGENT_STUDIO_ROUTES)
+    loadChildren: () => import('./agent-studio/agent-studio.routes').then(m => m.AGENT_STUDIO_ROUTES),
+    canActivate: [AuthGuard]
   },
 
   // Default route

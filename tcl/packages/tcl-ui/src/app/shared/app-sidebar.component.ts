@@ -191,6 +191,7 @@ export class AppSidebarComponent implements OnInit {
     { label: 'Audit Packs', route: '/audit-packs', icon: 'folder' },
     { label: 'Policies', route: '/policies', icon: 'description' },
     { label: 'Evidence', route: '/evidence', icon: 'verified' },
+    { label: 'Agent Studio', route: '/agent-studio', icon: 'smart_toy' },
     { label: 'Scoring', route: '/admin/scoring', icon: 'tune', adminOnly: true },
   ];
 

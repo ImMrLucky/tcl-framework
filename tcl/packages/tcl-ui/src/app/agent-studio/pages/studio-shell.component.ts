@@ -140,12 +140,29 @@ export class StudioShellComponent implements OnInit {
     this.studio.getSettings().subscribe({
       next: (res) => (this.settings = res.settings),
       error: (err) => {
-        if (err?.status === 403) {
-          this.snack.open('Agent Studio is not enabled for this organization.', 'OK', { duration: 5000 });
-          this.router.navigateByUrl('/dashboard');
-        } else {
-          console.error('[agent-studio] failed to load settings', err);
+        const code = err?.error?.error as string | undefined;
+        if (err?.status === 401) {
+          this.snack.open('Please sign in again to use Agent Studio.', 'OK', { duration: 5000 });
+          void this.router.navigateByUrl('/login');
+          return;
         }
+        // Legacy API still gates on org entitlement; current server does not.
+        if (err?.status === 403 && code === 'FEATURE_NOT_AVAILABLE') {
+          this.snack.open(
+            'This environment is still enforcing the old Agent Studio org flag. Deploy the latest API or enable agentStudio in org_entitlements.',
+            'OK',
+            { duration: 9000 }
+          );
+          void this.router.navigateByUrl('/dashboard');
+          return;
+        }
+        if (err?.status === 403) {
+          this.snack.open(err?.error?.message || 'Access denied.', 'OK', { duration: 6000 });
+          return;
+        }
+        const msg = err?.error?.message || err?.message || 'Failed to load Agent Studio settings';
+        this.snack.open(msg, 'OK', { duration: 6000 });
+        console.error('[agent-studio] failed to load settings', err);
       },
     });
   }

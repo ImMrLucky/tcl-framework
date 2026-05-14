@@ -31,6 +31,10 @@
         <mat-icon matListItemIcon>description</mat-icon>
         <span *ngIf="sidebarOpen" matListItemTitle>Policies & Rules</span>
       </a>
+      <a mat-list-item routerLink="/agent-studio" routerLinkActive="active" [routerLinkActiveOptions]="{exact: false}">
+        <mat-icon matListItemIcon>smart_toy</mat-icon>
+        <span *ngIf="sidebarOpen" matListItemTitle>Agent Studio</span>
+      </a>
       <mat-divider *ngIf="isSuperuser"></mat-divider>
       <a *ngIf="isSuperuser" mat-list-item routerLink="/admin" routerLinkActive="active" [routerLinkActiveOptions]="{exact: false}">
         <mat-icon matListItemIcon>admin_panel_settings</mat-icon>
@@ -162,6 +166,10 @@
                    <button mat-menu-item routerLink="/evidence">
                      <mat-icon>description</mat-icon>
                      <span>Policies & Rules</span>
+                   </button>
+                   <button mat-menu-item routerLink="/agent-studio">
+                     <mat-icon>smart_toy</mat-icon>
+                     <span>Agent Studio</span>
                    </button>
                    <mat-divider *ngIf="isSuperuser"></mat-divider>
                    <button *ngIf="isSuperuser" mat-menu-item routerLink="/admin">
@@ -310,6 +318,10 @@
                    <button mat-menu-item routerLink="/evidence">
                      <mat-icon>description</mat-icon>
                      <span>Policies & Rules</span>
+                   </button>
+                   <button mat-menu-item routerLink="/agent-studio">
+                     <mat-icon>smart_toy</mat-icon>
+                     <span>Agent Studio</span>
                    </button>
                    <mat-divider *ngIf="isSuperuser"></mat-divider>
                    <button *ngIf="isSuperuser" mat-menu-item routerLink="/admin">
