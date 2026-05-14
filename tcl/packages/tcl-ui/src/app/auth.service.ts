@@ -60,6 +60,11 @@ export class AuthService {
   private lastReauthTime: number | null = null;
   /** Same-tab password login: storage can lag behind in-memory session; brief guard bypass. */
   private loginSessionGraceUntil: { userId: string; until: number } | null = null;
+  /**
+   * Deferred `getSession()` from constructor can finish after password login and clear `currentUser`.
+   * Bump this after a successful credential login so stale probe handlers no-op.
+   */
+  private deferredSessionProbeGeneration = 0;
 
   constructor(private router: Router, private http: HttpClient) {
     const supabaseUrl = readWindowSupabaseUrl();
@@ -173,6 +178,7 @@ export class AuthService {
         return;
       }
 
+      const probeGeneration = ++this.deferredSessionProbeGeneration;
       const sessionPromise = this.supabase.auth.getSession();
       const timeoutPromise = new Promise((_, reject) =>
         setTimeout(() => reject(new Error('Session check timeout')), 12000)
@@ -180,6 +186,9 @@ export class AuthService {
 
       Promise.race([sessionPromise, timeoutPromise])
         .then(async (result: any) => {
+          if (probeGeneration !== this.deferredSessionProbeGeneration) {
+            return;
+          }
           const {
             data: { session },
             error: sessionError,
@@ -213,6 +222,9 @@ export class AuthService {
           }
         })
         .catch((err) => {
+          if (probeGeneration !== this.deferredSessionProbeGeneration) {
+            return;
+          }
           console.warn('[Auth] Session check failed or timed out:', err?.message);
           if (this.hydrateUserFromStorageIfPresent()) {
             return;
@@ -524,6 +536,7 @@ export class AuthService {
 
     // Load profile after signup
     await this.loadUserProfile(data.user.id);
+    this.deferredSessionProbeGeneration++;
 
     return { error: null, duplicateAccount: false };
   }
@@ -586,6 +599,7 @@ export class AuthService {
         id: fromJwt.id,
         email: fromJwt.email,
       });
+      this.deferredSessionProbeGeneration++;
       this.loginSessionGraceUntil = { userId: fromJwt.id, until: Date.now() + 120_000 };
       this.resetSessionTimer();
       this.ensureUserProvisioned(fromJwt.id, fromJwt.email || email);
@@ -599,6 +613,7 @@ export class AuthService {
       id: user.id,
       email: user.email
     });
+    this.deferredSessionProbeGeneration++;
     this.loginSessionGraceUntil = { userId: user.id, until: Date.now() + 120_000 };
 
     // Reset session timers for new login
