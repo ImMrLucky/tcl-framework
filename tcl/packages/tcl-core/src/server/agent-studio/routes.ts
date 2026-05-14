@@ -196,17 +196,16 @@ export function setupAgentStudioRoutes(app: express.Application): void {
 
   // ========================================================================
   // Templates (read-only, served from packages/agent-core/templates).
+  // Public GETs: no org/session required — payload is identical for all orgs
+  // and does not leak tenant data. Avoids 401 when callers omit auth (e.g.
+  // prefetch, tools, or stale client timing).
   // ========================================================================
 
-  app.get('/api/agent-studio/templates/roles', async (req, res) => {
-    const ctx = await ensureContext(req, res);
-    if (!ctx) return;
+  app.get('/api/agent-studio/templates/roles', (_req, res) => {
     res.json({ templates: loadRoleTemplates() });
   });
 
-  app.get('/api/agent-studio/templates/workflows', async (req, res) => {
-    const ctx = await ensureContext(req, res);
-    if (!ctx) return;
+  app.get('/api/agent-studio/templates/workflows', (_req, res) => {
     res.json({ templates: loadWorkflowTemplates() });
   });
 
