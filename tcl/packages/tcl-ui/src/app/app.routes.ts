@@ -164,7 +164,14 @@ export const routes: Routes = [
     loadComponent: () => import('./batch-ingestion/batch-ingestion.component').then(m => m.BatchIngestionComponent),
     canActivate: [AuthGuard]
   },
-  
+
+  // Agent Studio (ProtectQA Agent Developer Platform)
+  // Spec: docs/specs/agent-studio.md  ·  Implementation: docs/agent-studio/implementation-progress.md
+  {
+    path: 'agent-studio',
+    loadChildren: () => import('./agent-studio/agent-studio.routes').then(m => m.AGENT_STUDIO_ROUTES)
+  },
+
   // Default route
   {
     path: '',

@@ -13,6 +13,7 @@
 10. [Data Flow](#data-flow)
 11. [API Structure](#api-structure)
 12. [Recent Additions](#recent-additions)
+13. [Product Specs](#product-specs)
 
 ---
 
@@ -748,6 +749,14 @@ UI polls batch status to show progress
 6. **Graph-based Analysis**: Semantic graph enables contradiction detection
 7. **Audit Trail**: All actions logged for compliance
 8. **Export Ledger**: Tracks all exports for audit requirements
+
+---
+
+## Product Specs
+
+Forward-looking feature specs are tracked separately under [`docs/specs/`](./specs/README.md) so they stay reviewable independently of operational documentation:
+
+- [Agent Studio](./specs/agent-studio.md) — ProtectQA Agent Developer Platform (teams of AI agents, Kanban execution, orchestrator, BYOK + MCP, human-in-the-loop). **Status: Active.** MVP scaffolded — see [implementation tracker](./agent-studio/implementation-progress.md).
 
 ---
 

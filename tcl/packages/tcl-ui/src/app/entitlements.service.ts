@@ -19,7 +19,9 @@ export type EntitlementFeature =
   | 'connectorsDropbox'
   | 'connectorsGDrive'
   | 'ssoSaml'
-  | 'scim';
+  | 'scim'
+  // ProtectQA Agent Developer Platform — its own product (see docs/specs/agent-studio.md).
+  | 'agentStudio';
 
 export interface OrgEntitlements {
   orgId: string;

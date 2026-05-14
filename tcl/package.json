@@ -4,15 +4,24 @@
   "description": "TCL / ProtectQA monorepo — install from package lockfiles only (do not commit node_modules zips).",
   "workspaces": [
     "packages/tcl-core",
-    "packages/tcl-ui"
+    "packages/tcl-ui",
+    "packages/agent-core",
+    "packages/agent-context",
+    "packages/agent-orchestrator",
+    "packages/agent-workflows",
+    "packages/agent-integrations",
+    "packages/agent-mcp",
+    "packages/agent-model-router"
   ],
   "scripts": {
     "install:all": "npm install",
     "build": "npm run build -w packages/tcl-core && npm run build -w packages/tcl-ui",
     "build:core": "npm run build -w packages/tcl-core",
     "build:ui": "npm run build -w packages/tcl-ui",
+    "build:agent-packages": "npm run build -w packages/agent-core -w packages/agent-context -w packages/agent-orchestrator -w packages/agent-workflows -w packages/agent-integrations -w packages/agent-mcp -w packages/agent-model-router",
     "test": "npm run test -w packages/tcl-core",
     "typecheck": "npm run typecheck -w packages/tcl-core",
+    "typecheck:agent-packages": "npm run typecheck -w packages/agent-core -w packages/agent-context -w packages/agent-orchestrator -w packages/agent-workflows -w packages/agent-integrations -w packages/agent-mcp -w packages/agent-model-router",
     "lint": "echo \"No root lint script; add eslint at workspace level if needed\""
   },
   "engines": {

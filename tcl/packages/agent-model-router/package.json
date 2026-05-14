@@ -1,0 +1,17 @@
+{
+  "name": "agent-model-router",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Agent Studio — provider + routing rule contracts (multi-vendor model routing with BYOK).",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "files": ["dist", "README.md"],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "devDependencies": {
+    "typescript": "^5.6.3"
+  }
+}

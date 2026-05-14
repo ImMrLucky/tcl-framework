@@ -165,6 +165,15 @@ export const FEATURE_DEFINITIONS: Record<string, FeatureInfo> = {
     requiredTier: 'ENTERPRISE',
     type: 'entitlement',
   },
+  agentStudio: {
+    key: 'agentStudio',
+    name: 'Agent Studio',
+    description: 'ProtectQA Agent Developer Platform — teams of AI agents, Kanban execution, BYOK, MCP, IDE',
+    // Treated as its own product; not auto-unlocked by any TCL tier.
+    // We tag it ENTERPRISE for sort/grouping purposes only.
+    requiredTier: 'ENTERPRISE',
+    type: 'entitlement',
+  },
 };
 
 @Injectable({

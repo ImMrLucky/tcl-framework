@@ -16,7 +16,11 @@ export type EntitlementFeature =
   | 'connectorsDropbox'
   | 'connectorsGDrive'
   | 'ssoSaml'
-  | 'scim';
+  | 'scim'
+  // Agent Studio is treated as its own product (per docs/specs/agent-studio.md
+  // kickoff decisions). It does NOT auto-enable with any TCL plan tier;
+  // admins flip it on per-org via admin tooling.
+  | 'agentStudio';
 
 export interface OrgEntitlements {
   orgId: string;
@@ -168,6 +172,8 @@ export class EntitlementsService {
       connectorsGDrive: tier === 'ENTERPRISE',
       ssoSaml: false,
       scim: false,
+      // Separate product — never auto-enabled by TCL tier.
+      agentStudio: false,
     };
 
     return {
@@ -252,6 +258,7 @@ export class EntitlementsService {
       connectorsGDrive: features.connectorsGDrive || false,
       ssoSaml: features.ssoSaml || false,
       scim: features.scim || false,
+      agentStudio: features.agentStudio || false,
     };
 
     return {

@@ -34,6 +34,7 @@ import { setupIssueDecisionsRoutes } from "./issues/decisions-routes.js";
 import { setupIssueSignoffsRoutes } from "./issues/signoffs-routes.js";
 import { setupIssueSnapshotsRoutes } from "./issues/snapshots-routes.js";
 import { setupCasesRoutes } from "./cases/routes.js";
+import { setupAgentStudioRoutes } from "./agent-studio/routes.js";
 import { setupWebhooksRoutes } from "./integrations/webhooks-routes.js";
 import { setupJiraRoutes } from "./integrations/jira-routes.js";
 import { setupBatchIngestionRoutes } from "./batch-ingestion/routes.js";
@@ -3607,6 +3608,12 @@ console.log("Issue snapshots routes registered successfully");
 console.log("Registering cases routes...");
 setupCasesRoutes(app);
 console.log("Cases routes registered successfully");
+
+// Setup Agent Studio routes (ProtectQA Agent Developer Platform)
+// Spec: docs/specs/agent-studio.md  ·  Implementation: docs/agent-studio/implementation-progress.md
+console.log("Registering Agent Studio routes...");
+setupAgentStudioRoutes(app);
+console.log("Agent Studio routes registered successfully");
 
 // Setup analytics routes
 console.log("Registering analytics routes...");

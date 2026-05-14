@@ -295,8 +295,9 @@ async function runUnifiedGraphPath(
   const parsedFromRaw = normalizeTranscript(transcript);
   let sourceTurns: any[] | null = null;
   if (normalizedConversation?.turns && Array.isArray(normalizedConversation.turns) && normalizedConversation.turns.length > 0) {
-    sourceTurns = normalizedConversation.turns;
-    if (shouldPreferEngineParsedTurnsOverIngest(sourceTurns, parsedFromRaw)) {
+    const turnsFromIngest = normalizedConversation.turns as any[];
+    sourceTurns = turnsFromIngest;
+    if (shouldPreferEngineParsedTurnsOverIngest(turnsFromIngest, parsedFromRaw)) {
       log(
         "info",
         "Orchestrator",

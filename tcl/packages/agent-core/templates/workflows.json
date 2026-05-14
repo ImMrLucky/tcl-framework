@@ -1,0 +1,159 @@
+[
+  {
+    "key": "bmad_full_sdlc",
+    "name": "BMAD — Full SDLC",
+    "description": "Build → Measure → Analyze → Decide. Full SDLC pipeline with explicit spec, design, build, QA, and security gates.",
+    "recommendedRoles": [
+      "agent_manager",
+      "business_analyst",
+      "product_owner",
+      "ux_designer",
+      "software_architect",
+      "senior_software_engineer",
+      "qa_engineer",
+      "security_reviewer"
+    ],
+    "defaultBoardColumns": [
+      { "key": "intake", "label": "Intake" },
+      { "key": "spec", "label": "Spec" },
+      { "key": "design", "label": "Design" },
+      { "key": "build", "label": "Build" },
+      { "key": "qa", "label": "QA" },
+      { "key": "review", "label": "Review" },
+      { "key": "done", "label": "Done" }
+    ],
+    "defaultTasks": [
+      { "title": "Capture problem statement", "columnKey": "intake", "taskType": "RESEARCH" },
+      { "title": "Draft acceptance criteria", "columnKey": "spec", "taskType": "SPEC" },
+      { "title": "Design technical approach", "columnKey": "design", "taskType": "SPEC" },
+      { "title": "Implement vertical slice", "columnKey": "build", "taskType": "STORY" },
+      { "title": "Author + run test plan", "columnKey": "qa", "taskType": "REVIEW" }
+    ],
+    "reviewGates": [
+      { "afterColumnKey": "spec", "gateType": "SPEC_REVIEW", "requiredRole": "MANAGER" },
+      { "afterColumnKey": "build", "gateType": "CODE_REVIEW", "requiredRole": "MANAGER" },
+      { "afterColumnKey": "qa", "gateType": "QA_REVIEW", "requiredRole": "MANAGER" },
+      { "afterColumnKey": "review", "gateType": "SECURITY_REVIEW", "requiredRole": "ADMIN" }
+    ]
+  },
+  {
+    "key": "bmad_quick_feature",
+    "name": "BMAD — Quick Feature",
+    "description": "Lighter-weight BMAD path for small features that don't need full architecture / security review.",
+    "recommendedRoles": [
+      "agent_manager",
+      "business_analyst",
+      "senior_software_engineer",
+      "qa_engineer"
+    ],
+    "defaultBoardColumns": [
+      { "key": "intake", "label": "Intake" },
+      { "key": "spec", "label": "Spec" },
+      { "key": "build", "label": "Build" },
+      { "key": "qa", "label": "QA" },
+      { "key": "done", "label": "Done" }
+    ],
+    "defaultTasks": [
+      { "title": "Confirm acceptance criteria", "columnKey": "spec", "taskType": "SPEC" },
+      { "title": "Implement change", "columnKey": "build", "taskType": "STORY" },
+      { "title": "Run focused tests", "columnKey": "qa", "taskType": "REVIEW" }
+    ],
+    "reviewGates": [
+      { "afterColumnKey": "build", "gateType": "CODE_REVIEW", "requiredRole": "MANAGER" }
+    ]
+  },
+  {
+    "key": "bug_fix_flow",
+    "name": "Bug Fix Flow",
+    "description": "Reproduce → root cause → fix → regression test → release. Bias toward small, surgical changes.",
+    "recommendedRoles": [
+      "agent_manager",
+      "senior_software_engineer",
+      "qa_engineer"
+    ],
+    "defaultBoardColumns": [
+      { "key": "triage", "label": "Triage" },
+      { "key": "reproduce", "label": "Reproduce" },
+      { "key": "fix", "label": "Fix" },
+      { "key": "regression", "label": "Regression" },
+      { "key": "done", "label": "Done" }
+    ],
+    "defaultTasks": [
+      { "title": "Reproduce reported bug locally", "columnKey": "reproduce", "taskType": "BUG" },
+      { "title": "Identify root cause", "columnKey": "reproduce", "taskType": "RESEARCH" },
+      { "title": "Implement minimal fix", "columnKey": "fix", "taskType": "BUG" },
+      { "title": "Add regression test", "columnKey": "regression", "taskType": "REVIEW" }
+    ],
+    "reviewGates": [
+      { "afterColumnKey": "fix", "gateType": "CODE_REVIEW", "requiredRole": "MANAGER" },
+      { "afterColumnKey": "regression", "gateType": "QA_REVIEW", "requiredRole": "MANAGER" }
+    ]
+  },
+  {
+    "key": "research_spec_build_review",
+    "name": "Research → Spec → Build → Review",
+    "description": "Discovery-heavy workflow for ambiguous problems. Research must close before spec begins.",
+    "recommendedRoles": [
+      "agent_manager",
+      "researcher",
+      "business_analyst",
+      "software_architect",
+      "senior_software_engineer",
+      "qa_engineer"
+    ],
+    "defaultBoardColumns": [
+      { "key": "research", "label": "Research" },
+      { "key": "spec", "label": "Spec" },
+      { "key": "build", "label": "Build" },
+      { "key": "review", "label": "Review" },
+      { "key": "done", "label": "Done" }
+    ],
+    "defaultTasks": [
+      { "title": "Investigate prior art and constraints", "columnKey": "research", "taskType": "RESEARCH" },
+      { "title": "Decide on technical direction", "columnKey": "research", "taskType": "SPEC" },
+      { "title": "Author detailed spec", "columnKey": "spec", "taskType": "SPEC" },
+      { "title": "Implement and verify", "columnKey": "build", "taskType": "STORY" }
+    ],
+    "reviewGates": [
+      { "afterColumnKey": "research", "gateType": "SPEC_REVIEW", "requiredRole": "MANAGER" },
+      { "afterColumnKey": "spec", "gateType": "SPEC_REVIEW", "requiredRole": "MANAGER" },
+      { "afterColumnKey": "build", "gateType": "CODE_REVIEW", "requiredRole": "MANAGER" }
+    ]
+  },
+  {
+    "key": "protectqa_product_feature_flow",
+    "name": "ProtectQA Product Feature Flow",
+    "description": "Internal ProtectQA workflow: spec, build, evidence, compliance review, ship. Includes mandatory evidence + compliance gates.",
+    "recommendedRoles": [
+      "agent_manager",
+      "product_owner",
+      "business_analyst",
+      "senior_software_engineer",
+      "qa_engineer",
+      "security_reviewer",
+      "technical_writer"
+    ],
+    "defaultBoardColumns": [
+      { "key": "intake", "label": "Intake" },
+      { "key": "spec", "label": "Spec" },
+      { "key": "build", "label": "Build" },
+      { "key": "evidence", "label": "Evidence" },
+      { "key": "compliance", "label": "Compliance" },
+      { "key": "ship", "label": "Ship" },
+      { "key": "done", "label": "Done" }
+    ],
+    "defaultTasks": [
+      { "title": "Define product requirements", "columnKey": "spec", "taskType": "SPEC" },
+      { "title": "Implement feature", "columnKey": "build", "taskType": "STORY" },
+      { "title": "Generate evidence + screenshots", "columnKey": "evidence", "taskType": "REVIEW" },
+      { "title": "Compliance and security review", "columnKey": "compliance", "taskType": "REVIEW" },
+      { "title": "Ship + update docs", "columnKey": "ship", "taskType": "CHORE" }
+    ],
+    "reviewGates": [
+      { "afterColumnKey": "spec", "gateType": "SPEC_REVIEW", "requiredRole": "MANAGER" },
+      { "afterColumnKey": "evidence", "gateType": "QA_REVIEW", "requiredRole": "MANAGER" },
+      { "afterColumnKey": "compliance", "gateType": "SECURITY_REVIEW", "requiredRole": "ADMIN" },
+      { "afterColumnKey": "ship", "gateType": "RELEASE_APPROVAL", "requiredRole": "ADMIN" }
+    ]
+  }
+]

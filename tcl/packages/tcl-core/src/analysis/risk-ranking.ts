@@ -265,19 +265,16 @@ function scoreIssue(
   }
   
   // Step 4: Clamp to 0..1
-  const riskScore = clamp01(finalRisk01);
-  
-  // Step 5: Convert to 0..100 score
-  const score = Math.round(riskScore * 100);
-  
+  let riskScore = clamp01(finalRisk01);
+
   // Step 6: Derive severity from riskScore (canonical severity, independent of mode)
   let severity = deriveSeverity(riskScore, config);
-  
+
   // B2: Apply severity cap for non-AGENT↔AGENT contradictions
   if (speakerGating && !speakerGating.isAgentAgent && severity === 'high') {
     severity = 'medium'; // Cap at medium for customer disputes
   }
-  
+
   // Apply category-based minimums (e.g., CONTRADICTION involving MONEY/FEES/REFUND => min "high")
   let canonicalSeverity = applyCategoryMinimums(severity, issue, config);
 
@@ -291,6 +288,27 @@ function scoreIssue(
       canonicalSeverity = issue.severity;
     }
   }
+
+  // Coherence guard: keep the displayed numeric score in the same band as the
+  // canonical severity badge. Without this, category/domain-pack minimums can
+  // upgrade an issue to "high" while its raw riskScore stays in the medium band
+  // (e.g. a CONTRADICTION with category=compliance ending up at riskScore=0.51 +
+  // severity=high). The UI shows "Score: 51" next to a HIGH chip, which reads as
+  // contradictory. Lift riskScore to the floor for the canonical severity band.
+  const severityFloors: Record<SeverityV2, number> = {
+    low: 0,
+    medium: config.severityThresholds.medium,
+    high: config.severityThresholds.high,
+    critical: config.severityThresholds.critical,
+  };
+  const floor = severityFloors[canonicalSeverity] ?? 0;
+  if (riskScore < floor) {
+    riskScore = floor;
+  }
+
+  // Step 5: Convert to 0..100 score (computed after any severity-driven lift so
+  // the numeric badge and the severity chip agree).
+  const score = Math.round(riskScore * 100);
 
   // Step 7: Display severity (may differ from canonical for transcript-only UNVERIFIED, etc.)
   const severityDisplay = computeSeverityDisplay(
