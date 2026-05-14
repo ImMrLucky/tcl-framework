@@ -127,7 +127,21 @@ export class AuthService {
     this.supabase.auth.onAuthStateChange(async (event, session) => {
       if (event === 'SIGNED_OUT') {
         this.clearInactivityTimer();
-        this.currentUserSubject.next(null);
+        // Supabase can emit SIGNED_OUT while swapping sessions on password login. Clearing
+        // `currentUser` synchronously races AuthGuard and blocks /dashboard navigation.
+        queueMicrotask(() => {
+          if (this.getValidSessionFromStorage()?.access_token && this.hydrateUserFromStorageIfPresent()) {
+            return;
+          }
+          if (this.loginSessionGraceUntil && Date.now() < this.loginSessionGraceUntil.until) {
+            const gid = this.loginSessionGraceUntil.userId;
+            if (gid && !this.currentUserSubject.value?.id) {
+              this.currentUserSubject.next({ id: gid, email: undefined });
+            }
+            return;
+          }
+          this.currentUserSubject.next(null);
+        });
         return;
       }
 
@@ -136,6 +150,16 @@ export class AuthService {
         // clearing here races with password login and breaks AuthGuard / redirect.
         if (event === 'INITIAL_SESSION') {
           this.clearInactivityTimer();
+          if (this.hydrateUserFromStorageIfPresent()) {
+            return;
+          }
+          if (this.loginSessionGraceUntil && Date.now() < this.loginSessionGraceUntil.until) {
+            const gid = this.loginSessionGraceUntil.userId;
+            if (gid && !this.currentUserSubject.value?.id) {
+              this.currentUserSubject.next({ id: gid, email: undefined });
+            }
+            return;
+          }
           this.currentUserSubject.next(null);
         }
         return;
@@ -352,20 +376,8 @@ export class AuthService {
 
       const grace = this.loginSessionGraceUntil;
       if (grace && grace.userId === uid && Date.now() < grace.until) {
-        try {
-          const raced = await Promise.race([
-            this.supabase.auth.getSession(),
-            new Promise<{ data: { session: null } }>((res) =>
-              setTimeout(() => res({ data: { session: null } }), 2500)
-            ),
-          ]);
-          const session = (raced as any)?.data?.session;
-          if (session?.access_token) {
-            return true;
-          }
-        } catch {
-          /* fall through to grace */
-        }
+        // Do not await getSession here — it can stall on LockManager and delays AuthGuard.
+        void this.syncSupabaseSessionProbe(3000);
         return true;
       }
 
