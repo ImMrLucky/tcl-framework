@@ -1,26 +1,42 @@
 import { CommonModule } from '@angular/common';
 import { Component, OnInit } from '@angular/core';
+import { RouterModule } from '@angular/router';
 import { MatCardModule } from '@angular/material/card';
 import { MatChipsModule } from '@angular/material/chips';
 import { MatTabsModule } from '@angular/material/tabs';
 import { MatIconModule } from '@angular/material/icon';
+import { MatButtonModule } from '@angular/material/button';
 import { AgentStudioService } from '../agent-studio.service';
-import { RoleTemplate, WorkflowTemplate } from '../agent-studio.types';
+import { PersonaTemplate, RoleTemplate, WorkflowTemplate } from '../agent-studio.types';
 
 @Component({
   selector: 'app-templates',
   standalone: true,
-  imports: [CommonModule, MatCardModule, MatChipsModule, MatTabsModule, MatIconModule],
+  imports: [
+    CommonModule,
+    RouterModule,
+    MatCardModule,
+    MatChipsModule,
+    MatTabsModule,
+    MatIconModule,
+    MatButtonModule,
+  ],
   template: `
     <section class="page">
-      <h2>Templates</h2>
+      <h2>Templates & packs</h2>
       <p class="muted">
-        Seeded templates from <code>packages/agent-core/templates/</code>. Use these
-        as starting points when creating teams and agents.
+        Agent Studio is a <strong>generic</strong> agent platform: roles, personas, Markdown agent files, and workflow packs are composable.
+        <strong>BMAD Workflow Pack</strong> is one optional pack—not the default assumption for the whole product.
       </p>
+      <div class="hub">
+        <a mat-stroked-button routerLink="/agent-studio/templates/packs">Manage template packs</a>
+        <a mat-stroked-button routerLink="/agent-studio/templates/roles">Manage roles</a>
+        <a mat-stroked-button routerLink="/agent-studio/templates/personas">Manage personas</a>
+        <a mat-stroked-button routerLink="/agent-studio/templates/files">Manage agent file templates</a>
+      </div>
 
       <mat-tab-group>
-        <mat-tab label="Roles">
+        <mat-tab label="Roles (builtin catalog)">
           <div class="grid">
             <mat-card *ngFor="let r of roles" class="t-card">
               <mat-card-title>
@@ -39,7 +55,20 @@ import { RoleTemplate, WorkflowTemplate } from '../agent-studio.types';
           </div>
         </mat-tab>
 
-        <mat-tab label="Workflows">
+        <mat-tab label="Personas (builtin catalog)">
+          <div class="grid">
+            <mat-card *ngFor="let p of personas" class="t-card">
+              <mat-card-title>{{ p.name }}</mat-card-title>
+              <mat-card-subtitle>{{ p.key }}</mat-card-subtitle>
+              <mat-card-content>
+                <p>{{ p.description }}</p>
+                <p class="persona"><em>{{ p.personaMarkdown }}</em></p>
+              </mat-card-content>
+            </mat-card>
+          </div>
+        </mat-tab>
+
+        <mat-tab label="Workflow templates">
           <div class="grid">
             <mat-card *ngFor="let w of workflows" class="t-card">
               <mat-card-title>{{ w.name }}</mat-card-title>
@@ -70,24 +99,54 @@ import { RoleTemplate, WorkflowTemplate } from '../agent-studio.types';
   `,
   styles: [
     `
-      .page { display: flex; flex-direction: column; gap: 16px; }
-      .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 16px; padding-top: 16px; }
-      .t-card { background: #fff; }
-      .t-card mat-card-title { display: flex; align-items: center; gap: 8px; }
-      .persona { color: #666; }
-      h4 { margin-bottom: 4px; margin-top: 12px; }
-      .muted { color: #666; }
+      .page {
+        display: flex;
+        flex-direction: column;
+        gap: 16px;
+      }
+      .hub {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+      }
+      .grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+        gap: 16px;
+        padding-top: 16px;
+      }
+      .t-card {
+        background: #fff;
+      }
+      .t-card mat-card-title {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+      .persona {
+        color: #666;
+      }
+      h4 {
+        margin-bottom: 4px;
+        margin-top: 12px;
+      }
+      .muted {
+        color: #666;
+        max-width: 900px;
+      }
     `,
   ],
 })
 export class TemplatesComponent implements OnInit {
   roles: RoleTemplate[] = [];
+  personas: PersonaTemplate[] = [];
   workflows: WorkflowTemplate[] = [];
 
   constructor(private studio: AgentStudioService) {}
 
   ngOnInit(): void {
     this.studio.listRoleTemplates().subscribe({ next: (r) => (this.roles = r.templates) });
+    this.studio.listPersonaTemplates().subscribe({ next: (r) => (this.personas = r.templates) });
     this.studio.listWorkflowTemplates().subscribe({ next: (r) => (this.workflows = r.templates) });
   }
 }

@@ -1,0 +1,10 @@
+{
+  "key": "security_review",
+  "name": "Security Review Team",
+  "description": "Security assessment and hardening workflow pack.",
+  "category": "security",
+  "packType": "workflow",
+  "roles": ["security_reviewer", "software_architect", "senior_software_engineer"],
+  "personas": ["security_paranoid_reviewer", "strict_reviewer"],
+  "agentFiles": ["agent.md", "persona.md", "rules.md", "tools.md", "review-gates.md", "output-format.md"]
+}

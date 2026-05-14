@@ -27,6 +27,13 @@ export interface RoleTemplate {
   isOrchestrator?: boolean;
 }
 
+export interface PersonaTemplate {
+  key: string;
+  name: string;
+  description: string;
+  personaMarkdown: string;
+}
+
 export interface WorkflowTemplate {
   key: string;
   name: string;
@@ -55,6 +62,23 @@ export interface WorkflowTemplate {
 
 let cachedRoles: RoleTemplate[] | null = null;
 let cachedWorkflows: WorkflowTemplate[] | null = null;
+let cachedPersonas: PersonaTemplate[] | null = null;
+
+export function loadPersonaTemplates(): PersonaTemplate[] {
+  if (cachedPersonas) return cachedPersonas;
+  try {
+    const raw = readFileSync(resolve(TEMPLATES_DIR, 'personas.json'), 'utf8');
+    cachedPersonas = JSON.parse(raw) as PersonaTemplate[];
+  } catch (err) {
+    console.warn('[agent-studio][templates] failed to load personas.json', err);
+    cachedPersonas = [];
+  }
+  return cachedPersonas;
+}
+
+export function findPersonaTemplate(key: string): PersonaTemplate | null {
+  return loadPersonaTemplates().find((p) => p.key === key) ?? null;
+}
 
 export function loadRoleTemplates(): RoleTemplate[] {
   if (cachedRoles) return cachedRoles;
@@ -94,4 +118,5 @@ export function findWorkflowTemplate(key: string): WorkflowTemplate | null {
 export function _resetTemplateCacheForTests(): void {
   cachedRoles = null;
   cachedWorkflows = null;
+  cachedPersonas = null;
 }

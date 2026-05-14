@@ -1,0 +1,10 @@
+{
+  "key": "research",
+  "name": "Research Team",
+  "description": "Discovery-heavy research workflow pack.",
+  "category": "research",
+  "packType": "workflow",
+  "roles": ["agent_manager", "researcher", "data_scientist", "business_analyst"],
+  "personas": ["detail_oriented_analyst", "data_driven_skeptic"],
+  "agentFiles": ["agent.md", "persona.md", "instructions.md", "rules.md", "memory.md", "workflow.md", "output-format.md"]
+}

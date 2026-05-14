@@ -6,6 +6,8 @@
 > **Working name:** Agent Studio
 > **Route namespace:** `/agent-studio`
 > **Implementation doc:** [docs/agent-studio/implementation-progress.md](../agent-studio/implementation-progress.md)
+> **Generic agent files:** [docs/agent-studio/generic-agent-file-system.md](../agent-studio/generic-agent-file-system.md)
+> **Template packs:** [docs/agent-studio/template-packs.md](../agent-studio/template-packs.md)
 >
 > **Resolved decisions (from kickoff):**
 > - **Tenancy:** reuse existing TCL Org / Project / RBAC model (no separate tenancy).
@@ -29,7 +31,7 @@ The platform should support:
 - Agent Manager / Orchestrator per team
 - Human review gates
 - Jira / Azure DevOps integration-ready architecture
-- Spec-driven development workflows, defaulting to BMAD
+- Spec-driven and delivery workflows; **default delivery method:** generic software delivery templates. **BMAD Workflow Pack** is an optional template pack, not the platform default.
 - Shared team context and individual agent context
 - Mistake memory and rule learning
 - Multi-vendor model routing
@@ -63,6 +65,10 @@ Possible UI sections:
 - `/agent-studio/teams/:teamId/context`
 - `/agent-studio/teams/:teamId/rules`
 - `/agent-studio/teams/:teamId/ide`
+- `/agent-studio/templates/packs`
+- `/agent-studio/templates/roles`
+- `/agent-studio/templates/personas`
+- `/agent-studio/templates/files`
 - `/agent-studio/templates`
 - `/agent-studio/integrations`
 - `/agent-studio/settings`
@@ -152,8 +158,9 @@ Build the foundation first.
    - Technical Writer
 
 2. Seeded workflow templates:
-   - BMAD Full SDLC
-   - BMAD Quick Feature
+   - Generic Software Delivery (default)
+   - BMAD Workflow Pack — Full SDLC (optional)
+   - BMAD Workflow Pack — Quick Feature (optional)
    - Bug Fix Flow
    - Research → Spec → Build → Review
    - ProtectQA Product Feature Flow

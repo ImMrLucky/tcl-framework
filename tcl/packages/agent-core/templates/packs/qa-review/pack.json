@@ -1,0 +1,10 @@
+{
+  "key": "qa_review",
+  "name": "QA Review Team",
+  "description": "Quality gates and verification workflow pack.",
+  "category": "qa",
+  "packType": "workflow",
+  "roles": ["qa_engineer", "test_architect", "senior_software_engineer"],
+  "personas": ["strict_reviewer", "qa_gatekeeper"],
+  "agentFiles": ["agent.md", "persona.md", "instructions.md", "rules.md", "review-gates.md", "output-format.md"]
+}

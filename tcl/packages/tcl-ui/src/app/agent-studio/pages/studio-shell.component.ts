@@ -48,9 +48,25 @@ import { AgentStudioSettings } from '../agent-studio.types';
             <mat-icon>groups</mat-icon>
             <span>Teams</span>
           </a>
+          <a class="rail-link" routerLink="templates/packs" routerLinkActive="active">
+            <mat-icon>inventory_2</mat-icon>
+            <span>Packs</span>
+          </a>
+          <a class="rail-link" routerLink="templates/roles" routerLinkActive="active">
+            <mat-icon>badge</mat-icon>
+            <span>Roles</span>
+          </a>
+          <a class="rail-link" routerLink="templates/personas" routerLinkActive="active">
+            <mat-icon>mood</mat-icon>
+            <span>Personas</span>
+          </a>
+          <a class="rail-link" routerLink="templates/files" routerLinkActive="active">
+            <mat-icon>article</mat-icon>
+            <span>File templates</span>
+          </a>
           <a class="rail-link" routerLink="templates" routerLinkActive="active">
             <mat-icon>library_books</mat-icon>
-            <span>Templates</span>
+            <span>Catalog</span>
           </a>
           <a class="rail-link" routerLink="integrations" routerLinkActive="active">
             <mat-icon>link</mat-icon>

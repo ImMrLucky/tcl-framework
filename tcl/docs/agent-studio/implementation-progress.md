@@ -105,6 +105,17 @@ Architecture hooks exist (`packages/agent-integrations`, IDE panels, `provider-k
 
 ---
 
+## Generic platform & agent files (migration 050)
+
+- [x] `050_agent_studio_agent_files_and_template_packs.sql` — `agent_studio_template_packs`, `agent_studio_role_templates`, `agent_studio_persona_templates`, `agent_studio_template_assets`, `agent_studio_agent_files`, `agent_studio_agent_file_versions`; new columns on `agent_studio_agents`; seeded system packs (generic + optional BMAD pack key).
+- [x] Builtin Markdown bundle: `packages/agent-core/templates/assets/generic/*.md`.
+- [x] Pack descriptors: `packages/agent-core/templates/packs/*/pack.json`.
+- [x] `personas.json` + `GET /api/agent-studio/templates/personas`.
+- [x] `prompt-composer.ts` — composes system prompt from active agent files + task/context/mistakes; `dispatch.ts` sends system + user to providers.
+- [x] Routes in `agent-studio-template-file-routes.ts` (template packs, roles/personas merge listing, template assets, agent files CRUD subset, prompt preview).
+
+---
+
 ## Next iterations
 
 1. Replace placeholder logic in `packages/agent-orchestrator` with a real BullMQ-style queue + pause gateway.

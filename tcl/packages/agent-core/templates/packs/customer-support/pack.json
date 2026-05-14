@@ -1,0 +1,10 @@
+{
+  "key": "customer_support",
+  "name": "Customer Support",
+  "description": "Triage and customer response workflow pack.",
+  "category": "support",
+  "packType": "workflow",
+  "roles": ["customer_success_analyst", "agent_manager", "technical_writer"],
+  "personas": ["customer_first_product_strategist", "calm_incident_commander", "default_professional"],
+  "agentFiles": ["agent.md", "persona.md", "instructions.md", "rules.md", "handoff.md", "output-format.md"]
+}

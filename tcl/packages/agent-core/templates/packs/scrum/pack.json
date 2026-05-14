@@ -1,0 +1,10 @@
+{
+  "key": "scrum",
+  "name": "Scrum Team",
+  "description": "Sprint-oriented delivery workflow pack.",
+  "category": "software",
+  "packType": "workflow",
+  "roles": ["scrum_master", "product_owner", "senior_software_engineer", "qa_engineer"],
+  "personas": ["default_professional", "socratic_planner"],
+  "agentFiles": ["agent.md", "persona.md", "instructions.md", "rules.md", "workflow.md", "review-gates.md", "output-format.md"]
+}

@@ -1,0 +1,31 @@
+{
+  "key": "generic_software_delivery",
+  "name": "Generic Software Delivery",
+  "description": "A general-purpose software development team workflow with planning, implementation, review, QA, and delivery.",
+  "category": "software",
+  "packType": "workflow",
+  "roles": [
+    "agent_manager",
+    "product_owner",
+    "software_architect",
+    "senior_software_engineer",
+    "qa_engineer",
+    "security_reviewer",
+    "technical_writer"
+  ],
+  "personas": ["default_professional", "strict_reviewer", "startup_mvp_builder"],
+  "agentFiles": [
+    "agent.md",
+    "persona.md",
+    "instructions.md",
+    "rules.md",
+    "tools.md",
+    "memory.md",
+    "context.md",
+    "workflow.md",
+    "review-gates.md",
+    "handoff.md",
+    "heartbeat.md",
+    "output-format.md"
+  ]
+}

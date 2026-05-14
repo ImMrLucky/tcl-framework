@@ -130,7 +130,7 @@ export class TeamsListComponent implements OnInit {
   showForm = false;
   newName = '';
   newDescription = '';
-  newWorkflowKey: string | null = null;
+  newWorkflowKey: string | null = 'generic_software_delivery';
   creating = false;
 
   constructor(private studio: AgentStudioService, private snack: MatSnackBar, private router: Router) {}

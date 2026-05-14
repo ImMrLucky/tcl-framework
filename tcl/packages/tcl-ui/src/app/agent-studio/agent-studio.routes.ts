@@ -56,6 +56,26 @@ export const AGENT_STUDIO_ROUTES: Routes = [
           import('./pages/team-ide.component').then((m) => m.TeamIdeComponent),
       },
       {
+        path: 'templates/packs',
+        loadComponent: () =>
+          import('./pages/manage-template-packs.component').then((m) => m.ManageTemplatePacksComponent),
+      },
+      {
+        path: 'templates/roles',
+        loadComponent: () =>
+          import('./pages/manage-roles.component').then((m) => m.ManageRolesComponent),
+      },
+      {
+        path: 'templates/personas',
+        loadComponent: () =>
+          import('./pages/manage-personas.component').then((m) => m.ManagePersonasComponent),
+      },
+      {
+        path: 'templates/files',
+        loadComponent: () =>
+          import('./pages/manage-agent-files.component').then((m) => m.ManageAgentFilesComponent),
+      },
+      {
         path: 'templates',
         loadComponent: () =>
           import('./pages/templates.component').then((m) => m.TemplatesComponent),

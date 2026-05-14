@@ -2,7 +2,7 @@
   "name": "agent-workflows",
   "version": "0.1.0",
   "private": true,
-  "description": "Agent Studio — workflow templates and state machine contracts (BMAD, Bug Fix Flow, etc.).",
+  "description": "Agent Studio — workflow templates and state machine contracts (generic delivery, BMAD Workflow Pack, Bug Fix Flow, etc.).",
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",

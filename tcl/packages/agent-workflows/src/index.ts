@@ -1,7 +1,7 @@
 /**
  * agent-workflows — workflow state-machine helpers.
  *
- * The full workflow templates (BMAD, Bug Fix Flow, etc.) live as JSON in
+ * The full workflow templates (generic delivery, BMAD Workflow Pack, Bug Fix Flow, etc.) live as JSON in
  * `packages/agent-core/templates/workflows.json`. This package describes the
  * minimal runtime shape and a single `evaluateTransition` helper.
  */

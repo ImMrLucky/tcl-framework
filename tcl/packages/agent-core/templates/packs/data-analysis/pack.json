@@ -1,0 +1,10 @@
+{
+  "key": "data_analysis",
+  "name": "Data Analysis Team",
+  "description": "Analysis, metrics, and reporting workflow pack.",
+  "category": "data",
+  "packType": "workflow",
+  "roles": ["data_scientist", "researcher", "business_analyst"],
+  "personas": ["data_driven_skeptic", "detail_oriented_analyst"],
+  "agentFiles": ["agent.md", "persona.md", "instructions.md", "rules.md", "memory.md", "output-format.md"]
+}

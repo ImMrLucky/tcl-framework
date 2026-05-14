@@ -7,6 +7,11 @@ import {
   AgentStudioSettings,
   AgentTeam,
   AuditEvent,
+  AgentStudioSummary,
+  TeamCommandCenter,
+  PersonaTemplate,
+  TemplatePackRow,
+  AgentMarkdownFile,
   ContextEntry,
   ContextScope,
   IntegrationRow,
@@ -40,6 +45,11 @@ interface CreateAgentPayload {
   capabilities?: string[];
   tools?: string[];
   theme?: Record<string, unknown>;
+  templatePackKey?: string;
+  personaTemplateKey?: string;
+  roleTemplateId?: string;
+  personaTemplateId?: string;
+  generateAgentFiles?: boolean;
 }
 
 interface CreateTaskPayload {
@@ -96,11 +106,71 @@ export class AgentStudioService {
     return this.http.get<{ templates: WorkflowTemplate[] }>(this.url('/templates/workflows'));
   }
 
+  listPersonaTemplates(): Observable<{ templates: PersonaTemplate[] }> {
+    return this.http.get<{ templates: PersonaTemplate[] }>(this.url('/templates/personas'));
+  }
+
+  listTemplatePacks(): Observable<{ packs: TemplatePackRow[] }> {
+    return this.http.get<{ packs: TemplatePackRow[] }>(this.url('/template-packs'));
+  }
+
+  listRolesCatalog(): Observable<{ catalog: RoleTemplate[]; dbRoles: unknown[] }> {
+    return this.http.get<{ catalog: RoleTemplate[]; dbRoles: unknown[] }>(this.url('/roles'));
+  }
+
+  listPersonasCatalog(): Observable<{ catalog: PersonaTemplate[]; dbPersonas: unknown[] }> {
+    return this.http.get<{ catalog: PersonaTemplate[]; dbPersonas: unknown[] }>(this.url('/personas'));
+  }
+
+  listTemplateAssets(): Observable<{ assets: unknown[] }> {
+    return this.http.get<{ assets: unknown[] }>(this.url('/template-assets'));
+  }
+
+  listAgentMarkdownFiles(agentId: string): Observable<{ files: AgentMarkdownFile[] }> {
+    return this.http.get<{ files: AgentMarkdownFile[] }>(this.url(`/agents/${agentId}/files`));
+  }
+
+  updateAgentMarkdownFile(
+    agentId: string,
+    fileId: string,
+    body: { markdown?: string; isActive?: boolean; changeNote?: string }
+  ): Observable<{ file: AgentMarkdownFile }> {
+    return this.http.patch<{ file: AgentMarkdownFile }>(this.url(`/agents/${agentId}/files/${fileId}`), body);
+  }
+
+  listAgentFileVersions(agentId: string, fileId: string): Observable<{ versions: unknown[] }> {
+    return this.http.get<{ versions: unknown[] }>(this.url(`/agents/${agentId}/files/${fileId}/versions`));
+  }
+
+  previewAgentPrompt(
+    agentId: string,
+    body: {
+      taskId?: string;
+      activeFilePath?: string;
+      activeFileContent?: string;
+      selectedText?: string;
+      userPrompt?: string;
+    }
+  ): Observable<{ filesUsed: unknown[]; composedPrompt: string }> {
+    return this.http.post<{ filesUsed: unknown[]; composedPrompt: string }>(
+      this.url(`/agents/${agentId}/prompt-preview`),
+      body
+    );
+  }
+
   // -------------------------------------------------------------------------
   // Teams.
   // -------------------------------------------------------------------------
   listTeams(): Observable<{ teams: AgentTeam[] }> {
     return this.http.get<{ teams: AgentTeam[] }>(this.url('/teams'));
+  }
+
+  getSummary(): Observable<AgentStudioSummary> {
+    return this.http.get<AgentStudioSummary>(this.url('/summary'));
+  }
+
+  getTeamCommandCenter(teamId: string): Observable<TeamCommandCenter> {
+    return this.http.get<TeamCommandCenter>(this.url(`/teams/${teamId}/command-center`));
   }
 
   createTeam(body: CreateTeamPayload): Observable<{ team: AgentTeam; board: KanbanBoard }> {

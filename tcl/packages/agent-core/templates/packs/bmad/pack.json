@@ -1,0 +1,28 @@
+{
+  "key": "bmad",
+  "name": "BMAD Workflow Pack",
+  "description": "Optional BMAD-inspired software delivery workflow pack.",
+  "category": "software",
+  "packType": "workflow",
+  "roles": [
+    "agent_manager",
+    "business_analyst",
+    "product_owner",
+    "software_architect",
+    "senior_software_engineer",
+    "qa_engineer",
+    "security_reviewer"
+  ],
+  "personas": ["default_professional", "strict_reviewer", "detail_oriented_analyst"],
+  "agentFiles": [
+    "agent.md",
+    "persona.md",
+    "instructions.md",
+    "rules.md",
+    "tools.md",
+    "memory.md",
+    "workflow.md",
+    "review-gates.md",
+    "output-format.md"
+  ]
+}

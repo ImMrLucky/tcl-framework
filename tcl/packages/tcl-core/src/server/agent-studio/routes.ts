@@ -19,11 +19,15 @@ import { supabaseAdmin } from '../supabase.js';
 import { getOrgContext, type OrgContext } from '../auth-context.js';
 import { encryptString, decryptString, redact, type EncryptedBlob } from './crypto.js';
 import { logAgentStudioAudit } from './audit.js';
-import { loadRoleTemplates, loadWorkflowTemplates } from './templates.js';
+import { loadRoleTemplates, loadWorkflowTemplates, findPersonaTemplate } from './templates.js';
 import { bufFromDb, bufToDb } from './bytea.js';
 import { readPauseGate, type PauseGateState } from './pause-gate.js';
 import { handleAgentStudioDispatch } from './dispatch.js';
 import { handleIntegrationPing } from './integration-ping.js';
+import { buildAgentStudioSummary, buildTeamCommandCenter } from './summary.js';
+import { assertReviewGatesAllowTerminalMove } from './review-gate-move.js';
+import { registerAgentStudioTemplateFileRoutes } from './agent-studio-template-file-routes.js';
+import { resolveTemplatePackId, seedDefaultAgentMarkdownFiles } from './agent-files.js';
 
 const STAFF_ROLES = new Set(['OWNER', 'ADMIN', 'MANAGER']);
 const ANALYST_ROLES = new Set(['OWNER', 'ADMIN', 'MANAGER', 'ANALYST']);
@@ -194,6 +198,17 @@ export function setupAgentStudioRoutes(app: express.Application): void {
     res.json({ settings: data });
   });
 
+  app.get('/api/agent-studio/summary', async (req, res) => {
+    const ctx = await ensureContext(req, res);
+    if (!ctx || !requireAnalyst(ctx, res) || dbDown(res)) return;
+    try {
+      const summary = await buildAgentStudioSummary(supabaseAdmin!, ctx.orgId);
+      res.json(summary);
+    } catch (e) {
+      res.status(500).json({ error: String(e) });
+    }
+  });
+
   // ========================================================================
   // Templates (read-only, served from packages/agent-core/templates).
   // Public GETs: no org/session required — payload is identical for all orgs
@@ -237,7 +252,7 @@ export function setupAgentStudioRoutes(app: express.Application): void {
         project_id: projectId ?? null,
         name,
         description: description ?? null,
-        workflow_template_key: workflowTemplateKey ?? null,
+        workflow_template_key: workflowTemplateKey ?? 'generic_software_delivery',
         created_by: ctx.userId ?? null,
       })
       .select('*')
@@ -277,6 +292,19 @@ export function setupAgentStudioRoutes(app: express.Application): void {
     if (error) return res.status(500).json({ error: error.message });
     if (!data) return res.status(404).json({ error: 'Team not found' });
     res.json({ team: data });
+  });
+
+  app.get('/api/agent-studio/teams/:teamId/command-center', async (req, res) => {
+    const ctx = await ensureContext(req, res);
+    if (!ctx || !requireAnalyst(ctx, res) || dbDown(res)) return;
+    const { teamId } = req.params;
+    try {
+      const payload = await buildTeamCommandCenter(supabaseAdmin!, ctx.orgId, teamId);
+      if (!payload) return res.status(404).json({ error: 'TEAM_NOT_FOUND', message: 'Team not found' });
+      res.json(payload);
+    } catch (e) {
+      res.status(500).json({ error: String(e) });
+    }
   });
 
   app.patch('/api/agent-studio/teams/:teamId', async (req, res) => {
@@ -408,25 +436,78 @@ export function setupAgentStudioRoutes(app: express.Application): void {
       theme,
       capabilities,
       tools,
+      templatePackKey,
+      personaTemplateKey,
+      roleTemplateId,
+      personaTemplateId,
+      generateAgentFiles,
     } = req.body ?? {};
     if (!name) return res.status(400).json({ error: 'name is required' });
+
+    let personaFinal: string | null = persona ?? null;
+    if (personaTemplateKey) {
+      const pt = findPersonaTemplate(String(personaTemplateKey));
+      if (pt) personaFinal = pt.personaMarkdown;
+    }
+
+    let template_pack_id: string | null = null;
+    try {
+      template_pack_id = await resolveTemplatePackId(supabaseAdmin!, templatePackKey);
+    } catch {
+      /* table may not exist until migration 050 */
+    }
+
+    const insertRow: Record<string, unknown> = {
+      org_id: ctx.orgId,
+      team_id: teamId,
+      name,
+      role_template_key: roleTemplateKey ?? null,
+      is_orchestrator: !!isOrchestrator,
+      persona: personaFinal,
+      theme: theme ?? {},
+      capabilities: capabilities ?? [],
+      tools: tools ?? [],
+      created_by: ctx.userId ?? null,
+      template_pack_id,
+      role_template_id: roleTemplateId ?? null,
+      persona_template_id: personaTemplateId ?? null,
+    };
+
     const { data, error } = await supabaseAdmin!
       .from('agent_studio_agents')
-      .insert({
-        org_id: ctx.orgId,
-        team_id: teamId,
-        name,
-        role_template_key: roleTemplateKey ?? null,
-        is_orchestrator: !!isOrchestrator,
-        persona: persona ?? null,
-        theme: theme ?? {},
-        capabilities: capabilities ?? [],
-        tools: tools ?? [],
-        created_by: ctx.userId ?? null,
-      })
+      .insert(insertRow)
       .select('*')
       .single();
     if (error) return res.status(500).json({ error: error.message });
+
+    const doGen = generateAgentFiles !== false;
+    if (doGen) {
+      try {
+        await seedDefaultAgentMarkdownFiles({
+          supabase: supabaseAdmin!,
+          orgId: ctx.orgId,
+          teamId,
+          agentId: data.id,
+          agentName: name,
+          roleTemplateKey: roleTemplateKey ?? null,
+          personaText: personaFinal,
+          userId: ctx.userId ?? null,
+        });
+        await logAgentStudioAudit({
+          orgId: ctx.orgId,
+          teamId,
+          agentId: data.id,
+          actorUserId: ctx.userId,
+          eventType: 'agent.files.generated',
+          resourceType: 'agent_studio_agents',
+          resourceId: data.id,
+          payload: { templatePackKey: templatePackKey ?? 'generic_agent_setup' },
+        });
+      } catch (e) {
+        console.warn('[agent-studio] seed agent markdown files skipped', e);
+      }
+    }
+
     await logAgentStudioAudit({
       orgId: ctx.orgId,
       teamId,
@@ -751,7 +832,7 @@ export function setupAgentStudioRoutes(app: express.Application): void {
 
     const { data: existing } = await supabaseAdmin!
       .from('agent_studio_tasks')
-      .select('team_id, assigned_agent_id')
+      .select('team_id, assigned_agent_id, column_key')
       .eq('id', taskId)
       .eq('org_id', ctx.orgId)
       .maybeSingle();
@@ -779,6 +860,29 @@ export function setupAgentStudioRoutes(app: express.Application): void {
     };
     for (const [k, col] of Object.entries(map)) {
       if (req.body?.[k] !== undefined) allowed[col] = req.body[k];
+    }
+
+    const prevCol = existing.column_key as string;
+    const nextCol =
+      allowed.column_key !== undefined ? String(allowed.column_key) : prevCol;
+    if (nextCol !== prevCol) {
+      try {
+        const rv = await assertReviewGatesAllowTerminalMove(
+          supabaseAdmin!,
+          ctx.orgId,
+          taskId,
+          nextCol
+        );
+        if (!rv.ok) {
+          return res.status(409).json({
+            error: 'REVIEW_GATE_BLOCKED',
+            message: 'This task has pending review gates before it can move forward.',
+            pendingGates: rv.pendingGates,
+          });
+        }
+      } catch (e) {
+        return res.status(500).json({ error: String(e) });
+      }
     }
 
     const { data, error } = await supabaseAdmin!
@@ -1602,4 +1706,6 @@ export function setupAgentStudioRoutes(app: express.Application): void {
     if (error) return res.status(500).json({ error: error.message });
     res.json({ events: data ?? [] });
   });
+
+  registerAgentStudioTemplateFileRoutes(app);
 }

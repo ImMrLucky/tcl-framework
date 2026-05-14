@@ -49,6 +49,10 @@ export interface Agent {
   pause_reason: string | null;
   created_at: string;
   updated_at: string;
+  role_template_id?: string | null;
+  persona_template_id?: string | null;
+  template_pack_id?: string | null;
+  agent_file_mode?: 'managed' | 'advanced' | 'custom';
 }
 
 export interface AgentConfigVersion {
@@ -214,6 +218,13 @@ export interface RoleTemplate {
   isOrchestrator?: boolean;
 }
 
+export interface PersonaTemplate {
+  key: string;
+  name: string;
+  description: string;
+  personaMarkdown: string;
+}
+
 export interface WorkflowTemplate {
   key: string;
   name: string;
@@ -243,4 +254,81 @@ export interface AuditEvent {
   resource_id: string | null;
   payload: Record<string, unknown>;
   created_at: string;
+}
+
+export type NeedsAttentionType = 'task' | 'agent' | 'review' | 'integration' | 'mcp';
+
+export interface NeedsAttentionItem {
+  type: NeedsAttentionType;
+  label: string;
+  description: string;
+  teamId?: string;
+  taskId?: string;
+  agentId?: string;
+}
+
+/** Response from `GET /api/agent-studio/summary`. */
+export interface AgentStudioSummary {
+  teamsTotal: number;
+  teamsPaused: number;
+  agentsTotal: number;
+  agentsPaused: number;
+  tasksTotal: number;
+  tasksInProgress: number;
+  tasksBlocked: number;
+  reviewsPending: number;
+  recentAuditEvents: AuditEvent[];
+  recentRuns: unknown[];
+  needsAttention: NeedsAttentionItem[];
+  orgPaused: boolean;
+}
+
+/** Response from `GET /api/agent-studio/teams/:teamId/command-center`. */
+export interface TeamCommandCenter {
+  team: AgentTeam;
+  agentsTotal: number;
+  agentsPaused: number;
+  orchestratorCount: number;
+  tasksTotal: number;
+  tasksInProgress: number;
+  tasksBlocked: number;
+  tasksInReview: number;
+  pendingReviewGates: number;
+  recentCompleted: Task[];
+  recentAudit: AuditEvent[];
+  recentMistakes: Mistake[];
+  contextSummary: string | null;
+  orgPaused: boolean;
+}
+
+export interface TemplatePackRow {
+  id: string;
+  org_id: string | null;
+  key: string;
+  name: string;
+  description: string | null;
+  category: string;
+  pack_type: string;
+  is_system: boolean;
+  is_active: boolean;
+  metadata: Record<string, unknown>;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface AgentMarkdownFile {
+  id: string;
+  org_id: string;
+  team_id: string;
+  agent_id: string;
+  file_key: string;
+  file_name: string;
+  file_path: string;
+  file_type: string;
+  markdown: string;
+  is_required: boolean;
+  is_active: boolean;
+  metadata: Record<string, unknown>;
+  created_at: string;
+  updated_at: string;
 }

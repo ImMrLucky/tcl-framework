@@ -4,6 +4,7 @@ import { readPauseGate } from './pause-gate.js';
 import { bufFromDb } from './bytea.js';
 import { decryptString } from './crypto.js';
 import { logAgentStudioAudit } from './audit.js';
+import { composeAgentPrompt } from './prompt-composer.js';
 
 export interface DispatchOrgContext {
   orgId: string;
@@ -63,9 +64,15 @@ async function callOpenAICompatible(opts: {
   baseUrl: string;
   apiKey: string;
   model: string;
-  prompt: string;
+  system?: string;
+  user: string;
 }): Promise<{ text: string; raw: unknown }> {
   const url = `${opts.baseUrl.replace(/\/$/, '')}/chat/completions`;
+  const messages: Array<{ role: string; content: string }> = [];
+  if (opts.system?.trim()) {
+    messages.push({ role: 'system', content: opts.system.trim() });
+  }
+  messages.push({ role: 'user', content: opts.user });
   const res = await fetch(url, {
     method: 'POST',
     headers: {
@@ -74,7 +81,7 @@ async function callOpenAICompatible(opts: {
     },
     body: JSON.stringify({
       model: opts.model,
-      messages: [{ role: 'user', content: opts.prompt }],
+      messages,
       temperature: 0.2,
     }),
   });
@@ -90,7 +97,18 @@ async function callOpenAICompatible(opts: {
   return { text: String(text), raw };
 }
 
-async function callAnthropic(opts: { apiKey: string; model: string; prompt: string }): Promise<{ text: string; raw: unknown }> {
+async function callAnthropic(opts: {
+  apiKey: string;
+  model: string;
+  system?: string;
+  user: string;
+}): Promise<{ text: string; raw: unknown }> {
+  const body: Record<string, unknown> = {
+    model: opts.model,
+    max_tokens: 4096,
+    messages: [{ role: 'user', content: opts.user }],
+  };
+  if (opts.system?.trim()) body.system = opts.system.trim();
   const res = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
     headers: {
@@ -98,11 +116,7 @@ async function callAnthropic(opts: { apiKey: string; model: string; prompt: stri
       'anthropic-version': '2023-06-01',
       'content-type': 'application/json',
     },
-    body: JSON.stringify({
-      model: opts.model,
-      max_tokens: 4096,
-      messages: [{ role: 'user', content: opts.prompt }],
-    }),
+    body: JSON.stringify(body),
   });
   const raw = await res.json().catch(() => ({}));
   if (!res.ok) {
@@ -131,9 +145,22 @@ export async function handleAgentStudioDispatch(
       return;
     }
 
-    const { teamId, agentId, prompt, useCase = 'chat' } = req.body ?? {};
-    if (!teamId || !agentId || typeof prompt !== 'string' || !prompt.trim()) {
-      res.status(400).json({ error: 'teamId, agentId, and prompt are required' });
+    const {
+      teamId,
+      agentId,
+      prompt,
+      useCase = 'chat',
+      taskId,
+      activeFilePath,
+      activeFileContent,
+      selectedText,
+    } = req.body ?? {};
+    if (!teamId || !agentId) {
+      res.status(400).json({ error: 'teamId and agentId are required' });
+      return;
+    }
+    if (typeof prompt !== 'string') {
+      res.status(400).json({ error: 'prompt must be a string (may be empty when only file context is used)' });
       return;
     }
 
@@ -205,23 +232,52 @@ export async function handleAgentStudioDispatch(
 
     const apiKey = await loadAndDecryptProviderKey(ctx.orgId, providerKeyId);
 
+    let composed: { systemPrompt: string; userPrompt: string; filesUsed: unknown[] };
+    try {
+      composed = await composeAgentPrompt({
+        supabase: supabaseAdmin,
+        orgId: ctx.orgId,
+        teamId,
+        agentId,
+        taskId: taskId ?? null,
+        userPrompt: prompt.trim(),
+        activeFilePath: activeFilePath ?? null,
+        activeFileContent: activeFileContent ?? null,
+        selectedText: selectedText ?? null,
+      });
+    } catch (e) {
+      console.warn('[agent-studio][dispatch] composeAgentPrompt fallback', e);
+      composed = {
+        systemPrompt: '',
+        userPrompt: prompt.trim(),
+        filesUsed: [],
+      };
+    }
+
     let result: { text: string; raw: unknown };
 
     if (provider === 'anthropic') {
-      result = await callAnthropic({ apiKey, model, prompt: prompt.trim() });
+      result = await callAnthropic({
+        apiKey,
+        model,
+        system: composed.systemPrompt,
+        user: composed.userPrompt,
+      });
     } else if (provider === 'openai') {
       result = await callOpenAICompatible({
         baseUrl: 'https://api.openai.com/v1',
         apiKey,
         model,
-        prompt: prompt.trim(),
+        system: composed.systemPrompt,
+        user: composed.userPrompt,
       });
     } else if (provider === 'groq') {
       result = await callOpenAICompatible({
         baseUrl: 'https://api.groq.com/openai/v1',
         apiKey,
         model,
-        prompt: prompt.trim(),
+        system: composed.systemPrompt,
+        user: composed.userPrompt,
       });
     } else if (provider === 'azure-openai') {
       const { data: keyRow } = await supabaseAdmin
@@ -247,16 +303,21 @@ export async function handleAgentStudioDispatch(
         baseUrl: base,
         apiKey,
         model,
-        prompt: prompt.trim(),
+        system: composed.systemPrompt,
+        user: composed.userPrompt,
       });
     } else if (provider === 'ollama') {
       const ollamaUrl = process.env.OLLAMA_BASE_URL || 'http://127.0.0.1:11434';
+      const merged =
+        (composed.systemPrompt.trim()
+          ? `# System context\n${composed.systemPrompt.trim()}\n\n# User message\n`
+          : '') + composed.userPrompt;
       const r = await fetch(`${ollamaUrl.replace(/\/$/, '')}/api/chat`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           model,
-          messages: [{ role: 'user', content: prompt.trim() }],
+          messages: [{ role: 'user', content: merged }],
           stream: false,
         }),
       });
@@ -283,7 +344,8 @@ export async function handleAgentStudioDispatch(
         baseUrl: base,
         apiKey,
         model,
-        prompt: prompt.trim(),
+        system: composed.systemPrompt,
+        user: composed.userPrompt,
       });
     } else {
       res.status(501).json({
@@ -302,7 +364,14 @@ export async function handleAgentStudioDispatch(
       eventType: 'orchestrator.dispatch',
       resourceType: 'agent_studio_agents',
       resourceId: agentId,
-      payload: { useCase, provider, model, ruleId, previewChars: Math.min(200, result.text.length) },
+      payload: {
+        useCase,
+        provider,
+        model,
+        ruleId,
+        previewChars: Math.min(200, result.text.length),
+        filesUsedCount: (composed.filesUsed as unknown[]).length,
+      },
     });
 
     res.json({
@@ -311,6 +380,7 @@ export async function handleAgentStudioDispatch(
       model,
       ruleId,
       text: result.text,
+      filesUsed: composed.filesUsed,
     });
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : 'Dispatch failed';

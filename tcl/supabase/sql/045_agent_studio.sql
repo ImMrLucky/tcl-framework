@@ -65,7 +65,7 @@ CREATE TABLE IF NOT EXISTS public.agent_studio_teams (
   project_id      uuid REFERENCES public.projects(id) ON DELETE SET NULL,
   name            text NOT NULL,
   description     text,
-  workflow_template_key text,            -- e.g. 'bmad_full_sdlc' (see agent-core templates)
+  workflow_template_key text,            -- e.g. 'generic_software_delivery', 'bmad_full_sdlc' (agent-core templates)
   paused_at       timestamptz,
   paused_by       uuid REFERENCES auth.users(id) ON DELETE SET NULL,
   pause_reason    text,

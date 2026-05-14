@@ -1,8 +1,40 @@
 [
   {
+    "key": "generic_software_delivery",
+    "name": "Generic Software Delivery",
+    "description": "General-purpose software development workflow: planning, implementation, review, QA, and delivery. This is the default delivery method for new teams.",
+    "recommendedRoles": [
+      "agent_manager",
+      "product_owner",
+      "software_architect",
+      "senior_software_engineer",
+      "qa_engineer",
+      "security_reviewer",
+      "technical_writer"
+    ],
+    "defaultBoardColumns": [
+      { "key": "backlog", "label": "Backlog" },
+      { "key": "ready", "label": "Ready" },
+      { "key": "in_progress", "label": "In Progress" },
+      { "key": "review", "label": "Review" },
+      { "key": "qa", "label": "QA" },
+      { "key": "done", "label": "Done" }
+    ],
+    "defaultTasks": [
+      { "title": "Clarify scope and acceptance criteria", "columnKey": "ready", "taskType": "SPEC" },
+      { "title": "Implement the change", "columnKey": "in_progress", "taskType": "STORY" },
+      { "title": "Peer review", "columnKey": "review", "taskType": "REVIEW" },
+      { "title": "Verify with tests", "columnKey": "qa", "taskType": "REVIEW" }
+    ],
+    "reviewGates": [
+      { "afterColumnKey": "review", "gateType": "CODE_REVIEW", "requiredRole": "MANAGER" },
+      { "afterColumnKey": "qa", "gateType": "QA_REVIEW", "requiredRole": "MANAGER" }
+    ]
+  },
+  {
     "key": "bmad_full_sdlc",
-    "name": "BMAD — Full SDLC",
-    "description": "Build → Measure → Analyze → Decide. Full SDLC pipeline with explicit spec, design, build, QA, and security gates.",
+    "name": "BMAD Workflow Pack — Full SDLC",
+    "description": "Optional BMAD-inspired delivery path with explicit spec, design, build, QA, and security gates.",
     "recommendedRoles": [
       "agent_manager",
       "business_analyst",
@@ -38,8 +70,8 @@
   },
   {
     "key": "bmad_quick_feature",
-    "name": "BMAD — Quick Feature",
-    "description": "Lighter-weight BMAD path for small features that don't need full architecture / security review.",
+    "name": "BMAD Workflow Pack — Quick Feature",
+    "description": "Optional lighter BMAD-style path for small features that skip full architecture / security review.",
     "recommendedRoles": [
       "agent_manager",
       "business_analyst",
