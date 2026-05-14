@@ -42,11 +42,11 @@ import { AgentTeam, AuditEvent } from '../agent-studio.types';
               <mat-icon>groups</mat-icon>
               Manage teams
             </a>
-            <a mat-stroked-button routerLink="templates">
+            <a mat-stroked-button color="primary" routerLink="templates">
               <mat-icon>library_books</mat-icon>
               Browse templates
             </a>
-            <a mat-stroked-button routerLink="settings">
+            <a mat-stroked-button color="primary" routerLink="settings">
               <mat-icon>tune</mat-icon>
               Studio settings
             </a>
@@ -90,6 +90,38 @@ import { AgentTeam, AuditEvent } from '../agent-studio.types';
       }
       .hero {
         grid-column: 1 / -1;
+        background: #fff !important;
+        border: 1px solid #e2e8f0;
+        border-radius: 12px;
+        box-shadow: 0 1px 3px rgba(15, 23, 42, 0.06);
+      }
+      .hero ::ng-deep .mat-mdc-card-title {
+        color: #0f172a;
+        font-size: 1.375rem;
+        font-weight: 700;
+        letter-spacing: -0.02em;
+      }
+      .hero ::ng-deep .mat-mdc-card-subtitle {
+        color: #475569 !important;
+        margin-top: 4px;
+      }
+      .hero .muted {
+        color: #64748b;
+        line-height: 1.55;
+      }
+      .counts {
+        background: #fff;
+        border: 1px solid #e2e8f0;
+        border-radius: 12px;
+        box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+      }
+      .counts ::ng-deep .mat-mdc-card-title {
+        color: #0f172a;
+        font-size: 15px;
+        font-weight: 600;
+      }
+      .counts .muted {
+        color: #64748b;
       }
       .cta-row {
         display: flex;
@@ -97,14 +129,19 @@ import { AgentTeam, AuditEvent } from '../agent-studio.types';
         flex-wrap: wrap;
         margin-top: 16px;
       }
+      .cta-row a mat-icon {
+        margin-right: 4px;
+        vertical-align: middle;
+      }
       .muted {
-        color: #666;
+        color: #64748b;
       }
       .big {
         font-size: 48px;
         font-weight: 600;
         line-height: 1;
         margin-bottom: 8px;
+        color: #0f172a;
       }
       .events {
         list-style: none;
