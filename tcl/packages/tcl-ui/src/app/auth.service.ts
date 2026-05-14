@@ -61,10 +61,11 @@ export class AuthService {
   /** Same-tab password login: storage can lag behind in-memory session; brief guard bypass. */
   private loginSessionGraceUntil: { userId: string; until: number } | null = null;
   /**
-   * Deferred `getSession()` from constructor can finish after password login and clear `currentUser`.
-   * Bump this after a successful credential login so stale probe handlers no-op.
+   * Bumped after successful credential login/signup so the deferred constructor `getSession()` probe
+   * cannot clear `currentUser` if that probe started before login (same counter was incorrectly used
+   * for both "probe id" and "login bump", which let the probe stay "current" and wipe the user).
    */
-  private deferredSessionProbeGeneration = 0;
+  private authStateEpoch = 0;
 
   constructor(private router: Router, private http: HttpClient) {
     const supabaseUrl = readWindowSupabaseUrl();
@@ -178,7 +179,13 @@ export class AuthService {
         return;
       }
 
-      const probeGeneration = ++this.deferredSessionProbeGeneration;
+      // Password login can finish during this debounce; never run a stale no-session probe
+      // that would clear `currentUser` after a successful token response.
+      if (this.currentUserSubject.value?.id) {
+        return;
+      }
+
+      const epochWhenProbeBegan = this.authStateEpoch;
       const sessionPromise = this.supabase.auth.getSession();
       const timeoutPromise = new Promise((_, reject) =>
         setTimeout(() => reject(new Error('Session check timeout')), 12000)
@@ -186,7 +193,7 @@ export class AuthService {
 
       Promise.race([sessionPromise, timeoutPromise])
         .then(async (result: any) => {
-          if (probeGeneration !== this.deferredSessionProbeGeneration) {
+          if (this.authStateEpoch !== epochWhenProbeBegan) {
             return;
           }
           const {
@@ -222,7 +229,7 @@ export class AuthService {
           }
         })
         .catch((err) => {
-          if (probeGeneration !== this.deferredSessionProbeGeneration) {
+          if (this.authStateEpoch !== epochWhenProbeBegan) {
             return;
           }
           console.warn('[Auth] Session check failed or timed out:', err?.message);
@@ -536,7 +543,7 @@ export class AuthService {
 
     // Load profile after signup
     await this.loadUserProfile(data.user.id);
-    this.deferredSessionProbeGeneration++;
+    this.authStateEpoch++;
 
     return { error: null, duplicateAccount: false };
   }
@@ -599,7 +606,7 @@ export class AuthService {
         id: fromJwt.id,
         email: fromJwt.email,
       });
-      this.deferredSessionProbeGeneration++;
+      this.authStateEpoch++;
       this.loginSessionGraceUntil = { userId: fromJwt.id, until: Date.now() + 120_000 };
       this.resetSessionTimer();
       this.ensureUserProvisioned(fromJwt.id, fromJwt.email || email);
@@ -613,7 +620,7 @@ export class AuthService {
       id: user.id,
       email: user.email
     });
-    this.deferredSessionProbeGeneration++;
+    this.authStateEpoch++;
     this.loginSessionGraceUntil = { userId: user.id, until: Date.now() + 120_000 };
 
     // Reset session timers for new login
