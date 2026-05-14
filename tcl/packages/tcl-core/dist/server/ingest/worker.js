@@ -667,7 +667,7 @@ export async function runAnalysis(input) {
         const graphContradictions = graphData?.contradictions || [];
         const graphGrounding = graphData?.grounding || [];
         // Map claims to format expected by expandIssueCandidates
-        // CRITICAL: Preserve all speaker information (speaker, speakerType, speakerLabel) 
+        // CRITICAL: Preserve all speaker information (speaker, speakerType, speakerLabel)
         // so issues can correctly identify who made the claim
         const claimsForIssues = (validateOutput.report?.claims || []).map((c) => ({
             id: c.id,
@@ -690,36 +690,53 @@ export async function runAnalysis(input) {
         }));
         // Determine evidence mode based on verification level
         const evidenceMode = input.verificationLevel === 'TRANSCRIPT_ONLY' ? 'TRANSCRIPT_ONLY' : 'TRANSCRIPT_PLUS_EXTERNAL';
-        // Expand issues from graph (creates proper IssueV2 format)
-        const expansionResult = expandIssueCandidates({
-            claims: claimsForIssues,
-            contradictions: graphContradictions,
-            supports: graphSupports,
-            grounding: graphGrounding,
-            runId: 'pending', // Will be updated after evaluation is created
-            conversationId: input.conversationId,
-            evidenceMode,
-            audit: {
-                engineVersion: validateOutput.engineVersion || process.env.ENGINE_VERSION || '0.2.0',
-                scorerId: validateOutput.scorerId || 'unified-graph-v1',
-                modelFingerprint: validateOutput.report?.manifest?.modelFingerprint,
-                configHash: validateOutput.report?.manifest?.configHash,
-                inputHash: validateOutput.report?.manifest?.inputHash,
-            },
-        });
-        // D: Detect compliance issues (PCI, recording consent, PII)
+        // Prefer issues the orchestrator already produced. The orchestrator already runs
+        // expandIssueCandidates + dedupe + rankIssuesV2 over the full detector mix
+        // (graph contradictions, transcript-only unsupported, cross-turn, drift,
+        // hallucination, domain packs, etc). Re-expanding the graph here and then
+        // concatenating the two lists was producing duplicate CONTRADICTION rows that
+        // shared the same scoring inputs after the second rank pass, which is why
+        // every contradiction row collapsed to the same score in the UI.
+        const orchestratorDetectorIssues = validateOutput.report?.allIssuesV2 ?? [];
+        let graphIssues = orchestratorDetectorIssues;
+        if (graphIssues.length === 0) {
+            const expansionResult = expandIssueCandidates({
+                claims: claimsForIssues,
+                contradictions: graphContradictions,
+                supports: graphSupports,
+                grounding: graphGrounding,
+                runId: 'pending',
+                conversationId: input.conversationId,
+                evidenceMode,
+                audit: {
+                    engineVersion: validateOutput.engineVersion || process.env.ENGINE_VERSION || '0.2.0',
+                    scorerId: validateOutput.scorerId || 'unified-graph-v1',
+                    modelFingerprint: validateOutput.report?.manifest?.modelFingerprint,
+                    configHash: validateOutput.report?.manifest?.configHash,
+                    inputHash: validateOutput.report?.manifest?.inputHash,
+                },
+            });
+            graphIssues = expansionResult.allIssues;
+        }
+        // D: Detect compliance issues (PCI, recording consent, PII) — additive,
+        // orchestrator does not currently emit these.
         const { detectComplianceIssues } = await import('../../analysis/compliance-detectors.js');
         const complianceResult = detectComplianceIssues(claimsForIssues, 'pending', input.conversationId, evidenceMode);
-        // Combine graph issues with compliance issues AND the new moat detectors
-        // (final-expense, hallucination, drift, cross-turn, domain packs) which are
-        // produced inside the orchestrator's runUnifiedGraphPath and surfaced via
-        // report.allIssuesV2.
-        const orchestratorDetectorIssues = validateOutput.report?.allIssuesV2 ?? [];
-        const allAtomicIssues = [
-            ...expansionResult.allIssues,
-            ...complianceResult.issues,
-            ...orchestratorDetectorIssues,
-        ];
+        // Dedup by issueKey (stable atomic identity) so the same contradiction or
+        // compliance finding only contributes a single row to ranking and to the UI.
+        const dedupedAtomicIssues = [];
+        const seenIssueKeys = new Set();
+        for (const issue of [...graphIssues, ...complianceResult.issues]) {
+            const key = (issue?.issueKey || issue?.issueId);
+            if (!key) {
+                dedupedAtomicIssues.push(issue);
+                continue;
+            }
+            if (seenIssueKeys.has(key))
+                continue;
+            seenIssueKeys.add(key);
+            dedupedAtomicIssues.push(issue);
+        }
         // Rank issues (deterministic) with scoring context
         const scoringContext = {
             mode: (evidenceMode === 'TRANSCRIPT_ONLY' ? 'transcript_only' : 'with_evidence'),
@@ -728,7 +745,7 @@ export async function runAnalysis(input) {
             templateId: validateOutput.report?.manifest?.templateId,
             isRegulatedTemplate: false,
         };
-        const rankedResult = rankIssuesV2(allAtomicIssues, undefined, scoringContext);
+        const rankedResult = rankIssuesV2(dedupedAtomicIssues, undefined, scoringContext);
         // C2-C3: Aggregate issues into clusters
         // Use collapseIssuesToClusters which returns GroupedIssue[] with rollup structure
         const { collapseIssuesToClusters } = await import('../../analysis/issue-cluster-collapse.js');

@@ -2,11 +2,12 @@
  * Agent Studio — role + workflow template loader.
  *
  * Source of truth is `packages/agent-core/templates/*.json` (JSON, so a UI or
- * tool can read it without booting Node). We resolve the path relative to
- * this module so it works in both `ts-node` dev mode and after a `tsc` build.
+ * tool can read it without booting Node). Resolution tries several roots because
+ * `process.cwd()`, hoisted `node_modules`, and `dist/` layouts differ between
+ * dev, CI, and Docker.
  */
 
-import { readFileSync } from 'fs';
+import { existsSync, readFileSync } from 'fs';
 import { createRequire } from 'node:module';
 import { dirname, join, resolve } from 'path';
 import { fileURLToPath } from 'url';
@@ -14,21 +15,40 @@ import { fileURLToPath } from 'url';
 const HERE = dirname(fileURLToPath(import.meta.url));
 const nodeRequire = createRequire(import.meta.url);
 
-/**
- * Prefer resolving `agent-core` as an installed package (workspace / production install)
- * so templates survive `dist/` layouts and Docker images that only ship `node_modules`.
- * Fall back to monorepo sibling path for ad-hoc runs.
- */
-function resolveTemplatesDir(): string {
+/** `undefined` = not resolved yet; `null` = no directory contained roles.json */
+let resolvedTemplatesDir: string | null | undefined = undefined;
+
+function candidateTemplateDirs(): string[] {
+  const dirs: string[] = [];
   try {
     const pkg = nodeRequire.resolve('agent-core/package.json');
-    return join(dirname(pkg), 'templates');
+    dirs.push(join(dirname(pkg), 'templates'));
   } catch {
-    return resolve(HERE, '../../../../agent-core/templates');
+    /* agent-core not installed from this resolution root */
   }
+  dirs.push(resolve(HERE, '../../../../agent-core/templates'));
+  const cwd = process.cwd();
+  dirs.push(resolve(cwd, 'packages/agent-core/templates'));
+  dirs.push(resolve(cwd, 'node_modules/agent-core/templates'));
+  dirs.push(resolve(cwd, '../agent-core/templates'));
+  return [...new Set(dirs)];
 }
 
-const TEMPLATES_DIR = resolveTemplatesDir();
+function getTemplatesDir(): string | null {
+  if (resolvedTemplatesDir !== undefined) {
+    return resolvedTemplatesDir;
+  }
+  for (const dir of candidateTemplateDirs()) {
+    if (existsSync(join(dir, 'roles.json')) && existsSync(join(dir, 'personas.json'))) {
+      resolvedTemplatesDir = dir;
+      console.info('[agent-studio][templates] catalogue dir:', dir);
+      return dir;
+    }
+  }
+  console.error('[agent-studio][templates] roles.json / personas.json not found. Tried:', candidateTemplateDirs());
+  resolvedTemplatesDir = null;
+  return null;
+}
 
 export interface RoleTemplate {
   key: string;
@@ -74,18 +94,24 @@ export interface WorkflowTemplate {
   }>;
 }
 
-let cachedRoles: RoleTemplate[] | null = null;
-let cachedWorkflows: WorkflowTemplate[] | null = null;
-let cachedPersonas: PersonaTemplate[] | null = null;
+/** `undefined` = never loaded successfully; do not use truthiness — `[]` is a valid cache. */
+let cachedRoles: RoleTemplate[] | undefined = undefined;
+let cachedWorkflows: WorkflowTemplate[] | undefined = undefined;
+let cachedPersonas: PersonaTemplate[] | undefined = undefined;
 
 export function loadPersonaTemplates(): PersonaTemplate[] {
-  if (cachedPersonas) return cachedPersonas;
+  if (cachedPersonas !== undefined) return cachedPersonas;
+  const dir = getTemplatesDir();
+  if (!dir) {
+    return [];
+  }
   try {
-    const raw = readFileSync(resolve(TEMPLATES_DIR, 'personas.json'), 'utf8');
-    cachedPersonas = JSON.parse(raw) as PersonaTemplate[];
+    const raw = readFileSync(join(dir, 'personas.json'), 'utf8');
+    const parsed = JSON.parse(raw) as unknown;
+    cachedPersonas = Array.isArray(parsed) ? (parsed as PersonaTemplate[]) : [];
   } catch (err) {
-    console.warn('[agent-studio][templates] failed to load personas.json', err);
-    cachedPersonas = [];
+    console.warn('[agent-studio][templates] failed to load personas.json from', join(dir, 'personas.json'), err);
+    return [];
   }
   return cachedPersonas;
 }
@@ -95,25 +121,35 @@ export function findPersonaTemplate(key: string): PersonaTemplate | null {
 }
 
 export function loadRoleTemplates(): RoleTemplate[] {
-  if (cachedRoles) return cachedRoles;
+  if (cachedRoles !== undefined) return cachedRoles;
+  const dir = getTemplatesDir();
+  if (!dir) {
+    return [];
+  }
   try {
-    const raw = readFileSync(resolve(TEMPLATES_DIR, 'roles.json'), 'utf8');
-    cachedRoles = JSON.parse(raw) as RoleTemplate[];
+    const raw = readFileSync(join(dir, 'roles.json'), 'utf8');
+    const parsed = JSON.parse(raw) as unknown;
+    cachedRoles = Array.isArray(parsed) ? (parsed as RoleTemplate[]) : [];
   } catch (err) {
-    console.warn('[agent-studio][templates] failed to load roles.json', err);
-    cachedRoles = [];
+    console.warn('[agent-studio][templates] failed to load roles.json from', join(dir, 'roles.json'), err);
+    return [];
   }
   return cachedRoles;
 }
 
 export function loadWorkflowTemplates(): WorkflowTemplate[] {
-  if (cachedWorkflows) return cachedWorkflows;
+  if (cachedWorkflows !== undefined) return cachedWorkflows;
+  const dir = getTemplatesDir();
+  if (!dir) {
+    return [];
+  }
   try {
-    const raw = readFileSync(resolve(TEMPLATES_DIR, 'workflows.json'), 'utf8');
-    cachedWorkflows = JSON.parse(raw) as WorkflowTemplate[];
+    const raw = readFileSync(join(dir, 'workflows.json'), 'utf8');
+    const parsed = JSON.parse(raw) as unknown;
+    cachedWorkflows = Array.isArray(parsed) ? (parsed as WorkflowTemplate[]) : [];
   } catch (err) {
-    console.warn('[agent-studio][templates] failed to load workflows.json', err);
-    cachedWorkflows = [];
+    console.warn('[agent-studio][templates] failed to load workflows.json from', join(dir, 'workflows.json'), err);
+    return [];
   }
   return cachedWorkflows;
 }
@@ -130,7 +166,8 @@ export function findWorkflowTemplate(key: string): WorkflowTemplate | null {
  * Reset cache (tests / hot reload).
  */
 export function _resetTemplateCacheForTests(): void {
-  cachedRoles = null;
-  cachedWorkflows = null;
-  cachedPersonas = null;
+  cachedRoles = undefined;
+  cachedWorkflows = undefined;
+  cachedPersonas = undefined;
+  resolvedTemplatesDir = undefined;
 }

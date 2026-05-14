@@ -227,10 +227,14 @@ export class VTTSRTNormalizer {
             }
             // Accumulate cue text
             if (currentCue) {
-                // Strip HTML tags (common in VTT/SRT)
-                const cleanLine = line.replace(/<[^>]+>/g, "");
-                if (cleanLine) {
-                    cueTextLines.push(cleanLine);
+                // Strip non-voice HTML; keep WebVTT voice spans (<v Agent>...) for extractSpeaker().
+                let textLine = line;
+                if (!isVTT || !/^\s*<v\s/i.test(line)) {
+                    textLine = line.replace(/<[^>]+>/g, "");
+                }
+                const trimmed = textLine.trim();
+                if (trimmed) {
+                    cueTextLines.push(trimmed);
                 }
             }
         }

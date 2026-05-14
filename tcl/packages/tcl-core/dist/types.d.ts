@@ -61,6 +61,12 @@ export type Claim = {
         participantId?: string;
         /** Speech-act type from claim extractor (ASSERTION, PROMISE, …) */
         claimType?: string;
+        /** Bracket timestamp from line prefix e.g. "[00:10]" */
+        timestamp?: string;
+        timestampMs?: number;
+        salienceScore?: number;
+        isSalient?: boolean;
+        dropReason?: string;
     };
     truthState?: "SUPPORTED" | "CONTRADICTED" | "UNVERIFIED" | "UNGROUNDED" | "Supported" | "Contradicted" | "Ungrounded" | "Inconclusive";
     whyFlagged?: {
@@ -229,6 +235,8 @@ export interface IssueV2 {
     category: IssueCategoryV2;
     primaryCategory?: CanonicalCategory;
     severity: SeverityV2;
+    /** UI-oriented severity (maps critical→high; transcript-only may downshift UNVERIFIED) */
+    severityDisplay?: SeverityDisplayV2;
     impact: ImpactV2;
     riskScore: number;
     score: number;
@@ -1007,6 +1015,10 @@ export interface EvidenceCoverageStatsV2 {
     /** No grounding edge to transcript evidence */
     ungrounded: number;
     contradicted: number;
+    /** Salient claims sent to graph / risk detectors */
+    salientClaims?: number;
+    /** High-risk unsupported product / transcript-only policy issues (issue count) */
+    unsupportedHighRisk?: number;
     sourcesUsed: Array<{
         sourceType: string;
         count: number;
@@ -1015,8 +1027,23 @@ export interface EvidenceCoverageStatsV2 {
 export interface ClaimTimelineEventV2 {
     claimId: string;
     turnIndex?: number;
+    /** Raw or display speaker label when available */
+    speaker?: string;
+    speakerLabel?: string;
+    timestamp?: string;
     label: "claimed" | "repeated" | "contradicted" | "drifted" | "unsupported" | "flagged";
     textPreview: string;
+    isSalient?: boolean;
+}
+export interface AnalysisRunConfidenceV2 {
+    confidence: number;
+    confidenceBand: "low" | "medium" | "high";
+    confidenceComponents: Array<{
+        name: string;
+        value: number;
+        weight: number;
+        reason: string;
+    }>;
 }
 export interface AnalysisResultPayload {
     schemaVersion: string;
@@ -1041,6 +1068,14 @@ export interface AnalysisResultPayload {
         rulesSignalsApplied: string[];
         confidenceImpactNote: string;
     };
+    /** Full graph contradiction edges (claim id pairs) for UI chains */
+    contradictionEdgePairs?: ContradictionEdge[];
+    /** Count of salient claims sent to the graph */
+    salientClaimCount?: number;
+    /** High-risk agent claims without external documents in transcript-only mode */
+    unsupportedProductClaimIssues?: number;
+    /** Run-level analysis confidence (inputs explicit; matches calibration formula) */
+    runConfidence?: AnalysisRunConfidenceV2;
 }
 export type ValidateOutput = {
     answer: string;

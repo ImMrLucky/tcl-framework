@@ -200,9 +200,7 @@ function scoreIssue(issue, config, scoringContext, allIssues, normalizationFacto
         finalRisk01 = finalRisk01 * verificationMultiplier;
     }
     // Step 4: Clamp to 0..1
-    const riskScore = clamp01(finalRisk01);
-    // Step 5: Convert to 0..100 score
-    const score = Math.round(riskScore * 100);
+    let riskScore = clamp01(finalRisk01);
     // Step 6: Derive severity from riskScore (canonical severity, independent of mode)
     let severity = deriveSeverity(riskScore, config);
     // B2: Apply severity cap for non-AGENT↔AGENT contradictions
@@ -210,9 +208,38 @@ function scoreIssue(issue, config, scoringContext, allIssues, normalizationFacto
         severity = 'medium'; // Cap at medium for customer disputes
     }
     // Apply category-based minimums (e.g., CONTRADICTION involving MONEY/FEES/REFUND => min "high")
-    severity = applyCategoryMinimums(severity, issue, config);
-    // Step 7: Compute final severity (may be downgraded for transcript-only unverified claims)
-    const finalSeverity = computeSeverityDisplay(severity, issue.verification.level, issue.type, issue.compliance, scoringContext);
+    let canonicalSeverity = applyCategoryMinimums(severity, issue, config);
+    // Domain packs attach explicit regulatory severities; do not let score-only derivation erase them.
+    const reasonsJoin = (issue.scoring?.reasons ?? []).join(" ");
+    if (/DOMAIN_PACK:/i.test(reasonsJoin)) {
+        const order = { low: 1, medium: 2, high: 3, critical: 4 };
+        const fromScore = order[canonicalSeverity] ?? 0;
+        const fromRule = order[issue.severity] ?? 0;
+        if (fromRule > fromScore) {
+            canonicalSeverity = issue.severity;
+        }
+    }
+    // Coherence guard: keep the displayed numeric score in the same band as the
+    // canonical severity badge. Without this, category/domain-pack minimums can
+    // upgrade an issue to "high" while its raw riskScore stays in the medium band
+    // (e.g. a CONTRADICTION with category=compliance ending up at riskScore=0.51 +
+    // severity=high). The UI shows "Score: 51" next to a HIGH chip, which reads as
+    // contradictory. Lift riskScore to the floor for the canonical severity band.
+    const severityFloors = {
+        low: 0,
+        medium: config.severityThresholds.medium,
+        high: config.severityThresholds.high,
+        critical: config.severityThresholds.critical,
+    };
+    const floor = severityFloors[canonicalSeverity] ?? 0;
+    if (riskScore < floor) {
+        riskScore = floor;
+    }
+    // Step 5: Convert to 0..100 score (computed after any severity-driven lift so
+    // the numeric badge and the severity chip agree).
+    const score = Math.round(riskScore * 100);
+    // Step 7: Display severity (may differ from canonical for transcript-only UNVERIFIED, etc.)
+    const severityDisplay = computeSeverityDisplay(canonicalSeverity, issue.verification.level, issue.type, issue.compliance, scoringContext, issue);
     // MODE SAFETY: impact is UNCHANGED in transcript-only mode
     // Preserve existing impact if set, otherwise derive from impact01 using config thresholds
     // Use midpoints between impactMap values as thresholds
@@ -226,9 +253,9 @@ function scoreIssue(issue, config, scoringContext, allIssues, normalizationFacto
     // Note: impact is NOT affected by transcript-only mode (only severity may be downgraded)
     // Step 8: Build scoring explanation (enterprise requirement)
     // scoringReasons already initialized above
-    // B2: Add reason if impact != severity
-    if (finalImpact === 'high' && finalSeverity !== 'high') {
-        scoringReasons.push(`High impact but ${finalSeverity} severity due to ${issue.verification.level === 'TRANSCRIPT_ONLY' ? 'transcript-only evidence level' : 'evidence limitations'}`);
+    // B2: Add reason if high impact but UI severity display is capped
+    if (finalImpact === 'high' && severityDisplay !== 'high') {
+        scoringReasons.push(`High impact but ${severityDisplay} display severity due to ${issue.verification.level === 'TRANSCRIPT_ONLY' ? 'transcript-only evidence level' : 'evidence limitations'}`);
     }
     // Impact reason
     if (finalImpact === 'high') {
@@ -264,8 +291,8 @@ function scoreIssue(issue, config, scoringContext, allIssues, normalizationFacto
     }
     // Severity downgrade reason (only for UNVERIFIED types in transcript-only)
     if (scoringContext?.mode === 'transcript_only' && issue.verification.level === 'TRANSCRIPT_ONLY' && issue.type === 'UNVERIFIED_CLAIM') {
-        if (finalSeverity !== severity.toLowerCase() && finalSeverity !== severity) {
-            scoringReasons.push('Severity downgraded for unverified claim in transcript-only mode');
+        if (severityDisplay !== canonicalSeverity) {
+            scoringReasons.push('Display severity downgraded for unverified claim in transcript-only mode');
         }
     }
     // B4: Return only canonical scoring structure (no scoreBreakdown)
@@ -274,7 +301,8 @@ function scoreIssue(issue, config, scoringContext, allIssues, normalizationFacto
         impact: finalImpact,
         riskScore,
         score,
-        severity: finalSeverity, // Canonical severity (may be downgraded for transcript-only unverified)
+        severity: canonicalSeverity,
+        severityDisplay,
         scoring: {
             components: {
                 impact01: Math.round(impact01 * 1000) / 1000, // Round to 3 decimals

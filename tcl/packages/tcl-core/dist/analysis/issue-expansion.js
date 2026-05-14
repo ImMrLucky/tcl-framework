@@ -219,6 +219,22 @@ function createContradictionIssue(edge, claimMap, input, evidenceQuotesMax) {
             turnIndex: ref.turnIndex,
         })));
     }
+    if (evidenceRefs.length === 0) {
+        evidenceRefs.push({
+            sourceType: 'TRANSCRIPT',
+            sourceId: `e-transcript-${claimA.meta?.turnIndex ?? 0}`,
+            quote: claimA.text,
+            weight: edge.weight ?? 0.85,
+            turnIndex: claimA.meta?.turnIndex,
+        });
+        evidenceRefs.push({
+            sourceType: 'TRANSCRIPT',
+            sourceId: `e-transcript-${claimB.meta?.turnIndex ?? 0}`,
+            quote: claimB.text,
+            weight: edge.weight ?? 0.85,
+            turnIndex: claimB.meta?.turnIndex,
+        });
+    }
     // B3: Derive issue speaker from claims using new speaker info structure
     const claimSpeakers = [
         {

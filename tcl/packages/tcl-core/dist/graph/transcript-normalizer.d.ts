@@ -13,6 +13,10 @@ export interface NormalizedTurn {
     speakerLabelRaw: string;
     speakerType: SpeakerType;
     text: string;
+    /** Original bracket timestamp e.g. "[00:10]" when present */
+    timestampBracket?: string;
+    /** Parsed time in ms (mm:ss or hh:mm:ss) */
+    timestampMs?: number;
 }
 /**
  * Normalize transcript into structured turns

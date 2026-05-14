@@ -39,6 +39,12 @@ import { getTemplateConfig } from "./graph/template-config.js";
 import { getIndustryTemplate } from "./templates/template-registry.js";
 import { resolveGraphTemplateId } from "./templates/graph-template-resolve.js";
 import { buildAnalysisResultPayload } from "./scoring/analysis-result-builder.js";
+import { expandIssueCandidates } from "./analysis/issue-expansion.js";
+import { rankIssuesV2 } from "./analysis/risk-ranking.js";
+import { buildDeterministicContradictionEdges } from "./analysis/deterministic-contradiction-edges.js";
+import { buildTranscriptOnlyUnsupportedIssues, buildEnrollmentBeforeConsentIssues, } from "./analysis/transcript-only-unsupported-issues.js";
+import { normalizeTranscript } from "./graph/transcript-normalizer.js";
+import { evaluateClaimSalience } from "./analysis/claim-salience.js";
 // Cache for scorer to avoid re-initialization on every request
 let cachedScorer = null;
 const SCORER_CACHE_TTL = 5 * 60 * 1000; // 5 minutes
@@ -124,6 +130,37 @@ async function callSpectralAnalyzeService(spectralServiceUrl, claims, supports, 
     });
     return result;
 }
+function dedupeIssuesByKey(issues) {
+    const seen = new Set();
+    const out = [];
+    for (const i of issues) {
+        const k = i.issueKey || i.issueId;
+        if (!k || seen.has(k))
+            continue;
+        seen.add(k);
+        out.push(i);
+    }
+    return out;
+}
+/**
+ * Ingestion sometimes yields one "Speaker" / unknown blob for bracket-timestamp transcripts
+ * (e.g. "[00:38] Agent Sarah: ..." per line). If normalizeTranscript splits much finer, use it
+ * so claim meta, issues, and speaker confidence are not all stuck at turn 0 / unknown.
+ */
+function shouldPreferEngineParsedTurnsOverIngest(ingestTurns, parsed) {
+    if (parsed.length < 2 || parsed.length <= ingestTurns.length)
+        return false;
+    if (ingestTurns.length !== 1)
+        return false;
+    const t0 = ingestTurns[0];
+    const label = String(t0?.speakerLabel ?? t0?.speakerLabelRaw ?? "").trim().toLowerCase();
+    const body = String(t0?.text ?? "");
+    if (label === "speaker" || label === "")
+        return true;
+    if (/\[[\d:]+\]\s*[^:]+:\s*/m.test(body))
+        return true;
+    return false;
+}
 // =============================================================================
 // UNIFIED GRAPH PATH (DEFAULT - Best for spectral.py)
 // =============================================================================
@@ -156,16 +193,53 @@ async function runUnifiedGraphPath(input, timer, validationStartTime, adapter) {
     timer.start('claim_extraction');
     let extractedClaims = [];
     const normalizedConversation = options?.normalizedConversation;
+    const parsedFromRaw = normalizeTranscript(transcript);
+    let sourceTurns = null;
     if (normalizedConversation?.turns && Array.isArray(normalizedConversation.turns) && normalizedConversation.turns.length > 0) {
-        // CRITICAL: Use normalized turns directly - they have proper speaker information
-        log('debug', 'Orchestrator', `Using normalized turns (${normalizedConversation.turns.length} turns) with speaker info`);
+        const turnsFromIngest = normalizedConversation.turns;
+        sourceTurns = turnsFromIngest;
+        if (shouldPreferEngineParsedTurnsOverIngest(turnsFromIngest, parsedFromRaw)) {
+            log("info", "Orchestrator", `Replacing ${normalizedConversation.turns.length} ingest turn(s) with ${parsedFromRaw.length} engine-parsed turns (degenerate ingest / bracket timestamps)`);
+            sourceTurns = parsedFromRaw.map((t) => ({
+                turnIndex: t.turnIndex,
+                text: t.text,
+                speakerLabel: t.speakerLabelRaw,
+                speakerLabelRaw: t.speakerLabelRaw,
+                speakerType: t.speakerType,
+                role: t.speakerType,
+                participantId: undefined,
+                meta: { rawSpeaker: t.speakerLabelRaw },
+                startTimeMs: t.timestampMs,
+                timestampBracket: t.timestampBracket,
+            }));
+        }
+    }
+    else {
+        if (parsedFromRaw.length > 0) {
+            sourceTurns = parsedFromRaw.map((t) => ({
+                turnIndex: t.turnIndex,
+                text: t.text,
+                speakerLabel: t.speakerLabelRaw,
+                speakerLabelRaw: t.speakerLabelRaw,
+                speakerType: t.speakerType,
+                role: t.speakerType,
+                participantId: undefined,
+                meta: { rawSpeaker: t.speakerLabelRaw },
+                startTimeMs: t.timestampMs,
+                timestampBracket: t.timestampBracket,
+            }));
+        }
+    }
+    if (sourceTurns && sourceTurns.length > 0) {
+        // CRITICAL: structured turns with speaker info (ingestion or local normalizeTranscript)
+        log("debug", "Orchestrator", `Using ${sourceTurns.length} turns for claim extraction`);
         // Extract claims from normalized turns, preserving speaker information
         let claimIdx = 1;
-        for (const turn of normalizedConversation.turns) {
+        for (const turn of sourceTurns) {
             if (!turn.text || turn.text.trim().length < 8)
                 continue;
             // Get participant info for speaker attribution
-            const participant = normalizedConversation.participants?.find((p) => p.id === turn.participantId || p.participantId === turn.participantId);
+            const participant = normalizedConversation?.participants?.find((p) => p.id === turn.participantId || p.participantId === turn.participantId);
             let speakerRole = turn.role || turn.speakerType || participant?.role || participant?.speakerType || 'unknown';
             const speakerLabel = turn.speakerLabel || turn.speakerLabelRaw || participant?.displayName || turn.meta?.rawSpeaker;
             const rawSpeaker = turn.meta?.rawSpeaker || speakerLabel;
@@ -188,6 +262,9 @@ async function runUnifiedGraphPath(input, timer, validationStartTime, adapter) {
                 if (isContaminatedClaimText(sentence) || countSpeakerLabelsInClaim(sentence) > 0)
                     continue;
                 const claimType = classifyClaimType(sentence, speaker);
+                const salience = evaluateClaimSalience(sentence, claimType);
+                if (!salience.isSalient)
+                    continue;
                 const isAuditable = isAuditableClaimType(claimType);
                 if (isAuditable) {
                     extractedClaims.push({
@@ -197,11 +274,22 @@ async function runUnifiedGraphPath(input, timer, validationStartTime, adapter) {
                         evidence: [],
                         meta: {
                             speaker,
-                            speakerType: speakerRole === 'agent' || speakerRole === 'customer' || speakerRole === 'supervisor' || speakerRole === 'bot' || speakerRole === 'system' ? speakerRole : 'unknown',
+                            speakerType: speakerRole === "agent" ||
+                                speakerRole === "customer" ||
+                                speakerRole === "supervisor" ||
+                                speakerRole === "bot" ||
+                                speakerRole === "system"
+                                ? speakerRole
+                                : "unknown",
                             speakerLabel,
                             rawSpeaker,
                             turnIndex: turn.turnIndex,
                             participantId: turn.participantId,
+                            timestamp: turn.timestampBracket,
+                            timestampMs: turn.startTimeMs,
+                            isSalient: salience.isSalient,
+                            salienceScore: salience.salienceScore,
+                            dropReason: salience.dropReason,
                         },
                         claimType,
                         isAuditable: true,
@@ -299,6 +387,25 @@ async function runUnifiedGraphPath(input, timer, validationStartTime, adapter) {
         existing.push(g);
         groundingByClaimId.set(g.claimId, existing);
     }
+    const salienceByClaimId = new Map();
+    for (const ec of extractedClaims) {
+        if (!ec.id || !ec.meta)
+            continue;
+        salienceByClaimId.set(ec.id, {
+            speaker: ec.meta.speaker,
+            speakerType: ec.meta.speakerType,
+            speakerLabel: ec.meta.speakerLabel,
+            rawSpeaker: ec.meta.rawSpeaker,
+            turnIndex: ec.meta.turnIndex,
+            participantId: ec.meta.participantId,
+            claimType: ec.meta.claimType,
+            timestamp: ec.meta.timestamp,
+            timestampMs: ec.meta.timestampMs,
+            isSalient: ec.meta.isSalient,
+            salienceScore: ec.meta.salienceScore,
+            dropReason: ec.meta.dropReason,
+        });
+    }
     // Convert claims to the expected Claim type WITH evidenceRefs from grounding
     const claims = graphResult.graph.nodes.claims.map(c => {
         const claimGrounding = groundingByClaimId.get(c.id) || [];
@@ -361,6 +468,7 @@ async function runUnifiedGraphPath(input, timer, validationStartTime, adapter) {
             evidenceRefs, // NEW: Actual grounding refs
             truthState: truthResult?.truthState,
             meta: {
+                ...(salienceByClaimId.get(c.id) || {}),
                 speaker,
                 speakerType,
                 speakerLabel,
@@ -374,6 +482,17 @@ async function runUnifiedGraphPath(input, timer, validationStartTime, adapter) {
                     c.modality === 'deny' ? 'assertion' : 'assertion',
         };
     });
+    // Augment graph contradictions with deterministic insurance cross-turn pairs
+    const deterministicEdges = buildDeterministicContradictionEdges(claims);
+    const edgeKey = (e) => [e.claimA, e.claimB].sort().join("|");
+    const existingEdgeKeys = new Set(graphResult.legacy.contradictions.map(edgeKey));
+    for (const d of deterministicEdges) {
+        const k = edgeKey(d);
+        if (existingEdgeKeys.has(k))
+            continue;
+        existingEdgeKeys.add(k);
+        graphResult.legacy.contradictions.push(d);
+    }
     // Call spectral with the unified graph
     const spectralEnabled = options?.spectral !== false;
     const spectralServiceUrl = options?.spectralServiceUrl ?? process.env.TCL_SPECTRAL_URL ?? "";
@@ -441,6 +560,10 @@ async function runUnifiedGraphPath(input, timer, validationStartTime, adapter) {
             spectral = { spectralSkipped: true, debugReason: `spectral_error: ${error?.message}` };
         }
     }
+    if (coherenceScore === null || coherenceScore === undefined) {
+        const c = graphResult.legacy.contradictions.length;
+        coherenceScore = c > 0 ? Math.max(20, Math.round(100 - c * 14)) : 72;
+    }
     timer.end('unified_graph');
     // Build the result
     const totalLatency = Date.now() - validationStartTime;
@@ -468,14 +591,46 @@ async function runUnifiedGraphPath(input, timer, validationStartTime, adapter) {
         evidenceMode,
         toolResultsByTurn: options?.toolResultsByTurn instanceof Set ? options.toolResultsByTurn : undefined,
     });
-    const detectorIssues = [
+    const expandedGraphIssues = expandIssueCandidates({
+        claims,
+        contradictions: graphResult.legacy.contradictions,
+        supports: graphResult.legacy.supports,
+        grounding: graphResult.legacy.grounding,
+        runId,
+        conversationId,
+        evidenceMode,
+        audit: {
+            engineVersion: getEngineVersion(),
+            scorerId: "issue-expansion-v1",
+            modelFingerprint: graphResult.graph.meta?.modelFingerprint,
+            configHash: graphResult.graph.meta?.configHash,
+            inputHash: graphResult.graph.meta?.inputHash,
+        },
+    }).allIssues;
+    const transcriptUnsupported = buildTranscriptOnlyUnsupportedIssues(claims, {
+        runId,
+        conversationId,
+        hasExternalEvidence,
+    }).slice(0, 18);
+    const enrollmentIssues = buildEnrollmentBeforeConsentIssues(claims, { runId, conversationId });
+    const scoringContextRank = {
+        mode: (evidenceMode === "TRANSCRIPT_ONLY" ? "transcript_only" : "with_evidence"),
+        numSources: externalSources?.length ?? 0,
+        graphStatus: graphResult.graph.diagnostics.status,
+        templateId,
+        isRegulatedTemplate: domainPacks.some(p => p.id === "protectqa_final_expense"),
+    };
+    const detectorIssues = rankIssuesV2(dedupeIssuesByKey([
+        ...expandedGraphIssues,
+        ...transcriptUnsupported,
+        ...enrollmentIssues,
         ...domainPackIssues,
         ...finalExpenseIssues,
         ...hallucinationResult.issues,
         ...driftResult.driftIssues,
         ...crossTurnResult.issues,
         ...aiConversationIssues,
-    ];
+    ]), undefined, scoringContextRank).allIssues;
     const factualTruthResult = evaluateFactualTruth(claims, detectorIssues, { hasExternalEvidence });
     const criticalComplianceIssues = detectorIssues.filter(i => i.category === 'compliance' && i.severity === 'critical').length;
     const highComplianceIssues = detectorIssues.filter(i => i.category === 'compliance' && i.severity === 'high').length;
@@ -610,6 +765,9 @@ async function runUnifiedGraphPath(input, timer, validationStartTime, adapter) {
         transcriptQuality01: Math.max(0, Math.min(1, 1 - sanitizerResult.unknownSpeakerLines / transcriptLines)),
         speakerConfidence01: speakerMappingConfidence / 100,
         contradictionClarity01: Math.min(1, graphResult.legacy.contradictions.length / Math.max(1, claims.length)),
+        contradictionEdgePairs: graphResult.legacy.contradictions,
+        salientClaimCount: extractedClaims.filter(e => e.meta?.isSalient !== false).length,
+        unsupportedProductClaimIssueCount: detectorIssues.filter(i => i.type === "UNSUPPORTED_PRODUCT_CLAIM").length,
     });
     return {
         answer: input.answer,

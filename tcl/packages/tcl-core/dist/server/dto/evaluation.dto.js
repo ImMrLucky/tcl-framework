@@ -133,6 +133,19 @@ export function toEvaluationV2Dto(evaluation) {
         latency_ms: evaluation.latency_ms,
         created_at: evaluation.created_at,
     };
+    if (evaluation.evidence_set != null)
+        dto.evidence_set = evaluation.evidence_set;
+    if (evaluation.evidence_diagnostics != null)
+        dto.evidence_diagnostics = evaluation.evidence_diagnostics;
+    if (evaluation.template_id != null && evaluation.template_id !== undefined) {
+        dto.template_id = evaluation.template_id;
+    }
+    if (evaluation.simulation_mode != null && evaluation.simulation_mode !== undefined) {
+        dto.simulation_mode = !!evaluation.simulation_mode;
+    }
+    if (evaluation.representative_id != null && evaluation.representative_id !== undefined) {
+        dto.representative_id = evaluation.representative_id;
+    }
     if (evaluation.report) {
         // B2: Clean issues: remove scoreBreakdown and severityDisplay
         // Use defensive approach: strip + explicit delete
@@ -160,6 +173,7 @@ export function toEvaluationV2Dto(evaluation) {
             }
             return cleaned;
         });
+        const rawReport = evaluation.report;
         dto.report = {
             issues: {
                 atomic: atomicIssues,
@@ -168,15 +182,47 @@ export function toEvaluationV2Dto(evaluation) {
             // Legacy aliases for backward compatibility (but cleaned)
             topIssuesV2: groupedIssues,
             allIssuesV2: atomicIssues,
-            issueSummaryV2: evaluation.report.issueSummaryV2,
-            claims: evaluation.report.claims,
-            graph: evaluation.report.graph ? {
-                contradictions: evaluation.report.graph.contradictions,
-                supports: evaluation.report.graph.supports,
-            } : undefined,
-            spectral: evaluation.report.spectral,
-            executiveSummary: evaluation.report.executiveSummary,
-            evalMode: evaluation.report.evalMode,
+            issueSummaryV2: rawReport.issueSummaryV2,
+            claims: rawReport.claims,
+            graph: rawReport.graph
+                ? {
+                    contradictions: rawReport.graph.contradictions,
+                    supports: rawReport.graph.supports,
+                    grounding: rawReport.graph.grounding,
+                    grounded: rawReport.graph.grounded,
+                    groundedClaimIds: rawReport.graph.groundedClaimIds,
+                    debug: rawReport.graph.debug,
+                }
+                : undefined,
+            spectral: rawReport.spectral,
+            executiveSummary: rawReport.executiveSummary,
+            evalMode: rawReport.evalMode,
+            analysisResult: rawReport.analysisResult,
+            enhancedClientScores: rawReport.enhancedClientScores,
+            dashboardSummary: rawReport.dashboardSummary,
+            risk: rawReport.risk,
+            diagnostics: rawReport.diagnostics,
+            businessInsights: rawReport.businessInsights,
+            recommendedActions: rawReport.recommendedActions,
+            productContext: rawReport.productContext,
+            claimsAnalysis: rawReport.claimsAnalysis,
+            issuesBySeverity: rawReport.issuesBySeverity,
+            evidenceDependencyGraph: rawReport.evidenceDependencyGraph,
+            crossTurn: rawReport.crossTurn,
+            drift: rawReport.drift,
+            domainPacksApplied: rawReport.domainPacksApplied,
+            provenance: rawReport.provenance,
+            manifest: rawReport.manifest,
+            run: rawReport.run,
+            inputs: rawReport.inputs,
+            frozenInputs: rawReport.frozenInputs,
+            frozenConfig: rawReport.frozenConfig,
+            mode: rawReport.mode,
+            parentEvaluationId: rawReport.parentEvaluationId,
+            simulationDescription: rawReport.simulationDescription,
+            issueClustersV2: rawReport.issueClustersV2,
+            aggregatedIssues: rawReport.aggregatedIssues,
+            topAggregatedIssues: rawReport.topAggregatedIssues,
         };
     }
     return dto;

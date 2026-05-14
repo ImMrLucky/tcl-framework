@@ -71,6 +71,13 @@ export function mapSpeakerToRole(rawSpeaker, context) {
     if (exactCustomer) {
         return { role: "customer", confidence: 0.98, mappingDecision: `matched ${exactCustomer} -> customer`, rawSpeaker };
     }
+    // "Agent Sarah", "Representative Mike", etc.
+    if (/^agent\s+\S+/.test(cleaned)) {
+        return { role: "agent", confidence: 0.92, mappingDecision: "prefixed agent name -> agent", rawSpeaker };
+    }
+    if (/^(representative|rep|advisor|producer|consultant|specialist)\s+\S+/.test(cleaned)) {
+        return { role: "agent", confidence: 0.9, mappingDecision: "prefixed representative title -> agent", rawSpeaker };
+    }
     const supervisor = hasRoleLabel(cleaned, SUPERVISOR_LABELS);
     if (supervisor) {
         return { role: "supervisor", confidence: 0.9, mappingDecision: `contained ${supervisor} -> supervisor`, rawSpeaker };

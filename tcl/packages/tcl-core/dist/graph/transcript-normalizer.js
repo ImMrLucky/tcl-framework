@@ -14,6 +14,16 @@ import { sanitizeTranscriptForScoring } from '../ingestion/transcript-sanitizer.
 function normalizeSpeakerLabel(rawLabel) {
     return mapSpeakerToRole(rawLabel).role;
 }
+function parseBracketTimestampToMs(inner) {
+    const parts = inner.trim().split(":").map(p => parseInt(p, 10));
+    if (parts.length < 2 || parts.some(n => Number.isNaN(n)))
+        return undefined;
+    if (parts.length === 3) {
+        return (parts[0] * 3600 + parts[1] * 60 + parts[2]) * 1000;
+    }
+    // mm:ss (minutes:seconds) — common in QA transcripts
+    return (parts[0] * 60 + parts[1]) * 1000;
+}
 /**
  * Normalize transcript into structured turns
  *
@@ -27,8 +37,26 @@ export function normalizeTranscript(transcript, options) {
     let currentTurn = null;
     let turnIndex = 0;
     for (const line of lines) {
+        // Pattern 0: "[mm:ss] Speaker Name: text" or "[h:mm:ss] Speaker: text"
+        let match = line.match(/^\[([\d:]+)\]\s*([^:]+?)\s*:\s*(.*)$/);
+        if (match) {
+            const tsInner = match[1].trim();
+            const rawSpeaker = match[2].trim();
+            const text = match[3].trim();
+            const timestampMs = parseBracketTimestampToMs(tsInner);
+            currentTurn = {
+                turnIndex: turnIndex++,
+                speakerLabelRaw: rawSpeaker,
+                speakerType: normalizeSpeakerLabel(rawSpeaker),
+                text,
+                timestampBracket: `[${tsInner}]`,
+                timestampMs,
+            };
+            turns.push(currentTurn);
+            continue;
+        }
         // Pattern 1: "Speaker: text" (most common)
-        let match = line.match(/^([A-Za-z][A-Za-z0-9_ -]{0,30})\s*:\s*(.+)$/);
+        match = line.match(/^([A-Za-z][A-Za-z0-9_ -]{0,30})\s*:\s*(.+)$/);
         if (match) {
             const rawSpeaker = match[1].trim();
             const text = match[2].trim();

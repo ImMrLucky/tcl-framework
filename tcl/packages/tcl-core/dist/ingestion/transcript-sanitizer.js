@@ -1,6 +1,8 @@
 import { isRecognizedTranscriptSpeaker } from "./speaker-role.js";
 const INLINE_SPEAKER_BOUNDARY = /[ \t]+(Agent|Customer|Rep|Caller|Client|Prospect):/g;
 const SPEAKER_PREFIX = /^([A-Za-z][A-Za-z0-9_ -]{0,30})\s*:\s*(.*)$/;
+/** QA / dialer transcripts: "[mm:ss] Agent Name: utterance" */
+const BRACKET_TIMESTAMP_SPEAKER_LINE = /^\[[\d:]+\]\s*[^:]+:\s*.+$/;
 const ANNOTATION_PREFIXES = [
     "Risk Flag:",
     "Issue:",
@@ -52,17 +54,31 @@ export function sanitizeTranscriptForScoring(input) {
             removedAnnotationLines++;
             continue;
         }
+        if (BRACKET_TIMESTAMP_SPEAKER_LINE.test(line)) {
+            kept.push(line);
+            hasValidTurn = true;
+            continue;
+        }
         const speakerMatch = line.match(SPEAKER_PREFIX);
         if (speakerMatch) {
             const speaker = speakerMatch[1].trim();
+            const body = (speakerMatch[2] ?? "").trim();
             if (isRecognizedTranscriptSpeaker(speaker)) {
                 kept.push(line);
                 hasValidTurn = true;
             }
             else {
                 unknownSpeakerLines++;
-                diagnostics.push(`Dropped unrecognized speaker line: ${speaker}`);
-                hasValidTurn = false;
+                const singleTokenLabel = /^[A-Za-z][A-Za-z0-9_]{0,50}$/.test(speaker);
+                if (singleTokenLabel && body.length > 0) {
+                    diagnostics.push(`Kept unrecognized single-token speaker line: ${speaker}`);
+                    kept.push(line);
+                    hasValidTurn = true;
+                }
+                else {
+                    diagnostics.push(`Dropped unrecognized speaker line: ${speaker}`);
+                    hasValidTurn = false;
+                }
             }
             continue;
         }
