@@ -27,3 +27,12 @@ body.has-sidebar.sidebar-collapsed {
   padding-left: 64px;
 }
 
+/* Agent Studio (full-width shell): give mat-cards horizontal breathing room */
+app-agent-studio-shell .studio-main {
+  .mat-mdc-card-content,
+  .mat-mdc-card-header {
+    padding-left: 24px !important;
+    padding-right: 24px !important;
+  }
+}
+

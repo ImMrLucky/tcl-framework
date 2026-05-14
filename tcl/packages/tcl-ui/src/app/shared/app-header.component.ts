@@ -272,6 +272,9 @@ export class AppHeaderComponent implements OnInit, OnDestroy {
   }
   
   ngOnDestroy() {
+    if (typeof document !== 'undefined') {
+      document.body.classList.remove('has-sidebar', 'sidebar-collapsed');
+    }
     this.destroy$.next();
     this.destroy$.complete();
   }
