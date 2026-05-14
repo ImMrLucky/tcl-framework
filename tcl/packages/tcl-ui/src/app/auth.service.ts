@@ -967,16 +967,12 @@ export class AuthService {
   private async loadUserProfile(userId: string): Promise<void> {
     // Get the auth user first (this also validates the session)
     const { data: { user }, error: authError } = await this.supabase.auth.getUser();
-    
+
     if (authError || !user) {
-      // Handle AuthSessionMissingError gracefully - don't clear user if session might still exist
-      if (authError?.name === 'AuthSessionMissingError' || authError?.message?.includes('session')) {
-        return;
-      }
-      // Only clear user if it's a real error, not a session timing issue
-      if (authError && !authError.message?.includes('session')) {
-        this.currentUserSubject.next(null);
-      }
+      // NEVER clear the in-memory user from this enrichment path.
+      // Network blips / Navigator LockManager / transient `getUser` failures must not
+      // log the user out and bounce them back to /login right after a successful sign-in.
+      // Authoritative session invalidation happens in `signOut()` and `onAuthStateChange('SIGNED_OUT')`.
       return;
     }
 
