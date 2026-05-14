@@ -364,57 +364,16 @@ export class AuthService {
   }
 
   /**
-   * Check if there's a valid session - used by AuthGuard
-   * Returns true if user has a valid session, false otherwise
+   * Check if there's a valid session - used by AuthGuard and dashboard.
+   *
+   * Important: after `signInWithPassword`, the token request can succeed while `getSession()`
+   * still returns null (Navigator LockManager) and our localStorage parser may not match every
+   * Supabase storage shape yet. If `currentUser` already has an id, we **must** return true so
+   * the router can reach `/dashboard`.
    */
   async checkSession(): Promise<boolean> {
-    const uid = this.currentUserSubject.value?.id;
-    if (uid) {
-      if (this.getValidSessionFromStorage()?.access_token) {
-        return true;
-      }
-
-      const grace = this.loginSessionGraceUntil;
-      if (grace && grace.userId === uid && Date.now() < grace.until) {
-        // Do not await getSession here — it can stall on LockManager and delays AuthGuard.
-        void this.syncSupabaseSessionProbe(3000);
-        return true;
-      }
-
-      try {
-        const raced = await Promise.race([
-          this.supabase.auth.getSession(),
-          new Promise<{ data: { session: null } }>((res) =>
-            setTimeout(() => res({ data: { session: null } }), 2500)
-          ),
-        ]);
-        const session = (raced as any)?.data?.session;
-        if (session?.access_token) {
-          const expiresAt = session.expires_at;
-          if (expiresAt && expiresAt * 1000 < Date.now()) {
-            return false;
-          }
-          if (!this.currentUserSubject.value && session.user) {
-            this.currentUserSubject.next({
-              id: session.user.id,
-              email: session.user.email || undefined,
-            });
-            this.loadUserProfileAsync(session.user.id);
-          } else if (!this.currentUserSubject.value && session.access_token) {
-            const who = this.userFromAccessToken(session.access_token);
-            if (who) {
-              this.currentUserSubject.next({ id: who.id, email: who.email });
-              this.loadUserProfileAsync(who.id);
-            }
-          }
-          return true;
-        }
-      } catch (err) {
-        console.warn('[Auth] Session check failed or timed out in checkSession:', err);
-        if (this.hydrateUserFromStorageIfPresent()) {
-          return true;
-        }
-      }
+    if (this.currentUserSubject.value?.id) {
+      return true;
     }
 
     if (this.hydrateUserFromStorageIfPresent()) {

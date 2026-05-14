@@ -239,14 +239,13 @@ export class LoginComponent {
           this.errorMessage = result.error.message || 'Authentication failed';
         }
       } else {
-        const navigated = await this.router.navigateByUrl('/dashboard', { replaceUrl: true });
-        if (!navigated) {
-          if (typeof window !== 'undefined') {
-            window.location.assign('/dashboard');
-          } else {
-            this.errorMessage =
-              'Login succeeded but the app could not open the dashboard (session check). Try refreshing the page.';
-          }
+        // Full navigation reloads the app so AuthService hydrates from Supabase localStorage.
+        // Client-side `navigateByUrl` + `checkSession` was still losing races with auth-js events
+        // and LockManager; this path is boring but reliable after a successful token response.
+        if (typeof window !== 'undefined') {
+          window.location.assign('/dashboard');
+        } else {
+          await this.router.navigateByUrl('/dashboard', { replaceUrl: true });
         }
       }
     } catch (error: any) {
