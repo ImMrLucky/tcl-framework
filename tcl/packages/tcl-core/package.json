@@ -17,6 +17,7 @@
     "check:hardcoded:ts": "tsx scripts/check-hardcoded-values.ts"
   },
   "dependencies": {
+    "agent-core": "file:../agent-core",
     "@supabase/supabase-js": "^2.89.0",
     "@types/pdfkit": "^0.17.4",
     "@types/yauzl": "^2.10.3",

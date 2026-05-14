@@ -7,14 +7,28 @@
  */
 
 import { readFileSync } from 'fs';
-import { dirname, resolve } from 'path';
+import { createRequire } from 'node:module';
+import { dirname, join, resolve } from 'path';
 import { fileURLToPath } from 'url';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
+const nodeRequire = createRequire(import.meta.url);
 
-// In dev (ts-node):     packages/tcl-core/src/server/agent-studio/ -> ../../../../agent-core/templates
-// After build (tsc):    packages/tcl-core/dist/server/agent-studio/ -> ../../../../agent-core/templates
-const TEMPLATES_DIR = resolve(HERE, '../../../../agent-core/templates');
+/**
+ * Prefer resolving `agent-core` as an installed package (workspace / production install)
+ * so templates survive `dist/` layouts and Docker images that only ship `node_modules`.
+ * Fall back to monorepo sibling path for ad-hoc runs.
+ */
+function resolveTemplatesDir(): string {
+  try {
+    const pkg = nodeRequire.resolve('agent-core/package.json');
+    return join(dirname(pkg), 'templates');
+  } catch {
+    return resolve(HERE, '../../../../agent-core/templates');
+  }
+}
+
+const TEMPLATES_DIR = resolveTemplatesDir();
 
 export interface RoleTemplate {
   key: string;

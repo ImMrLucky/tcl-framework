@@ -50,12 +50,6 @@ function dbDown(res: express.Response): boolean {
 }
 
 export function registerAgentStudioTemplateFileRoutes(app: express.Application): void {
-  app.get('/api/agent-studio/templates/personas', async (req, res) => {
-    const c = await ensure(req, res);
-    if (!c || dbDown(res)) return;
-    res.json({ templates: loadPersonaTemplates() });
-  });
-
   app.get('/api/agent-studio/template-packs', async (req, res) => {
     const c = await ensure(req, res);
     if (!c || !analyst(c, res) || dbDown(res)) return;

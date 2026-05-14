@@ -19,7 +19,7 @@ import { supabaseAdmin } from '../supabase.js';
 import { getOrgContext, type OrgContext } from '../auth-context.js';
 import { encryptString, decryptString, redact, type EncryptedBlob } from './crypto.js';
 import { logAgentStudioAudit } from './audit.js';
-import { loadRoleTemplates, loadWorkflowTemplates, findPersonaTemplate } from './templates.js';
+import { loadRoleTemplates, loadPersonaTemplates, loadWorkflowTemplates, findPersonaTemplate } from './templates.js';
 import { bufFromDb, bufToDb } from './bytea.js';
 import { readPauseGate, type PauseGateState } from './pause-gate.js';
 import { handleAgentStudioDispatch } from './dispatch.js';
@@ -222,6 +222,10 @@ export function setupAgentStudioRoutes(app: express.Application): void {
 
   app.get('/api/agent-studio/templates/workflows', (_req, res) => {
     res.json({ templates: loadWorkflowTemplates() });
+  });
+
+  app.get('/api/agent-studio/templates/personas', (_req, res) => {
+    res.json({ templates: loadPersonaTemplates() });
   });
 
   // ========================================================================

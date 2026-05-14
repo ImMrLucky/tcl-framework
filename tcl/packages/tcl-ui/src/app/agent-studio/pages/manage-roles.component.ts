@@ -62,6 +62,8 @@ export class ManageRolesComponent implements OnInit {
   constructor(private studio: AgentStudioService) {}
 
   ngOnInit(): void {
-    this.studio.listRolesCatalog().subscribe({ next: (r) => (this.catalog = r.catalog) });
+    // Builtin catalog is served from `agent-core` JSON (same as templates hub). Use the
+    // public `/templates/roles` route so this page is not empty when `/roles` RBAC fails.
+    this.studio.listRoleTemplates().subscribe({ next: (r) => (this.catalog = r.templates) });
   }
 }

@@ -64,6 +64,8 @@ export class ManagePersonasComponent implements OnInit {
   constructor(private studio: AgentStudioService) {}
 
   ngOnInit(): void {
-    this.studio.listPersonasCatalog().subscribe({ next: (r) => (this.personas = r.catalog) });
+    // Builtin personas ship from `agent-core` JSON; use public `/templates/personas` so
+    // the catalog is not empty when `/personas` requires analyst context.
+    this.studio.listPersonaTemplates().subscribe({ next: (r) => (this.personas = r.templates) });
   }
 }
