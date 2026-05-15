@@ -20,6 +20,9 @@ let resolvedTemplatesDir: string | null | undefined = undefined;
 
 function candidateTemplateDirs(): string[] {
   const dirs: string[] = [];
+  // Populated by `npm run build` in tcl-core (`scripts/copy-agent-templates-to-dist.mjs`).
+  // Sits next to compiled `templates.js` — works when only `dist/` is shipped.
+  dirs.push(join(HERE, 'agent-template-json'));
   try {
     const pkg = nodeRequire.resolve('agent-core/package.json');
     dirs.push(join(dirname(pkg), 'templates'));
@@ -31,6 +34,7 @@ function candidateTemplateDirs(): string[] {
   dirs.push(resolve(cwd, 'packages/agent-core/templates'));
   dirs.push(resolve(cwd, 'node_modules/agent-core/templates'));
   dirs.push(resolve(cwd, '../agent-core/templates'));
+  dirs.push(resolve(cwd, '../../agent-core/templates'));
   return [...new Set(dirs)];
 }
 
@@ -170,4 +174,35 @@ export function _resetTemplateCacheForTests(): void {
   cachedWorkflows = undefined;
   cachedPersonas = undefined;
   resolvedTemplatesDir = undefined;
+}
+
+/** For `/api/agent-studio/templates/_debug` — why is the catalogue empty? */
+export function getTemplateCatalogueDebug(): {
+  here: string;
+  cwd: string;
+  resolvedDir: string | null | undefined;
+  candidates: string[];
+  presence: Array<{ dir: string; roles: boolean; personas: boolean; workflows: boolean }>;
+  counts: { roles: number; personas: number; workflows: number };
+} {
+  const candidates = candidateTemplateDirs();
+  const presence = candidates.map((dir) => ({
+    dir,
+    roles: existsSync(join(dir, 'roles.json')),
+    personas: existsSync(join(dir, 'personas.json')),
+    workflows: existsSync(join(dir, 'workflows.json')),
+  }));
+  const counts = {
+    roles: loadRoleTemplates().length,
+    personas: loadPersonaTemplates().length,
+    workflows: loadWorkflowTemplates().length,
+  };
+  return {
+    here: HERE,
+    cwd: process.cwd(),
+    resolvedDir: resolvedTemplatesDir,
+    candidates,
+    presence,
+    counts,
+  };
 }

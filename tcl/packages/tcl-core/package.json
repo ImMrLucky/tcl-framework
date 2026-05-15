@@ -6,7 +6,7 @@
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "scripts": {
-    "build": "tsc -p tsconfig.json && node -e \"const fs=require('fs');const path=require('path');const src=path.join('src','config');const dist=path.join('dist','config');if(!fs.existsSync(dist))fs.mkdirSync(dist,{recursive:true});fs.readdirSync(src).filter(f=>f.endsWith('.json')).forEach(f=>fs.copyFileSync(path.join(src,f),path.join(dist,f)));\"",
+    "build": "tsc -p tsconfig.json && node -e \"const fs=require('fs');const path=require('path');const src=path.join('src','config');const dist=path.join('dist','config');if(!fs.existsSync(dist))fs.mkdirSync(dist,{recursive:true});fs.readdirSync(src).filter(f=>f.endsWith('.json')).forEach(f=>fs.copyFileSync(path.join(src,f),path.join(dist,f)));\" && node scripts/copy-agent-templates-to-dist.mjs",
     "start": "sh start.sh",
     "start:direct": "node dist/server/express.js",
     "dev": "node --loader ts-node/esm src/server/express.ts",
