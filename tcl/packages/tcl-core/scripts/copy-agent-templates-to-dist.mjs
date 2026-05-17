@@ -14,16 +14,20 @@ const destDir = path.join(tclCoreRoot, 'dist', 'server', 'agent-studio', 'agent-
 const files = ['roles.json', 'personas.json', 'workflows.json'];
 
 if (!fs.existsSync(srcDir)) {
-  console.error('[copy-agent-templates] source dir missing:', srcDir);
-  process.exit(1);
+  console.warn(
+    '[copy-agent-templates] skip: source dir missing (' +
+      srcDir +
+      "). Production API still serves embedded catalog from generated-agent-catalog.ts."
+  );
+  process.exit(0);
 }
 
 fs.mkdirSync(destDir, { recursive: true });
 for (const f of files) {
   const from = path.join(srcDir, f);
   if (!fs.existsSync(from)) {
-    console.error('[copy-agent-templates] missing file:', from);
-    process.exit(1);
+    console.warn('[copy-agent-templates] skip missing file:', from);
+    continue;
   }
   fs.copyFileSync(from, path.join(destDir, f));
 }

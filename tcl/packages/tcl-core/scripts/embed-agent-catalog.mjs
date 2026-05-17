@@ -1,6 +1,11 @@
 /**
  * Emit `generated-agent-catalog.ts` from `agent-core` JSON so production APIs
  * never depend on disk layout (Docker, Netlify, missing agent-template-json).
+ *
+ * Resilient: if `agent-core/templates/*.json` is missing (e.g. Railway deploys
+ * only the `tcl-core/` subpath without monorepo siblings), we keep the
+ * already-committed `generated-agent-catalog.ts` instead of failing the build.
+ * The committed file is the source of truth for production.
  */
 import fs from 'fs';
 import path from 'path';
@@ -12,12 +17,24 @@ const agentTemplates = path.join(tclCoreRoot, '..', 'agent-core', 'templates');
 const outFile = path.join(tclCoreRoot, 'src', 'server', 'agent-studio', 'generated-agent-catalog.ts');
 
 const files = ['roles.json', 'personas.json', 'workflows.json'];
-for (const f of files) {
-  const p = path.join(agentTemplates, f);
-  if (!fs.existsSync(p)) {
-    console.error('[embed-agent-catalog] missing:', p);
-    process.exit(1);
+const missing = files.filter((f) => !fs.existsSync(path.join(agentTemplates, f)));
+
+if (missing.length > 0) {
+  if (fs.existsSync(outFile) && fs.statSync(outFile).size > 1000) {
+    console.log(
+      '[embed-agent-catalog] skip: agent-core templates missing (' +
+        missing.join(', ') +
+        '); keeping committed generated-agent-catalog.ts (' +
+        fs.statSync(outFile).size +
+        ' bytes)'
+    );
+    process.exit(0);
   }
+  console.error(
+    '[embed-agent-catalog] FATAL: agent-core templates missing AND no committed catalog at',
+    outFile
+  );
+  process.exit(1);
 }
 
 const roles = JSON.parse(fs.readFileSync(path.join(agentTemplates, 'roles.json'), 'utf8'));
