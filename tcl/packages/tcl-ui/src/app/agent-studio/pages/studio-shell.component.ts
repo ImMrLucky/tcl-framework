@@ -64,7 +64,12 @@ import { AgentStudioSettings } from '../agent-studio.types';
             <mat-icon>article</mat-icon>
             <span>File templates</span>
           </a>
-          <a class="rail-link" routerLink="templates" routerLinkActive="active">
+          <a
+            class="rail-link"
+            routerLink="templates"
+            routerLinkActive="active"
+            [routerLinkActiveOptions]="{ exact: true }"
+          >
             <mat-icon>library_books</mat-icon>
             <span>Catalog</span>
           </a>

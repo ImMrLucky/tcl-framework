@@ -12,6 +12,12 @@ import { createRequire } from 'node:module';
 import { dirname, join, resolve } from 'path';
 import { fileURLToPath } from 'url';
 
+import {
+  BUILTIN_PERSONA_TEMPLATES,
+  BUILTIN_ROLE_TEMPLATES,
+  BUILTIN_WORKFLOW_TEMPLATES,
+} from './generated-agent-catalog.js';
+
 const HERE = dirname(fileURLToPath(import.meta.url));
 const nodeRequire = createRequire(import.meta.url);
 
@@ -103,8 +109,29 @@ let cachedRoles: RoleTemplate[] | undefined = undefined;
 let cachedWorkflows: WorkflowTemplate[] | undefined = undefined;
 let cachedPersonas: PersonaTemplate[] | undefined = undefined;
 
+/** Prefer embedded catalogue (always present in compiled output); filesystem is fallback for dev overrides. */
+function builtinRoles(): RoleTemplate[] {
+  const v = BUILTIN_ROLE_TEMPLATES as unknown as RoleTemplate[];
+  return Array.isArray(v) && v.length > 0 ? [...v] : [];
+}
+
+function builtinPersonas(): PersonaTemplate[] {
+  const v = BUILTIN_PERSONA_TEMPLATES as unknown as PersonaTemplate[];
+  return Array.isArray(v) && v.length > 0 ? [...v] : [];
+}
+
+function builtinWorkflows(): WorkflowTemplate[] {
+  const v = BUILTIN_WORKFLOW_TEMPLATES as unknown as WorkflowTemplate[];
+  return Array.isArray(v) && v.length > 0 ? [...v] : [];
+}
+
 export function loadPersonaTemplates(): PersonaTemplate[] {
   if (cachedPersonas !== undefined) return cachedPersonas;
+  const bi = builtinPersonas();
+  if (bi.length > 0) {
+    cachedPersonas = bi;
+    return cachedPersonas;
+  }
   const dir = getTemplatesDir();
   if (!dir) {
     return [];
@@ -126,6 +153,11 @@ export function findPersonaTemplate(key: string): PersonaTemplate | null {
 
 export function loadRoleTemplates(): RoleTemplate[] {
   if (cachedRoles !== undefined) return cachedRoles;
+  const bi = builtinRoles();
+  if (bi.length > 0) {
+    cachedRoles = bi;
+    return cachedRoles;
+  }
   const dir = getTemplatesDir();
   if (!dir) {
     return [];
@@ -143,6 +175,11 @@ export function loadRoleTemplates(): RoleTemplate[] {
 
 export function loadWorkflowTemplates(): WorkflowTemplate[] {
   if (cachedWorkflows !== undefined) return cachedWorkflows;
+  const bi = builtinWorkflows();
+  if (bi.length > 0) {
+    cachedWorkflows = bi;
+    return cachedWorkflows;
+  }
   const dir = getTemplatesDir();
   if (!dir) {
     return [];
@@ -181,10 +218,16 @@ export function getTemplateCatalogueDebug(): {
   here: string;
   cwd: string;
   resolvedDir: string | null | undefined;
+  embedded: { roles: number; personas: number; workflows: number };
   candidates: string[];
   presence: Array<{ dir: string; roles: boolean; personas: boolean; workflows: boolean }>;
   counts: { roles: number; personas: number; workflows: number };
 } {
+  const embedded = {
+    roles: (BUILTIN_ROLE_TEMPLATES as unknown as RoleTemplate[]).length,
+    personas: (BUILTIN_PERSONA_TEMPLATES as unknown as PersonaTemplate[]).length,
+    workflows: (BUILTIN_WORKFLOW_TEMPLATES as unknown as WorkflowTemplate[]).length,
+  };
   const candidates = candidateTemplateDirs();
   const presence = candidates.map((dir) => ({
     dir,
@@ -201,6 +244,7 @@ export function getTemplateCatalogueDebug(): {
     here: HERE,
     cwd: process.cwd(),
     resolvedDir: resolvedTemplatesDir,
+    embedded,
     candidates,
     presence,
     counts,

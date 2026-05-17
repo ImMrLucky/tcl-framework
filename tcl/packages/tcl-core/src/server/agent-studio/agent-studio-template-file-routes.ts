@@ -7,9 +7,14 @@ import type express from 'express';
 import { supabaseAdmin } from '../supabase.js';
 import { getOrgContext, type OrgContext } from '../auth-context.js';
 import { loadRoleTemplates, loadPersonaTemplates } from './templates.js';
+import {
+  BUILTIN_ROLE_TEMPLATES,
+  BUILTIN_PERSONA_TEMPLATES,
+} from './generated-agent-catalog.js';
 import { composeAgentPrompt } from './prompt-composer.js';
 import { appendAgentFileVersion } from './agent-files.js';
 import { logAgentStudioAudit } from './audit.js';
+import { ensureSystemTemplatesSeeded } from './seed-system-templates.js';
 
 const STAFF_ROLES = new Set(['OWNER', 'ADMIN', 'MANAGER']);
 const ANALYST_ROLES = new Set(['OWNER', 'ADMIN', 'MANAGER', 'ANALYST']);
@@ -106,25 +111,58 @@ export function registerAgentStudioTemplateFileRoutes(app: express.Application):
   app.get('/api/agent-studio/roles', async (req, res) => {
     const c = await ensure(req, res);
     if (!c || !analyst(c, res) || dbDown(res)) return;
-    const { data, error } = await supabaseAdmin!
+    let { data, error } = await supabaseAdmin!
       .from('agent_studio_role_templates')
       .select('*')
       .or(`org_id.is.null,org_id.eq.${c.orgId}`)
       .order('name', { ascending: true });
     if (error) return res.status(500).json({ error: error.message });
-    res.json({ catalog: loadRoleTemplates(), dbRoles: data ?? [] });
+
+    // No system rows yet? Seed once and re-query so the user immediately gets data.
+    if (!data || data.length === 0) {
+      await ensureSystemTemplatesSeeded(supabaseAdmin!);
+      const re = await supabaseAdmin!
+        .from('agent_studio_role_templates')
+        .select('*')
+        .or(`org_id.is.null,org_id.eq.${c.orgId}`)
+        .order('name', { ascending: true });
+      if (!re.error) data = re.data;
+    }
+
+    const catalog = loadRoleTemplates();
+    res.setHeader('Cache-Control', 'no-store');
+    res.json({
+      catalog: catalog.length > 0 ? catalog : ([...(BUILTIN_ROLE_TEMPLATES as any)] as typeof catalog),
+      dbRoles: data ?? [],
+    });
   });
 
   app.get('/api/agent-studio/personas', async (req, res) => {
     const c = await ensure(req, res);
     if (!c || !analyst(c, res) || dbDown(res)) return;
-    const { data, error } = await supabaseAdmin!
+    let { data, error } = await supabaseAdmin!
       .from('agent_studio_persona_templates')
       .select('*')
       .or(`org_id.is.null,org_id.eq.${c.orgId}`)
       .order('name', { ascending: true });
     if (error) return res.status(500).json({ error: error.message });
-    res.json({ catalog: loadPersonaTemplates(), dbPersonas: data ?? [] });
+
+    if (!data || data.length === 0) {
+      await ensureSystemTemplatesSeeded(supabaseAdmin!);
+      const re = await supabaseAdmin!
+        .from('agent_studio_persona_templates')
+        .select('*')
+        .or(`org_id.is.null,org_id.eq.${c.orgId}`)
+        .order('name', { ascending: true });
+      if (!re.error) data = re.data;
+    }
+
+    const catalog = loadPersonaTemplates();
+    res.setHeader('Cache-Control', 'no-store');
+    res.json({
+      catalog: catalog.length > 0 ? catalog : ([...(BUILTIN_PERSONA_TEMPLATES as any)] as typeof catalog),
+      dbPersonas: data ?? [],
+    });
   });
 
   app.get('/api/agent-studio/template-assets', async (req, res) => {

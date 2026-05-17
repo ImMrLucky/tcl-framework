@@ -20,6 +20,11 @@ import { getOrgContext, type OrgContext } from '../auth-context.js';
 import { encryptString, decryptString, redact, type EncryptedBlob } from './crypto.js';
 import { logAgentStudioAudit } from './audit.js';
 import { loadRoleTemplates, loadPersonaTemplates, loadWorkflowTemplates, findPersonaTemplate, getTemplateCatalogueDebug } from './templates.js';
+import {
+  BUILTIN_ROLE_TEMPLATES,
+  BUILTIN_PERSONA_TEMPLATES,
+  BUILTIN_WORKFLOW_TEMPLATES,
+} from './generated-agent-catalog.js';
 import { bufFromDb, bufToDb } from './bytea.js';
 import { readPauseGate, type PauseGateState } from './pause-gate.js';
 import { handleAgentStudioDispatch } from './dispatch.js';
@@ -28,6 +33,7 @@ import { buildAgentStudioSummary, buildTeamCommandCenter } from './summary.js';
 import { assertReviewGatesAllowTerminalMove } from './review-gate-move.js';
 import { registerAgentStudioTemplateFileRoutes } from './agent-studio-template-file-routes.js';
 import { resolveTemplatePackId, seedDefaultAgentMarkdownFiles } from './agent-files.js';
+import { ensureSystemTemplatesSeeded } from './seed-system-templates.js';
 
 const STAFF_ROLES = new Set(['OWNER', 'ADMIN', 'MANAGER']);
 const ANALYST_ROLES = new Set(['OWNER', 'ADMIN', 'MANAGER', 'ANALYST']);
@@ -216,21 +222,62 @@ export function setupAgentStudioRoutes(app: express.Application): void {
   // prefetch, tools, or stale client timing).
   // ========================================================================
 
+  // Serve directly from the compiled-in catalogue. If `loadRoleTemplates()` ever
+  // returns empty (cache poisoning, missing JSON on disk, stale dist), fall back
+  // to the embedded constant — those are guaranteed to ship with the bundle.
   app.get('/api/agent-studio/templates/roles', (_req, res) => {
-    res.json({ templates: loadRoleTemplates() });
+    const fromLoader = loadRoleTemplates();
+    const templates =
+      fromLoader.length > 0 ? fromLoader : ([...(BUILTIN_ROLE_TEMPLATES as any)] as typeof fromLoader);
+    res.setHeader('Cache-Control', 'no-store');
+    res.json({ templates });
   });
 
   app.get('/api/agent-studio/templates/workflows', (_req, res) => {
-    res.json({ templates: loadWorkflowTemplates() });
+    const fromLoader = loadWorkflowTemplates();
+    const templates =
+      fromLoader.length > 0 ? fromLoader : ([...(BUILTIN_WORKFLOW_TEMPLATES as any)] as typeof fromLoader);
+    res.setHeader('Cache-Control', 'no-store');
+    res.json({ templates });
   });
 
   app.get('/api/agent-studio/templates/personas', (_req, res) => {
-    res.json({ templates: loadPersonaTemplates() });
+    const fromLoader = loadPersonaTemplates();
+    const templates =
+      fromLoader.length > 0 ? fromLoader : ([...(BUILTIN_PERSONA_TEMPLATES as any)] as typeof fromLoader);
+    res.setHeader('Cache-Control', 'no-store');
+    res.json({ templates });
   });
 
   app.get('/api/agent-studio/templates/_debug', (_req, res) => {
-    res.json(getTemplateCatalogueDebug());
+    res.setHeader('Cache-Control', 'no-store');
+    res.json({
+      ...getTemplateCatalogueDebug(),
+      embeddedSample: {
+        firstRoleKey: (BUILTIN_ROLE_TEMPLATES as any)[0]?.key ?? null,
+        firstPersonaKey: (BUILTIN_PERSONA_TEMPLATES as any)[0]?.key ?? null,
+        firstWorkflowKey: (BUILTIN_WORKFLOW_TEMPLATES as any)[0]?.key ?? null,
+      },
+    });
   });
+
+  // Manual re-seed (idempotent upsert on key WHERE org_id IS NULL).
+  app.post('/api/agent-studio/templates/_seed', async (_req, res) => {
+    if (dbDown(res)) return;
+    try {
+      const result = await ensureSystemTemplatesSeeded(supabaseAdmin!);
+      res.json(result);
+    } catch (e) {
+      res.status(500).json({ error: String(e) });
+    }
+  });
+
+  // Best-effort fire-and-forget seed at startup so a fresh DB is never empty.
+  if (supabaseAdmin) {
+    ensureSystemTemplatesSeeded(supabaseAdmin).catch((err) => {
+      console.warn('[agent-studio] startup seed failed (non-fatal):', err?.message ?? err);
+    });
+  }
 
   // ========================================================================
   // Teams.
