@@ -1,4 +1,55 @@
 // Netlify serverless function to proxy API requests to TCL Core
+'use strict';
+
+const agentStudioCatalog = require('./agent-studio-catalog');
+
+/** Serve built-in templates locally when Railway tcl-core is stale (empty arrays). */
+const AGENT_STUDIO_TEMPLATE_GETS = {
+  '/api/agent-studio/templates/roles': 'roles',
+  '/api/agent-studio/templates/personas': 'personas',
+  '/api/agent-studio/templates/workflows': 'workflows',
+};
+
+function corsJsonHeaders() {
+  return {
+    'Content-Type': 'application/json',
+    'Access-Control-Allow-Origin': '*',
+    'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+    'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
+    'Cache-Control': 'no-store',
+  };
+}
+
+function serveAgentStudioTemplates(fullPath) {
+  const key = AGENT_STUDIO_TEMPLATE_GETS[fullPath];
+  if (!key) return null;
+  const templates = agentStudioCatalog[key];
+  if (!Array.isArray(templates) || templates.length === 0) return null;
+  return {
+    statusCode: 200,
+    headers: corsJsonHeaders(),
+    body: JSON.stringify({ templates, _source: 'netlify-catalog-fallback' }),
+  };
+}
+
+/** If upstream returns empty templates, substitute embedded catalogue. */
+function patchEmptyAgentStudioTemplates(fullPath, statusCode, bodyText) {
+  const key = AGENT_STUDIO_TEMPLATE_GETS[fullPath];
+  if (!key || statusCode !== 200 || !bodyText) return null;
+  let parsed;
+  try {
+    parsed = JSON.parse(bodyText);
+  } catch {
+    return null;
+  }
+  if (!parsed || !Array.isArray(parsed.templates) || parsed.templates.length > 0) {
+    return null;
+  }
+  const templates = agentStudioCatalog[key];
+  if (!Array.isArray(templates) || templates.length === 0) return null;
+  return JSON.stringify({ templates, _source: 'netlify-catalog-patch' });
+}
+
 exports.handler = async (event, context) => {
   const TCL_CORE_URL = process.env.NETLIFY_TCL_CORE_URL;
   
@@ -119,6 +170,16 @@ exports.handler = async (event, context) => {
     }
   }
   
+  // Built-in Agent Studio templates: serve from embedded JSON on GET so the UI is
+  // never empty while Railway tcl-core is on an older build.
+  if (event.httpMethod === 'GET') {
+    const local = serveAgentStudioTemplates(fullPath);
+    if (local) {
+      console.log(`[proxy] serving agent-studio templates locally: ${fullPath}`);
+      return local;
+    }
+  }
+
   const url = `${TCL_CORE_URL}${fullPath}${queryString}`;
   
   console.log(`Proxying ${event.httpMethod} ${fullPath}${queryString} to ${url}`);
@@ -229,16 +290,21 @@ exports.handler = async (event, context) => {
       body: bodyBuffer || body || undefined,
     });
     
-    const data = await response.text();
+    let data = await response.text();
+
+    if (event.httpMethod === 'GET') {
+      const patched = patchEmptyAgentStudioTemplates(fullPath, response.status, data);
+      if (patched) {
+        console.warn(
+          `[proxy] upstream returned empty templates for ${fullPath}; using embedded catalogue`
+        );
+        data = patched;
+      }
+    }
     
     return {
       statusCode: response.status,
-      headers: {
-        'Content-Type': 'application/json',
-        'Access-Control-Allow-Origin': '*',
-        'Access-Control-Allow-Headers': 'Content-Type, Authorization',
-        'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
-      },
+      headers: corsJsonHeaders(),
       body: data,
     };
   } catch (error) {

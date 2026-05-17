@@ -52,11 +52,12 @@ RUN cd /app/models && \
 # Copy package files
 COPY package*.json ./
 COPY tsconfig.json ./
+COPY scripts ./scripts
 
 # Install dependencies
 RUN npm install
 
-# Copy source code
+# Copy source code (prebuild uses committed generated-agent-catalog.ts if agent-core absent)
 COPY src ./src
 
 # Build TypeScript

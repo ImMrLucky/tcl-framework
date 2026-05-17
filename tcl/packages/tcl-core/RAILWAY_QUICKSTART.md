@@ -19,10 +19,11 @@ git push
 
 ### 3. Configure
 
-1. **Set Root Directory**:
+1. **Set Root Directory** (must match this monorepo layout):
    - Click on your service
    - Settings → Root Directory
-   - Set to: `packages/tcl-core`
+   - Set to: `tcl/packages/tcl-core`
+   - After deploy, verify templates: `curl https://YOUR-RAILWAY-URL/api/agent-studio/templates/_debug` — should return JSON (not 404). If 404, Railway is still on an old build; trigger **Redeploy**.
 
 2. **Set Environment Variables**:
    - Click on your service → Variables
