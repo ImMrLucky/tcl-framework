@@ -289,6 +289,31 @@ import { AgentStudioSettings } from '../agent-studio.types';
         padding: 24px;
         min-height: 0;
       }
+
+      /* Consistent inner padding for Material cards across Agent Studio pages */
+      .studio-main ::ng-deep mat-card.mat-mdc-card {
+        padding: 0;
+      }
+      .studio-main ::ng-deep mat-card .mat-mdc-card-header,
+      .studio-main ::ng-deep mat-card mat-card-header {
+        padding: 20px 20px 0;
+      }
+      .studio-main ::ng-deep mat-card .mat-mdc-card-title,
+      .studio-main ::ng-deep mat-card mat-card-title {
+        padding: 20px 20px 0;
+      }
+      .studio-main ::ng-deep mat-card .mat-mdc-card-subtitle,
+      .studio-main ::ng-deep mat-card mat-card-subtitle {
+        padding: 4px 20px 0;
+      }
+      .studio-main ::ng-deep mat-card .mat-mdc-card-content,
+      .studio-main ::ng-deep mat-card mat-card-content {
+        padding: 16px 20px 20px;
+      }
+      .studio-main ::ng-deep mat-card .mat-mdc-card-actions,
+      .studio-main ::ng-deep mat-card mat-card-actions {
+        padding: 8px 12px 16px;
+      }
     `,
   ],
 })

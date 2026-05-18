@@ -6,8 +6,16 @@ import { MatButtonModule } from '@angular/material/button';
 import { MatIconModule } from '@angular/material/icon';
 import { MatChipsModule } from '@angular/material/chips';
 import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
+import { forkJoin, of } from 'rxjs';
+import { catchError, map } from 'rxjs/operators';
 import { AgentStudioService } from '../agent-studio.service';
-import { AgentStudioSummary, AuditEvent } from '../agent-studio.types';
+import { Agent, AgentStudioSummary, AgentTeam, AuditEvent } from '../agent-studio.types';
+
+type OverviewPanel = 'teams' | 'agents';
+
+interface AgentWithTeam extends Agent {
+  teamName: string;
+}
 
 @Component({
   selector: 'app-studio-overview',
@@ -59,19 +67,114 @@ import { AgentStudioSummary, AuditEvent } from '../agent-studio.types';
         </mat-card-content>
       </mat-card>
 
-      <mat-card class="stat">
-        <mat-card-title>Teams</mat-card-title>
+      <mat-card
+        class="stat stat-clickable"
+        [class.stat-active]="expandedPanel === 'teams'"
+        (click)="togglePanel('teams')"
+        role="button"
+        tabindex="0"
+        (keydown.enter)="togglePanel('teams')"
+        (keydown.space)="$event.preventDefault(); togglePanel('teams')"
+      >
+        <mat-card-title>
+          <span>Teams</span>
+          <mat-icon class="stat-chevron">{{ expandedPanel === 'teams' ? 'expand_less' : 'expand_more' }}</mat-icon>
+        </mat-card-title>
         <mat-card-content>
           <div class="big">{{ s.teamsTotal }}</div>
-          <div class="sub">{{ s.teamsPaused }} paused</div>
+          <div class="sub">{{ s.teamsPaused }} paused · click to {{ expandedPanel === 'teams' ? 'hide' : 'list' }}</div>
         </mat-card-content>
       </mat-card>
 
-      <mat-card class="stat">
-        <mat-card-title>Agents</mat-card-title>
+      <mat-card
+        class="stat stat-clickable"
+        [class.stat-active]="expandedPanel === 'agents'"
+        (click)="togglePanel('agents')"
+        role="button"
+        tabindex="0"
+        (keydown.enter)="togglePanel('agents')"
+        (keydown.space)="$event.preventDefault(); togglePanel('agents')"
+      >
+        <mat-card-title>
+          <span>Agents</span>
+          <mat-icon class="stat-chevron">{{ expandedPanel === 'agents' ? 'expand_less' : 'expand_more' }}</mat-icon>
+        </mat-card-title>
         <mat-card-content>
           <div class="big">{{ s.agentsTotal }}</div>
-          <div class="sub">{{ s.agentsPaused }} paused</div>
+          <div class="sub">{{ s.agentsPaused }} paused · click to {{ expandedPanel === 'agents' ? 'hide' : 'list' }}</div>
+        </mat-card-content>
+      </mat-card>
+
+      <mat-card class="wide list-panel" *ngIf="expandedPanel === 'teams'">
+        <mat-card-title>
+          <mat-icon>groups</mat-icon>
+          All teams
+        </mat-card-title>
+        <mat-card-content>
+          <div class="list-loading" *ngIf="listsLoading">
+            <mat-progress-spinner diameter="28" mode="indeterminate" />
+            <span>Loading teams…</span>
+          </div>
+          <ul class="entity-list" *ngIf="!listsLoading && teams.length">
+            <li *ngFor="let team of teams" class="entity-row">
+              <div class="entity-main">
+                <a class="entity-link" [routerLink]="['/agent-studio', 'teams', team.id]">{{ team.name }}</a>
+                <span class="muted" *ngIf="team.description">{{ team.description }}</span>
+                <span class="muted meta" *ngIf="team.workflow_template_key">{{ team.workflow_template_key }}</span>
+              </div>
+              <div class="entity-actions">
+                <mat-chip *ngIf="team.paused_at" color="warn" selected>paused</mat-chip>
+                <a mat-button color="primary" [routerLink]="['/agent-studio', 'teams', team.id, 'agents']">Agents</a>
+                <a mat-button [routerLink]="['/agent-studio', 'teams', team.id]">Open</a>
+              </div>
+            </li>
+          </ul>
+          <p class="muted" *ngIf="!listsLoading && !teams.length">No teams yet.</p>
+          <div class="list-footer">
+            <a mat-stroked-button color="primary" routerLink="teams">
+              <mat-icon>open_in_new</mat-icon>
+              Manage teams
+            </a>
+          </div>
+        </mat-card-content>
+      </mat-card>
+
+      <mat-card class="wide list-panel" *ngIf="expandedPanel === 'agents'">
+        <mat-card-title>
+          <mat-icon>smart_toy</mat-icon>
+          All agents
+        </mat-card-title>
+        <mat-card-content>
+          <div class="list-loading" *ngIf="listsLoading">
+            <mat-progress-spinner diameter="28" mode="indeterminate" />
+            <span>Loading agents…</span>
+          </div>
+          <ul class="entity-list" *ngIf="!listsLoading && agents.length">
+            <li *ngFor="let agent of agents" class="entity-row">
+              <div class="entity-main">
+                <a
+                  class="entity-link"
+                  [routerLink]="['/agent-studio', 'teams', agent.team_id, 'agents']"
+                >
+                  {{ agent.name }}
+                </a>
+                <span class="muted">{{ agent.teamName }}</span>
+                <span class="muted meta" *ngIf="agent.role_template_key">{{ agent.role_template_key }}</span>
+              </div>
+              <div class="entity-actions">
+                <mat-chip *ngIf="agent.is_orchestrator" color="primary" selected>orchestrator</mat-chip>
+                <mat-chip *ngIf="agent.paused_at" color="warn" selected>paused</mat-chip>
+                <a mat-button color="primary" [routerLink]="['/agent-studio', 'teams', agent.team_id]">Team</a>
+              </div>
+            </li>
+          </ul>
+          <p class="muted" *ngIf="!listsLoading && !agents.length">No agents yet. Create a team and add agents.</p>
+          <div class="list-footer">
+            <a mat-stroked-button color="primary" routerLink="teams">
+              <mat-icon>groups</mat-icon>
+              Browse teams
+            </a>
+          </div>
         </mat-card-content>
       </mat-card>
 
@@ -224,6 +327,28 @@ import { AgentStudioSummary, AuditEvent } from '../agent-studio.types';
         color: #0f172a;
         font-size: 14px;
         font-weight: 600;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+      }
+      .stat-clickable {
+        cursor: pointer;
+        transition: border-color 0.15s ease, box-shadow 0.15s ease;
+      }
+      .stat-clickable:hover {
+        border-color: #93c5fd;
+        box-shadow: 0 4px 12px rgba(37, 99, 235, 0.12);
+      }
+      .stat-clickable.stat-active {
+        border-color: #3b82f6;
+        box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.2);
+      }
+      .stat-chevron {
+        font-size: 20px;
+        width: 20px;
+        height: 20px;
+        color: #64748b;
       }
       .wide {
         grid-column: 1 / -1;
@@ -234,6 +359,12 @@ import { AgentStudioSummary, AuditEvent } from '../agent-studio.types';
       .wide ::ng-deep .mat-mdc-card-title {
         font-size: 15px;
         font-weight: 600;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+      .list-panel ::ng-deep .mat-mdc-card-title mat-icon {
+        color: #3b82f6;
       }
       .big {
         font-size: 36px;
@@ -266,6 +397,62 @@ import { AgentStudioSummary, AuditEvent } from '../agent-studio.types';
       .cta-row a mat-icon {
         margin-right: 4px;
         vertical-align: middle;
+      }
+      .entity-list {
+        list-style: none;
+        margin: 0;
+        padding: 0;
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+      }
+      .entity-row {
+        display: flex;
+        align-items: flex-start;
+        justify-content: space-between;
+        gap: 12px;
+        flex-wrap: wrap;
+        padding: 12px 14px;
+        border: 1px solid #e2e8f0;
+        border-radius: 8px;
+        background: #f8fafc;
+      }
+      .entity-main {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+        min-width: 180px;
+        flex: 1;
+      }
+      .entity-link {
+        font-weight: 600;
+        color: #1d4ed8;
+        text-decoration: none;
+        font-size: 15px;
+      }
+      .entity-link:hover {
+        text-decoration: underline;
+      }
+      .entity-actions {
+        display: flex;
+        align-items: center;
+        gap: 4px;
+        flex-wrap: wrap;
+      }
+      .meta {
+        font-size: 12px;
+      }
+      .list-loading {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        color: #64748b;
+        padding: 8px 0;
+      }
+      .list-footer {
+        margin-top: 12px;
+        padding-top: 8px;
+        border-top: 1px solid #e2e8f0;
       }
       .events,
       .attention {
@@ -310,6 +497,11 @@ export class StudioOverviewComponent implements OnInit {
   loadError: string | null = null;
   busy = false;
 
+  expandedPanel: OverviewPanel | null = null;
+  teams: AgentTeam[] = [];
+  agents: AgentWithTeam[] = [];
+  listsLoading = false;
+
   constructor(private studio: AgentStudioService) {}
 
   ngOnInit(): void {
@@ -327,6 +519,70 @@ export class StudioOverviewComponent implements OnInit {
       error: (err) => {
         this.loading = false;
         this.loadError = err?.error?.error || err?.message || 'Failed to load summary';
+      },
+    });
+  }
+
+  togglePanel(panel: OverviewPanel): void {
+    if (this.expandedPanel === panel) {
+      this.expandedPanel = null;
+      return;
+    }
+    this.expandedPanel = panel;
+    if (panel === 'teams') {
+      this.loadTeamsList();
+    } else {
+      this.loadAgentsList();
+    }
+  }
+
+  loadTeamsList(): void {
+    this.listsLoading = true;
+    this.studio.listTeams().subscribe({
+      next: (r) => {
+        this.teams = r.teams ?? [];
+        this.listsLoading = false;
+      },
+      error: () => {
+        this.listsLoading = false;
+      },
+    });
+  }
+
+  loadAgentsList(): void {
+    this.listsLoading = true;
+    this.studio.listTeams().subscribe({
+      next: (r) => {
+        const teams = r.teams ?? [];
+        if (!teams.length) {
+          this.agents = [];
+          this.listsLoading = false;
+          return;
+        }
+        forkJoin(
+          teams.map((team) =>
+            this.studio.listAgents(team.id).pipe(
+              map((res) =>
+                (res.agents ?? []).map((agent) => ({
+                  ...agent,
+                  teamName: team.name,
+                }))
+              ),
+              catchError(() => of([] as AgentWithTeam[]))
+            )
+          )
+        ).subscribe({
+          next: (groups) => {
+            this.agents = groups.flat().sort((a, b) => a.name.localeCompare(b.name));
+            this.listsLoading = false;
+          },
+          error: () => {
+            this.listsLoading = false;
+          },
+        });
+      },
+      error: () => {
+        this.listsLoading = false;
       },
     });
   }
