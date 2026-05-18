@@ -60,6 +60,8 @@ export class AuthService {
   private lastReauthTime: number | null = null;
   /** Same-tab password login: storage can lag behind in-memory session; brief guard bypass. */
   private loginSessionGraceUntil: { userId: string; until: number } | null = null;
+  /** While true, ignore transient SIGNED_OUT / null-session events during password login. */
+  private loginInProgressUntil = 0;
   /**
    * Bumped after successful credential login/signup so the deferred constructor `getSession()` probe
    * cannot clear `currentUser` if that probe started before login (same counter was incorrectly used
@@ -132,14 +134,8 @@ export class AuthService {
         // Supabase can emit SIGNED_OUT while swapping sessions on password login. Clearing
         // `currentUser` synchronously races AuthGuard and blocks /dashboard navigation.
         queueMicrotask(() => {
-          if (this.getValidSessionFromStorage()?.access_token && this.hydrateUserFromStorageIfPresent()) {
-            return;
-          }
-          if (this.loginSessionGraceUntil && Date.now() < this.loginSessionGraceUntil.until) {
-            const gid = this.loginSessionGraceUntil.userId;
-            if (gid && !this.currentUserSubject.value?.id) {
-              this.currentUserSubject.next({ id: gid, email: undefined });
-            }
+          if (this.shouldPreserveSessionAfterAuthEvent()) {
+            this.restoreUserFromLoginHints();
             return;
           }
           this.currentUserSubject.next(null);
@@ -158,11 +154,8 @@ export class AuthService {
           if (this.applyPostLoginSessionHint()) {
             return;
           }
-          if (this.loginSessionGraceUntil && Date.now() < this.loginSessionGraceUntil.until) {
-            const gid = this.loginSessionGraceUntil.userId;
-            if (gid && !this.currentUserSubject.value?.id) {
-              this.currentUserSubject.next({ id: gid, email: undefined });
-            }
+          if (this.shouldPreserveSessionAfterAuthEvent()) {
+            this.restoreUserFromLoginHints();
             return;
           }
           this.currentUserSubject.next(null);
@@ -235,7 +228,7 @@ export class AuthService {
             error: sessionError,
           } = result || { data: { session: null }, error: null };
           if (sessionError) {
-            if (!this.hydrateUserFromStorageIfPresent()) {
+            if (!this.hydrateUserFromStorageIfPresent() && !this.shouldPreserveSessionAfterAuthEvent()) {
               this.currentUserSubject.next(null);
             }
             return;
@@ -260,6 +253,8 @@ export class AuthService {
             return;
           } else if (this.applyPostLoginSessionHint()) {
             return;
+          } else if (this.shouldPreserveSessionAfterAuthEvent()) {
+            this.restoreUserFromLoginHints();
           } else {
             this.currentUserSubject.next(null);
           }
@@ -273,6 +268,10 @@ export class AuthService {
             return;
           }
           if (this.applyPostLoginSessionHint()) {
+            return;
+          }
+          if (this.shouldPreserveSessionAfterAuthEvent()) {
+            this.restoreUserFromLoginHints();
             return;
           }
           this.clearExpiredSession();
@@ -399,12 +398,103 @@ export class AuthService {
     if (this.applyPostLoginSessionHint()) {
       return true;
     }
-    return !!this.getValidSessionFromStorage()?.access_token;
+    if (this.getValidSessionFromStorage()?.access_token) {
+      return true;
+    }
+    const hint = this.peekPostLoginSessionHint();
+    return !!(hint?.userId && hint.accessToken);
   }
 
   /** Call after successful sign-in so the next navigation (including full reload) is authenticated. */
-  prepareLoginRedirect(userId: string, email?: string): void {
-    this.markPostLoginSession(userId, email);
+  prepareLoginRedirect(userId: string, email?: string, accessToken?: string): void {
+    this.markPostLoginSession(userId, email, accessToken);
+  }
+
+  /**
+   * Reliable post-login navigation: wait until session is visible in storage, then hard-navigate.
+   * Avoids router + AuthGuard races with Supabase LockManager and transient SIGNED_OUT events.
+   */
+  async finishLoginRedirect(targetPath = '/dashboard'): Promise<void> {
+    const user = this.currentUserSubject.value;
+    const token = this.getAccessTokenSync();
+    if (user?.id) {
+      this.markPostLoginSession(user.id, user.email, token ?? undefined);
+    }
+
+    for (let attempt = 0; attempt < 30; attempt++) {
+      if (this.hasValidSessionSync()) {
+        break;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+
+    if (typeof window !== 'undefined') {
+      window.location.replace(targetPath);
+    }
+  }
+
+  private beginLoginAttempt(): void {
+    this.loginInProgressUntil = Date.now() + 90_000;
+  }
+
+  private isLoginInProgress(): boolean {
+    return Date.now() < this.loginInProgressUntil;
+  }
+
+  private shouldPreserveSessionAfterAuthEvent(): boolean {
+    if (this.isLoginInProgress()) {
+      return true;
+    }
+    if (this.loginSessionGraceUntil && Date.now() < this.loginSessionGraceUntil.until) {
+      return true;
+    }
+    if (this.getValidSessionFromStorage()?.access_token) {
+      return true;
+    }
+    const hint = this.peekPostLoginSessionHint();
+    return !!(hint?.userId && (hint.accessToken || this.getValidSessionFromStorage()?.access_token));
+  }
+
+  private restoreUserFromLoginHints(): void {
+    if (this.hydrateUserFromStorageIfPresent()) {
+      return;
+    }
+    if (this.applyPostLoginSessionHint()) {
+      return;
+    }
+    const hint = this.peekPostLoginSessionHint();
+    if (hint?.userId && !this.currentUserSubject.value?.id) {
+      this.currentUserSubject.next({ id: hint.userId, email: hint.email });
+    }
+  }
+
+  private peekPostLoginSessionHint(): {
+    userId?: string;
+    email?: string;
+    until?: number;
+    accessToken?: string;
+  } | null {
+    if (typeof sessionStorage === 'undefined') {
+      return null;
+    }
+    try {
+      const raw = sessionStorage.getItem(AuthService.POST_LOGIN_STORAGE_KEY);
+      if (!raw) {
+        return null;
+      }
+      const hint = JSON.parse(raw) as {
+        userId?: string;
+        email?: string;
+        until?: number;
+        accessToken?: string;
+      };
+      if (!hint?.userId || (hint.until != null && Date.now() > hint.until)) {
+        return null;
+      }
+      return hint;
+    } catch {
+      return null;
+    }
   }
 
   async checkSession(): Promise<boolean> {
@@ -491,42 +581,40 @@ export class AuthService {
     }
   }
 
-  private markPostLoginSession(userId: string, email?: string): void {
+  private markPostLoginSession(userId: string, email?: string, accessToken?: string): void {
     this.loginSessionGraceUntil = { userId, until: Date.now() + 120_000 };
     if (typeof sessionStorage === 'undefined') {
       return;
     }
     sessionStorage.setItem(
       AuthService.POST_LOGIN_STORAGE_KEY,
-      JSON.stringify({ userId, email, until: Date.now() + 120_000 })
+      JSON.stringify({
+        userId,
+        email,
+        accessToken: accessToken ?? this.getAccessTokenSync() ?? undefined,
+        until: Date.now() + 120_000,
+      })
     );
   }
 
   private applyPostLoginSessionHint(): boolean {
-    if (typeof sessionStorage === 'undefined') {
-      return false;
-    }
-    try {
-      const raw = sessionStorage.getItem(AuthService.POST_LOGIN_STORAGE_KEY);
-      if (!raw) {
-        return false;
-      }
-      const hint = JSON.parse(raw) as { userId?: string; email?: string; until?: number };
-      if (!hint?.userId || (hint.until != null && Date.now() > hint.until)) {
+    const hint = this.peekPostLoginSessionHint();
+    if (!hint?.userId) {
+      if (typeof sessionStorage !== 'undefined') {
         sessionStorage.removeItem(AuthService.POST_LOGIN_STORAGE_KEY);
-        return false;
       }
-      if (!this.getValidSessionFromStorage()?.access_token) {
-        return false;
-      }
-      if (!this.currentUserSubject.value?.id) {
-        this.currentUserSubject.next({ id: hint.userId, email: hint.email });
-        this.resetInactivityTimer();
-      }
-      return true;
-    } catch {
       return false;
     }
+    const hasToken =
+      !!this.getValidSessionFromStorage()?.access_token || !!hint.accessToken;
+    if (!hasToken) {
+      return false;
+    }
+    if (!this.currentUserSubject.value?.id) {
+      this.currentUserSubject.next({ id: hint.userId, email: hint.email });
+      this.resetInactivityTimer();
+    }
+    return true;
   }
 
   clearPostLoginSessionHint(): void {
@@ -645,6 +733,7 @@ export class AuthService {
   }
 
   async signIn(email: string, password: string): Promise<{ error: AuthError | null; duplicateAccount?: boolean }> {
+    this.beginLoginAttempt();
     // Clear any expired sessions before attempting login
     // This prevents hanging on getSession() calls with expired tokens
     this.clearExpiredSession();
@@ -694,7 +783,7 @@ export class AuthService {
         email: fromJwt.email,
       });
       this.authStateEpoch++;
-      this.markPostLoginSession(fromJwt.id, fromJwt.email);
+      this.markPostLoginSession(fromJwt.id, fromJwt.email, data.session.access_token);
       this.resetSessionTimer();
       this.ensureUserProvisioned(fromJwt.id, fromJwt.email || email);
       this.loadUserProfileAsync(fromJwt.id);
@@ -708,7 +797,7 @@ export class AuthService {
       email: user.email
     });
     this.authStateEpoch++;
-    this.markPostLoginSession(user.id, user.email ?? undefined);
+    this.markPostLoginSession(user.id, user.email ?? undefined, data.session.access_token);
 
     // Reset session timers for new login
     this.resetSessionTimer();
@@ -782,6 +871,8 @@ export class AuthService {
     
     // STEP 2: Clear user state immediately (UI updates)
     this.loginSessionGraceUntil = null;
+    this.loginInProgressUntil = 0;
+    this.clearPostLoginSessionHint();
     this.currentUserSubject.next(null);
     
     // STEP 3: Clear all localStorage (including Supabase auth tokens and user-specific data)

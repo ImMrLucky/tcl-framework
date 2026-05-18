@@ -186,7 +186,7 @@ export class LoginComponent implements OnInit {
 
   ngOnInit(): void {
     if (this.authService.hasValidSessionSync()) {
-      void this.router.navigateByUrl('/dashboard', { replaceUrl: true });
+      void this.authService.finishLoginRedirect('/dashboard');
     }
   }
 
@@ -245,22 +245,8 @@ export class LoginComponent implements OnInit {
           this.errorMessage = result.error.message || 'Authentication failed';
         }
       } else {
-        const user = this.authService.getCurrentUser();
-        if (user?.id) {
-          this.authService.prepareLoginRedirect(user.id, user.email);
-        }
-        // Flush persisted session + post-login hint before navigation.
-        await new Promise<void>((resolve) => setTimeout(resolve, 0));
-        const navigated = await this.router.navigateByUrl('/dashboard', { replaceUrl: true });
-        if (!navigated || typeof window === 'undefined') {
-          return;
-        }
-        // If AuthGuard bounced us back (race with LockManager), hard-navigate once.
-        setTimeout(() => {
-          if (window.location.pathname.includes('/login')) {
-            window.location.assign('/dashboard');
-          }
-        }, 150);
+        // Hard navigation after session is in storage — avoids AuthGuard / SIGNED_OUT races.
+        await this.authService.finishLoginRedirect('/dashboard');
       }
     } catch (error: any) {
       this.errorMessage = error.message || 'An unexpected error occurred';
