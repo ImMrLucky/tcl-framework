@@ -163,7 +163,7 @@ const PACK_KEYS = [
                     <button mat-stroked-button (click)="seedFiles(agent)" [disabled]="seedingFiles">
                       {{ seedingFiles ? 'Seeding…' : 'Seed / repair files' }}
                     </button>
-                    <button mat-button (click)="preview(agent, selectedFile)" [disabled]="!selectedFile">
+                    <button mat-button (click)="previewSelected(agent)" [disabled]="!selectedFile">
                       <mat-icon>visibility</mat-icon> Preview composed prompt
                     </button>
                   </div>
@@ -459,6 +459,11 @@ export class TeamAgentsComponent implements OnInit {
         this.snack.open(err?.error?.error || 'Seed failed', 'OK', { duration: 4000 });
       },
     });
+  }
+
+  previewSelected(agent: Agent): void {
+    if (!this.selectedFile) return;
+    this.preview(agent, this.selectedFile);
   }
 
   preview(agent: Agent, _f: AgentMarkdownFile): void {
