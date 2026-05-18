@@ -13,6 +13,8 @@ import { MatSlideToggleModule } from '@angular/material/slide-toggle';
 import { MatExpansionModule } from '@angular/material/expansion';
 import { MatSnackBar, MatSnackBarModule } from '@angular/material/snack-bar';
 import { MatStepperModule } from '@angular/material/stepper';
+import { MatTabsModule } from '@angular/material/tabs';
+import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
 import { AgentStudioService } from '../agent-studio.service';
 import { Agent, AgentMarkdownFile, PersonaTemplate, RoleTemplate } from '../agent-studio.types';
 
@@ -46,6 +48,8 @@ const PACK_KEYS = [
     MatExpansionModule,
     MatSnackBarModule,
     MatStepperModule,
+    MatTabsModule,
+    MatProgressSpinnerModule,
   ],
   template: `
     <section class="page">
@@ -144,31 +148,67 @@ const PACK_KEYS = [
             </button>
           </mat-card-actions>
 
-          <mat-expansion-panel>
-            <mat-expansion-panel-header>
-              <mat-panel-title>Markdown files</mat-panel-title>
-            </mat-expansion-panel-header>
-            <button mat-stroked-button (click)="loadFiles(agent)">Refresh file list</button>
-            <ul class="file-list" *ngIf="filesByAgent[agent.id]?.length">
-              <li *ngFor="let f of filesByAgent[agent.id]">
-                <strong>{{ f.file_path }}</strong>
-                <span class="muted">{{ f.file_type }}</span>
-                <button mat-button (click)="preview(agent, f)">Preview prompt</button>
-              </li>
-            </ul>
-            <p class="muted" *ngIf="filesByAgent[agent.id] && !filesByAgent[agent.id]!.length">No files yet (run DB migration 050 and recreate agent).</p>
-          </mat-expansion-panel>
-
-          <mat-expansion-panel *ngIf="expandedAgentId === agent.id" class="config-panel">
-            <mat-expansion-panel-header>
-              <mat-panel-title>Active config (JSON)</mat-panel-title>
-            </mat-expansion-panel-header>
-            <mat-form-field appearance="outline" class="full">
-              <mat-label>config (JSON)</mat-label>
-              <textarea matInput rows="10" [(ngModel)]="configDraft"></textarea>
-            </mat-form-field>
-            <button mat-flat-button color="primary" (click)="publishConfig(agent)">Publish new version</button>
-          </mat-expansion-panel>
+          <div *ngIf="expandedAgentId === agent.id" class="config-panel">
+            <mat-tab-group animationDuration="0ms" (selectedIndexChange)="onConfigTabChange(agent, $event)">
+              <mat-tab label="Markdown files">
+                <div class="tab-body">
+                  <div class="row actions" *ngIf="loadingFiles">
+                    <mat-spinner diameter="24"></mat-spinner>
+                    <span class="muted">Loading files…</span>
+                  </div>
+                  <div class="row actions" *ngIf="!loadingFiles">
+                    <button mat-stroked-button (click)="loadFiles(agent)">
+                      <mat-icon>refresh</mat-icon> Refresh
+                    </button>
+                    <button mat-stroked-button (click)="seedFiles(agent)" [disabled]="seedingFiles">
+                      {{ seedingFiles ? 'Seeding…' : 'Seed / repair files' }}
+                    </button>
+                    <button mat-button (click)="preview(agent, selectedFile)" [disabled]="!selectedFile">
+                      <mat-icon>visibility</mat-icon> Preview composed prompt
+                    </button>
+                  </div>
+                  <p class="muted small" *ngIf="filesByAgent[agent.id] && !filesByAgent[agent.id]!.length">
+                    No markdown files yet. Click <strong>Seed / repair files</strong> (requires migration 050).
+                  </p>
+                  <div class="file-editor" *ngIf="filesByAgent[agent.id]?.length">
+                    <mat-form-field appearance="outline" class="file-select">
+                      <mat-label>File</mat-label>
+                      <mat-select [ngModel]="selectedFileId" (ngModelChange)="onSelectFile(agent, $event)">
+                        <mat-option *ngFor="let f of filesByAgent[agent.id]" [value]="f.id">
+                          {{ f.file_path }}
+                          <span class="muted" *ngIf="!f.markdown?.trim()"> (empty)</span>
+                        </mat-option>
+                      </mat-select>
+                    </mat-form-field>
+                    <mat-form-field appearance="outline" class="full">
+                      <mat-label>{{ selectedFile?.file_path || 'markdown' }}</mat-label>
+                      <textarea matInput rows="16" [(ngModel)]="markdownDraft" [disabled]="!selectedFile"></textarea>
+                    </mat-form-field>
+                    <div class="row">
+                      <button
+                        mat-flat-button
+                        color="primary"
+                        [disabled]="!selectedFile || savingMarkdown"
+                        (click)="saveMarkdown(agent)"
+                      >
+                        {{ savingMarkdown ? 'Saving…' : 'Save markdown' }}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </mat-tab>
+              <mat-tab label="Runtime config (JSON)">
+                <div class="tab-body">
+                  <p class="muted small">Optional runtime overrides (model routing, feature flags). Prompt text comes from Markdown files.</p>
+                  <mat-form-field appearance="outline" class="full">
+                    <mat-label>config (JSON)</mat-label>
+                    <textarea matInput rows="10" [(ngModel)]="configDraft"></textarea>
+                  </mat-form-field>
+                  <button mat-flat-button color="primary" (click)="publishConfig(agent)">Publish new version</button>
+                </div>
+              </mat-tab>
+            </mat-tab-group>
+          </div>
         </mat-card>
       </div>
     </section>
@@ -207,6 +247,24 @@ const PACK_KEYS = [
       }
       .config-panel {
         margin-top: 12px;
+        padding: 8px 0 0;
+        border-top: 1px solid #eee;
+      }
+      .tab-body {
+        padding: 12px 0;
+      }
+      .actions {
+        margin-bottom: 12px;
+        align-items: center;
+      }
+      .file-select {
+        width: 100%;
+        max-width: 360px;
+      }
+      .file-editor {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
       }
       .empty {
         text-align: center;
@@ -261,6 +319,13 @@ export class TeamAgentsComponent implements OnInit {
   expandedAgentId: string | null = null;
   configDraft = '{}';
   filesByAgent: Record<string, AgentMarkdownFile[]> = {};
+  selectedFileId: string | null = null;
+  selectedFile: AgentMarkdownFile | null = null;
+  markdownDraft = '';
+  loadingFiles = false;
+  savingMarkdown = false;
+  seedingFiles = false;
+  configsLoadedFor: Record<string, boolean> = {};
 
   private teamId!: string;
 
@@ -324,10 +389,75 @@ export class TeamAgentsComponent implements OnInit {
       });
   }
 
-  loadFiles(agent: Agent): void {
+  loadFiles(agent: Agent, selectFirst = false): void {
+    this.loadingFiles = true;
     this.studio.listAgentMarkdownFiles(agent.id).subscribe({
-      next: (r) => (this.filesByAgent = { ...this.filesByAgent, [agent.id]: r.files }),
-      error: () => this.snack.open('Could not load files (migration 050 applied?)', 'OK', { duration: 4000 }),
+      next: (r) => {
+        this.loadingFiles = false;
+        this.filesByAgent = { ...this.filesByAgent, [agent.id]: r.files };
+        if (selectFirst && r.files.length) {
+          this.onSelectFile(agent, r.files[0].id);
+        } else if (this.selectedFileId) {
+          const still = r.files.find((f) => f.id === this.selectedFileId);
+          if (still) this.onSelectFile(agent, still.id);
+        }
+      },
+      error: () => {
+        this.loadingFiles = false;
+        this.snack.open('Could not load files (migration 050 applied?)', 'OK', { duration: 4000 });
+      },
+    });
+  }
+
+  onSelectFile(agent: Agent, fileId: string): void {
+    const f = this.filesByAgent[agent.id]?.find((x) => x.id === fileId) ?? null;
+    this.selectedFileId = fileId;
+    this.selectedFile = f;
+    this.markdownDraft = f?.markdown ?? '';
+  }
+
+  saveMarkdown(agent: Agent): void {
+    if (!this.selectedFile) return;
+    this.savingMarkdown = true;
+    this.studio
+      .updateAgentMarkdownFile(agent.id, this.selectedFile.id, {
+        markdown: this.markdownDraft,
+        changeNote: 'edited in Agents UI',
+      })
+      .subscribe({
+        next: (r) => {
+          this.savingMarkdown = false;
+          this.selectedFile = r.file;
+          const list = this.filesByAgent[agent.id] ?? [];
+          this.filesByAgent = {
+            ...this.filesByAgent,
+            [agent.id]: list.map((x) => (x.id === r.file.id ? r.file : x)),
+          };
+          this.snack.open('Markdown saved.', 'OK', { duration: 3000 });
+        },
+        error: (err) => {
+          this.savingMarkdown = false;
+          this.snack.open(err?.error?.error || 'Save failed', 'OK', { duration: 4000 });
+        },
+      });
+  }
+
+  seedFiles(agent: Agent): void {
+    this.seedingFiles = true;
+    this.studio.seedAgentMarkdownFiles(agent.id).subscribe({
+      next: (r) => {
+        this.seedingFiles = false;
+        this.snack.open(
+          `Files: ${r.inserted} added, ${r.repaired} repaired, ${r.skipped} unchanged`,
+          'OK',
+          { duration: 5000 }
+        );
+        this.loadFiles(agent, true);
+      },
+      error: (err) => {
+        this.seedingFiles = false;
+        this.snack.open(err?.error?.error || 'Seed failed', 'OK', { duration: 4000 });
+      },
     });
   }
 
@@ -353,15 +483,42 @@ export class TeamAgentsComponent implements OnInit {
   openConfig(agent: Agent): void {
     if (this.expandedAgentId === agent.id) {
       this.expandedAgentId = null;
+      this.selectedFile = null;
+      this.selectedFileId = null;
+      this.markdownDraft = '';
       return;
     }
     this.expandedAgentId = agent.id;
+    this.selectedFile = null;
+    this.selectedFileId = null;
+    this.markdownDraft = '';
+    this.loadFiles(agent, true);
+  }
+
+  onConfigTabChange(agent: Agent, tabIndex: number): void {
+    // Tab 1 = Runtime config (JSON); only fetch when user opens that tab.
+    if (tabIndex === 1) {
+      this.loadAgentConfigs(agent);
+    }
+  }
+
+  loadAgentConfigs(agent: Agent): void {
+    if (this.configsLoadedFor[agent.id]) return;
     this.studio.listAgentConfigs(agent.id).subscribe({
       next: (r) => {
+        this.configsLoadedFor = { ...this.configsLoadedFor, [agent.id]: true };
         const active = r.configs.find((c) => c.is_active);
         this.configDraft = JSON.stringify(active?.config ?? {}, null, 2);
       },
-      error: () => (this.configDraft = '{}'),
+      error: (err) => {
+        const msg = err?.error?.error || err?.message || 'Failed to load config';
+        if (err?.status === 401) {
+          this.snack.open('Session expired — sign in again to edit runtime config.', 'OK', { duration: 5000 });
+        } else {
+          this.snack.open(msg, 'OK', { duration: 4000 });
+        }
+        this.configDraft = '{}';
+      },
     });
   }
 

@@ -47,13 +47,13 @@ export class DashboardComponent implements OnInit {
   ) {}
 
   async ngOnInit() {
-    // Check authentication first
-    const isAuth = await this.authService.isAuthenticated();
-    if (!isAuth) {
+    // AuthGuard already validated the route; avoid a second async check that races LockManager.
+    if (!this.authService.hasValidSessionSync() && !(await this.authService.isAuthenticated())) {
       console.log('Not authenticated, redirecting to login');
       this.router.navigate(['/login']);
       return;
     }
+    this.authService.clearPostLoginSessionHint();
 
     // Don't reload plan context here - the header's router event listener will handle it
     // This prevents duplicate /api/me calls when navigating from admin page

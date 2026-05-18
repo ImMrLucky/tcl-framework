@@ -1,4 +1,4 @@
-import { Component } from '@angular/core';
+import { Component, OnInit } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormBuilder, FormGroup, Validators, ReactiveFormsModule } from '@angular/forms';
 import { Router, RouterModule } from '@angular/router';
@@ -165,7 +165,7 @@ import type { AuthError } from '@supabase/supabase-js';
     }
   `]
 })
-export class LoginComponent {
+export class LoginComponent implements OnInit {
   authForm: FormGroup;
   isSignUp = false;
   hidePassword = true;
@@ -182,6 +182,12 @@ export class LoginComponent {
       email: ['', [Validators.required, Validators.email]],
       password: ['', [Validators.required, Validators.minLength(6)]]
     });
+  }
+
+  ngOnInit(): void {
+    if (this.authService.hasValidSessionSync()) {
+      void this.router.navigateByUrl('/dashboard', { replaceUrl: true });
+    }
   }
 
   toggleMode() {
@@ -239,14 +245,22 @@ export class LoginComponent {
           this.errorMessage = result.error.message || 'Authentication failed';
         }
       } else {
-        // Full navigation reloads the app so AuthService hydrates from Supabase localStorage.
-        // Client-side `navigateByUrl` + `checkSession` was still losing races with auth-js events
-        // and LockManager; this path is boring but reliable after a successful token response.
-        if (typeof window !== 'undefined') {
-          window.location.assign('/dashboard');
-        } else {
-          await this.router.navigateByUrl('/dashboard', { replaceUrl: true });
+        const user = this.authService.getCurrentUser();
+        if (user?.id) {
+          this.authService.prepareLoginRedirect(user.id, user.email);
         }
+        // Flush persisted session + post-login hint before navigation.
+        await new Promise<void>((resolve) => setTimeout(resolve, 0));
+        const navigated = await this.router.navigateByUrl('/dashboard', { replaceUrl: true });
+        if (!navigated || typeof window === 'undefined') {
+          return;
+        }
+        // If AuthGuard bounced us back (race with LockManager), hard-navigate once.
+        setTimeout(() => {
+          if (window.location.pathname.includes('/login')) {
+            window.location.assign('/dashboard');
+          }
+        }, 150);
       }
     } catch (error: any) {
       this.errorMessage = error.message || 'An unexpected error occurred';

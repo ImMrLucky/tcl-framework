@@ -12,7 +12,7 @@ import {
   BUILTIN_PERSONA_TEMPLATES,
 } from './generated-agent-catalog.js';
 import { composeAgentPrompt } from './prompt-composer.js';
-import { appendAgentFileVersion } from './agent-files.js';
+import { appendAgentFileVersion, seedDefaultAgentMarkdownFiles } from './agent-files.js';
 import { logAgentStudioAudit } from './audit.js';
 import { ensureSystemTemplatesSeeded } from './seed-system-templates.js';
 
@@ -175,6 +175,36 @@ export function registerAgentStudioTemplateFileRoutes(app: express.Application):
       .order('name', { ascending: true });
     if (error) return res.status(500).json({ error: error.message });
     res.json({ assets: data ?? [] });
+  });
+
+  app.post('/api/agent-studio/agents/:agentId/files/_seed', async (req, res) => {
+    const c = await ensure(req, res);
+    if (!c || !staff(c, res) || dbDown(res)) return;
+    const { agentId } = req.params;
+    const { data: agent, error: aErr } = await supabaseAdmin!
+      .from('agent_studio_agents')
+      .select('id, team_id, name, role_template_key, persona')
+      .eq('id', agentId)
+      .eq('org_id', c.orgId)
+      .maybeSingle();
+    if (aErr) return res.status(500).json({ error: aErr.message });
+    if (!agent) return res.status(404).json({ error: 'Agent not found' });
+    try {
+      const result = await seedDefaultAgentMarkdownFiles({
+        supabase: supabaseAdmin!,
+        orgId: c.orgId,
+        teamId: agent.team_id,
+        agentId: agent.id,
+        agentName: agent.name,
+        roleTemplateKey: agent.role_template_key,
+        personaText: agent.persona,
+        userId: c.userId ?? null,
+        repairExisting: true,
+      });
+      res.json(result);
+    } catch (e) {
+      res.status(500).json({ error: String(e) });
+    }
   });
 
   app.get('/api/agent-studio/agents/:agentId/files', async (req, res) => {

@@ -66,8 +66,13 @@ export class AgentStudioService {
   constructor(private http: HttpClient) {}
 
   private get apiUrl(): string {
-    if (typeof window !== 'undefined' && (window as any).__TCL_API_URL) {
-      return (window as any).__TCL_API_URL;
+    if (typeof window !== 'undefined') {
+      const configured = (window as any).__TCL_API_URL;
+      if (configured) {
+        return configured;
+      }
+      // Same-origin /api/* → Netlify proxy (must match AuthInterceptor + login session).
+      return window.location.origin;
     }
     return '';
   }
@@ -128,6 +133,13 @@ export class AgentStudioService {
 
   listAgentMarkdownFiles(agentId: string): Observable<{ files: AgentMarkdownFile[] }> {
     return this.http.get<{ files: AgentMarkdownFile[] }>(this.url(`/agents/${agentId}/files`));
+  }
+
+  seedAgentMarkdownFiles(agentId: string): Observable<{ inserted: number; repaired: number; skipped: number }> {
+    return this.http.post<{ inserted: number; repaired: number; skipped: number }>(
+      this.url(`/agents/${agentId}/files/_seed`),
+      {}
+    );
   }
 
   updateAgentMarkdownFile(

@@ -66,6 +66,8 @@ export class AuthService {
    * for both "probe id" and "login bump", which let the probe stay "current" and wipe the user).
    */
   private authStateEpoch = 0;
+  /** Survives full page reload after password login (sessionStorage). */
+  private static readonly POST_LOGIN_STORAGE_KEY = 'tcl_post_login_session';
 
   constructor(private router: Router, private http: HttpClient) {
     const supabaseUrl = readWindowSupabaseUrl();
@@ -153,6 +155,9 @@ export class AuthService {
           if (this.hydrateUserFromStorageIfPresent()) {
             return;
           }
+          if (this.applyPostLoginSessionHint()) {
+            return;
+          }
           if (this.loginSessionGraceUntil && Date.now() < this.loginSessionGraceUntil.until) {
             const gid = this.loginSessionGraceUntil.userId;
             if (gid && !this.currentUserSubject.value?.id) {
@@ -200,6 +205,11 @@ export class AuthService {
       this.clearExpiredSession();
 
       if (this.hydrateUserFromStorageIfPresent()) {
+        this.clearPostLoginSessionHint();
+        return;
+      }
+
+      if (this.applyPostLoginSessionHint()) {
         return;
       }
 
@@ -248,6 +258,8 @@ export class AuthService {
             }
           } else if (this.hydrateUserFromStorageIfPresent()) {
             return;
+          } else if (this.applyPostLoginSessionHint()) {
+            return;
           } else {
             this.currentUserSubject.next(null);
           }
@@ -258,6 +270,9 @@ export class AuthService {
           }
           console.warn('[Auth] Session check failed or timed out:', err?.message);
           if (this.hydrateUserFromStorageIfPresent()) {
+            return;
+          }
+          if (this.applyPostLoginSessionHint()) {
             return;
           }
           this.clearExpiredSession();
@@ -371,12 +386,29 @@ export class AuthService {
    * Supabase storage shape yet. If `currentUser` already has an id, we **must** return true so
    * the router can reach `/dashboard`.
    */
-  async checkSession(): Promise<boolean> {
+  /**
+   * Fast path for AuthGuard / login page — no async Supabase calls.
+   */
+  hasValidSessionSync(): boolean {
     if (this.currentUserSubject.value?.id) {
       return true;
     }
-
     if (this.hydrateUserFromStorageIfPresent()) {
+      return true;
+    }
+    if (this.applyPostLoginSessionHint()) {
+      return true;
+    }
+    return !!this.getValidSessionFromStorage()?.access_token;
+  }
+
+  /** Call after successful sign-in so the next navigation (including full reload) is authenticated. */
+  prepareLoginRedirect(userId: string, email?: string): void {
+    this.markPostLoginSession(userId, email);
+  }
+
+  async checkSession(): Promise<boolean> {
+    if (this.hasValidSessionSync()) {
       return true;
     }
 
@@ -418,7 +450,89 @@ export class AuthService {
       }
     }
 
+    if (this.applyPostLoginSessionHint()) {
+      return true;
+    }
+
     return false;
+  }
+
+  /** Write session to localStorage in the shape `getValidSessionFromStorage` expects. */
+  private persistSignInSession(session: {
+    access_token: string;
+    refresh_token?: string | null;
+    expires_at?: number;
+    expires_in?: number;
+    token_type?: string;
+    user?: { id: string; email?: string | null } | null;
+  }): void {
+    if (typeof window === 'undefined' || !window.localStorage) {
+      return;
+    }
+    const storageKey = this.getAuthStorageKey();
+    const expiresAt =
+      session.expires_at ??
+      (session.expires_in ? Math.floor(Date.now() / 1000) + session.expires_in : undefined);
+    const blob: Record<string, unknown> = {
+      access_token: session.access_token,
+      refresh_token: session.refresh_token ?? '',
+      expires_at: expiresAt,
+      expires_in: session.expires_in,
+      token_type: session.token_type ?? 'bearer',
+      user: session.user ?? undefined,
+    };
+    localStorage.setItem(storageKey, JSON.stringify(blob));
+    if (session.user?.id) {
+      try {
+        localStorage.setItem(`${storageKey}-user`, JSON.stringify({ user: session.user }));
+      } catch {
+        /* noop */
+      }
+    }
+  }
+
+  private markPostLoginSession(userId: string, email?: string): void {
+    this.loginSessionGraceUntil = { userId, until: Date.now() + 120_000 };
+    if (typeof sessionStorage === 'undefined') {
+      return;
+    }
+    sessionStorage.setItem(
+      AuthService.POST_LOGIN_STORAGE_KEY,
+      JSON.stringify({ userId, email, until: Date.now() + 120_000 })
+    );
+  }
+
+  private applyPostLoginSessionHint(): boolean {
+    if (typeof sessionStorage === 'undefined') {
+      return false;
+    }
+    try {
+      const raw = sessionStorage.getItem(AuthService.POST_LOGIN_STORAGE_KEY);
+      if (!raw) {
+        return false;
+      }
+      const hint = JSON.parse(raw) as { userId?: string; email?: string; until?: number };
+      if (!hint?.userId || (hint.until != null && Date.now() > hint.until)) {
+        sessionStorage.removeItem(AuthService.POST_LOGIN_STORAGE_KEY);
+        return false;
+      }
+      if (!this.getValidSessionFromStorage()?.access_token) {
+        return false;
+      }
+      if (!this.currentUserSubject.value?.id) {
+        this.currentUserSubject.next({ id: hint.userId, email: hint.email });
+        this.resetInactivityTimer();
+      }
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  clearPostLoginSessionHint(): void {
+    if (typeof sessionStorage !== 'undefined') {
+      sessionStorage.removeItem(AuthService.POST_LOGIN_STORAGE_KEY);
+    }
   }
 
   async signUp(email: string, password: string): Promise<{ error: AuthError | null; duplicateAccount?: boolean }> {
@@ -556,6 +670,8 @@ export class AuthService {
       };
     }
 
+    this.persistSignInSession(data.session);
+
     // User is authenticated - set user state immediately
     const user = data.user ?? data.session?.user ?? null;
     if (!user?.id) {
@@ -578,7 +694,7 @@ export class AuthService {
         email: fromJwt.email,
       });
       this.authStateEpoch++;
-      this.loginSessionGraceUntil = { userId: fromJwt.id, until: Date.now() + 120_000 };
+      this.markPostLoginSession(fromJwt.id, fromJwt.email);
       this.resetSessionTimer();
       this.ensureUserProvisioned(fromJwt.id, fromJwt.email || email);
       this.loadUserProfileAsync(fromJwt.id);
@@ -592,7 +708,7 @@ export class AuthService {
       email: user.email
     });
     this.authStateEpoch++;
-    this.loginSessionGraceUntil = { userId: user.id, until: Date.now() + 120_000 };
+    this.markPostLoginSession(user.id, user.email ?? undefined);
 
     // Reset session timers for new login
     this.resetSessionTimer();
@@ -1115,6 +1231,14 @@ export class AuthService {
   }
 
   /**
+   * Read access token from localStorage only (sync). Used by HttpInterceptor so API
+   * calls are not sent without Authorization while getSession() is still pending.
+   */
+  getAccessTokenSync(): string | null {
+    return this.getValidSessionFromStorage()?.access_token ?? null;
+  }
+
+  /**
    * Get the current session access token for API requests
    * Uses Supabase's built-in session management which handles refresh automatically
    */
@@ -1161,29 +1285,17 @@ export class AuthService {
     if (typeof window === 'undefined' || !window.localStorage) {
       return;
     }
-    
+
     const storageKey = this.getAuthStorageKey();
-    const storedSession = localStorage.getItem(storageKey);
-    
-    if (storedSession) {
-      try {
-        const parsed = JSON.parse(storedSession);
-        const expiresAt = parsed?.expires_at || parsed?.session?.expires_at;
-        
-        // Check if token is expired
-        if (expiresAt) {
-          const expiryTime = typeof expiresAt === 'string' ? parseInt(expiresAt, 10) : expiresAt;
-          if (expiryTime * 1000 < Date.now()) {
-            console.log('[Auth] Clearing expired session from localStorage');
-            localStorage.removeItem(storageKey);
-            // Also clear user state
-            this.currentUserSubject.next(null);
-          }
+    const cached = this.getValidSessionFromStorage();
+    if (!cached) {
+      const stored = localStorage.getItem(storageKey);
+      if (stored) {
+        try {
+          JSON.parse(stored);
+        } catch {
+          localStorage.removeItem(storageKey);
         }
-      } catch (e) {
-        // Invalid JSON - clear it
-        console.log('[Auth] Clearing invalid session from localStorage');
-        localStorage.removeItem(storageKey);
       }
     }
   }

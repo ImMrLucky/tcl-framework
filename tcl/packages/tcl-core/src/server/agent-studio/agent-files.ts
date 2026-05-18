@@ -3,14 +3,32 @@
  * `packages/agent-core/templates/assets/generic/*.md`.
  */
 
-import { readFileSync } from 'fs';
-import { dirname, resolve } from 'path';
+import { existsSync, readFileSync } from 'fs';
+import { createRequire } from 'node:module';
+import { dirname, join, resolve } from 'path';
 import { fileURLToPath } from 'url';
 import type { SupabaseClient } from '@supabase/supabase-js';
+import { BUILTIN_GENERIC_AGENT_FILES } from './generated-agent-generic-files.js';
 import { findRoleTemplate } from './templates.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
-const GENERIC_DIR = resolve(HERE, '../../../../agent-core/templates/assets/generic');
+const nodeRequire = createRequire(import.meta.url);
+
+function candidateGenericDirs(): string[] {
+  const dirs: string[] = [];
+  dirs.push(join(HERE, 'agent-generic-md'));
+  try {
+    const pkg = nodeRequire.resolve('agent-core/package.json');
+    dirs.push(join(dirname(pkg), 'templates', 'assets', 'generic'));
+  } catch {
+    /* optional */
+  }
+  dirs.push(resolve(HERE, '../../../../agent-core/templates/assets/generic'));
+  const cwd = process.cwd();
+  dirs.push(resolve(cwd, 'packages/agent-core/templates/assets/generic'));
+  dirs.push(resolve(cwd, '../agent-core/templates/assets/generic'));
+  return [...new Set(dirs)];
+}
 
 export type AgentFileType =
   | 'agent'
@@ -48,11 +66,21 @@ export const DEFAULT_AGENT_FILE_SPECS: Array<{
 ];
 
 function readGenericFile(relativePath: string): string {
-  try {
-    return readFileSync(resolve(GENERIC_DIR, relativePath), 'utf8');
-  } catch {
-    return '';
+  const embedded = BUILTIN_GENERIC_AGENT_FILES[relativePath];
+  if (typeof embedded === 'string' && embedded.trim()) {
+    return embedded;
   }
+  for (const dir of candidateGenericDirs()) {
+    const full = join(dir, relativePath);
+    if (existsSync(full)) {
+      try {
+        return readFileSync(full, 'utf8');
+      } catch {
+        /* try next */
+      }
+    }
+  }
+  return embedded ?? '';
 }
 
 function interpolateMarkdown(raw: string, vars: Record<string, string>): string {
@@ -86,7 +114,9 @@ export async function seedDefaultAgentMarkdownFiles(opts: {
   roleTemplateKey: string | null;
   personaText: string | null;
   userId: string | null;
-}): Promise<void> {
+  /** When true, fill empty markdown on existing rows and insert only missing paths. */
+  repairExisting?: boolean;
+}): Promise<{ inserted: number; repaired: number; skipped: number }> {
   const roleTpl = opts.roleTemplateKey ? findRoleTemplate(opts.roleTemplateKey) : null;
   const roleName = roleTpl?.name ?? opts.roleTemplateKey ?? 'Custom role';
   const vars: Record<string, string> = {
@@ -94,13 +124,56 @@ export async function seedDefaultAgentMarkdownFiles(opts: {
     roleName,
   };
 
+  let inserted = 0;
+  let repaired = 0;
+  let skipped = 0;
+
   for (const spec of DEFAULT_AGENT_FILE_SPECS) {
     let md = readGenericFile(spec.path);
     if (spec.fileType === 'persona' && opts.personaText?.trim()) {
       md = `# Persona (from setup)\n\n${opts.personaText.trim()}\n\n---\n\n${md}`;
     }
     md = interpolateMarkdown(md, vars);
-    const { data: inserted, error } = await opts.supabase
+    if (!md.trim()) {
+      console.warn('[agent-studio][agent-files] empty template for', spec.path);
+      skipped++;
+      continue;
+    }
+
+    if (opts.repairExisting) {
+      const { data: existing } = await opts.supabase
+        .from('agent_studio_agent_files')
+        .select('id, markdown')
+        .eq('agent_id', opts.agentId)
+        .eq('org_id', opts.orgId)
+        .eq('file_path', spec.path)
+        .maybeSingle();
+      if (existing) {
+        if (!(existing as { markdown?: string }).markdown?.trim()) {
+          await opts.supabase
+            .from('agent_studio_agent_files')
+            .update({
+              markdown: md,
+              last_modified_by: opts.userId,
+            })
+            .eq('id', existing.id);
+          await appendAgentFileVersion({
+            supabase: opts.supabase,
+            orgId: opts.orgId,
+            agentFileId: existing.id,
+            markdown: md,
+            changeNote: 'repaired empty seed',
+            userId: opts.userId,
+          });
+          repaired++;
+        } else {
+          skipped++;
+        }
+        continue;
+      }
+    }
+
+    const { data: insertedRow, error } = await opts.supabase
       .from('agent_studio_agent_files')
       .insert({
         org_id: opts.orgId,
@@ -120,17 +193,20 @@ export async function seedDefaultAgentMarkdownFiles(opts: {
       .single();
     if (error) {
       console.warn('[agent-studio][agent-files] insert failed', spec.path, error.message);
+      skipped++;
       continue;
     }
+    inserted++;
     await opts.supabase.from('agent_studio_agent_file_versions').insert({
       org_id: opts.orgId,
-      agent_file_id: inserted.id,
+      agent_file_id: insertedRow.id,
       version: 1,
       markdown: md,
       change_note: 'initial',
       created_by: opts.userId,
     });
   }
+  return { inserted, repaired, skipped };
 }
 
 export async function appendAgentFileVersion(opts: {

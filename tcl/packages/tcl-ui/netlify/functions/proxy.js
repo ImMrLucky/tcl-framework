@@ -10,14 +10,37 @@ const AGENT_STUDIO_TEMPLATE_GETS = {
   '/api/agent-studio/templates/workflows': 'workflows',
 };
 
+const CORS_ALLOW_HEADERS = 'Content-Type, Authorization, X-Active-Org-Id';
+
 function corsJsonHeaders() {
   return {
     'Content-Type': 'application/json',
     'Access-Control-Allow-Origin': '*',
-    'Access-Control-Allow-Headers': 'Content-Type, Authorization',
-    'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
+    'Access-Control-Allow-Headers': CORS_ALLOW_HEADERS,
+    'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS, PATCH',
     'Cache-Control': 'no-store',
   };
+}
+
+/** Netlify may store headers lowercased or in multiValueHeaders. */
+function getRequestHeader(event, name) {
+  const want = name.toLowerCase();
+  if (event.headers) {
+    for (const [k, v] of Object.entries(event.headers)) {
+      if (k.toLowerCase() === want && v != null && String(v).trim() !== '') {
+        return String(v);
+      }
+    }
+  }
+  const mv = event.multiValueHeaders;
+  if (mv) {
+    for (const [k, vals] of Object.entries(mv)) {
+      if (k.toLowerCase() === want && Array.isArray(vals) && vals[0]) {
+        return String(vals[0]);
+      }
+    }
+  }
+  return null;
 }
 
 function serveAgentStudioTemplates(fullPath) {
@@ -73,8 +96,8 @@ exports.handler = async (event, context) => {
       statusCode: 200,
       headers: {
         'Access-Control-Allow-Origin': '*',
-        'Access-Control-Allow-Headers': 'Content-Type, Authorization',
-        'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
+        'Access-Control-Allow-Headers': CORS_ALLOW_HEADERS,
+        'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS, PATCH',
       },
       body: '',
     };
@@ -215,23 +238,18 @@ exports.handler = async (event, context) => {
     const contentType = event.headers['content-type'] || event.headers['Content-Type'];
     const isMultipart = contentType && contentType.includes('multipart/form-data');
     
-    // Forward authorization header (Netlify lowercases all headers)
-    // Check both lowercase and original case
-    const authHeader = event.headers.authorization || event.headers['Authorization'] || event.headers['authorization'];
+    const authHeader = getRequestHeader(event, 'authorization');
     if (authHeader) {
       headers['Authorization'] = authHeader;
     }
-    
-    // Also forward any other headers that might be needed
-    // Netlify lowercases all header names, so we need to check lowercase versions
-    for (const [key, value] of Object.entries(event.headers)) {
-      const lowerKey = key.toLowerCase();
-      // Skip headers we've already handled or that Netlify manages
-      if (lowerKey !== 'content-type' && lowerKey !== 'authorization' && 
-          lowerKey !== 'host' && lowerKey !== 'content-length' &&
-          !lowerKey.startsWith('x-') && !lowerKey.startsWith('netlify-')) {
-        headers[key] = value;
-      }
+
+    const activeOrgId = getRequestHeader(event, 'x-active-org-id');
+    if (activeOrgId) {
+      headers['X-Active-Org-Id'] = activeOrgId;
+    }
+
+    if (!authHeader && fullPath.startsWith('/api/agent-studio')) {
+      console.warn('[proxy] missing Authorization for', fullPath);
     }
     
     // Handle body based on content type
