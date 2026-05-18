@@ -103,7 +103,7 @@ const PACK_KEYS = [
             </mat-step>
             <mat-step label="Files & create">
               <p class="muted small">
-                On create, the server seeds editable Markdown files (<code>agent.md</code>, <code>persona.md</code>, …) from the generic asset bundle.
+                On create, the server seeds all 12 Markdown files (<code>agent.md</code>, <code>persona.md</code>, <code>instructions.md</code>, …) with detailed role-aware content from the generic asset bundle.
                 Dispatch composes prompts from those files after migration <code>050</code> is applied.
               </p>
               <div class="row">
@@ -161,7 +161,7 @@ const PACK_KEYS = [
                       <mat-icon>refresh</mat-icon> Refresh
                     </button>
                     <button mat-stroked-button (click)="seedFiles(agent)" [disabled]="seedingFiles">
-                      {{ seedingFiles ? 'Seeding…' : 'Seed / repair files' }}
+                      {{ seedingFiles ? 'Seeding…' : 'Seed / upgrade all .md files' }}
                     </button>
                     <button mat-button (click)="previewSelected(agent)" [disabled]="!selectedFile">
                       <mat-icon>visibility</mat-icon> Preview composed prompt

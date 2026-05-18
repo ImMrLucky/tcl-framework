@@ -119,9 +119,27 @@ export async function seedDefaultAgentMarkdownFiles(opts: {
 }): Promise<{ inserted: number; repaired: number; skipped: number }> {
   const roleTpl = opts.roleTemplateKey ? findRoleTemplate(opts.roleTemplateKey) : null;
   const roleName = roleTpl?.name ?? opts.roleTemplateKey ?? 'Custom role';
+  const rolePersona =
+    opts.personaText?.trim() || roleTpl?.defaultPersona?.trim() || '';
   const vars: Record<string, string> = {
     agentName: opts.agentName,
     roleName,
+    roleKey: opts.roleTemplateKey ?? 'custom',
+    roleDescription:
+      roleTpl?.description ??
+      'Deliver assigned work with clear acceptance criteria, evidence, and safe collaboration.',
+    rolePersona:
+      rolePersona ||
+      'Be clear, professional, evidence-driven, and explicit about assumptions and risks.',
+    capabilities: (roleTpl?.defaultCapabilities?.length
+      ? roleTpl.defaultCapabilities.join(', ')
+      : 'analyze, plan, execute, review, document') as string,
+    tools: (roleTpl?.defaultTools?.length
+      ? roleTpl.defaultTools.join(', ')
+      : 'read_repo, read_board, write_board, post_comment') as string,
+    orchestratorMode: roleTpl?.isOrchestrator
+      ? 'This agent may orchestrate other specialists. Delegate implementation; own planning, routing, and review gates.'
+      : 'This agent executes work in its specialty. Escalate cross-cutting decisions to the orchestrator or a human.',
   };
 
   let inserted = 0;
@@ -130,8 +148,21 @@ export async function seedDefaultAgentMarkdownFiles(opts: {
 
   for (const spec of DEFAULT_AGENT_FILE_SPECS) {
     let md = readGenericFile(spec.path);
-    if (spec.fileType === 'persona' && opts.personaText?.trim()) {
-      md = `# Persona (from setup)\n\n${opts.personaText.trim()}\n\n---\n\n${md}`;
+    if (spec.fileType === 'persona') {
+      const personaBlocks: string[] = [];
+      if (opts.personaText?.trim()) {
+        personaBlocks.push(
+          `## Persona override (from agent setup)\n\n${opts.personaText.trim()}`
+        );
+      }
+      if (roleTpl?.defaultPersona?.trim() && roleTpl.defaultPersona.trim() !== opts.personaText?.trim()) {
+        personaBlocks.push(
+          `## Role template persona ({{roleName}})\n\n${roleTpl.defaultPersona.trim()}`
+        );
+      }
+      if (personaBlocks.length > 0) {
+        md = `${personaBlocks.join('\n\n')}\n\n---\n\n${md}`;
+      }
     }
     md = interpolateMarkdown(md, vars);
     if (!md.trim()) {
@@ -149,7 +180,11 @@ export async function seedDefaultAgentMarkdownFiles(opts: {
         .eq('file_path', spec.path)
         .maybeSingle();
       if (existing) {
-        if (!(existing as { markdown?: string }).markdown?.trim()) {
+        const current = ((existing as { markdown?: string }).markdown ?? '').trim();
+        const stale =
+          !current ||
+          current.length < Math.min(400, Math.floor(md.length * 0.35));
+        if (stale) {
           await opts.supabase
             .from('agent_studio_agent_files')
             .update({
@@ -162,7 +197,7 @@ export async function seedDefaultAgentMarkdownFiles(opts: {
             orgId: opts.orgId,
             agentFileId: existing.id,
             markdown: md,
-            changeNote: 'repaired empty seed',
+            changeNote: current ? 'upgraded template content' : 'repaired empty seed',
             userId: opts.userId,
           });
           repaired++;
