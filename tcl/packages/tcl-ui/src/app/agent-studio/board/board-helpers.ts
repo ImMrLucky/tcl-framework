@@ -79,6 +79,52 @@ export function isTerminalColumn(columnKey: string): boolean {
   return k === 'done' || k === 'ready_for_delivery' || k === 'release' || k === 'delivery';
 }
 
+/** Approximate % complete from column position + status (for board UX). */
+export function estimateTaskProgressPercent(
+  task: Task,
+  columns: Array<{ key: string }>
+): number {
+  if (task.status === 'DONE' || task.status === 'CANCELLED') {
+    return task.status === 'DONE' ? 100 : 0;
+  }
+  const stored = task.metadata?.['progressPercent'];
+  if (typeof stored === 'number' && stored >= 0 && stored <= 100) {
+    return Math.round(stored);
+  }
+  const keys = columns.map((c) => normalizeColumnKey(c.key));
+  const idx = keys.indexOf(normalizeColumnKey(task.column_key));
+  if (idx < 0) {
+    if (task.status === 'IN_PROGRESS') return 40;
+    if (task.status === 'REVIEW') return 75;
+    if (task.status === 'BLOCKED') return 15;
+    return 5;
+  }
+  const terminalIdx = keys.findIndex((k) => isTerminalColumn(k));
+  const denom = terminalIdx > 0 ? terminalIdx : Math.max(keys.length - 1, 1);
+  const base = Math.round((idx / denom) * 85);
+  if (task.status === 'IN_PROGRESS') return Math.min(95, base + 10);
+  if (task.status === 'REVIEW') return Math.min(98, base + 15);
+  if (task.status === 'BLOCKED') return Math.max(5, base - 10);
+  return Math.max(0, Math.min(100, base));
+}
+
+export function boardOverallProgress(
+  tasks: Task[],
+  columns: Array<{ key: string }>
+): { done: number; total: number; percent: number } {
+  const active = tasks.filter((t) => t.status !== 'CANCELLED');
+  const total = active.length;
+  if (!total) return { done: 0, total: 0, percent: 0 };
+  let sum = 0;
+  let done = 0;
+  for (const t of active) {
+    const p = estimateTaskProgressPercent(t, columns);
+    sum += p;
+    if (p >= 100 || t.status === 'DONE') done += 1;
+  }
+  return { done, total, percent: Math.round(sum / total) };
+}
+
 export interface Swimlane {
   key: string;
   label: string;

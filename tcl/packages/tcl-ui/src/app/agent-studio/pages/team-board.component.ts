@@ -14,11 +14,14 @@ import { MatSnackBar, MatSnackBarModule } from '@angular/material/snack-bar';
 import { MatTooltipModule } from '@angular/material/tooltip';
 import { MatDividerModule } from '@angular/material/divider';
 import { MatSlideToggleModule } from '@angular/material/slide-toggle';
+import { MatProgressBarModule } from '@angular/material/progress-bar';
 import { rememberBoardTeam } from '../board-nav';
 import { AgentStudioService } from '../agent-studio.service';
 import {
+  boardOverallProgress,
   buildSwimlanes,
   dropListId,
+  estimateTaskProgressPercent,
   isReviewColumn,
   isTerminalColumn,
   parseBoardSettings,
@@ -64,6 +67,7 @@ import {
     MatTooltipModule,
     MatDividerModule,
     MatSlideToggleModule,
+    MatProgressBarModule,
   ],
   template: `
     <section class="page" *ngIf="board; else loadingTpl">
@@ -95,6 +99,19 @@ import {
           </button>
         </div>
       </header>
+
+      <mat-card class="progress-summary" *ngIf="boardProgress.total">
+        <mat-card-content>
+          <div class="progress-row">
+            <span
+              ><strong>{{ boardProgress.percent }}%</strong> overall · {{ boardProgress.done }} /
+              {{ boardProgress.total }} tasks complete</span
+            >
+            <mat-progress-bar mode="determinate" [value]="boardProgress.percent"></mat-progress-bar>
+          </div>
+          <p class="muted small">Per-card bars are approximate based on column and status.</p>
+        </mat-card-content>
+      </mat-card>
 
       <mat-card class="toolbar">
         <mat-card-content>
@@ -181,7 +198,10 @@ import {
               <mat-label>Assigned agent</mat-label>
               <mat-select [(ngModel)]="newAgentId" [disabled]="pauseBlocked">
                 <mat-option [value]="null">— Unassigned —</mat-option>
-                <mat-option *ngFor="let a of agents" [value]="a.id">{{ a.name }}</mat-option>
+                <mat-option *ngIf="jarvisAgent" [value]="jarvisAssignValue">
+                  {{ jarvisAgent.name }} (delegates to team)
+                </mat-option>
+                <mat-option *ngFor="let a of specialistAgents" [value]="a.id">{{ a.name }}</mat-option>
               </mat-select>
             </mat-form-field>
           </div>
@@ -309,12 +329,15 @@ import {
               <mat-form-field appearance="outline">
                 <mat-label>Assigned agent</mat-label>
                 <mat-select
-                  [value]="t.assigned_agent_id"
+                  [value]="assignSelectValue(t)"
                   (selectionChange)="assignAgent(t, $event.value)"
                   [disabled]="pauseBlocked"
                 >
                   <mat-option [value]="null">— Unassigned —</mat-option>
-                  <mat-option *ngFor="let a of agents" [value]="a.id">{{ a.name }}</mat-option>
+                  <mat-option *ngIf="jarvisAgent" [value]="jarvisAssignValue">
+                    {{ jarvisAgent.name }} (delegates)
+                  </mat-option>
+                  <mat-option *ngFor="let a of specialistAgents" [value]="a.id">{{ a.name }}</mat-option>
                 </mat-select>
               </mat-form-field>
               <mat-form-field appearance="outline">
@@ -613,6 +636,23 @@ import {
         font-size: 11px;
         min-height: 22px;
       }
+      .progress-summary .progress-row {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+      }
+      .task-progress {
+        margin: 6px 0;
+      }
+      .task-progress mat-progress-bar {
+        height: 6px;
+        border-radius: 3px;
+      }
+      .progress-label {
+        font-size: 10px;
+        display: block;
+        margin-top: 2px;
+      }
       .task-assignee {
         display: flex;
         align-items: center;
@@ -831,6 +871,42 @@ export class TeamBoardComponent implements OnInit {
     return this.orgPaused || this.teamPaused;
   }
 
+  readonly jarvisAssignValue = '__jarvis__';
+
+  get jarvisAgent(): Agent | null {
+    return this.agents.find((a) => a.is_orchestrator) ?? null;
+  }
+
+  get specialistAgents(): Agent[] {
+    return this.agents.filter((a) => !a.is_orchestrator);
+  }
+
+  get boardProgress(): { done: number; total: number; percent: number } {
+    if (!this.board) return { done: 0, total: 0, percent: 0 };
+    return boardOverallProgress(this.tasks, this.board.columns);
+  }
+
+  taskProgress(task: Task): number {
+    return this.board ? estimateTaskProgressPercent(task, this.board.columns) : 0;
+  }
+
+  remainingPercent(task: Task): number {
+    return Math.max(0, 100 - this.taskProgress(task));
+  }
+
+  assignSelectValue(task: Task): string | null {
+    if (!task.assigned_agent_id) return null;
+    if (this.jarvisAgent && task.assigned_agent_id === this.jarvisAgent.id) {
+      return this.jarvisAssignValue;
+    }
+    return task.assigned_agent_id;
+  }
+
+  resolveAssignId(value: string | null): string | null {
+    if (value === this.jarvisAssignValue) return this.jarvisAgent?.id ?? null;
+    return value;
+  }
+
   ngOnInit(): void {
     this.teamId = this.route.snapshot.paramMap.get('teamId')!;
     rememberBoardTeam(this.teamId);
@@ -1021,8 +1097,21 @@ export class TeamBoardComponent implements OnInit {
     const prevColumn = task.column_key;
     task.column_key = nextCol;
     task.position = position;
+    const progressPercent = this.board
+      ? estimateTaskProgressPercent({ ...task, column_key: nextCol }, this.board.columns)
+      : 0;
 
-    this.studio.updateTask(task.id, { columnKey: nextCol, position }).subscribe({
+    this.studio
+      .updateTask(task.id, {
+        columnKey: nextCol,
+        position,
+        metadata: {
+          ...task.metadata,
+          progressPercent,
+          progressNote: 'Updated from board column move.',
+        },
+      })
+      .subscribe({
       next: (r) => {
         Object.assign(task, r.task);
         if (prevColumn !== nextCol && isReviewColumn(nextCol)) {
@@ -1131,7 +1220,8 @@ export class TeamBoardComponent implements OnInit {
   }
 
   assignAgent(task: Task, agentId: string | null): void {
-    this.studio.updateTask(task.id, { assignedAgentId: agentId }).subscribe({
+    const resolved = this.resolveAssignId(agentId);
+    this.studio.updateTask(task.id, { assignedAgentId: resolved }).subscribe({
       next: (r) => {
         Object.assign(task, r.task);
         this.rebuildGrid();
@@ -1227,7 +1317,7 @@ export class TeamBoardComponent implements OnInit {
         columnKey: this.newColumnKey,
         taskType: this.newType,
         priority: this.newPriority,
-        assignedAgentId: this.newAgentId ?? undefined,
+        assignedAgentId: this.resolveAssignId(this.newAgentId) ?? undefined,
       })
       .subscribe({
         next: () => {

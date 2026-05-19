@@ -32,6 +32,45 @@ export interface AgentTeam {
   updated_at: string;
 }
 
+export type WorkItemKind = 'APP_IDEA' | 'STORY' | 'TASK';
+
+export type DeliveryMode = 'SPEC_DRIVEN' | 'TASK_DRIVEN';
+
+export interface TeamBoxRecommendation {
+  teamBoxKey: string;
+  teamBoxName: string;
+  confidence: 'high' | 'medium' | 'low';
+  rationale: string;
+  suggestedTeamName: string;
+  deliveryMode: DeliveryMode;
+  complexityScore: number;
+  complexityLabel: 'simple' | 'moderate' | 'complex';
+}
+
+export interface JarvisWorkPlan {
+  deliveryMode: DeliveryMode;
+  complexityScore: number;
+  complexityLabel: string;
+  summary: string;
+  items: unknown[];
+}
+
+export interface TeamBoxCatalogEntry {
+  key: string;
+  name: string;
+  description: string;
+  icon: string;
+  workflowTemplateKey: string;
+  exampleObjective: string;
+  agentRoleCount: number;
+}
+
+export interface ProvisionedTeamAgent {
+  agentId: string;
+  name: string;
+  roleTemplateKey: string;
+}
+
 export interface Agent {
   id: string;
   org_id: string;

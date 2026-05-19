@@ -6,6 +6,12 @@ import {
   AgentConfigVersion,
   AgentStudioSettings,
   AgentTeam,
+  ProvisionedTeamAgent,
+  TeamBoxCatalogEntry,
+  TeamBoxRecommendation,
+  JarvisWorkPlan,
+  DeliveryMode,
+  WorkItemKind,
   AuditEvent,
   AgentStudioSummary,
   TeamCommandCenter,
@@ -195,6 +201,98 @@ export class AgentStudioService {
 
   createTeam(body: CreateTeamPayload): Observable<{ team: AgentTeam; board: KanbanBoard }> {
     return this.http.post<{ team: AgentTeam; board: KanbanBoard }>(this.url('/teams'), body);
+  }
+
+  listTeamBoxes(): Observable<{ boxes: TeamBoxCatalogEntry[] }> {
+    return this.http.get<{ boxes: TeamBoxCatalogEntry[] }>(this.url('/team-boxes'));
+  }
+
+  recommendTeamBox(body: {
+    idea: string;
+    requirements?: string;
+  }): Observable<{ recommendation: TeamBoxRecommendation; planPreview: JarvisWorkPlan }> {
+    return this.http.post<{ recommendation: TeamBoxRecommendation; planPreview: JarvisWorkPlan }>(
+      this.url('/team-boxes/recommend'),
+      body
+    );
+  }
+
+  planTeamWork(
+    teamId: string,
+    body: { idea: string; requirements?: string; deliveryMode?: DeliveryMode; replaceBacklog?: boolean }
+  ): Observable<{ plan: JarvisWorkPlan; tasks: Task[] }> {
+    return this.http.post<{ plan: JarvisWorkPlan; tasks: Task[] }>(
+      this.url(`/teams/${teamId}/plan-work`),
+      body
+    );
+  }
+
+  createTeamFromBox(body: {
+    name: string;
+    description?: string;
+    teamBoxKey: string;
+    projectId?: string;
+    appIdeaTitle?: string;
+    appIdeaDescription?: string;
+    idea?: string;
+    requirements?: string;
+    autoPlan?: boolean;
+    deliveryMode?: DeliveryMode;
+    startWorking?: boolean;
+  }): Observable<{
+    team: AgentTeam;
+    board: KanbanBoard;
+    teamBoxKey: string;
+    jarvisAgentId: string | null;
+    agents: ProvisionedTeamAgent[];
+    appIdeaTask?: Task;
+    run?: TeamRun;
+  }> {
+    return this.http.post<{
+      team: AgentTeam;
+      board: KanbanBoard;
+      teamBoxKey: string;
+      jarvisAgentId: string | null;
+      agents: ProvisionedTeamAgent[];
+      appIdeaTask?: Task;
+      run?: TeamRun;
+    }>(this.url('/teams/from-box'), body);
+  }
+
+  listTeamWorkItems(teamId: string): Observable<{ workItems: Task[] }> {
+    return this.http.get<{ workItems: Task[] }>(this.url(`/teams/${teamId}/work-items`));
+  }
+
+  createWorkItem(
+    teamId: string,
+    body: {
+      kind: WorkItemKind;
+      title: string;
+      description?: string;
+      parentTaskId?: string;
+      stories?: Array<{ title: string; description?: string }>;
+    }
+  ): Observable<{ workItem: Task; stories: Task[] }> {
+    return this.http.post<{ workItem: Task; stories: Task[] }>(
+      this.url(`/teams/${teamId}/work-items`),
+      body
+    );
+  }
+
+  startWorking(
+    teamId: string,
+    body?: {
+      objective?: string;
+      runMode?: TeamRunMode;
+      maxSteps?: number;
+      taskIds?: string[];
+      useJarvis?: boolean;
+    }
+  ): Observable<{ run: TeamRun; objective: string }> {
+    return this.http.post<{ run: TeamRun; objective: string }>(
+      this.url(`/teams/${teamId}/start-working`),
+      body ?? {}
+    );
   }
 
   getTeam(teamId: string): Observable<{ team: AgentTeam }> {

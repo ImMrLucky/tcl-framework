@@ -12,8 +12,17 @@ import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
 import { MatFormFieldModule } from '@angular/material/form-field';
 import { MatInputModule } from '@angular/material/input';
 import { MatSelectModule } from '@angular/material/select';
+import { MatTooltipModule } from '@angular/material/tooltip';
 import { AgentStudioService } from '../agent-studio.service';
-import { AgentTeam, AuditEvent, TeamCommandCenter, TeamRun, TeamRunMode } from '../agent-studio.types';
+import {
+  AgentTeam,
+  AuditEvent,
+  Task,
+  TeamCommandCenter,
+  TeamRun,
+  TeamRunMode,
+  WorkItemKind,
+} from '../agent-studio.types';
 import { migrationBannerText, migrationErrorText, responseNeedsMigration } from '../agent-studio-migration.util';
 
 @Component({
@@ -33,6 +42,7 @@ import { migrationBannerText, migrationErrorText, responseNeedsMigration } from 
     MatFormFieldModule,
     MatInputModule,
     MatSelectModule,
+    MatTooltipModule,
   ],
   template: `
     <div class="pause-banner" *ngIf="cc?.orgPaused">
@@ -131,12 +141,64 @@ import { migrationBannerText, migrationErrorText, responseNeedsMigration } from 
         </mat-card-content>
       </mat-card>
 
-      <mat-card class="launch-card">
-        <mat-card-title>Launch autonomous team</mat-card-title>
+      <mat-card class="work-card">
+        <mat-card-title>Assign work</mat-card-title>
+        <mat-card-content>
+          <div class="work-kind-row">
+            <button
+              mat-stroked-button
+              *ngFor="let k of workKinds"
+              [color]="workKind === k.value ? 'primary' : undefined"
+              (click)="workKind = k.value"
+            >
+              {{ k.label }}
+            </button>
+          </div>
+          <mat-form-field appearance="outline" class="full">
+            <mat-label>{{ workKindLabel }} title</mat-label>
+            <input matInput [(ngModel)]="workTitle" />
+          </mat-form-field>
+          <mat-form-field appearance="outline" class="full">
+            <mat-label>Description</mat-label>
+            <textarea matInput rows="2" [(ngModel)]="workDescription"></textarea>
+          </mat-form-field>
+          <mat-form-field appearance="outline" class="full" *ngIf="workKind === 'STORY' && appIdeas.length">
+            <mat-label>Under app idea (optional)</mat-label>
+            <mat-select [(ngModel)]="workParentId">
+              <mat-option [value]="null">— None —</mat-option>
+              <mat-option *ngFor="let idea of appIdeas" [value]="idea.id">{{ idea.title }}</mat-option>
+            </mat-select>
+          </mat-form-field>
+          <div class="work-actions">
+            <button mat-stroked-button color="primary" (click)="addWork()" [disabled]="!workTitle.trim() || addingWork">
+              Add to backlog
+            </button>
+            <button
+              mat-stroked-button
+              (click)="planWithJarvis()"
+              [disabled]="!workTitle.trim() || planning"
+              matTooltip="Break down into specs (complex) or stories (simple)"
+            >
+              {{ planning ? 'Planning…' : 'Plan with Jarvis' }}
+            </button>
+          </div>
+          <ul class="work-list" *ngIf="workItems.length">
+            <li *ngFor="let w of workItems">
+              <mat-chip class="tiny">{{ workItemKind(w) }}</mat-chip>
+              <span>{{ w.title }}</span>
+            </li>
+          </ul>
+          <p class="muted" *ngIf="!workItems.length">No backlog items yet.</p>
+        </mat-card-content>
+      </mat-card>
+
+      <mat-card class="launch-card highlight">
+        <mat-card-title>Start Working</mat-card-title>
+        <mat-card-subtitle>Jarvis coordinates the team until paused, blocked, or done.</mat-card-subtitle>
         <mat-card-content>
           <mat-form-field appearance="outline" class="full">
-            <mat-label>Objective</mat-label>
-            <textarea matInput rows="2" [(ngModel)]="runObjective"></textarea>
+            <mat-label>Objective (optional — uses backlog if empty)</mat-label>
+            <textarea matInput rows="2" [(ngModel)]="runObjective" [placeholder]="defaultObjectiveHint"></textarea>
           </mat-form-field>
           <div class="launch-row">
             <mat-form-field appearance="outline">
@@ -156,7 +218,9 @@ import { migrationBannerText, migrationErrorText, responseNeedsMigration } from 
             <span class="muted">{{ run.completed_steps }}/{{ run.max_steps }} steps</span>
           </div>
           <div class="launch-actions">
-            <button mat-flat-button color="primary" (click)="launchTeam()" [disabled]="launching || !runObjective.trim()">Launch</button>
+            <button mat-flat-button color="primary" (click)="launchTeam()" [disabled]="launching || !!activeRun">
+              <mat-icon>play_arrow</mat-icon> Start Working
+            </button>
             <button mat-stroked-button (click)="stepRun()" [disabled]="!activeRun">One step</button>
             <button mat-stroked-button (click)="pauseRun()" [disabled]="!activeRun">Pause</button>
             <button mat-stroked-button (click)="resumeRun()" [disabled]="!activeRun">Resume</button>
@@ -433,9 +497,18 @@ import { migrationBannerText, migrationErrorText, responseNeedsMigration } from 
         border-color: #fecaca;
         background: #fef2f2;
       }
+      .work-card { background: #fff; margin-bottom: 0; }
+      .work-kind-row { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
+      .work-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 8px; }
+      .work-list { list-style: none; padding: 0; margin: 16px 0 0; }
+      .work-list li { display: flex; align-items: center; gap: 8px; padding: 6px 0; border-bottom: 1px solid #eee; }
       .launch-card {
         background: #fff;
         border: 1px solid #c7d2fe;
+      }
+      .launch-card.highlight {
+        border-color: #6366f1;
+        background: linear-gradient(180deg, #f8f9ff 0%, #fff 48px);
       }
       .launch-row {
         display: grid;
@@ -468,10 +541,24 @@ export class TeamDetailComponent implements OnInit {
   teamId = '';
   runObjective = '';
   runMode: TeamRunMode = 'RUN_UNTIL_BLOCKED';
-  runMaxSteps = 25;
+  runMaxSteps = 50;
   activeRun: TeamRun | null = null;
   launching = false;
   migrationWarning: string | null = null;
+
+  workItems: Task[] = [];
+  workKind: WorkItemKind = 'APP_IDEA';
+  workTitle = '';
+  workDescription = '';
+  workParentId: string | null = null;
+  addingWork = false;
+  planning = false;
+  workKinds = [
+    { value: 'APP_IDEA' as WorkItemKind, label: 'App idea' },
+    { value: 'STORY' as WorkItemKind, label: 'Story' },
+    { value: 'TASK' as WorkItemKind, label: 'Task' },
+  ];
+  defaultObjectiveHint = 'Leave empty to use backlog titles as the team objective.';
 
   constructor(
     private route: ActivatedRoute,
@@ -494,6 +581,7 @@ export class TeamDetailComponent implements OnInit {
         this.team = payload.team;
         this.loading = false;
         this.loadActiveRun();
+        this.loadWorkItems();
       },
       error: (err) => {
         this.loading = false;
@@ -538,12 +626,80 @@ export class TeamDetailComponent implements OnInit {
     });
   }
 
+  get workKindLabel(): string {
+    return this.workKinds.find((k) => k.value === this.workKind)?.label ?? 'Work';
+  }
+
+  get appIdeas(): Task[] {
+    return this.workItems.filter((w) => this.workItemKind(w) === 'APP_IDEA');
+  }
+
+  workItemKind(task: Task): string {
+    const k = task.metadata?.['workItemKind'];
+    return typeof k === 'string' ? k : task.task_type;
+  }
+
+  loadWorkItems(): void {
+    this.studio.listTeamWorkItems(this.teamId).subscribe({
+      next: (r) => (this.workItems = r.workItems ?? []),
+    });
+  }
+
+  planWithJarvis(): void {
+    if (!this.workTitle.trim()) return;
+    this.planning = true;
+    this.studio
+      .planTeamWork(this.teamId, {
+        idea: this.workTitle.trim(),
+        requirements: this.workDescription.trim() || undefined,
+      })
+      .subscribe({
+        next: (r) => {
+          this.planning = false;
+          this.snack.open(r.plan.summary, 'OK', { duration: 6000 });
+          this.workTitle = '';
+          this.workDescription = '';
+          this.loadWorkItems();
+          this.reload();
+        },
+        error: (err) => {
+          this.planning = false;
+          this.snack.open(err?.error?.error || 'Planning failed', 'OK', { duration: 4000 });
+        },
+      });
+  }
+
+  addWork(): void {
+    if (!this.workTitle.trim()) return;
+    this.addingWork = true;
+    this.studio
+      .createWorkItem(this.teamId, {
+        kind: this.workKind,
+        title: this.workTitle.trim(),
+        description: this.workDescription.trim() || undefined,
+        parentTaskId: this.workParentId ?? undefined,
+      })
+      .subscribe({
+        next: () => {
+          this.addingWork = false;
+          this.workTitle = '';
+          this.workDescription = '';
+          this.snack.open('Added to backlog.', 'OK', { duration: 2500 });
+          this.loadWorkItems();
+          this.reload();
+        },
+        error: (err) => {
+          this.addingWork = false;
+          this.snack.open(err?.error?.error || 'Could not add work', 'OK', { duration: 4000 });
+        },
+      });
+  }
+
   launchTeam(): void {
-    if (!this.runObjective.trim()) return;
     this.launching = true;
     this.studio
-      .createTeamRun(this.teamId, {
-        objective: this.runObjective.trim(),
+      .startWorking(this.teamId, {
+        objective: this.runObjective.trim() || undefined,
         runMode: this.runMode,
         maxSteps: this.runMaxSteps,
         useJarvis: true,
@@ -552,11 +708,12 @@ export class TeamDetailComponent implements OnInit {
         next: (r) => {
           this.launching = false;
           this.activeRun = r.run;
-          this.snack.open('Team run queued — start local runner to execute.', 'OK', { duration: 5000 });
+          if (!this.runObjective.trim()) this.runObjective = r.objective;
+          this.snack.open('Team run queued — pair local runner to execute.', 'OK', { duration: 5000 });
         },
         error: (err) => {
           this.launching = false;
-          const msg = migrationErrorText(err) ?? err?.error?.error ?? 'Launch failed';
+          const msg = migrationErrorText(err) ?? err?.error?.error ?? 'Start Working failed';
           this.migrationWarning = migrationErrorText(err) ?? this.migrationWarning;
           this.snack.open(msg, 'OK', { duration: 8000 });
         },

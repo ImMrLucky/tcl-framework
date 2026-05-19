@@ -37,6 +37,7 @@ import { resolveTemplatePackId, seedDefaultAgentMarkdownFiles } from './agent-fi
 import { ensureSystemTemplatesSeeded } from './seed-system-templates.js';
 import { registerAutonomousAgentStudioRoutes } from './autonomous-routes.js';
 import { provisionJarvisForTeam } from './jarvis.js';
+import { registerTeamBoxRoutes } from './team-box-routes.js';
 
 const STAFF_ROLES = new Set(['OWNER', 'ADMIN', 'MANAGER']);
 const ANALYST_ROLES = new Set(['OWNER', 'ADMIN', 'MANAGER', 'ANALYST']);
@@ -1853,6 +1854,13 @@ export function setupAgentStudioRoutes(app: express.Application): void {
     res.json({ events: data ?? [] });
   });
 
+  registerTeamBoxRoutes(app, {
+    ensureContext,
+    requireStaff,
+    requireAnalyst,
+    dbDown,
+    blockedByPause,
+  });
   registerAutonomousAgentStudioRoutes(app);
   registerAgentStudioTemplateFileRoutes(app);
 }
