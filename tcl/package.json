@@ -12,7 +12,9 @@
     "packages/agent-integrations",
     "packages/agent-mcp",
     "packages/agent-model-router",
-    "packages/agent-runner-local"
+    "packages/agent-runner-local",
+    "packages/tcl-sdk",
+    "packages/tcl-browser-runner"
   ],
   "scripts": {
     "install:all": "npm install",

@@ -25,6 +25,46 @@ function headers(config: RunnerConfig, withAuth = false): Record<string, string>
   return h;
 }
 
+export function runnerHeaders(config: RunnerConfig): Record<string, string> {
+  const token = config.runnerAuthToken;
+  if (!token || !config.runnerId) {
+    throw new Error('Runner auth missing — run `agent-runner-local pair` first.');
+  }
+  return {
+    'Content-Type': 'application/json',
+    Authorization: `Bearer ${token}`,
+    'X-ProtectQA-Runner-Id': config.runnerId,
+  };
+}
+
+async function runnerRequest<T>(
+  config: RunnerConfig,
+  method: string,
+  path: string,
+  body?: unknown
+): Promise<T> {
+  const res = await fetch(`${baseUrl(config)}${path}`, {
+    method,
+    headers: runnerHeaders(config),
+    body: body != null ? JSON.stringify(body) : undefined,
+  });
+  const text = await res.text();
+  let json: unknown;
+  try {
+    json = text ? JSON.parse(text) : {};
+  } catch {
+    json = { raw: text };
+  }
+  if (!res.ok) {
+    const err =
+      typeof json === 'object' && json && 'error' in json
+        ? String((json as { error: unknown }).error)
+        : res.statusText;
+    throw new ApiError(err || `HTTP ${res.status}`, res.status, json);
+  }
+  return json as T;
+}
+
 async function request<T>(
   config: RunnerConfig,
   method: string,
@@ -80,7 +120,10 @@ export async function pairRunner(
   config: RunnerConfig,
   pairingCode: string,
   deviceLabel?: string
-): Promise<{ runner: { id: string; name: string; status: string } }> {
+): Promise<{
+  runner: { id: string; name: string; status: string };
+  runnerAuthToken: string;
+}> {
   return request(config, 'POST', '/api/agent-studio/local-runners/pair', {
     pairingCode: pairingCode.trim().toUpperCase(),
     deviceLabel,
@@ -90,33 +133,26 @@ export async function pairRunner(
 
 export async function heartbeatRunner(
   config: RunnerConfig,
-  runnerId: string,
   capabilities?: Record<string, unknown>
 ): Promise<void> {
-  await request(config, 'POST', `/api/agent-studio/local-runners/${runnerId}/heartbeat`, {
+  await runnerRequest(config, 'POST', `/api/agent-studio/local-runners/${config.runnerId}/heartbeat`, {
     capabilities: capabilities ?? { version: '0.1.0' },
   });
 }
 
-export async function pollJobs(config: RunnerConfig, runnerId: string): Promise<{
+export async function pollJobs(config: RunnerConfig): Promise<{
   jobs: TeamRunJob[];
   revoked?: boolean;
 }> {
-  return request(
-    config,
-    'GET',
-    `/api/agent-studio/local-runner/jobs/poll?runnerId=${encodeURIComponent(runnerId)}`
-  );
+  return runnerRequest(config, 'GET', '/api/agent-studio/local-runner/jobs/poll');
 }
 
 export async function claimJob(
   config: RunnerConfig,
   jobId: string,
-  runnerId: string,
   sessionId: string
 ): Promise<{ run: TeamRunJob }> {
-  return request(config, 'POST', `/api/agent-studio/local-runner/jobs/${jobId}/claim`, {
-    runnerId,
+  return runnerRequest(config, 'POST', `/api/agent-studio/local-runner/jobs/${jobId}/claim`, {
     sessionId,
   });
 }
@@ -126,7 +162,7 @@ export async function progressJob(
   jobId: string,
   patch: { completedSteps?: number; status?: string; metadata?: Record<string, unknown> }
 ): Promise<{ run: TeamRunJob }> {
-  return request(config, 'POST', `/api/agent-studio/local-runner/jobs/${jobId}/progress`, patch);
+  return runnerRequest(config, 'POST', `/api/agent-studio/local-runner/jobs/${jobId}/progress`, patch);
 }
 
 export async function completeJob(
@@ -135,7 +171,7 @@ export async function completeJob(
   status?: string,
   metadata?: Record<string, unknown>
 ): Promise<{ run: TeamRunJob }> {
-  return request(config, 'POST', `/api/agent-studio/local-runner/jobs/${jobId}/complete`, {
+  return runnerRequest(config, 'POST', `/api/agent-studio/local-runner/jobs/${jobId}/complete`, {
     status,
     metadata,
   });
@@ -147,7 +183,7 @@ export async function failJob(
   error: string,
   metadata?: Record<string, unknown>
 ): Promise<{ run: TeamRunJob }> {
-  return request(config, 'POST', `/api/agent-studio/local-runner/jobs/${jobId}/fail`, {
+  return runnerRequest(config, 'POST', `/api/agent-studio/local-runner/jobs/${jobId}/fail`, {
     error,
     metadata,
   });

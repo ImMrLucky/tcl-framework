@@ -3,7 +3,12 @@
  */
 
 import express from 'express';
-import { createHash, randomBytes } from 'node:crypto';
+import { randomBytes } from 'node:crypto';
+import { hashPairingCode } from './runner-auth.js';
+import {
+  pairLocalRunnerHandler,
+  registerLocalRunnerExecutionRoutes,
+} from './local-runner-routes.js';
 import { supabaseAdmin } from '../supabase.js';
 import { getOrgContext, type OrgContext } from '../auth-context.js';
 import { logAgentStudioAudit } from './audit.js';
@@ -496,7 +501,8 @@ export function registerAutonomousAgentStudioRoutes(app: express.Application): v
     const ctx = await ensureContext(req, res);
     if (!ctx || !requireStaff(ctx, res) || dbDown(res)) return;
     const code = randomBytes(4).toString('hex').toUpperCase();
-    const hash = createHash('sha256').update(code).digest('hex');
+    const hash = hashPairingCode(code);
+    const expiresAt = new Date(Date.now() + 10 * 60 * 1000).toISOString();
     const name = req.body?.name ?? 'Local Runner';
     const { data, error } = await supabaseAdmin!
       .from('agent_studio_local_runners')
@@ -505,6 +511,7 @@ export function registerAutonomousAgentStudioRoutes(app: express.Application): v
         name,
         device_label: req.body?.deviceLabel ?? null,
         pairing_code_hash: hash,
+        pairing_expires_at: expiresAt,
         status: 'NEW',
         created_by: ctx.userId ?? null,
       })
@@ -521,51 +528,8 @@ export function registerAutonomousAgentStudioRoutes(app: express.Application): v
     });
   });
 
-  app.post('/api/agent-studio/local-runners/pair', async (req, res) => {
-    const { pairingCode, runnerPublicKey, deviceLabel } = req.body ?? {};
-    if (!pairingCode) {
-      return res.status(400).json({ error: 'pairingCode is required' });
-    }
-    const hash = createHash('sha256').update(String(pairingCode)).digest('hex');
-    const { data: runner, error } = await supabaseAdmin!
-      .from('agent_studio_local_runners')
-      .select('*')
-      .eq('pairing_code_hash', hash)
-      .eq('status', 'NEW')
-      .maybeSingle();
-    if (error || !runner) {
-      return res.status(404).json({ error: 'Invalid or expired pairing code' });
-    }
-    const { data: updated, error: upErr } = await supabaseAdmin!
-      .from('agent_studio_local_runners')
-      .update({
-        status: 'PAIRED',
-        runner_public_key: runnerPublicKey ?? null,
-        device_label: deviceLabel ?? runner.device_label,
-        pairing_code_hash: null,
-        last_seen_at: new Date().toISOString(),
-      })
-      .eq('id', runner.id)
-      .select('*')
-      .single();
-    if (upErr) return res.status(500).json({ error: upErr.message });
-    res.json({ runner: updated });
-  });
-
-  app.post('/api/agent-studio/local-runners/:runnerId/heartbeat', async (req, res) => {
-    const { runnerId } = req.params;
-    const { data, error } = await supabaseAdmin!
-      .from('agent_studio_local_runners')
-      .update({
-        status: 'ONLINE',
-        last_seen_at: new Date().toISOString(),
-        capabilities: req.body?.capabilities ?? {},
-      })
-      .eq('id', runnerId)
-      .select('*')
-      .single();
-    if (error || !data) return res.status(404).json({ error: 'Runner not found' });
-    res.json({ runner: data });
+  app.post('/api/agent-studio/local-runners/pair', (req, res) => {
+    void pairLocalRunnerHandler(req, res);
   });
 
   app.post('/api/agent-studio/local-runners/:runnerId/revoke', async (req, res) => {
@@ -573,7 +537,12 @@ export function registerAutonomousAgentStudioRoutes(app: express.Application): v
     if (!ctx || !requireStaff(ctx, res) || dbDown(res)) return;
     const { data, error } = await supabaseAdmin!
       .from('agent_studio_local_runners')
-      .update({ status: 'REVOKED' })
+      .update({
+        status: 'REVOKED',
+        runner_auth_token_hash: null,
+        runner_session_token_hash: null,
+        pairing_code_hash: null,
+      })
       .eq('id', req.params.runnerId)
       .eq('org_id', ctx.orgId)
       .select('*')
@@ -647,114 +616,7 @@ export function registerAutonomousAgentStudioRoutes(app: express.Application): v
     res.status(204).end();
   });
 
-  // -------------------------------------------------------------------------
-  // Local runner job polling (MVP: team runs for paired runner)
-  // -------------------------------------------------------------------------
-  app.get('/api/agent-studio/local-runner/jobs/poll', async (req, res) => {
-    const runnerId = req.query.runnerId as string;
-    if (!runnerId) return res.status(400).json({ error: 'runnerId query required' });
-
-    const { data: runner, error: runnerErr } = await supabaseAdmin!
-      .from('agent_studio_local_runners')
-      .select('id, org_id, status')
-      .eq('id', runnerId)
-      .maybeSingle();
-    if (runnerErr) return res.status(500).json({ error: runnerErr.message });
-    if (!runner) return res.status(404).json({ error: 'Runner not found' });
-    if (runner.status === 'REVOKED') {
-      return res.json({ jobs: [], revoked: true });
-    }
-
-    // Claimable: already bound to this runner, or org-wide QUEUED runs not yet bound.
-    const { data: runs, error } = await supabaseAdmin!
-      .from('agent_studio_team_runs')
-      .select('*')
-      .eq('org_id', runner.org_id)
-      .in('status', ['QUEUED', 'RUNNING', 'PAUSED'])
-      .or(`local_runner_id.eq.${runnerId},and(local_runner_id.is.null,status.eq.QUEUED)`)
-      .order('created_at', { ascending: true })
-      .limit(10);
-    if (error) {
-      sendAutonomousListError(res, error, { jobs: [] });
-      return;
-    }
-
-    res.json({ jobs: runs ?? [] });
-  });
-
-  app.post('/api/agent-studio/local-runner/jobs/:jobId/claim', async (req, res) => {
-    const { jobId } = req.params;
-    const { runnerId, sessionId } = req.body ?? {};
-    const { data, error } = await supabaseAdmin!
-      .from('agent_studio_team_runs')
-      .update({
-        status: 'RUNNING',
-        local_runner_id: runnerId ?? undefined,
-        local_runner_session_id: sessionId ?? null,
-        started_at: new Date().toISOString(),
-        last_heartbeat_at: new Date().toISOString(),
-      })
-      .eq('id', jobId)
-      .select('*')
-      .single();
-    if (error || !data) return res.status(404).json({ error: 'Job not found' });
-    res.json({ run: data });
-  });
-
-  app.post('/api/agent-studio/local-runner/jobs/:jobId/progress', async (req, res) => {
-    const { jobId } = req.params;
-    const { completedSteps, status, metadata } = req.body ?? {};
-    const patch: Record<string, unknown> = {
-      last_heartbeat_at: new Date().toISOString(),
-    };
-    if (completedSteps != null) patch.completed_steps = completedSteps;
-    if (status) patch.status = status;
-    if (metadata) patch.metadata = metadata;
-
-    const { data, error } = await supabaseAdmin!
-      .from('agent_studio_team_runs')
-      .update(patch)
-      .eq('id', jobId)
-      .select('*')
-      .single();
-    if (error || !data) return res.status(404).json({ error: 'Job not found' });
-    res.json({ run: data });
-  });
-
-  app.post('/api/agent-studio/local-runner/jobs/:jobId/complete', async (req, res) => {
-    const { jobId } = req.params;
-    const { status, metadata } = req.body ?? {};
-    const { data, error } = await supabaseAdmin!
-      .from('agent_studio_team_runs')
-      .update({
-        status: status ?? 'SUCCEEDED',
-        finished_at: new Date().toISOString(),
-        last_heartbeat_at: new Date().toISOString(),
-        metadata: metadata ?? {},
-      })
-      .eq('id', jobId)
-      .select('*')
-      .single();
-    if (error || !data) return res.status(404).json({ error: 'Job not found' });
-    res.json({ run: data });
-  });
-
-  app.post('/api/agent-studio/local-runner/jobs/:jobId/fail', async (req, res) => {
-    const { jobId } = req.params;
-    const { error: errMsg, metadata } = req.body ?? {};
-    const { data, error } = await supabaseAdmin!
-      .from('agent_studio_team_runs')
-      .update({
-        status: 'FAILED',
-        finished_at: new Date().toISOString(),
-        metadata: { error: errMsg, ...(metadata ?? {}) },
-      })
-      .eq('id', jobId)
-      .select('*')
-      .single();
-    if (error || !data) return res.status(404).json({ error: 'Job not found' });
-    res.json({ run: data });
-  });
+  registerLocalRunnerExecutionRoutes(app);
 
   // -------------------------------------------------------------------------
   // Model routing preview

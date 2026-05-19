@@ -374,6 +374,27 @@ export async function handleAgentStudioDispatch(
       },
     });
 
+    if (result.text?.trim()) {
+      const sources: Array<{ id: string; text: string; label?: string }> = [];
+      if (activeFilePath && activeFileContent) {
+        sources.push({
+          id: 'active-file',
+          text: String(activeFileContent).slice(0, 12000),
+          label: String(activeFilePath),
+        });
+      }
+      const { scheduleTclAnalysisForDispatch } = await import('./tcl-studio-service.js');
+      scheduleTclAnalysisForDispatch({
+        orgId: ctx.orgId,
+        teamId,
+        agentId,
+        taskId: taskId ?? null,
+        question: composed.userPrompt,
+        answer: result.text,
+        sources: sources.length ? sources : undefined,
+      });
+    }
+
     res.json({
       outcome: 'OK',
       provider,
@@ -381,6 +402,7 @@ export async function handleAgentStudioDispatch(
       ruleId,
       text: result.text,
       filesUsed: composed.filesUsed,
+      tclAnalysisScheduled: !!result.text?.trim(),
     });
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : 'Dispatch failed';

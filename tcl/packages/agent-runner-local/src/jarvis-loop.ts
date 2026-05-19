@@ -1,20 +1,17 @@
 import type { RunnerConfig } from './config.js';
 import type { TeamRunJob } from './api-client.js';
 import { previewRouting } from './api-client.js';
-import { fetchRecentEvents, logTeamEvent } from './board-client.js';
+import { fetchBoardState } from './runner-api.js';
 import { chatCompletion } from './model-client.js';
-import { runAgentLoop, type AgentLoopInput } from './agent-loop.js';
+import { logTeamEvent } from './board-client.js';
+import {
+  executeJarvisAction,
+  parseJarvisAction,
+  type JarvisActionType,
+} from './jarvis-actions.js';
+import { scheduleJarvisTclStep } from './runner-api.js';
 
-export type JarvisActionType =
-  | 'ASSIGN_TASK'
-  | 'ASK_AGENT_STATUS'
-  | 'START_AGENT_TASK'
-  | 'CREATE_REVIEW_GATE'
-  | 'REQUEST_HUMAN_REVIEW'
-  | 'MOVE_TASK'
-  | 'SUMMARIZE_PROGRESS'
-  | 'STOP_WAITING_FOR_HUMAN'
-  | 'STOP_RUN_COMPLETE';
+export type { JarvisActionType };
 
 export interface JarvisTickResult {
   action: JarvisActionType;
@@ -30,14 +27,28 @@ export async function runJarvisTick(
   const teamRunId = run.id;
 
   let eventLines = '(no events yet)';
+  let boardHint = '';
   try {
-    const { events } = await fetchRecentEvents(config, teamId, teamRunId, 100);
-    eventLines = events
-      .slice(-30)
+    const [{ events }, board] = await Promise.all([
+      import('./api-client.js').then((m) =>
+        m.listTeamEvents(m.requireAuth(config), teamId, teamRunId, 50).catch(() => ({
+          events: [],
+        }))
+      ),
+      fetchBoardState(config, teamId).catch(() => null),
+    ]);
+    eventLines = (events ?? [])
+      .slice(-25)
       .map((e) => `#${e.sequence} [${e.actor_type}] ${e.event_type}: ${e.summary}`)
       .join('\n');
+    if (board?.tasks) {
+      const unassigned = board.tasks.filter((t) => !t.assigned_agent_id && t.status !== 'DONE');
+      boardHint = `Unassigned tasks: ${unassigned.length}. Agents: ${(board.agents ?? [])
+        .map((a) => a.name)
+        .join(', ')}`;
+    }
   } catch {
-    eventLines = '(events unavailable — run `agent-runner-local login` to sync)';
+    eventLines = '(partial context)';
   }
 
   let provider = config.defaultProvider ?? 'openai';
@@ -47,22 +58,25 @@ export async function runJarvisTick(
     provider = route.provider;
     model = route.model;
   } catch {
-    /* use defaults */
+    /* local vault defaults */
   }
 
-  const system = `You are Jarvis, the team orchestrator for Agent Studio.
-Respond with JSON only: { "action": "<JarvisActionType>", "summary": "<one paragraph>", "done": <boolean> }
-Actions: SUMMARIZE_PROGRESS, REQUEST_HUMAN_REVIEW, STOP_RUN_COMPLETE, ASSIGN_TASK, START_AGENT_TASK.
-Rules: never bypass pause or review gates; prefer small safe steps; if blocked, set done false and action REQUEST_HUMAN_REVIEW.`;
+  const system = `You are Jarvis, the team orchestrator. LOCAL_RUNNER_DEFAULT: inference runs on the user's machine.
+Respond with JSON only:
+{ "type": "<JarvisActionType>", "summary": "<string>", "done": <boolean>, "taskId"?: "uuid", "agentId"?: "uuid", "columnKey"?: "string", "title"?: "string", "reason"?: "string" }
+
+Allowed types: SUMMARIZE_STATUS, ASSIGN_TASK, MOVE_TASK, MARK_BLOCKED, UNBLOCK_TASK, REQUEST_REVIEW, CREATE_TASK, STOP_WAITING_FOR_HUMAN, STOP_RUN_COMPLETE.
+Pick one safe next action. Never bypass pause or review gates.`;
 
   const user = `Team run ${teamRunId}
 Objective: ${run.objective}
-Status: ${run.status} | Steps ${run.completed_steps}/${run.max_steps} | Mode ${run.run_mode}
+Steps ${run.completed_steps}/${run.max_steps} | Status ${run.status}
+${boardHint}
 
-Recent shared JSONL events:
+Recent JSONL:
 ${eventLines}
 
-What is the next orchestration action?`;
+What is the next action?`;
 
   const chat = await chatCompletion({
     provider,
@@ -73,60 +87,55 @@ What is the next orchestration action?`;
     ],
   });
 
-  let action: JarvisActionType = 'SUMMARIZE_PROGRESS';
-  let done = false;
-  let summary = chat.text.slice(0, 2000);
-
-  try {
-    const parsed = JSON.parse(chat.text.replace(/^```json\s*/i, '').replace(/```$/i, '').trim()) as {
-      action?: JarvisActionType;
-      summary?: string;
-      done?: boolean;
-    };
-    if (parsed.action) action = parsed.action;
-    if (parsed.summary) summary = parsed.summary;
-    if (typeof parsed.done === 'boolean') done = parsed.done;
-  } catch {
-    summary = chat.text.slice(0, 500);
+  let parsed = parseJarvisAction(
+    tryParseJson(chat.text) ?? { type: 'SUMMARIZE_STATUS', summary: chat.text.slice(0, 500) }
+  );
+  if (!parsed) {
+    parsed = { type: 'SUMMARIZE_STATUS', summary: chat.text.slice(0, 500) };
   }
 
-  await logTeamEvent(config, teamId, {
-    teamRunId,
-    agentId: run.orchestrator_agent_id ?? undefined,
-    eventType: 'jarvis.tick',
-    actorType: 'JARVIS',
-    actorName: 'Jarvis',
-    summary,
-    jsonl: { action, provider, model, done },
-  });
+  const result = await executeJarvisAction({ config, run, action: parsed });
+  let done = parsed.type === 'STOP_RUN_COMPLETE' || !!result.done;
+  if (run.run_mode === 'ONE_STEP') done = true;
+  if (run.completed_steps + 1 >= run.max_steps) done = true;
 
-  if (action === 'START_AGENT_TASK' && run.orchestrator_agent_id) {
-    const agentInput: AgentLoopInput = {
-      teamId,
-      agentId: run.orchestrator_agent_id,
-      userPrompt: `Execute one step toward: ${run.objective}`,
-      useCase: 'code',
-    };
-    const agentResult = await runAgentLoop(config, agentInput, { provider, model });
+  if (!result.ok && result.error) {
     await logTeamEvent(config, teamId, {
       teamRunId,
-      agentId: run.orchestrator_agent_id,
-      eventType: 'agent.tick',
-      actorType: 'AGENT',
-      summary: agentResult.summary,
-      jsonl: { status: agentResult.status },
+      eventType: 'jarvis.action_failed',
+      actorType: 'JARVIS',
+      summary: result.summary,
+      jsonl: { type: parsed.type, error: result.error },
     });
-    if (agentResult.status === 'NEEDS_HUMAN') done = false;
   }
 
-  if (run.completed_steps + 1 >= run.max_steps) {
-    done = true;
-    action = 'STOP_RUN_COMPLETE';
+  if (chat.text?.trim() && run.orchestrator_agent_id) {
+    scheduleJarvisTclStep(config, {
+      teamId,
+      teamRunId,
+      agentId: run.orchestrator_agent_id,
+      objective: run.objective,
+      jarvisOutput: chat.text,
+      actionSummary: `${parsed.type}: ${result.summary}`,
+    }).catch(() => {
+      /* TCL optional */
+    });
   }
 
-  if (run.run_mode === 'ONE_STEP') {
-    done = true;
-  }
+  return {
+    action: result.type,
+    summary: result.summary,
+    done,
+  };
+}
 
-  return { action, summary, done };
+function tryParseJson(text: string): Record<string, unknown> | null {
+  try {
+    return JSON.parse(text.replace(/^```json\s*/i, '').replace(/```$/i, '').trim()) as Record<
+      string,
+      unknown
+    >;
+  } catch {
+    return null;
+  }
 }

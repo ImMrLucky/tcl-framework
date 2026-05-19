@@ -12,14 +12,16 @@ export async function runPairFlow(config: RunnerConfig): Promise<RunnerConfig> {
   const apiBaseUrl = await promptLine('ProtectQA API URL', config.apiBaseUrl);
   const deviceLabel = await promptLine('Device label', hostname());
   const next = { ...config, apiBaseUrl };
-  const { runner } = await pairRunner(next, pairingCode, deviceLabel);
+  const { runner, runnerAuthToken } = await pairRunner(next, pairingCode, deviceLabel);
   const paired: RunnerConfig = {
     ...next,
     runnerId: runner.id,
     runnerName: runner.name,
+    runnerAuthToken,
     pairedAt: new Date().toISOString(),
   };
   saveConfig(paired);
   console.log(`Paired runner ${runner.name} (${runner.id})`);
+  console.log('Runner auth token saved locally (shown only once at pair time).');
   return paired;
 }

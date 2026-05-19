@@ -29,14 +29,32 @@ import { migrationBannerText, responseNeedsMigration, migrationErrorText } from 
         </mat-card-content>
       </mat-card>
 
-      <mat-card>
-        <mat-card-title>Execution mode</mat-card-title>
+      <mat-card class="hero">
+        <mat-card-title>Local-first execution (default)</mat-card-title>
         <mat-card-content>
           <mat-chip color="primary" selected>LOCAL_RUNNER_DEFAULT</mat-chip>
-          <p class="muted small">
-            Optional CLOUD_ENCRYPTED uses server BYOK (Settings). Install:
-            <code>npx &#64;protectqa/agent-runner-local setup</code>
+          <p>
+            ProtectQA is the <strong>control plane</strong> (teams, board, runs, audit). Your machine is the
+            <strong>execution plane</strong> — models, tools, and keys never leave the runner unless you opt into cloud
+            dispatch.
           </p>
+          <p class="muted small">
+            Server-side <code>/dispatch</code> and Settings provider keys are optional cloud mode only.
+          </p>
+        </mat-card-content>
+      </mat-card>
+
+      <mat-card>
+        <mat-card-title>Runtime setup wizard</mat-card-title>
+        <mat-card-content>
+          <ol class="wizard">
+            <li><code>npx @protectqa/agent-runner-local setup</code></li>
+            <li>Generate pairing code below, then <code>npx @protectqa/agent-runner-local pair</code></li>
+            <li><code>npx @protectqa/agent-runner-local login</code> (optional user session for UI sync)</li>
+            <li><code>npx @protectqa/agent-runner-local add-key openai</code> (keys stay local)</li>
+            <li><code>npx @protectqa/agent-runner-local register-vendors</code></li>
+            <li><code>npx @protectqa/agent-runner-local start</code></li>
+          </ol>
         </mat-card-content>
       </mat-card>
 
@@ -77,6 +95,9 @@ import { migrationBannerText, responseNeedsMigration, migrationErrorText } from 
   styles: [
     `
       .page { display: flex; flex-direction: column; gap: 16px; }
+      .hero { border-left: 4px solid #6366f1; }
+      .wizard { margin: 0; padding-left: 20px; line-height: 1.8; }
+      .wizard code { font-size: 12px; }
       .header h2 { margin: 0 0 4px; }
       .muted { color: #64748b; }
       .small { font-size: 13px; }

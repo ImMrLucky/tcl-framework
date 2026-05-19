@@ -16,7 +16,7 @@ import { MatFormFieldModule } from '@angular/material/form-field';
 import { MatInputModule } from '@angular/material/input';
 import { MatSnackBar, MatSnackBarModule } from '@angular/material/snack-bar';
 import { MatSelectModule } from '@angular/material/select';
-import { Agent, TeamEventLogEntry } from '../agent-studio.types';
+import { Agent, StudioTclReport, TclAnalysisRow, TeamEventLogEntry } from '../agent-studio.types';
 import {
   loadMonacoFromCdn,
   type MonacoEditor,
@@ -100,6 +100,10 @@ main();
         <button mat-stroked-button (click)="askJarvis()">Ask Jarvis</button>
         <button mat-stroked-button (click)="loadJsonl()">JSONL</button>
         <a mat-button [routerLink]="['/agent-studio', 'teams', teamId, 'jarvis']">Jarvis</a>
+        <a mat-button [routerLink]="['/agent-studio', 'teams', teamId, 'tcl']">
+          <mat-icon>verified</mat-icon>
+          TCL Insights
+        </a>
       </header>
     <section class="ide">
       <aside class="file-tree">
@@ -175,6 +179,39 @@ main();
               </ul>
               <ng-template #noProblems>
                 <p class="muted pad">No problems in the active file.</p>
+              </ng-template>
+            </mat-tab>
+            <mat-tab label="TCL">
+              <div class="tcl-panel" *ngIf="latestTclReport as r; else tclEmpty">
+                <p class="tcl-score" *ngIf="r.scores.overall != null">
+                  TCL score <strong>{{ r.scores.overall | number: '1.0-0' }}</strong>
+                  <span class="muted"> · {{ r.issueCount }} issues</span>
+                </p>
+                <p class="tcl-summary" *ngIf="r.summary">{{ r.summary }}</p>
+                <ul class="tcl-issues" *ngIf="r.issues?.length">
+                  <li *ngFor="let i of r.issues | slice: 0 : 6">
+                    <strong>{{ i.severity }}</strong> {{ i.title }}
+                  </li>
+                </ul>
+                <div class="tcl-fixes" *ngIf="r.suggestions?.length">
+                  <h4>Suggested fixes</h4>
+                  <button
+                    mat-stroked-button
+                    class="fix-btn"
+                    *ngFor="let s of r.suggestions | slice: 0 : 4"
+                    (click)="copyTclSuggestion(s.suggestedAction)"
+                  >
+                    {{ s.title }}
+                  </button>
+                </div>
+                <button mat-button (click)="loadTclInsights()">Refresh TCL</button>
+              </div>
+              <ng-template #tclEmpty>
+                <p class="muted pad">
+                  Run an agent dispatch — TCL analyzes output automatically. Or open
+                  <a [routerLink]="['/agent-studio', 'teams', teamId, 'tcl']">TCL Insights</a>.
+                </p>
+                <button mat-stroked-button (click)="loadTclInsights()">Load latest</button>
               </ng-template>
             </mat-tab>
           </mat-tab-group>
@@ -388,6 +425,35 @@ main();
       .sev-warning {
         color: #cca700;
       }
+      .tcl-panel {
+        padding: 12px 16px;
+        max-height: 220px;
+        overflow-y: auto;
+        font-size: 13px;
+      }
+      .tcl-score strong {
+        color: #7dd3fc;
+        font-size: 1.1rem;
+      }
+      .tcl-summary {
+        color: #94a3b8;
+        margin: 8px 0;
+      }
+      .tcl-issues {
+        margin: 8px 0;
+        padding-left: 1.2rem;
+      }
+      .tcl-fixes h4 {
+        margin: 10px 0 6px;
+        font-size: 12px;
+        color: #94a3b8;
+      }
+      .fix-btn {
+        display: block;
+        margin: 4px 0;
+        text-align: left;
+        max-width: 100%;
+      }
       .sev-info,
       .sev-hint {
         color: #75beff;
@@ -426,8 +492,10 @@ export class TeamIdeComponent implements AfterViewInit, OnDestroy {
     startLineNumber: number;
   }> = [];
   bottomTabIndex = 0;
+  latestTclReport: StudioTclReport | null = null;
 
   private monaco: MonacoGlobal | null = null;
+  private tclPollTimer: ReturnType<typeof setTimeout> | null = null;
   private editor: MonacoEditor | null = null;
   private contentListener: { dispose: () => void } | null = null;
 
@@ -451,6 +519,7 @@ export class TeamIdeComponent implements AfterViewInit, OnDestroy {
   }
 
   ngOnDestroy(): void {
+    if (this.tclPollTimer) clearTimeout(this.tclPollTimer);
     this.contentListener?.dispose();
     this.editor?.dispose();
     this.editor = null;
@@ -721,6 +790,69 @@ export class TeamIdeComponent implements AfterViewInit, OnDestroy {
     };
   }
 
+  loadTclInsights(): void {
+    this.studio.listTeamTclAnalyses(this.teamId, 5).subscribe({
+      next: (res) => {
+        const row = (res.analyses ?? []).find((a: TclAnalysisRow) => a.status === 'SUCCEEDED' && a.report);
+        this.latestTclReport = row?.report ?? null;
+        if (row?.report?.issues?.length) {
+          this.applyTclMarkers(row.report);
+        }
+      },
+    });
+  }
+
+  private pollTclAfterDispatch(attempt = 0): void {
+    if (this.tclPollTimer) clearTimeout(this.tclPollTimer);
+    if (attempt > 12) return;
+    this.tclPollTimer = setTimeout(() => {
+      this.studio.listTeamTclAnalyses(this.teamId, 3).subscribe({
+        next: (res) => {
+          const row = (res.analyses ?? []).find(
+            (a: TclAnalysisRow) =>
+              a.trigger === 'IDE_DISPATCH' && a.status === 'SUCCEEDED' && a.report
+          );
+          if (row?.report) {
+            this.latestTclReport = row.report;
+            this.bottomTabIndex = 4;
+            this.applyTclMarkers(row.report);
+            this.terminalLines.push('TCL analysis ready — see TCL tab.');
+            this.scrollTerminal();
+            return;
+          }
+          if ((res.analyses ?? []).some((a) => a.status === 'RUNNING')) {
+            this.pollTclAfterDispatch(attempt + 1);
+          }
+        },
+      });
+    }, attempt === 0 ? 2000 : 3000);
+  }
+
+  private applyTclMarkers(report: StudioTclReport): void {
+    if (!this.monaco || !this.editor) return;
+    const model = this.editor.getModel() as MonacoTextModel | null;
+    if (!model) return;
+    const markers: MonacoMarkerData[] = (report.issues ?? []).slice(0, 8).map((issue, idx) => ({
+      severity: this.monaco!.MarkerSeverity.Warning,
+      message: `${issue.title}: ${issue.recommendedAction}`,
+      startLineNumber: Math.min(idx + 1, model.getLineCount?.() ?? 1),
+      startColumn: 1,
+      endLineNumber: Math.min(idx + 1, model.getLineCount?.() ?? 1),
+      endColumn: Math.max(2, (model.getLineMaxColumn?.(idx + 1) as number) ?? 2),
+    }));
+    this.monaco.editor.setModelMarkers(model, 'tcl', markers);
+    this.problems = markers.map((m) => ({
+      message: m.message,
+      severity: 'warning',
+      startLineNumber: m.startLineNumber,
+    }));
+  }
+
+  copyTclSuggestion(text: string): void {
+    void navigator.clipboard?.writeText(text);
+    this.snack.open('Copied suggested fix to clipboard', 'OK', { duration: 2500 });
+  }
+
   private async runDispatch(prompt: string): Promise<void> {
     if (!prompt) {
       this.terminalLines.push('Usage: dispatch <your prompt>');
@@ -737,10 +869,14 @@ export class TeamIdeComponent implements AfterViewInit, OnDestroy {
     this.terminalLines.push(`Dispatching as ${agent.name} (${this.useCase})…`);
     this.scrollTerminal();
     this.studio.dispatch(this.dispatchPayload(prompt)).subscribe({
-      next: (res) => {
+      next: (res: { text?: string; provider?: string; model?: string; tclAnalysisScheduled?: boolean }) => {
         this.outputText = res.text ?? '';
         this.bottomTabIndex = 1;
         this.terminalLines.push(`Done (${res.provider} / ${res.model}).`);
+        if (res.tclAnalysisScheduled) {
+          this.terminalLines.push('TCL engine analyzing output…');
+          this.pollTclAfterDispatch();
+        }
         this.scrollTerminal();
       },
       error: (err) => {

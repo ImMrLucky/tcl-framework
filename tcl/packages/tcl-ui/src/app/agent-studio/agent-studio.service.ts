@@ -1,6 +1,7 @@
 import { Injectable } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
 import { Observable } from 'rxjs';
+import { AuthService } from '../auth.service';
 import {
   Agent,
   AgentConfigVersion,
@@ -13,6 +14,9 @@ import {
   DeliveryMode,
   WorkItemKind,
   AuditEvent,
+  TclAnalysisRow,
+  PatchProposalRow,
+  StudioTclReport,
   AgentStudioSummary,
   TeamCommandCenter,
   TeamRun,
@@ -77,7 +81,10 @@ interface CreateTaskPayload {
 
 @Injectable({ providedIn: 'root' })
 export class AgentStudioService {
-  constructor(private http: HttpClient) {}
+  constructor(
+    private http: HttpClient,
+    private auth: AuthService
+  ) {}
 
   private get apiUrl(): string {
     if (typeof window !== 'undefined') {
@@ -666,6 +673,146 @@ export class AgentStudioService {
       keyMode: string;
       reason: string;
     }>(this.url('/model-routing/preview'), body);
+  }
+
+  // -------------------------------------------------------------------------
+  // TCL engine (truth analytics for agent work).
+  // -------------------------------------------------------------------------
+
+  listTclLiveFeed(teamId?: string, since?: string, limit = 40): Observable<{
+    analyses: TclAnalysisRow[];
+    migrationRequired?: string;
+  }> {
+    const params: Record<string, string> = { limit: String(limit) };
+    if (teamId) params['teamId'] = teamId;
+    if (since) params['since'] = since;
+    return this.http.get<{ analyses: TclAnalysisRow[]; migrationRequired?: string }>(
+      this.url('/tcl/live-feed'),
+      { params }
+    );
+  }
+
+  listTeamTclAnalyses(teamId: string, limit = 50): Observable<{
+    analyses: TclAnalysisRow[];
+    migrationRequired?: string;
+  }> {
+    return this.http.get<{ analyses: TclAnalysisRow[]; migrationRequired?: string }>(
+      this.url(`/teams/${teamId}/tcl/analyses`),
+      { params: { limit: String(limit) } }
+    );
+  }
+
+  getTclAnalysis(teamId: string, analysisId: string): Observable<{ analysis: TclAnalysisRow }> {
+    return this.http.get<{ analysis: TclAnalysisRow }>(
+      this.url(`/teams/${teamId}/tcl/analyses/${analysisId}`)
+    );
+  }
+
+  analyzeWithTcl(
+    teamId: string,
+    body: {
+      question: string;
+      answer: string;
+      sources?: Array<{ id: string; text: string; label?: string }>;
+      agentId?: string;
+      taskId?: string;
+      agentRunId?: string;
+      trigger?: string;
+    }
+  ): Observable<{ analysisId: string; report: StudioTclReport }> {
+    return this.http.post<{ analysisId: string; report: StudioTclReport }>(
+      this.url(`/teams/${teamId}/tcl/analyze`),
+      body
+    );
+  }
+
+  /**
+   * Fetch-based SSE with Bearer auth (EventSource cannot set Authorization).
+   * Returns abort function.
+   */
+  connectTclStream(
+    onAnalysis: (payload: TclAnalysisRow & { id: string; team_id: string; status: string }) => void,
+    teamId?: string
+  ): () => void {
+    const ac = new AbortController();
+    const params = new URLSearchParams();
+    if (teamId) params.set('teamId', teamId);
+    const url = `${this.url('/tcl/stream')}?${params.toString()}`;
+    const token = this.auth.getAccessTokenSync();
+    const orgId =
+      typeof window !== 'undefined' ? window.localStorage.getItem('activeOrgId') : null;
+    const headers: Record<string, string> = {};
+    if (token) headers['Authorization'] = `Bearer ${token}`;
+    if (orgId) headers['X-Active-Org-Id'] = orgId;
+
+    void (async () => {
+      try {
+        const res = await fetch(url, { headers, signal: ac.signal });
+        if (!res.ok || !res.body) return;
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder();
+        let buf = '';
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buf += decoder.decode(value, { stream: true });
+          const blocks = buf.split('\n\n');
+          buf = blocks.pop() ?? '';
+          for (const block of blocks) {
+            if (!block.includes('event: analysis')) continue;
+            const line = block.split('\n').find((l) => l.startsWith('data: '));
+            if (line) {
+              try {
+                onAnalysis(JSON.parse(line.slice(6)) as TclAnalysisRow & {
+                  id: string;
+                  team_id: string;
+                  status: string;
+                });
+              } catch {
+                /* ignore parse errors */
+              }
+            }
+          }
+        }
+      } catch {
+        /* aborted or network */
+      }
+    })();
+
+    return () => ac.abort();
+  }
+
+  listTeamPatches(
+    teamId: string,
+    status?: string
+  ): Observable<{ patches: PatchProposalRow[]; migrationRequired?: string }> {
+    const params: Record<string, string> = {};
+    if (status) params['status'] = status;
+    return this.http.get<{ patches: PatchProposalRow[]; migrationRequired?: string }>(
+      this.url(`/teams/${teamId}/patches`),
+      { params }
+    );
+  }
+
+  applyTeamPatch(
+    teamId: string,
+    patchId: string
+  ): Observable<{ patch: PatchProposalRow; workspace: Record<string, string> }> {
+    return this.http.post<{ patch: PatchProposalRow; workspace: Record<string, string> }>(
+      this.url(`/teams/${teamId}/patches/${patchId}/apply`),
+      {}
+    );
+  }
+
+  updatePatchStatus(
+    teamId: string,
+    patchId: string,
+    status: 'APPROVED' | 'REJECTED' | 'APPLIED' | 'SUPERSEDED'
+  ): Observable<{ patch: PatchProposalRow }> {
+    return this.http.patch<{ patch: PatchProposalRow }>(
+      this.url(`/teams/${teamId}/patches/${patchId}`),
+      { status }
+    );
   }
 
   // -------------------------------------------------------------------------

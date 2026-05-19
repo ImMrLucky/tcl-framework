@@ -38,6 +38,9 @@ import { ensureSystemTemplatesSeeded } from './seed-system-templates.js';
 import { registerAutonomousAgentStudioRoutes } from './autonomous-routes.js';
 import { provisionJarvisForTeam } from './jarvis.js';
 import { registerTeamBoxRoutes } from './team-box-routes.js';
+import { registerContextSummaryRoutes } from './context-summary-routes.js';
+import { registerTclStudioRoutes } from './tcl-studio-routes.js';
+import { registerPatchProposalRoutes } from './patch-proposal-routes.js';
 
 const STAFF_ROLES = new Set(['OWNER', 'ADMIN', 'MANAGER']);
 const ANALYST_ROLES = new Set(['OWNER', 'ADMIN', 'MANAGER', 'ANALYST']);
@@ -1862,5 +1865,8 @@ export function setupAgentStudioRoutes(app: express.Application): void {
     blockedByPause,
   });
   registerAutonomousAgentStudioRoutes(app);
+  registerContextSummaryRoutes(app);
   registerAgentStudioTemplateFileRoutes(app);
+  registerTclStudioRoutes(app);
+  registerPatchProposalRoutes(app);
 }

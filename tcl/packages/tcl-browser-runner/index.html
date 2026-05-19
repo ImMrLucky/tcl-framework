@@ -1,0 +1,34 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>TCL Live — Agent Studio</title>
+    <link rel="stylesheet" href="/src/style.css" />
+  </head>
+  <body>
+    <div id="app">
+      <header class="hdr">
+        <h1>TCL Live</h1>
+        <p class="sub">Truth engine findings as Agent Studio works</p>
+      </header>
+      <section class="controls">
+        <label>
+          API base
+          <input id="apiBase" type="url" placeholder="http://localhost:3000" />
+        </label>
+        <label>
+          Team id (optional)
+          <input id="teamId" type="text" placeholder="uuid" />
+        </label>
+        <label>
+          Auth token
+          <input id="authToken" type="password" placeholder="Bearer session token" />
+        </label>
+        <button id="connectBtn" type="button">Connect &amp; poll</button>
+        <span id="status" class="status">idle</span>
+      </section>
+      <main id="feed" class="feed" aria-live="polite"></main>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

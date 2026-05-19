@@ -66,6 +66,16 @@ export const AGENT_STUDIO_ROUTES: Routes = [
           import('./pages/team-jarvis.component').then((m) => m.TeamJarvisComponent),
       },
       {
+        path: 'tcl',
+        loadComponent: () =>
+          import('./pages/tcl-live.component').then((m) => m.TclLiveComponent),
+      },
+      {
+        path: 'teams/:teamId/tcl',
+        loadComponent: () =>
+          import('./pages/tcl-live.component').then((m) => m.TclLiveComponent),
+      },
+      {
         path: 'vendors',
         loadComponent: () =>
           import('./pages/vendors-runtime.component').then((m) => m.VendorsRuntimeComponent),

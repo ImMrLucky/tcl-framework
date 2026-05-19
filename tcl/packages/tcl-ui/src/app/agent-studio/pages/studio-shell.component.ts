@@ -7,7 +7,21 @@ import { MatChipsModule } from '@angular/material/chips';
 import { MatSnackBar, MatSnackBarModule } from '@angular/material/snack-bar';
 import { AgentStudioService } from '../agent-studio.service';
 import { AgentStudioSettings } from '../agent-studio.types';
-import { boardNavLink, isBoardRouteActive } from '../board-nav';
+import {
+  boardNavLink,
+  isBoardRouteActive,
+  isIntegrationsRouteActive,
+  isOverviewRouteActive,
+  isSettingsRouteActive,
+  isTeamsRouteActive,
+  isTemplateFilesRouteActive,
+  isTemplatePacksRouteActive,
+  isTemplatePersonasRouteActive,
+  isTemplateRolesRouteActive,
+  isTemplatesCatalogRouteActive,
+  isVendorsRouteActive,
+  isTclLiveRouteActive,
+} from '../board-nav';
 
 /**
  * Agent Studio shell: dedicated left navigation (not the main ProtectQA sidebar)
@@ -36,16 +50,11 @@ import { boardNavLink, isBoardRouteActive } from '../board-nav';
         </div>
 
         <nav class="rail-nav">
-          <a
-            class="rail-link"
-            routerLink="."
-            routerLinkActive="active"
-            [routerLinkActiveOptions]="{ exact: true }"
-          >
+          <a class="rail-link" routerLink="/agent-studio" [class.active]="overviewNavActive">
             <mat-icon>dashboard</mat-icon>
             <span>Overview</span>
           </a>
-          <a class="rail-link" routerLink="teams" routerLinkActive="active">
+          <a class="rail-link" routerLink="teams" [class.active]="teamsNavActive">
             <mat-icon>groups</mat-icon>
             <span>Teams</span>
           </a>
@@ -53,40 +62,39 @@ import { boardNavLink, isBoardRouteActive } from '../board-nav';
             <mat-icon>view_kanban</mat-icon>
             <span>Board</span>
           </a>
-          <a class="rail-link" routerLink="vendors" routerLinkActive="active">
+          <a class="rail-link" routerLink="tcl" [class.active]="tclNavActive">
+            <mat-icon>verified</mat-icon>
+            <span>TCL Insights</span>
+          </a>
+          <a class="rail-link" routerLink="vendors" [class.active]="vendorsNavActive">
             <mat-icon>memory</mat-icon>
             <span>Vendors &amp; Runtime</span>
           </a>
-          <a class="rail-link" routerLink="templates/packs" routerLinkActive="active">
+          <a class="rail-link" routerLink="templates/packs" [class.active]="templatePacksNavActive">
             <mat-icon>inventory_2</mat-icon>
             <span>Packs</span>
           </a>
-          <a class="rail-link" routerLink="templates/roles" routerLinkActive="active">
+          <a class="rail-link" routerLink="templates/roles" [class.active]="templateRolesNavActive">
             <mat-icon>badge</mat-icon>
             <span>Roles</span>
           </a>
-          <a class="rail-link" routerLink="templates/personas" routerLinkActive="active">
+          <a class="rail-link" routerLink="templates/personas" [class.active]="templatePersonasNavActive">
             <mat-icon>mood</mat-icon>
             <span>Personas</span>
           </a>
-          <a class="rail-link" routerLink="templates/files" routerLinkActive="active">
+          <a class="rail-link" routerLink="templates/files" [class.active]="templateFilesNavActive">
             <mat-icon>article</mat-icon>
             <span>File templates</span>
           </a>
-          <a
-            class="rail-link"
-            routerLink="templates"
-            routerLinkActive="active"
-            [routerLinkActiveOptions]="{ exact: true }"
-          >
+          <a class="rail-link" routerLink="templates" [class.active]="templatesCatalogNavActive">
             <mat-icon>library_books</mat-icon>
             <span>Catalog</span>
           </a>
-          <a class="rail-link" routerLink="integrations" routerLinkActive="active">
+          <a class="rail-link" routerLink="integrations" [class.active]="integrationsNavActive">
             <mat-icon>link</mat-icon>
             <span>Integrations</span>
           </a>
-          <a class="rail-link" routerLink="settings" routerLinkActive="active">
+          <a class="rail-link" routerLink="settings" [class.active]="settingsNavActive">
             <mat-icon>tune</mat-icon>
             <span>Settings</span>
           </a>
@@ -337,8 +345,56 @@ export class StudioShellComponent implements OnInit {
 
   boardNavLink = boardNavLink;
 
+  private navUrl(): string {
+    return this.router.url;
+  }
+
+  get overviewNavActive(): boolean {
+    return isOverviewRouteActive(this.navUrl());
+  }
+
+  get teamsNavActive(): boolean {
+    return isTeamsRouteActive(this.navUrl());
+  }
+
   get boardNavActive(): boolean {
-    return isBoardRouteActive(this.router.url);
+    return isBoardRouteActive(this.navUrl());
+  }
+
+  get tclNavActive(): boolean {
+    return isTclLiveRouteActive(this.navUrl());
+  }
+
+  get vendorsNavActive(): boolean {
+    return isVendorsRouteActive(this.navUrl());
+  }
+
+  get templatePacksNavActive(): boolean {
+    return isTemplatePacksRouteActive(this.navUrl());
+  }
+
+  get templateRolesNavActive(): boolean {
+    return isTemplateRolesRouteActive(this.navUrl());
+  }
+
+  get templatePersonasNavActive(): boolean {
+    return isTemplatePersonasRouteActive(this.navUrl());
+  }
+
+  get templateFilesNavActive(): boolean {
+    return isTemplateFilesRouteActive(this.navUrl());
+  }
+
+  get templatesCatalogNavActive(): boolean {
+    return isTemplatesCatalogRouteActive(this.navUrl());
+  }
+
+  get integrationsNavActive(): boolean {
+    return isIntegrationsRouteActive(this.navUrl());
+  }
+
+  get settingsNavActive(): boolean {
+    return isSettingsRouteActive(this.navUrl());
   }
 
   ngOnInit(): void {

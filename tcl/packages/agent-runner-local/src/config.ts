@@ -14,11 +14,15 @@ export interface RunnerConfig {
   runnerId?: string;
   runnerName?: string;
   pairedAt?: string;
+  /** User session token (ProtectQA UI login) — optional, for catalog preview only. */
   authToken?: string;
+  /** Runner bearer token — required for job poll/claim and board mutations. */
+  runnerAuthToken?: string;
   runnerPublicKey?: string;
   defaultProvider?: string;
   defaultModel?: string;
   pollIntervalMs?: number;
+  workspaceRoot?: string;
 }
 
 export const DEFAULT_CONFIG: RunnerConfig = {

@@ -1,6 +1,7 @@
 export * from "./types.js";
 export * from "./types/analysis-result.js";
 export * from "./orchestrator.js";
+export * from "./studio/index.js";
 export * from "./graph/edge_builder.js";
 export * from "./adapters/llm_adapter.js";
 export * from "./adapters/openai_adapter.js";

@@ -489,3 +489,81 @@ export interface AgentPrivateContext {
 }
 
 export type ExecutionMode = 'LOCAL_RUNNER_DEFAULT' | 'CLOUD_ENCRYPTED_OPTIONAL' | 'DISABLED';
+
+export type StudioTclTrigger =
+  | 'AGENT_RUN_COMPLETE'
+  | 'MANUAL'
+  | 'IDE_DISPATCH'
+  | 'JARVIS_STEP'
+  | 'TEAM_EVENT';
+
+export interface StudioTclSuggestion {
+  type: string;
+  priority: 'high' | 'medium' | 'low';
+  title: string;
+  description: string;
+  suggestedAction: string;
+  example?: string;
+}
+
+export interface StudioTclIssueSummary {
+  id: string;
+  title: string;
+  severity: string;
+  category: string;
+  whyItMatters: string;
+  recommendedAction: string;
+}
+
+export interface StudioTclReport {
+  analysisId?: string;
+  trigger: StudioTclTrigger;
+  teamId?: string;
+  agentRunId?: string;
+  scores: {
+    truth: number | null;
+    evidence: number | null;
+    consistency: number | null;
+    overall: number | null;
+  };
+  refusal: boolean;
+  claimCount: number;
+  issueCount: number;
+  issues: StudioTclIssueSummary[];
+  suggestions: StudioTclSuggestion[];
+  summary?: string;
+  durationMs: number;
+  engineVersion?: string;
+}
+
+export interface PatchProposalRow {
+  id: string;
+  org_id: string;
+  team_id: string;
+  tcl_analysis_id: string | null;
+  title: string;
+  summary: string | null;
+  files: Array<{ path: string; content: string; action?: string }>;
+  unified_diff: string;
+  status: 'PROPOSED' | 'APPROVED' | 'REJECTED' | 'APPLIED' | 'SUPERSEDED';
+  created_at: string;
+  updated_at: string;
+}
+
+export interface TclAnalysisRow {
+  id: string;
+  org_id: string;
+  team_id: string;
+  agent_run_id: string | null;
+  team_run_id: string | null;
+  agent_id: string | null;
+  task_id: string | null;
+  trigger: StudioTclTrigger;
+  status: 'PENDING' | 'RUNNING' | 'SUCCEEDED' | 'FAILED';
+  input_snapshot: Record<string, unknown>;
+  report: StudioTclReport | null;
+  error: string | null;
+  started_at: string | null;
+  finished_at: string | null;
+  created_at: string;
+}

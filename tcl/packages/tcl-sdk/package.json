@@ -1,0 +1,28 @@
+{
+  "name": "@protectqa/tcl-sdk",
+  "version": "0.1.0",
+  "description": "Public TCL SDK for apps — wraps tcl-core validate() and Agent Studio adapters.",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "tcl-core": "file:../tcl-core"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "typescript": "^5.6.3"
+  },
+  "peerDependencies": {
+    "tcl-core": ">=0.2.0"
+  }
+}

@@ -35,12 +35,12 @@ export async function runRunnerLoop(opts: RunnerLoopOptions = {}): Promise<void>
   const tick = async (): Promise<void> => {
     if (opts.signal?.aborted) return;
 
-    await heartbeatRunner(config, runnerId, {
+    await heartbeatRunner(config, {
       version: '0.1.0',
       sessionId,
     });
 
-    const { jobs, revoked } = await pollJobs(config, runnerId);
+    const { jobs, revoked } = await pollJobs(config);
     if (revoked) {
       console.error('Runner revoked in ProtectQA. Exiting.');
       process.exit(1);
@@ -92,7 +92,7 @@ async function processJob(
 
   let run = job;
   if (job.status === 'QUEUED' || !job.local_runner_id) {
-    const claimed = await claimJob(config, job.id, runnerId, sessionId);
+    const claimed = await claimJob(config, job.id, sessionId);
     run = claimed.run;
   }
 

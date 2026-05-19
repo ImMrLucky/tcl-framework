@@ -1,0 +1,153 @@
+:root {
+  --bg: #0c0f14;
+  --panel: #151a22;
+  --text: #e8ecf1;
+  --muted: #8b95a5;
+  --accent: #3d9eff;
+  --ok: #3ecf8e;
+  --warn: #f5a623;
+  --err: #ff6b6b;
+  font-family: 'IBM Plex Sans', system-ui, sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  min-height: 100vh;
+}
+
+#app {
+  max-width: 960px;
+  margin: 0 auto;
+  padding: 1.5rem;
+}
+
+.hdr h1 {
+  margin: 0;
+  font-size: 1.75rem;
+  letter-spacing: -0.02em;
+}
+
+.sub {
+  color: var(--muted);
+  margin: 0.25rem 0 1.5rem;
+}
+
+.controls {
+  display: grid;
+  gap: 0.75rem;
+  background: var(--panel);
+  padding: 1rem;
+  border-radius: 10px;
+  margin-bottom: 1.5rem;
+}
+
+.controls label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
+.controls input {
+  padding: 0.5rem 0.65rem;
+  border-radius: 6px;
+  border: 1px solid #2a3340;
+  background: var(--bg);
+  color: var(--text);
+}
+
+#connectBtn {
+  padding: 0.6rem 1rem;
+  background: var(--accent);
+  color: #fff;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.status {
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+
+.feed {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.card {
+  background: var(--panel);
+  border-radius: 10px;
+  padding: 1rem;
+  border-left: 3px solid var(--accent);
+}
+
+.card header {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
+  margin-bottom: 0.5rem;
+  font-size: 0.8rem;
+}
+
+.pill {
+  padding: 0.15rem 0.5rem;
+  border-radius: 4px;
+  background: #2a3340;
+  text-transform: uppercase;
+  font-size: 0.7rem;
+}
+
+.pill.succeeded {
+  background: rgba(62, 207, 142, 0.2);
+  color: var(--ok);
+}
+
+.pill.failed {
+  background: rgba(255, 107, 107, 0.2);
+  color: var(--err);
+}
+
+.score strong {
+  color: var(--accent);
+  font-size: 1.25rem;
+}
+
+.summary {
+  color: var(--muted);
+  line-height: 1.5;
+}
+
+.issues,
+.fixes ul {
+  margin: 0.5rem 0 0;
+  padding-left: 1.2rem;
+  font-size: 0.9rem;
+}
+
+.fixes h4 {
+  margin: 0.75rem 0 0.25rem;
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
+.prio.high {
+  color: var(--err);
+}
+.prio.medium {
+  color: var(--warn);
+}
+
+.err {
+  color: var(--err);
+}
