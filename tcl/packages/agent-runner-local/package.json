@@ -1,6 +1,6 @@
 {
   "name": "@protectqa/agent-runner-local",
-  "version": "0.1.0",
+  "version": "0.1.3",
   "description": "Local Agent Studio execution plane — vendor keys stay on your machine; ProtectQA is the control plane.",
   "type": "module",
   "license": "MIT",
@@ -21,6 +21,9 @@
     "local-runner",
     "byok"
   ],
+  "publishConfig": {
+    "access": "public"
+  },
   "bin": {
     "agent-runner-local": "./dist/cli.js"
   },
@@ -34,13 +37,11 @@
   },
   "files": [
     "dist",
-    "README.md",
-    "LICENSE"
+    "README.md"
   ],
   "scripts": {
     "build": "tsc -p tsconfig.json && node scripts/add-shebang.mjs",
     "prepublishOnly": "npm run build",
-    "prepare": "npm run build",
     "start": "node dist/cli.js start",
     "doctor": "node dist/cli.js doctor"
   },
@@ -50,12 +51,5 @@
   "devDependencies": {
     "@types/node": "^20.10.0",
     "typescript": "~5.2.2"
-  },
-  "publishConfig": {
-    "access": "public"
-  },
-  "dependencies": {
-    "@types/node": "^20.19.41",
-    "typescript": "^5.2.2"
   }
 }

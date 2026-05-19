@@ -48,12 +48,12 @@ import { migrationBannerText, responseNeedsMigration, migrationErrorText } from 
         <mat-card-title>Runtime setup wizard</mat-card-title>
         <mat-card-content>
           <ol class="wizard">
-            <li><code>npx @protectqa/agent-runner-local setup</code></li>
-            <li>Generate pairing code below, then <code>npx @protectqa/agent-runner-local pair</code></li>
-            <li><code>npx @protectqa/agent-runner-local login</code> (optional user session for UI sync)</li>
-            <li><code>npx @protectqa/agent-runner-local add-key openai</code> (keys stay local)</li>
-            <li><code>npx @protectqa/agent-runner-local register-vendors</code></li>
-            <li><code>npx @protectqa/agent-runner-local start</code></li>
+            <li><code>npx &#64;protectqa/agent-runner-local setup</code></li>
+            <li>Generate pairing code below, then <code>npx &#64;protectqa/agent-runner-local pair</code></li>
+            <li><code>npx &#64;protectqa/agent-runner-local login</code> (optional user session for UI sync)</li>
+            <li><code>npx &#64;protectqa/agent-runner-local add-key openai</code> (keys stay local)</li>
+            <li><code>npx &#64;protectqa/agent-runner-local register-vendors</code></li>
+            <li><code>npx &#64;protectqa/agent-runner-local start</code></li>
           </ol>
         </mat-card-content>
       </mat-card>

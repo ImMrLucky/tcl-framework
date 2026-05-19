@@ -1,13 +1,33 @@
 {
-  "name": "tcl-core",
-  "version": "0.2.0",
+  "name": "@protectqa/tcl-core",
+  "version": "0.2.1",
   "description": "Conversation Truth & Risk Intelligence — compliance, hallucination, drift, evidence, and business insights (ProtectQA-first defaults).",
   "type": "module",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/protectqa/tcl.git",
+    "directory": "packages/tcl-core"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
   "scripts": {
     "prebuild": "node scripts/embed-agent-catalog.mjs && node scripts/embed-generic-agent-files.mjs",
     "build": "tsc -p tsconfig.json && node -e \"const fs=require('fs');const path=require('path');const src=path.join('src','config');const dist=path.join('dist','config');if(!fs.existsSync(dist))fs.mkdirSync(dist,{recursive:true});fs.readdirSync(src).filter(f=>f.endsWith('.json')).forEach(f=>fs.copyFileSync(path.join(src,f),path.join(dist,f)));\" && node scripts/copy-agent-templates-to-dist.mjs",
+    "prepublishOnly": "npm run build",
     "start": "sh start.sh",
     "start:direct": "node dist/server/express.js",
     "dev": "node --loader ts-node/esm src/server/express.ts",
@@ -17,15 +37,17 @@
     "check:hardcoded": "bash scripts/check-hardcoded-values.sh",
     "check:hardcoded:ts": "tsx scripts/check-hardcoded-values.ts"
   },
+  "engines": {
+    "node": ">=18"
+  },
   "dependencies": {
-    "agent-core": "file:../agent-core",
+    "@protectqa/agent-core": "^0.1.2",
     "@supabase/supabase-js": "^2.89.0",
     "@types/pdfkit": "^0.17.4",
     "@types/yauzl": "^2.10.3",
     "@xenova/transformers": "^2.17.2",
     "archiver": "^7.0.1",
     "aws-sdk": "^2.1691.0",
-    "crypto": "^1.0.1",
     "express": "^4.19.2",
     "form-data": "^4.0.0",
     "multer": "^1.4.5-lts.1",
@@ -39,6 +61,7 @@
     "@types/express": "^4.17.21",
     "@types/multer": "^1.4.13",
     "@types/node": "^22.10.0",
+    "@protectqa/agent-core": "file:../agent-core",
     "ts-node": "^10.9.2",
     "typescript": "^5.6.3",
     "vitest": "^1.6.0"

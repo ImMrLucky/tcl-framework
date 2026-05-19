@@ -18,7 +18,7 @@ function candidateGenericDirs(): string[] {
   const dirs: string[] = [];
   dirs.push(join(HERE, 'agent-generic-md'));
   try {
-    const pkg = nodeRequire.resolve('agent-core/package.json');
+    const pkg = nodeRequire.resolve('@protectqa/agent-core/package.json');
     dirs.push(join(dirname(pkg), 'templates', 'assets', 'generic'));
   } catch {
     /* optional */

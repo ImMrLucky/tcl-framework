@@ -5,13 +5,13 @@ Public TypeScript SDK for the **TCL (Truth & Compliance Layer) engine** — use 
 ## Install
 
 ```bash
-npm install @protectqa/tcl-sdk tcl-core
+npm install @protectqa/tcl-sdk @protectqa/tcl-core
 ```
 
 In this monorepo:
 
 ```bash
-npm run build -w packages/tcl-core
+npm run build -w packages/tcl-core   # @protectqa/tcl-core
 npm run build -w packages/tcl-sdk
 ```
 

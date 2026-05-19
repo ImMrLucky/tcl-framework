@@ -1,13 +1,29 @@
 {
   "name": "@protectqa/tcl-browser-runner",
-  "version": "0.1.0",
-  "private": true,
+  "version": "0.1.1",
   "description": "Standalone local browser dashboard for TCL findings (Agent Studio live feed).",
   "type": "module",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/protectqa/tcl.git",
+    "directory": "packages/tcl-browser-runner"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "prepublishOnly": "npm run build"
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=18"
   },
   "devDependencies": {
     "typescript": "^5.6.3",

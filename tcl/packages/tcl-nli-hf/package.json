@@ -1,11 +1,28 @@
 {
-  "name": "tcl-nli-hf",
-  "version": "0.1.0",
+  "name": "@protectqa/tcl-nli-hf",
+  "version": "0.1.1",
+  "description": "TCL NLI scoring service (Hugging Face style HTTP API).",
   "type": "module",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/protectqa/tcl.git",
+    "directory": "packages/tcl-nli-hf"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
   "main": "src/server.js",
+  "files": [
+    "src",
+    "README.md"
+  ],
   "scripts": {
     "start": "node src/server.js",
     "dev": "node --watch src/server.js"
+  },
+  "engines": {
+    "node": ">=18"
   },
   "dependencies": {
     "express": "^4.19.2"
@@ -15,4 +32,3 @@
     "@types/node": "^22.10.0"
   }
 }
-

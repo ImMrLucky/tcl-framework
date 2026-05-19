@@ -30,7 +30,7 @@ function candidateTemplateDirs(): string[] {
   // Sits next to compiled `templates.js` — works when only `dist/` is shipped.
   dirs.push(join(HERE, 'agent-template-json'));
   try {
-    const pkg = nodeRequire.resolve('agent-core/package.json');
+    const pkg = nodeRequire.resolve('@protectqa/agent-core/package.json');
     dirs.push(join(dirname(pkg), 'templates'));
   } catch {
     /* agent-core not installed from this resolution root */
@@ -38,7 +38,7 @@ function candidateTemplateDirs(): string[] {
   dirs.push(resolve(HERE, '../../../../agent-core/templates'));
   const cwd = process.cwd();
   dirs.push(resolve(cwd, 'packages/agent-core/templates'));
-  dirs.push(resolve(cwd, 'node_modules/agent-core/templates'));
+  dirs.push(resolve(cwd, 'node_modules/@protectqa/agent-core/templates'));
   dirs.push(resolve(cwd, '../agent-core/templates'));
   dirs.push(resolve(cwd, '../../agent-core/templates'));
   return [...new Set(dirs)];

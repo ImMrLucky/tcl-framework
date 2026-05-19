@@ -10,7 +10,7 @@ export {
   runStudioTclAnalysis,
   mapStudioArtifactToValidateInput,
   buildArtifactFromAgentRun,
-} from 'tcl-core';
+} from '@protectqa/tcl-core';
 
 export type {
   ValidateInput,
@@ -21,4 +21,4 @@ export type {
   StudioTclReport,
   StudioTclTrigger,
   RunStudioAnalysisOptions,
-} from 'tcl-core';
+} from '@protectqa/tcl-core';

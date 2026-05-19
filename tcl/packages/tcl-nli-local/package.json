@@ -1,11 +1,28 @@
 {
-  "name": "tcl-nli-local",
-  "version": "0.1.0",
+  "name": "@protectqa/tcl-nli-local",
+  "version": "0.1.1",
+  "description": "TCL local NLI scoring HTTP service.",
   "type": "module",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/protectqa/tcl.git",
+    "directory": "packages/tcl-nli-local"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
   "main": "src/server.js",
+  "files": [
+    "src",
+    "README.md"
+  ],
   "scripts": {
     "start": "node src/server.js",
     "dev": "node --watch src/server.js"
+  },
+  "engines": {
+    "node": ">=18"
   },
   "dependencies": {
     "express": "^4.19.2"
@@ -15,4 +32,3 @@
     "@types/node": "^22.10.0"
   }
 }
-

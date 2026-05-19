@@ -5,6 +5,10 @@
   "workspaces": [
     "packages/tcl-core",
     "packages/tcl-ui",
+    "packages/tcl-integrations",
+    "packages/tcl-nli-service",
+    "packages/tcl-nli-hf",
+    "packages/tcl-nli-local",
     "packages/agent-core",
     "packages/agent-context",
     "packages/agent-orchestrator",
@@ -25,7 +29,9 @@
     "test": "npm run test -w packages/tcl-core",
     "typecheck": "npm run typecheck -w packages/tcl-core",
     "typecheck:agent-packages": "npm run typecheck -w packages/agent-core -w packages/agent-context -w packages/agent-orchestrator -w packages/agent-workflows -w packages/agent-integrations -w packages/agent-mcp -w packages/agent-model-router",
-    "lint": "echo \"No root lint script; add eslint at workspace level if needed\""
+    "lint": "echo \"No root lint script; add eslint at workspace level if needed\"",
+    "build:publishable": "bash scripts/build-publishable.sh",
+    "publish:npm": "bash scripts/publish-npm.sh"
   },
   "engines": {
     "node": ">=18"

@@ -1,20 +1,37 @@
 {
-  "name": "tcl-integrations",
-  "version": "0.1.0",
+  "name": "@protectqa/tcl-integrations",
+  "version": "0.1.1",
+  "description": "TCL / ProtectQA integrations service (webhooks, connectors).",
   "type": "module",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/protectqa/tcl.git",
+    "directory": "packages/tcl-integrations"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
+  "files": [
+    "dist",
+    "README.md"
+  ],
   "scripts": {
     "build": "tsc -p tsconfig.json",
+    "prepublishOnly": "npm run build",
     "start": "node dist/server/express.js",
     "dev": "node --loader ts-node/esm src/server/express.ts",
     "railway:build": "npm install && npm run build",
     "railway:start": "npm start"
   },
+  "engines": {
+    "node": ">=18"
+  },
   "dependencies": {
     "@supabase/supabase-js": "^2.89.0",
     "express": "^4.19.2",
-    "crypto": "^1.0.1",
     "aws-sdk": "^2.1691.0",
     "form-data": "^4.0.0",
     "node-fetch": "^3.3.2",
@@ -27,4 +44,3 @@
     "typescript": "^5.6.3"
   }
 }
-

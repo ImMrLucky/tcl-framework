@@ -33,7 +33,8 @@ export class SlackAlertConnector extends ExportConnector {
   }
 
   async execute(payload: any): Promise<{ success: boolean; data?: any; error?: string }> {
-    return this.export(payload.evaluationId, payload.evaluationData);
+    const attempt = await this.export(payload.evaluationId, payload.evaluationData);
+    return this.deliveryResult(attempt);
   }
 
   async export(evaluationId: string, evaluationData: any): Promise<DeliveryAttempt> {

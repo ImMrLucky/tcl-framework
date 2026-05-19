@@ -55,5 +55,18 @@ export abstract class ExportConnector extends BaseConnector {
    * Export evaluation results
    */
   abstract export(evaluationId: string, evaluationData: any): Promise<DeliveryAttempt>;
+
+  /** Map a delivery attempt row to the connector execute() result shape. */
+  protected deliveryResult(attempt: DeliveryAttempt): {
+    success: boolean;
+    data?: DeliveryAttempt;
+    error?: string;
+  } {
+    return {
+      success: attempt.status === 'success',
+      data: attempt,
+      error: attempt.error_message,
+    };
+  }
 }
 
