@@ -35,6 +35,8 @@ import { assertReviewGatesAllowTerminalMove } from './review-gate-move.js';
 import { registerAgentStudioTemplateFileRoutes } from './agent-studio-template-file-routes.js';
 import { resolveTemplatePackId, seedDefaultAgentMarkdownFiles } from './agent-files.js';
 import { ensureSystemTemplatesSeeded } from './seed-system-templates.js';
+import { registerAutonomousAgentStudioRoutes } from './autonomous-routes.js';
+import { provisionJarvisForTeam } from './jarvis.js';
 
 const STAFF_ROLES = new Set(['OWNER', 'ADMIN', 'MANAGER']);
 const ANALYST_ROLES = new Set(['OWNER', 'ADMIN', 'MANAGER', 'ANALYST']);
@@ -299,7 +301,7 @@ export function setupAgentStudioRoutes(app: express.Application): void {
   app.post('/api/agent-studio/teams', async (req, res) => {
     const ctx = await ensureContext(req, res);
     if (!ctx || !requireStaff(ctx, res) || dbDown(res)) return;
-    const { name, description, projectId, workflowTemplateKey } = req.body ?? {};
+    const { name, description, projectId, workflowTemplateKey, skipJarvis } = req.body ?? {};
     if (!name) return res.status(400).json({ error: 'name is required' });
     const { data, error } = await supabaseAdmin!
       .from('agent_studio_teams')
@@ -322,6 +324,18 @@ export function setupAgentStudioRoutes(app: express.Application): void {
       .select('*')
       .single();
 
+    let jarvisAgentId: string | null = null;
+    if (skipJarvis !== true) {
+      const jarvis = await provisionJarvisForTeam({
+        supabase: supabaseAdmin!,
+        orgId: ctx.orgId,
+        teamId: data.id,
+        userId: ctx.userId ?? null,
+        teamName: name,
+      });
+      jarvisAgentId = jarvis?.agentId ?? null;
+    }
+
     await logAgentStudioAudit({
       orgId: ctx.orgId,
       teamId: data.id,
@@ -329,10 +343,10 @@ export function setupAgentStudioRoutes(app: express.Application): void {
       eventType: 'team.create',
       resourceType: 'agent_studio_teams',
       resourceId: data.id,
-      payload: { name, workflowTemplateKey },
+      payload: { name, workflowTemplateKey, jarvisAgentId },
     });
 
-    res.status(201).json({ team: data, board });
+    res.status(201).json({ team: data, board, jarvisAgentId });
   });
 
   app.get('/api/agent-studio/teams/:teamId', async (req, res) => {
@@ -1839,5 +1853,6 @@ export function setupAgentStudioRoutes(app: express.Application): void {
     res.json({ events: data ?? [] });
   });
 
+  registerAutonomousAgentStudioRoutes(app);
   registerAgentStudioTemplateFileRoutes(app);
 }

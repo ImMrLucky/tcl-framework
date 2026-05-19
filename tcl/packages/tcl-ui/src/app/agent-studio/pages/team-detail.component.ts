@@ -1,5 +1,6 @@
 import { CommonModule } from '@angular/common';
 import { Component, OnInit } from '@angular/core';
+import { FormsModule } from '@angular/forms';
 import { ActivatedRoute, Router, RouterModule } from '@angular/router';
 import { MatCardModule } from '@angular/material/card';
 import { MatButtonModule } from '@angular/material/button';
@@ -8,8 +9,11 @@ import { MatChipsModule } from '@angular/material/chips';
 import { MatSnackBar, MatSnackBarModule } from '@angular/material/snack-bar';
 import { MatDividerModule } from '@angular/material/divider';
 import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
+import { MatFormFieldModule } from '@angular/material/form-field';
+import { MatInputModule } from '@angular/material/input';
+import { MatSelectModule } from '@angular/material/select';
 import { AgentStudioService } from '../agent-studio.service';
-import { AgentTeam, AuditEvent, TeamCommandCenter } from '../agent-studio.types';
+import { AgentTeam, AuditEvent, TeamCommandCenter, TeamRun, TeamRunMode } from '../agent-studio.types';
 
 @Component({
   selector: 'app-team-detail',
@@ -24,6 +28,10 @@ import { AgentTeam, AuditEvent, TeamCommandCenter } from '../agent-studio.types'
     MatSnackBarModule,
     MatDividerModule,
     MatProgressSpinnerModule,
+    FormsModule,
+    MatFormFieldModule,
+    MatInputModule,
+    MatSelectModule,
   ],
   template: `
     <div class="pause-banner" *ngIf="cc?.orgPaused">
@@ -117,6 +125,41 @@ import { AgentTeam, AuditEvent, TeamCommandCenter } from '../agent-studio.types'
         </mat-card-content>
       </mat-card>
 
+      <mat-card class="launch-card">
+        <mat-card-title>Launch autonomous team</mat-card-title>
+        <mat-card-content>
+          <mat-form-field appearance="outline" class="full">
+            <mat-label>Objective</mat-label>
+            <textarea matInput rows="2" [(ngModel)]="runObjective"></textarea>
+          </mat-form-field>
+          <div class="launch-row">
+            <mat-form-field appearance="outline">
+              <mat-label>Run mode</mat-label>
+              <mat-select [(ngModel)]="runMode">
+                <mat-option value="RUN_UNTIL_BLOCKED">Run until blocked</mat-option>
+                <mat-option value="ONE_STEP">One step</mat-option>
+              </mat-select>
+            </mat-form-field>
+            <mat-form-field appearance="outline">
+              <mat-label>Max steps</mat-label>
+              <input matInput type="number" [(ngModel)]="runMaxSteps" />
+            </mat-form-field>
+          </div>
+          <div *ngIf="activeRun as run" class="run-status">
+            <mat-chip>{{ run.status }}</mat-chip>
+            <span class="muted">{{ run.completed_steps }}/{{ run.max_steps }} steps</span>
+          </div>
+          <div class="launch-actions">
+            <button mat-flat-button color="primary" (click)="launchTeam()" [disabled]="launching || !runObjective.trim()">Launch</button>
+            <button mat-stroked-button (click)="stepRun()" [disabled]="!activeRun">One step</button>
+            <button mat-stroked-button (click)="pauseRun()" [disabled]="!activeRun">Pause</button>
+            <button mat-stroked-button (click)="resumeRun()" [disabled]="!activeRun">Resume</button>
+            <button mat-stroked-button color="warn" (click)="cancelRun()" [disabled]="!activeRun">Cancel</button>
+            <a mat-button [routerLink]="['/agent-studio', 'teams', teamId, 'jarvis']">Jarvis</a>
+          </div>
+        </mat-card-content>
+      </mat-card>
+
       <div class="two-col">
         <mat-card>
           <mat-card-title>Recently completed</mat-card-title>
@@ -196,6 +239,10 @@ import { AgentTeam, AuditEvent, TeamCommandCenter } from '../agent-studio.types'
         <a class="quick" [routerLink]="['/agent-studio', 'teams', t.id, 'rules']">
           <mat-icon>policy</mat-icon>
           <span>Rules</span>
+        </a>
+        <a class="quick" [routerLink]="['/agent-studio', 'teams', t.id, 'jarvis']">
+          <mat-icon>psychology</mat-icon>
+          <span>Jarvis</span>
         </a>
         <a class="quick" [routerLink]="['/agent-studio', 'teams', t.id, 'ide']">
           <mat-icon>code</mat-icon>
@@ -375,6 +422,30 @@ import { AgentTeam, AuditEvent, TeamCommandCenter } from '../agent-studio.types'
         border-color: #fecaca;
         background: #fef2f2;
       }
+      .launch-card {
+        background: #fff;
+        border: 1px solid #c7d2fe;
+      }
+      .launch-row {
+        display: grid;
+        grid-template-columns: 1fr 120px;
+        gap: 12px;
+      }
+      .full {
+        width: 100%;
+      }
+      .launch-actions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        margin-top: 12px;
+      }
+      .run-status {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin-top: 8px;
+      }
     `,
   ],
 })
@@ -383,7 +454,12 @@ export class TeamDetailComponent implements OnInit {
   cc: TeamCommandCenter | null = null;
   loading = true;
   loadError: string | null = null;
-  private teamId = '';
+  teamId = '';
+  runObjective = '';
+  runMode: TeamRunMode = 'RUN_UNTIL_BLOCKED';
+  runMaxSteps = 25;
+  activeRun: TeamRun | null = null;
+  launching = false;
 
   constructor(
     private route: ActivatedRoute,
@@ -405,6 +481,7 @@ export class TeamDetailComponent implements OnInit {
         this.cc = payload;
         this.team = payload.team;
         this.loading = false;
+        this.loadActiveRun();
       },
       error: (err) => {
         this.loading = false;
@@ -429,10 +506,89 @@ export class TeamDetailComponent implements OnInit {
     this.router.navigate(['/agent-studio', 'teams', this.teamId, 'agents']);
   }
 
-  instructionToManager(): void {
-    this.snack.open('Agent Manager messaging will connect to dispatch in a later iteration.', 'OK', {
-      duration: 4500,
+  loadActiveRun(): void {
+    this.studio.listTeamRuns(this.teamId).subscribe({
+      next: (r) => {
+        const active = (r.runs ?? []).find((run) =>
+          ['QUEUED', 'RUNNING', 'PAUSED', 'WAITING_FOR_HUMAN', 'WAITING_FOR_REVIEW', 'BLOCKED'].includes(run.status)
+        );
+        this.activeRun = active ?? null;
+      },
     });
+  }
+
+  launchTeam(): void {
+    if (!this.runObjective.trim()) return;
+    this.launching = true;
+    this.studio
+      .createTeamRun(this.teamId, {
+        objective: this.runObjective.trim(),
+        runMode: this.runMode,
+        maxSteps: this.runMaxSteps,
+        useJarvis: true,
+      })
+      .subscribe({
+        next: (r) => {
+          this.launching = false;
+          this.activeRun = r.run;
+          this.snack.open('Team run queued — start local runner to execute.', 'OK', { duration: 5000 });
+        },
+        error: (err) => {
+          this.launching = false;
+          this.snack.open(err?.error?.error || 'Launch failed', 'OK', { duration: 4000 });
+        },
+      });
+  }
+
+  stepRun(): void {
+    if (!this.activeRun) return;
+    this.studio.stepTeamRun(this.activeRun.id).subscribe({
+      next: (r) => {
+        this.activeRun = r.run;
+        this.snack.open('Step queued for local runner.', 'OK', { duration: 3000 });
+      },
+      error: (err) => this.snack.open(err?.error?.error || 'Step failed', 'OK', { duration: 4000 }),
+    });
+  }
+
+  pauseRun(): void {
+    if (!this.activeRun) return;
+    this.studio.pauseTeamRun(this.activeRun.id).subscribe({
+      next: (r) => (this.activeRun = r.run),
+    });
+  }
+
+  resumeRun(): void {
+    if (!this.activeRun) return;
+    this.studio.resumeTeamRun(this.activeRun.id).subscribe({
+      next: (r) => (this.activeRun = r.run),
+    });
+  }
+
+  cancelRun(): void {
+    if (!this.activeRun) return;
+    this.studio.cancelTeamRun(this.activeRun.id).subscribe({
+      next: () => {
+        this.activeRun = null;
+        this.snack.open('Run cancelled.', 'OK', { duration: 2500 });
+      },
+    });
+  }
+
+  instructionToManager(): void {
+    const msg = window.prompt('Instruction for Jarvis / Agent Manager:');
+    if (!msg?.trim()) return;
+    this.studio
+      .appendTeamEvent(this.teamId, {
+        eventType: 'user.instruction',
+        summary: msg.trim(),
+        actorType: 'USER',
+        actorName: 'user',
+        jsonl: { priority: 'high' },
+      })
+      .subscribe({
+        next: () => this.snack.open('Instruction recorded in shared JSONL log.', 'OK', { duration: 3000 }),
+      });
   }
 
   pause(): void {

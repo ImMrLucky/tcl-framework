@@ -132,6 +132,12 @@ const PACK_KEYS = [
           <mat-card-subtitle *ngIf="agent.role_template_key">{{ agent.role_template_key }}</mat-card-subtitle>
           <mat-card-content>
             <p class="muted" *ngIf="agent.persona">{{ agent.persona }}</p>
+            <div class="runtime">
+              <span class="runtime-label">Runtime</span>
+              <mat-chip class="tiny">{{ agent.status }}</mat-chip>
+              <mat-chip *ngIf="agent.is_orchestrator" class="tiny">Jarvis · orchestrate</mat-chip>
+              <span class="muted small" *ngIf="agent.paused_at">Blocked: team/agent pause</span>
+            </div>
             <mat-chip-set *ngIf="agent.capabilities?.length">
               <mat-chip *ngFor="let c of agent.capabilities">{{ c }}</mat-chip>
             </mat-chip-set>

@@ -364,3 +364,89 @@ export interface AgentMarkdownFile {
   created_at: string;
   updated_at: string;
 }
+
+export type TeamRunMode =
+  | 'MANUAL'
+  | 'ONE_STEP'
+  | 'RUN_UNTIL_BLOCKED'
+  | 'RUN_UNTIL_REVIEW'
+  | 'RUN_UNTIL_DONE'
+  | 'CONTINUOUS';
+
+export type TeamRunStatus =
+  | 'QUEUED'
+  | 'RUNNING'
+  | 'PAUSED'
+  | 'WAITING_FOR_HUMAN'
+  | 'WAITING_FOR_REVIEW'
+  | 'BLOCKED'
+  | 'SUCCEEDED'
+  | 'FAILED'
+  | 'CANCELLED';
+
+export interface TeamRun {
+  id: string;
+  org_id: string;
+  team_id: string;
+  name: string;
+  objective: string;
+  run_mode: TeamRunMode;
+  status: TeamRunStatus;
+  orchestrator_agent_id: string | null;
+  max_steps: number;
+  completed_steps: number;
+  local_runner_id: string | null;
+  last_heartbeat_at: string | null;
+  started_at: string | null;
+  finished_at: string | null;
+  metadata: Record<string, unknown>;
+  created_at: string;
+}
+
+export type TeamEventActorType = 'SYSTEM' | 'USER' | 'AGENT' | 'JARVIS' | 'LOCAL_RUNNER';
+
+export interface TeamEventLogEntry {
+  id: string;
+  team_id: string;
+  team_run_id: string | null;
+  agent_id: string | null;
+  task_id: string | null;
+  sequence: number;
+  event_type: string;
+  actor_type: TeamEventActorType;
+  actor_name: string | null;
+  summary: string;
+  jsonl: Record<string, unknown>;
+  created_at: string;
+}
+
+export interface LocalRunner {
+  id: string;
+  org_id: string;
+  name: string;
+  device_label: string | null;
+  status: string;
+  last_seen_at: string | null;
+  capabilities: Record<string, unknown>;
+}
+
+export interface LocalVendorRef {
+  id: string;
+  provider: string;
+  label: string;
+  local_key_ref: string;
+  key_preview: string | null;
+  status: string;
+  supported_models: unknown[];
+}
+
+export interface AgentPrivateContext {
+  agent_id: string;
+  summary: string;
+  current_task_id: string | null;
+  memory: Record<string, unknown>;
+  blockers: unknown[];
+  updated_at: string;
+}
+
+export type ExecutionMode = 'LOCAL_RUNNER_DEFAULT' | 'CLOUD_ENCRYPTED_OPTIONAL' | 'DISABLED';

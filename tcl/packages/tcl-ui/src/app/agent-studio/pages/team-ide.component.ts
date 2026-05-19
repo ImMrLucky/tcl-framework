@@ -15,6 +15,8 @@ import { MatChipsModule } from '@angular/material/chips';
 import { MatFormFieldModule } from '@angular/material/form-field';
 import { MatInputModule } from '@angular/material/input';
 import { MatSnackBar, MatSnackBarModule } from '@angular/material/snack-bar';
+import { MatSelectModule } from '@angular/material/select';
+import { Agent, TeamEventLogEntry } from '../agent-studio.types';
 import {
   loadMonacoFromCdn,
   type MonacoEditor,
@@ -70,8 +72,35 @@ main();
     MatFormFieldModule,
     MatInputModule,
     MatSnackBarModule,
+    MatSelectModule,
   ],
   template: `
+    <section class="ide-wrap">
+      <header class="ide-toolbar">
+        <mat-form-field appearance="outline" class="tb-field">
+          <mat-label>Agent</mat-label>
+          <mat-select [(ngModel)]="selectedAgentId">
+            <mat-option *ngFor="let a of agents" [value]="a.id">{{ a.name }}</mat-option>
+          </mat-select>
+        </mat-form-field>
+        <mat-form-field appearance="outline" class="tb-field narrow">
+          <mat-label>Use case</mat-label>
+          <mat-select [(ngModel)]="useCase">
+            <mat-option value="chat">chat</mat-option>
+            <mat-option value="code">code</mat-option>
+            <mat-option value="review">review</mat-option>
+            <mat-option value="orchestrate">orchestrate</mat-option>
+          </mat-select>
+        </mat-form-field>
+        <mat-form-field appearance="outline" class="tb-field narrow">
+          <mat-label>Task id (optional)</mat-label>
+          <input matInput [(ngModel)]="taskId" />
+        </mat-form-field>
+        <button mat-flat-button color="primary" (click)="runSelectedAgent()">Run agent</button>
+        <button mat-stroked-button (click)="askJarvis()">Ask Jarvis</button>
+        <button mat-stroked-button (click)="loadJsonl()">JSONL</button>
+        <a mat-button [routerLink]="['/agent-studio', 'teams', teamId, 'jarvis']">Jarvis</a>
+      </header>
     <section class="ide">
       <aside class="file-tree">
         <header class="tree-head">
@@ -135,6 +164,9 @@ main();
             <mat-tab label="Output">
               <pre class="output">{{ outputText || emptyOutputHint }}</pre>
             </mat-tab>
+            <mat-tab label="JSONL">
+              <pre class="output">{{ jsonlText || 'Load JSONL to see recent team events.' }}</pre>
+            </mat-tab>
             <mat-tab label="Problems">
               <ul class="problems" *ngIf="problems.length; else noProblems">
                 <li *ngFor="let p of problems" [class]="'sev-' + (p.severity || 'info').toLowerCase()">
@@ -149,9 +181,23 @@ main();
         </div>
       </main>
     </section>
+    </section>
   `,
   styles: [
     `
+      .ide-wrap { display: flex; flex-direction: column; gap: 8px; }
+      .ide-toolbar {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        align-items: center;
+        padding: 8px 12px;
+        background: #f8fafc;
+        border-radius: 8px;
+        border: 1px solid #e2e8f0;
+      }
+      .tb-field { min-width: 160px; margin: 0; }
+      .tb-field.narrow { max-width: 140px; }
       .ide {
         display: grid;
         grid-template-columns: 260px 1fr;
@@ -360,6 +406,11 @@ export class TeamIdeComponent implements AfterViewInit, OnDestroy {
   @ViewChild('terminalLog', { static: false }) terminalLog?: ElementRef<HTMLDivElement>;
 
   teamId = '';
+  agents: Agent[] = [];
+  selectedAgentId = '';
+  useCase = 'chat';
+  taskId = '';
+  jsonlText = '';
   workspace: Record<string, string> = {};
   filePaths: string[] = [];
   tabs: OpenTab[] = [];
@@ -389,6 +440,13 @@ export class TeamIdeComponent implements AfterViewInit, OnDestroy {
   ngAfterViewInit(): void {
     this.teamId = this.route.snapshot.paramMap.get('teamId') || '';
     this.loadWorkspace();
+    this.studio.listAgents(this.teamId).subscribe({
+      next: (r) => {
+        this.agents = r.agents ?? [];
+        const orch = this.agents.find((a) => a.is_orchestrator);
+        this.selectedAgentId = orch?.id ?? this.agents[0]?.id ?? '';
+      },
+    });
     void this.initMonaco();
   }
 
@@ -598,39 +656,97 @@ export class TeamIdeComponent implements AfterViewInit, OnDestroy {
     }, 0);
   }
 
+  runSelectedAgent(): void {
+    const prompt = window.prompt('Prompt for selected agent:');
+    if (prompt?.trim()) void this.runDispatch(prompt.trim());
+  }
+
+  askJarvis(): void {
+    const jarvis = this.agents.find((a) => a.is_orchestrator);
+    if (!jarvis) {
+      this.snack.open('No Jarvis orchestrator on this team.', 'OK', { duration: 3000 });
+      return;
+    }
+    this.selectedAgentId = jarvis.id;
+    this.useCase = 'orchestrate';
+    const msg = window.prompt('Ask Jarvis:');
+    if (msg?.trim()) {
+      this.studio
+        .appendTeamEvent(this.teamId, {
+          eventType: 'ide.jarvis',
+          summary: msg.trim(),
+          actorType: 'USER',
+          actorName: 'ide',
+          jsonl: { priority: 'high' },
+        })
+        .subscribe({ next: () => this.loadJsonl() });
+    }
+  }
+
+  loadJsonl(): void {
+    this.studio.listTeamEvents(this.teamId, undefined, 50).subscribe({
+      next: (r) => {
+        const lines = (r.events ?? []).map((e: TeamEventLogEntry) =>
+          JSON.stringify({
+            seq: e.sequence,
+            at: e.created_at,
+            actor: e.actor_type,
+            type: e.event_type,
+            summary: e.summary,
+          })
+        );
+        this.jsonlText = lines.join('\n');
+        this.bottomTabIndex = 3;
+      },
+    });
+  }
+
+  private dispatchPayload(prompt: string) {
+    const editor = this.editor as { getSelection?: () => { isEmpty: () => boolean } } | null;
+    const model = this.editor?.getModel() as { getValueInRange?: (r: unknown) => string } | null;
+    const selection = editor?.getSelection?.();
+    let selectedText: string | undefined;
+    if (model?.getValueInRange && selection && !selection.isEmpty()) {
+      selectedText = model.getValueInRange(selection);
+    }
+    return {
+      teamId: this.teamId,
+      agentId: this.selectedAgentId,
+      prompt,
+      useCase: this.useCase,
+      taskId: this.taskId.trim() || undefined,
+      activeFilePath: this.activePath,
+      activeFileContent: this.editor?.getModel()?.getValue(),
+      selectedText,
+    };
+  }
+
   private async runDispatch(prompt: string): Promise<void> {
     if (!prompt) {
       this.terminalLines.push('Usage: dispatch <your prompt>');
       this.scrollTerminal();
       return;
     }
-    this.studio.listAgents(this.teamId).subscribe({
-      next: (r) => {
-        const agent = r.agents[0];
-        if (!agent) {
-          this.terminalLines.push('No agents on this team — create one first.');
-          this.scrollTerminal();
-          return;
-        }
-        this.terminalLines.push(`Dispatching as agent ${agent.name} (${agent.id})…`);
+    const agent = this.agents.find((a) => a.id === this.selectedAgentId) ?? this.agents[0];
+    if (!agent) {
+      this.terminalLines.push('No agents on this team — create one first.');
+      this.scrollTerminal();
+      return;
+    }
+    this.selectedAgentId = agent.id;
+    this.terminalLines.push(`Dispatching as ${agent.name} (${this.useCase})…`);
+    this.scrollTerminal();
+    this.studio.dispatch(this.dispatchPayload(prompt)).subscribe({
+      next: (res) => {
+        this.outputText = res.text ?? '';
+        this.bottomTabIndex = 1;
+        this.terminalLines.push(`Done (${res.provider} / ${res.model}).`);
         this.scrollTerminal();
-        this.studio.dispatch({ teamId: this.teamId, agentId: agent.id, prompt, useCase: 'chat' }).subscribe({
-          next: (res) => {
-            this.outputText = res.text ?? '';
-            this.bottomTabIndex = 1;
-            this.terminalLines.push(`Done (${res.provider} / ${res.model}).`);
-            this.scrollTerminal();
-          },
-          error: (err) => {
-            const msg = err?.error?.message || err?.error?.error || err?.message || 'Dispatch failed';
-            this.terminalLines.push(`Error: ${msg}`);
-            this.snack.open(String(msg), 'OK', { duration: 6000 });
-            this.scrollTerminal();
-          },
-        });
       },
       error: (err) => {
-        this.terminalLines.push(`Failed to list agents: ${err?.message || 'error'}`);
+        const msg = err?.error?.message || err?.error?.error || err?.message || 'Dispatch failed';
+        this.terminalLines.push(`Error: ${msg}`);
+        this.snack.open(String(msg), 'OK', { duration: 6000 });
         this.scrollTerminal();
       },
     });

@@ -49,6 +49,14 @@ import { boardNavLink, isBoardRouteActive } from '../board-nav';
             <mat-icon>groups</mat-icon>
             <span>Teams</span>
           </a>
+          <a class="rail-link" [routerLink]="boardNavLink()" [class.active]="boardNavActive">
+            <mat-icon>view_kanban</mat-icon>
+            <span>Board</span>
+          </a>
+          <a class="rail-link" routerLink="vendors" routerLinkActive="active">
+            <mat-icon>memory</mat-icon>
+            <span>Vendors &amp; Runtime</span>
+          </a>
           <a class="rail-link" routerLink="templates/packs" routerLinkActive="active">
             <mat-icon>inventory_2</mat-icon>
             <span>Packs</span>

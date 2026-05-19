@@ -1,3 +1,4 @@
+import type express from 'express';
 import { supabaseAdmin } from '../supabase.js';
 
 export interface PauseGateState {
@@ -59,4 +60,16 @@ export async function readPauseGate(input: {
   }
 
   return result;
+}
+
+export function blockedByPause(res: express.Response, gate: PauseGateState): boolean {
+  if (gate.orgPaused || gate.teamPaused || gate.agentPaused) {
+    res.status(423).json({
+      error: 'PAUSED',
+      message: 'Operation blocked while pause is active.',
+      gate,
+    });
+    return true;
+  }
+  return false;
 }

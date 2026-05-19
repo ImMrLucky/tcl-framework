@@ -1,0 +1,112 @@
+import { CommonModule } from '@angular/common';
+import { Component, OnInit } from '@angular/core';
+import { MatCardModule } from '@angular/material/card';
+import { MatButtonModule } from '@angular/material/button';
+import { MatIconModule } from '@angular/material/icon';
+import { MatChipsModule } from '@angular/material/chips';
+import { MatSnackBar, MatSnackBarModule } from '@angular/material/snack-bar';
+import { AgentStudioService } from '../agent-studio.service';
+import { LocalRunner, LocalVendorRef } from '../agent-studio.types';
+
+@Component({
+  selector: 'app-vendors-runtime',
+  standalone: true,
+  imports: [CommonModule, MatCardModule, MatButtonModule, MatIconModule, MatChipsModule, MatSnackBarModule],
+  template: `
+    <section class="page">
+      <header class="header">
+        <h2>Vendors &amp; Runtime</h2>
+        <p class="muted">
+          Keys live in your local Agent Runner vault by default. ProtectQA stores metadata only — never plaintext API keys.
+        </p>
+      </header>
+
+      <mat-card>
+        <mat-card-title>Execution mode</mat-card-title>
+        <mat-card-content>
+          <mat-chip color="primary" selected>LOCAL_RUNNER_DEFAULT</mat-chip>
+          <p class="muted small">
+            Optional CLOUD_ENCRYPTED uses server BYOK (Settings). Install:
+            <code>npx &#64;protectqa/agent-runner-local setup</code>
+          </p>
+        </mat-card-content>
+      </mat-card>
+
+      <mat-card>
+        <mat-card-title>Local runner</mat-card-title>
+        <mat-card-content>
+          <button mat-flat-button color="primary" (click)="pairRunner()" [disabled]="pairing">
+            {{ pairing ? 'Generating…' : 'Generate pairing code' }}
+          </button>
+          <p *ngIf="pairingCode" class="code">Pairing code: <strong>{{ pairingCode }}</strong></p>
+          <ul class="list">
+            <li *ngFor="let r of runners">
+              {{ r.name }} — <mat-chip>{{ r.status }}</mat-chip>
+              <span class="muted" *ngIf="r.last_seen_at">seen {{ r.last_seen_at | date: 'short' }}</span>
+            </li>
+          </ul>
+          <p class="muted" *ngIf="!runners.length">No runners paired yet.</p>
+        </mat-card-content>
+      </mat-card>
+
+      <mat-card>
+        <mat-card-title>Local vendor refs</mat-card-title>
+        <mat-card-content>
+          <ul class="list">
+            <li *ngFor="let v of vendors">
+              <strong>{{ v.provider }}</strong> / {{ v.label }}
+              <mat-chip>{{ v.status }}</mat-chip>
+              <span class="muted" *ngIf="v.key_preview">{{ v.key_preview }}</span>
+            </li>
+          </ul>
+          <p class="muted" *ngIf="!vendors.length">
+            Register vendors from the local CLI: <code>agent-runner-local add-key openai</code>
+          </p>
+        </mat-card-content>
+      </mat-card>
+    </section>
+  `,
+  styles: [
+    `
+      .page { display: flex; flex-direction: column; gap: 16px; }
+      .header h2 { margin: 0 0 4px; }
+      .muted { color: #64748b; }
+      .small { font-size: 13px; }
+      .list { list-style: none; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+      .code { margin-top: 12px; padding: 12px; background: #f1f5f9; border-radius: 8px; }
+    `,
+  ],
+})
+export class VendorsRuntimeComponent implements OnInit {
+  runners: LocalRunner[] = [];
+  vendors: LocalVendorRef[] = [];
+  pairing = false;
+  pairingCode: string | null = null;
+
+  constructor(private studio: AgentStudioService, private snack: MatSnackBar) {}
+
+  ngOnInit(): void {
+    this.refresh();
+  }
+
+  refresh(): void {
+    this.studio.listLocalRunners().subscribe({ next: (r) => (this.runners = r.runners ?? []) });
+    this.studio.listLocalVendors().subscribe({ next: (r) => (this.vendors = r.vendors ?? []) });
+  }
+
+  pairRunner(): void {
+    this.pairing = true;
+    this.studio.createLocalRunnerPairingCode('My Mac').subscribe({
+      next: (r) => {
+        this.pairing = false;
+        this.pairingCode = r.pairingCode;
+        this.refresh();
+        this.snack.open('Enter this code in agent-runner-local pair', 'OK', { duration: 6000 });
+      },
+      error: () => {
+        this.pairing = false;
+        this.snack.open('Failed to create pairing code', 'OK', { duration: 4000 });
+      },
+    });
+  }
+}

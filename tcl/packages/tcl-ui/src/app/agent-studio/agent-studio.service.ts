@@ -9,6 +9,12 @@ import {
   AuditEvent,
   AgentStudioSummary,
   TeamCommandCenter,
+  TeamRun,
+  TeamRunMode,
+  TeamEventLogEntry,
+  LocalRunner,
+  LocalVendorRef,
+  AgentPrivateContext,
   PersonaTemplate,
   TemplatePackRow,
   AgentMarkdownFile,
@@ -427,6 +433,10 @@ export class AgentStudioService {
     agentId: string;
     prompt: string;
     useCase?: string;
+    taskId?: string;
+    activeFilePath?: string;
+    activeFileContent?: string;
+    selectedText?: string;
   }): Observable<{ outcome: string; provider: string; model: string; ruleId: string | null; text: string }> {
     return this.http.post<{ outcome: string; provider: string; model: string; ruleId: string | null; text: string }>(
       this.url('/dispatch'),
@@ -447,6 +457,117 @@ export class AgentStudioService {
 
   pingIntegration(id: string): Observable<{ ok: boolean; provider?: string; error?: unknown }> {
     return this.http.post<{ ok: boolean; provider?: string; error?: unknown }>(this.url(`/integrations/${id}/ping`), {});
+  }
+
+  // -------------------------------------------------------------------------
+  // Autonomous runs + JSONL events + local runner
+  // -------------------------------------------------------------------------
+  listTeamRuns(teamId: string): Observable<{ runs: TeamRun[] }> {
+    return this.http.get<{ runs: TeamRun[] }>(this.url(`/teams/${teamId}/runs`));
+  }
+
+  createTeamRun(
+    teamId: string,
+    body: {
+      name?: string;
+      objective: string;
+      runMode?: TeamRunMode;
+      maxSteps?: number;
+      localRunnerId?: string;
+      useJarvis?: boolean;
+      metadata?: Record<string, unknown>;
+    }
+  ): Observable<{ run: TeamRun }> {
+    return this.http.post<{ run: TeamRun }>(this.url(`/teams/${teamId}/runs`), body);
+  }
+
+  getTeamRun(runId: string): Observable<{ run: TeamRun; steps: unknown[]; agentRuns: unknown[] }> {
+    return this.http.get<{ run: TeamRun; steps: unknown[]; agentRuns: unknown[] }>(
+      this.url(`/team-runs/${runId}`)
+    );
+  }
+
+  pauseTeamRun(runId: string): Observable<{ run: TeamRun }> {
+    return this.http.post<{ run: TeamRun }>(this.url(`/team-runs/${runId}/pause`), {});
+  }
+
+  resumeTeamRun(runId: string): Observable<{ run: TeamRun }> {
+    return this.http.post<{ run: TeamRun }>(this.url(`/team-runs/${runId}/resume`), {});
+  }
+
+  cancelTeamRun(runId: string): Observable<{ run: TeamRun }> {
+    return this.http.post<{ run: TeamRun }>(this.url(`/team-runs/${runId}/cancel`), {});
+  }
+
+  stepTeamRun(runId: string, body?: Record<string, unknown>): Observable<{ run: TeamRun; step: unknown }> {
+    return this.http.post<{ run: TeamRun; step: unknown }>(this.url(`/team-runs/${runId}/step`), body ?? {});
+  }
+
+  listTeamEvents(teamId: string, teamRunId?: string, limit = 100): Observable<{ events: TeamEventLogEntry[] }> {
+    const params: Record<string, string> = { limit: String(limit) };
+    if (teamRunId) params['teamRunId'] = teamRunId;
+    return this.http.get<{ events: TeamEventLogEntry[] }>(this.url(`/teams/${teamId}/events`), { params });
+  }
+
+  appendTeamEvent(
+    teamId: string,
+    body: {
+      eventType: string;
+      summary: string;
+      actorType?: string;
+      actorName?: string;
+      teamRunId?: string;
+      agentId?: string;
+      taskId?: string;
+      jsonl?: Record<string, unknown>;
+    }
+  ): Observable<{ event: { id: string; sequence: number } }> {
+    return this.http.post<{ event: { id: string; sequence: number } }>(
+      this.url(`/teams/${teamId}/events`),
+      body
+    );
+  }
+
+  listAgentPrivateContexts(teamId: string): Observable<{ contexts: AgentPrivateContext[] }> {
+    return this.http.get<{ contexts: AgentPrivateContext[] }>(this.url(`/teams/${teamId}/agent-contexts`));
+  }
+
+  listLocalRunners(): Observable<{ runners: LocalRunner[] }> {
+    return this.http.get<{ runners: LocalRunner[] }>(this.url('/local-runners'));
+  }
+
+  createLocalRunnerPairingCode(name?: string): Observable<{ runner: LocalRunner; pairingCode: string }> {
+    return this.http.post<{ runner: LocalRunner; pairingCode: string }>(
+      this.url('/local-runners/pairing-code'),
+      { name: name ?? 'Local Runner' }
+    );
+  }
+
+  listLocalVendors(runnerId?: string): Observable<{ vendors: LocalVendorRef[] }> {
+    const params: Record<string, string> = {};
+    if (runnerId) params['runnerId'] = runnerId;
+    return this.http.get<{ vendors: LocalVendorRef[] }>(this.url('/local-vendors'), { params });
+  }
+
+  previewModelRouting(body: {
+    teamId: string;
+    agentId?: string;
+    useCase: string;
+    executionMode?: string;
+  }): Observable<{
+    provider: string;
+    model: string;
+    source: string;
+    keyMode: string;
+    reason: string;
+  }> {
+    return this.http.post<{
+      provider: string;
+      model: string;
+      source: string;
+      keyMode: string;
+      reason: string;
+    }>(this.url('/model-routing/preview'), body);
   }
 
   // -------------------------------------------------------------------------

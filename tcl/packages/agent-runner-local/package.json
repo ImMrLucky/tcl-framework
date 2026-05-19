@@ -1,0 +1,61 @@
+{
+  "name": "@protectqa/agent-runner-local",
+  "version": "0.1.0",
+  "description": "Local Agent Studio execution plane — vendor keys stay on your machine; ProtectQA is the control plane.",
+  "type": "module",
+  "license": "MIT",
+  "author": "ProtectQA",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/protectqa/tcl.git",
+    "directory": "packages/agent-runner-local"
+  },
+  "homepage": "https://github.com/protectqa/tcl/tree/main/packages/agent-runner-local#readme",
+  "bugs": {
+    "url": "https://github.com/protectqa/tcl/issues"
+  },
+  "keywords": [
+    "protectqa",
+    "agent-studio",
+    "ai-agents",
+    "local-runner",
+    "byok"
+  ],
+  "bin": {
+    "agent-runner-local": "./dist/cli.js"
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json && node scripts/add-shebang.mjs",
+    "prepublishOnly": "npm run build",
+    "prepare": "npm run build",
+    "start": "node dist/cli.js start",
+    "doctor": "node dist/cli.js doctor"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "devDependencies": {
+    "@types/node": "^20.10.0",
+    "typescript": "~5.2.2"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "dependencies": {
+    "@types/node": "^20.19.41",
+    "typescript": "^5.2.2"
+  }
+}

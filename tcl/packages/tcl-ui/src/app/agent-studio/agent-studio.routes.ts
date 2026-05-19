@@ -61,6 +61,16 @@ export const AGENT_STUDIO_ROUTES: Routes = [
           import('./pages/team-ide.component').then((m) => m.TeamIdeComponent),
       },
       {
+        path: 'teams/:teamId/jarvis',
+        loadComponent: () =>
+          import('./pages/team-jarvis.component').then((m) => m.TeamJarvisComponent),
+      },
+      {
+        path: 'vendors',
+        loadComponent: () =>
+          import('./pages/vendors-runtime.component').then((m) => m.VendorsRuntimeComponent),
+      },
+      {
         path: 'templates/packs',
         loadComponent: () =>
           import('./pages/manage-template-packs.component').then((m) => m.ManageTemplatePacksComponent),

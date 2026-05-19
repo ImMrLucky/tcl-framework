@@ -11,7 +11,8 @@
     "packages/agent-workflows",
     "packages/agent-integrations",
     "packages/agent-mcp",
-    "packages/agent-model-router"
+    "packages/agent-model-router",
+    "packages/agent-runner-local"
   ],
   "scripts": {
     "install:all": "npm install",
