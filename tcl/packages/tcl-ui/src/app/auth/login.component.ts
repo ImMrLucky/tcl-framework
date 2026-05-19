@@ -245,8 +245,14 @@ export class LoginComponent implements OnInit {
           this.errorMessage = result.error.message || 'Authentication failed';
         }
       } else {
+        const user = this.authService.getCurrentUser();
+        const token = this.authService.getAccessTokenSync();
+        if (user?.id) {
+          this.authService.prepareLoginRedirect(user.id, user.email ?? email, token ?? undefined);
+        }
         // Hard navigation after session is in storage — avoids AuthGuard / SIGNED_OUT races.
         await this.authService.finishLoginRedirect('/dashboard');
+        return;
       }
     } catch (error: any) {
       this.errorMessage = error.message || 'An unexpected error occurred';

@@ -129,6 +129,28 @@ export class AuthService {
     this.setupActivityTracking();
 
     this.supabase.auth.onAuthStateChange(async (event, session) => {
+      if (event === 'SIGNED_IN' && session?.user) {
+        this.resetInactivityTimer();
+        this.authStateEpoch++;
+        const basicUser: User = {
+          id: session.user.id,
+          email: session.user.email || undefined,
+          fullName: session.user.user_metadata?.['full_name'] as string | undefined,
+        };
+        this.currentUserSubject.next(basicUser);
+        this.markPostLoginSession(
+          session.user.id,
+          session.user.email ?? undefined,
+          session.access_token
+        );
+        try {
+          await this.loadUserProfile(session.user.id);
+        } catch {
+          /* keep basic user */
+        }
+        return;
+      }
+
       if (event === 'SIGNED_OUT') {
         this.clearInactivityTimer();
         // Supabase can emit SIGNED_OUT while swapping sessions on password login. Clearing
@@ -304,21 +326,21 @@ export class AuthService {
 
   /** Restore `currentUser` from persisted Supabase session (handles nested `currentSession` / `session` blobs). */
   private hydrateUserFromStorageIfPresent(): boolean {
-    const cached = this.getValidSessionFromStorage();
-    if (!cached?.access_token) return false;
+    const found = this.findSessionInLocalStorage();
+    if (!found?.access_token) return false;
 
-    const storageKey = this.getAuthStorageKey();
+    const storageKey = found.storageKey;
     let who: { id: string; email?: string } | null = null;
     try {
       const raw = typeof window !== 'undefined' ? window.localStorage?.getItem(storageKey) : null;
       if (raw) {
         const parsed = JSON.parse(raw) as Record<string, unknown>;
-        who = this.readUserFromSplitStorage(storageKey, parsed) ?? this.userFromAccessToken(cached.access_token);
+        who = this.readUserFromSplitStorage(storageKey, parsed) ?? this.userFromAccessToken(found.access_token);
       } else {
-        who = this.userFromAccessToken(cached.access_token);
+        who = this.userFromAccessToken(found.access_token);
       }
     } catch {
-      who = this.userFromAccessToken(cached.access_token);
+      who = this.userFromAccessToken(found.access_token);
     }
 
     if (!who?.id) return false;
@@ -411,26 +433,52 @@ export class AuthService {
   }
 
   /**
+   * Apply sessionStorage / localStorage hints so AuthGuard passes on the next tick.
+   * Returns true if the user can be treated as signed in.
+   */
+  ensureAuthHintsApplied(): boolean {
+    if (this.currentUserSubject.value?.id) {
+      return true;
+    }
+    if (this.hydrateUserFromStorageIfPresent()) {
+      return true;
+    }
+    if (this.applyPostLoginSessionHint()) {
+      return true;
+    }
+    return this.hasValidSessionSync();
+  }
+
+  /**
    * Reliable post-login navigation: wait until session is visible in storage, then hard-navigate.
    * Avoids router + AuthGuard races with Supabase LockManager and transient SIGNED_OUT events.
    */
   async finishLoginRedirect(targetPath = '/dashboard'): Promise<void> {
+    if (typeof window === 'undefined') {
+      return;
+    }
+
     const user = this.currentUserSubject.value;
     const token = this.getAccessTokenSync();
     if (user?.id) {
       this.markPostLoginSession(user.id, user.email, token ?? undefined);
     }
 
-    for (let attempt = 0; attempt < 30; attempt++) {
+    // Just finished password login — navigate immediately when credentials are present.
+    if (user?.id && token) {
+      window.location.assign(targetPath);
+      return;
+    }
+
+    for (let attempt = 0; attempt < 40; attempt++) {
+      this.ensureAuthHintsApplied();
       if (this.hasValidSessionSync()) {
         break;
       }
       await new Promise((resolve) => setTimeout(resolve, 50));
     }
 
-    if (typeof window !== 'undefined') {
-      window.location.replace(targetPath);
-    }
+    window.location.assign(targetPath);
   }
 
   private beginLoginAttempt(): void {
@@ -744,11 +792,13 @@ export class AuthService {
     });
 
     if (error) {
+      this.loginInProgressUntil = 0;
       return { error, duplicateAccount: false };
     }
 
     // Check if we got a valid session
     if (!data.session || !data.session.access_token) {
+      this.loginInProgressUntil = 0;
       return { 
         error: { 
           message: 'Login succeeded but no session was created. Please try again.', 
@@ -1244,16 +1294,44 @@ export class AuthService {
     return expiryTime < now;
   }
 
-  /**
-   * Validate and get session from localStorage
-   */
-  private getValidSessionFromStorage(): { access_token: string; expires_at?: number } | null {
+  /** Try primary Supabase storage key, then any `sb-*-auth-token` entry (handles key drift across deploys). */
+  private findSessionInLocalStorage(): {
+    access_token: string;
+    expires_at?: number;
+    storageKey: string;
+  } | null {
     if (typeof window === 'undefined' || !window.localStorage) {
       return null;
     }
 
-    const storageKey = this.getAuthStorageKey();
-    const stored = window.localStorage.getItem(storageKey);
+    const keysToTry: string[] = [this.getAuthStorageKey()];
+    const url = readWindowSupabaseUrl();
+    if (url) {
+      const derived = supabaseStorageKeyFromUrl(url);
+      if (!keysToTry.includes(derived)) {
+        keysToTry.push(derived);
+      }
+    }
+
+    for (let i = 0; i < window.localStorage.length; i++) {
+      const k = window.localStorage.key(i);
+      if (k && k.startsWith('sb-') && k.includes('auth-token') && !keysToTry.includes(k)) {
+        keysToTry.push(k);
+      }
+    }
+
+    for (const storageKey of keysToTry) {
+      const parsed = this.parseStoredSessionBlob(window.localStorage.getItem(storageKey));
+      if (parsed) {
+        return { ...parsed, storageKey };
+      }
+    }
+    return null;
+  }
+
+  private parseStoredSessionBlob(
+    stored: string | null
+  ): { access_token: string; expires_at?: number } | null {
     if (!stored) {
       return null;
     }
@@ -1303,22 +1381,36 @@ export class AuthService {
         return null;
       }
 
-      // Check if token is expired
-      if (this.isTokenExpired(expiresAt)) {
-        // Token expired, clear storage
-        window.localStorage.removeItem(storageKey);
+      const expires =
+        expiresAt != null
+          ? typeof expiresAt === 'string'
+            ? parseInt(expiresAt, 10)
+            : expiresAt
+          : undefined;
+
+      // Check if token is expired (skip purge during active login — clock skew / race)
+      if (this.isTokenExpired(expires) && !this.shouldPreserveSessionAfterAuthEvent()) {
         return null;
       }
 
       return {
         access_token: session.access_token,
-        expires_at: expiresAt ? (typeof expiresAt === 'string' ? parseInt(expiresAt, 10) : expiresAt) : undefined
+        expires_at: expires,
       };
-    } catch (e) {
-      // Invalid JSON - clear corrupted storage
-      window.localStorage.removeItem(storageKey);
+    } catch {
       return null;
     }
+  }
+
+  /**
+   * Validate and get session from localStorage
+   */
+  private getValidSessionFromStorage(): { access_token: string; expires_at?: number } | null {
+    const found = this.findSessionInLocalStorage();
+    if (!found) {
+      return null;
+    }
+    return { access_token: found.access_token, expires_at: found.expires_at };
   }
 
   /**

@@ -12,6 +12,9 @@ export class AuthGuard implements CanActivate {
   ) {}
 
   async canActivate(): Promise<boolean | UrlTree> {
+    if (this.authService.ensureAuthHintsApplied()) {
+      return true;
+    }
     if (this.authService.hasValidSessionSync()) {
       return true;
     }
