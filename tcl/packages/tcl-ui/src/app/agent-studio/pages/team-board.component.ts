@@ -14,6 +14,7 @@ import { MatSnackBar, MatSnackBarModule } from '@angular/material/snack-bar';
 import { MatTooltipModule } from '@angular/material/tooltip';
 import { MatDividerModule } from '@angular/material/divider';
 import { MatSlideToggleModule } from '@angular/material/slide-toggle';
+import { rememberBoardTeam } from '../board-nav';
 import { AgentStudioService } from '../agent-studio.service';
 import {
   buildSwimlanes,
@@ -832,6 +833,7 @@ export class TeamBoardComponent implements OnInit {
 
   ngOnInit(): void {
     this.teamId = this.route.snapshot.paramMap.get('teamId')!;
+    rememberBoardTeam(this.teamId);
     this.refresh();
     this.studio.listAgents(this.teamId).subscribe({ next: (r) => (this.agents = r.agents) });
   }

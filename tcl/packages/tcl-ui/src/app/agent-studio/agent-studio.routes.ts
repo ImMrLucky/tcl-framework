@@ -26,6 +26,11 @@ export const AGENT_STUDIO_ROUTES: Routes = [
           import('./pages/teams-list.component').then((m) => m.TeamsListComponent),
       },
       {
+        path: 'board',
+        loadComponent: () =>
+          import('./pages/board-hub.component').then((m) => m.BoardHubComponent),
+      },
+      {
         path: 'teams/:teamId',
         loadComponent: () =>
           import('./pages/team-detail.component').then((m) => m.TeamDetailComponent),

@@ -7,6 +7,7 @@ import { MatChipsModule } from '@angular/material/chips';
 import { MatSnackBar, MatSnackBarModule } from '@angular/material/snack-bar';
 import { AgentStudioService } from '../agent-studio.service';
 import { AgentStudioSettings } from '../agent-studio.types';
+import { boardNavLink, isBoardRouteActive } from '../board-nav';
 
 /**
  * Agent Studio shell: dedicated left navigation (not the main ProtectQA sidebar)
@@ -323,8 +324,14 @@ export class StudioShellComponent implements OnInit {
   constructor(
     private studio: AgentStudioService,
     private snack: MatSnackBar,
-    private router: Router
+    public router: Router
   ) {}
+
+  boardNavLink = boardNavLink;
+
+  get boardNavActive(): boolean {
+    return isBoardRouteActive(this.router.url);
+  }
 
   ngOnInit(): void {
     this.refreshSettings();
