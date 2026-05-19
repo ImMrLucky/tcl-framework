@@ -11,6 +11,7 @@ import { MatChipsModule } from '@angular/material/chips';
 import { MatSnackBar, MatSnackBarModule } from '@angular/material/snack-bar';
 import { AgentStudioService } from '../agent-studio.service';
 import { Agent, TeamEventLogEntry, TeamRun } from '../agent-studio.types';
+import { migrationBannerText, migrationErrorText, responseNeedsMigration } from '../agent-studio-migration.util';
 
 @Component({
   selector: 'app-team-jarvis',
@@ -29,6 +30,7 @@ import { Agent, TeamEventLogEntry, TeamRun } from '../agent-studio.types';
   ],
   template: `
     <section class="page">
+      <p class="migration-warn" *ngIf="migrationWarning">{{ migrationWarning }}</p>
       <header class="header">
         <a mat-icon-button routerLink="../"><mat-icon>arrow_back</mat-icon></a>
         <div>
@@ -89,6 +91,14 @@ import { Agent, TeamEventLogEntry, TeamRun } from '../agent-studio.types';
       .events li { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; font-size: 13px; }
       .seq { color: #94a3b8; font-size: 12px; }
       .tiny { font-size: 11px; min-height: 22px; }
+      .migration-warn {
+        padding: 10px 12px;
+        background: #fff7ed;
+        border: 1px solid #fdba74;
+        border-radius: 8px;
+        color: #9a3412;
+        font-size: 14px;
+      }
     `,
   ],
 })
@@ -98,6 +108,7 @@ export class TeamJarvisComponent implements OnInit {
   activeRun: TeamRun | null = null;
   jarvis: Agent | null = null;
   instruction = '';
+  migrationWarning: string | null = null;
 
   constructor(private route: ActivatedRoute, private studio: AgentStudioService, private snack: MatSnackBar) {}
 
@@ -111,12 +122,32 @@ export class TeamJarvisComponent implements OnInit {
 
   refresh(): void {
     this.studio.listTeamEvents(this.teamId, undefined, 100).subscribe({
-      next: (r) => (this.events = [...(r.events ?? [])].reverse()),
+      next: (r) => {
+        if (responseNeedsMigration(r)) {
+          this.migrationWarning = migrationBannerText(r);
+          this.events = [];
+          return;
+        }
+        this.events = [...(r.events ?? [])].reverse();
+      },
+      error: (err) => {
+        const msg = migrationErrorText(err);
+        if (msg) this.migrationWarning = msg;
+      },
     });
     this.studio.listTeamRuns(this.teamId).subscribe({
       next: (r) => {
+        if (responseNeedsMigration(r)) {
+          this.migrationWarning = migrationBannerText(r);
+          this.activeRun = null;
+          return;
+        }
         this.activeRun =
           r.runs.find((run) => ['QUEUED', 'RUNNING', 'PAUSED'].includes(run.status)) ?? null;
+      },
+      error: (err) => {
+        const msg = migrationErrorText(err);
+        if (msg) this.migrationWarning = msg;
       },
     });
   }

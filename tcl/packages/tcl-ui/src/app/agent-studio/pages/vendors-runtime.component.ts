@@ -7,6 +7,7 @@ import { MatChipsModule } from '@angular/material/chips';
 import { MatSnackBar, MatSnackBarModule } from '@angular/material/snack-bar';
 import { AgentStudioService } from '../agent-studio.service';
 import { LocalRunner, LocalVendorRef } from '../agent-studio.types';
+import { migrationBannerText, responseNeedsMigration, migrationErrorText } from '../agent-studio-migration.util';
 
 @Component({
   selector: 'app-vendors-runtime',
@@ -20,6 +21,13 @@ import { LocalRunner, LocalVendorRef } from '../agent-studio.types';
           Keys live in your local Agent Runner vault by default. ProtectQA stores metadata only — never plaintext API keys.
         </p>
       </header>
+
+      <mat-card *ngIf="migrationWarning" class="warn-card">
+        <mat-card-content>
+          <mat-icon>warning</mat-icon>
+          <p>{{ migrationWarning }}</p>
+        </mat-card-content>
+      </mat-card>
 
       <mat-card>
         <mat-card-title>Execution mode</mat-card-title>
@@ -74,6 +82,15 @@ import { LocalRunner, LocalVendorRef } from '../agent-studio.types';
       .small { font-size: 13px; }
       .list { list-style: none; padding: 0; display: flex; flex-direction: column; gap: 8px; }
       .code { margin-top: 12px; padding: 12px; background: #f1f5f9; border-radius: 8px; }
+      .warn-card mat-card-content {
+        display: flex;
+        gap: 12px;
+        align-items: flex-start;
+        background: #fffbeb;
+        color: #92400e;
+        font-size: 14px;
+      }
+      .warn-card mat-icon { color: #d97706; }
     `,
   ],
 })
@@ -82,6 +99,7 @@ export class VendorsRuntimeComponent implements OnInit {
   vendors: LocalVendorRef[] = [];
   pairing = false;
   pairingCode: string | null = null;
+  migrationWarning: string | null = null;
 
   constructor(private studio: AgentStudioService, private snack: MatSnackBar) {}
 
@@ -90,8 +108,26 @@ export class VendorsRuntimeComponent implements OnInit {
   }
 
   refresh(): void {
-    this.studio.listLocalRunners().subscribe({ next: (r) => (this.runners = r.runners ?? []) });
-    this.studio.listLocalVendors().subscribe({ next: (r) => (this.vendors = r.vendors ?? []) });
+    this.studio.listLocalRunners().subscribe({
+      next: (r) => {
+        this.runners = r.runners ?? [];
+        if (responseNeedsMigration(r)) this.migrationWarning = migrationBannerText(r);
+      },
+      error: (err) => {
+        const msg = migrationErrorText(err);
+        if (msg) this.migrationWarning = msg;
+      },
+    });
+    this.studio.listLocalVendors().subscribe({
+      next: (r) => {
+        this.vendors = r.vendors ?? [];
+        if (responseNeedsMigration(r)) this.migrationWarning = migrationBannerText(r);
+      },
+      error: (err) => {
+        const msg = migrationErrorText(err);
+        if (msg) this.migrationWarning = msg;
+      },
+    });
   }
 
   pairRunner(): void {
@@ -103,9 +139,10 @@ export class VendorsRuntimeComponent implements OnInit {
         this.refresh();
         this.snack.open('Enter this code in agent-runner-local pair', 'OK', { duration: 6000 });
       },
-      error: () => {
+      error: (err) => {
         this.pairing = false;
-        this.snack.open('Failed to create pairing code', 'OK', { duration: 4000 });
+        const msg = migrationErrorText(err) ?? 'Failed to create pairing code';
+        this.snack.open(msg, 'OK', { duration: 8000 });
       },
     });
   }

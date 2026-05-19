@@ -10,6 +10,12 @@ import { logAgentStudioAudit } from './audit.js';
 import { readPauseGate, blockedByPause } from './pause-gate.js';
 import { appendTeamEvent } from './team-events.js';
 import { getJarvisAgentId } from './jarvis.js';
+import {
+  AUTONOMOUS_MIGRATION_FILE,
+  isAutonomousSchemaError,
+  respondAutonomousDbError,
+  respondAutonomousListEmpty,
+} from './autonomous-db.js';
 
 const ANALYST_ROLES = new Set(['OWNER', 'ADMIN', 'MANAGER', 'ANALYST']);
 const STAFF_ROLES = new Set(['OWNER', 'ADMIN', 'MANAGER']);
@@ -51,6 +57,23 @@ function requireStaff(ctx: AuthedContext, res: express.Response): boolean {
   return true;
 }
 
+function sendAutonomousListError(
+  res: express.Response,
+  error: { code?: string; message: string },
+  emptyPayload: Record<string, unknown>
+): void {
+  if (respondAutonomousListEmpty(res, error, emptyPayload)) return;
+  res.status(500).json({ error: error.message });
+}
+
+function sendAutonomousMutationError(
+  res: express.Response,
+  error: { code?: string; message: string }
+): void {
+  if (respondAutonomousDbError(res, error)) return;
+  res.status(500).json({ error: error.message });
+}
+
 const ORCHESTRATE_USE_CASES = new Set([
   'orchestrate',
   'plan',
@@ -67,6 +90,25 @@ const ORCHESTRATE_USE_CASES = new Set([
 ]);
 
 export function registerAutonomousAgentStudioRoutes(app: express.Application): void {
+  app.get('/api/agent-studio/autonomous/health', async (req, res) => {
+    const ctx = await ensureContext(req, res);
+    if (!ctx || dbDown(res)) return;
+    const { error } = await supabaseAdmin!
+      .from('agent_studio_team_runs')
+      .select('id')
+      .eq('org_id', ctx.orgId)
+      .limit(1);
+    if (error && isAutonomousSchemaError(error)) {
+      return res.status(503).json({
+        ready: false,
+        code: 'MIGRATION_REQUIRED',
+        migration: AUTONOMOUS_MIGRATION_FILE,
+      });
+    }
+    if (error) return res.status(500).json({ error: error.message });
+    res.json({ ready: true });
+  });
+
   // -------------------------------------------------------------------------
   // Team events (shared JSONL log)
   // -------------------------------------------------------------------------
@@ -85,7 +127,10 @@ export function registerAutonomousAgentStudioRoutes(app: express.Application): v
       .limit(limit);
     if (teamRunId) q = q.eq('team_run_id', teamRunId);
     const { data, error } = await q;
-    if (error) return res.status(500).json({ error: error.message });
+    if (error) {
+      sendAutonomousListError(res, error, { events: [] });
+      return;
+    }
     res.json({ events: data ?? [] });
   });
 
@@ -146,7 +191,10 @@ export function registerAutonomousAgentStudioRoutes(app: express.Application): v
       .eq('org_id', ctx.orgId)
       .order('sequence', { ascending: true })
       .limit(200);
-    if (error) return res.status(500).json({ error: error.message });
+    if (error) {
+      sendAutonomousListError(res, error, { events: [] });
+      return;
+    }
     res.json({ events: data ?? [] });
   });
 
@@ -164,7 +212,10 @@ export function registerAutonomousAgentStudioRoutes(app: express.Application): v
       .eq('team_id', teamId)
       .order('created_at', { ascending: false })
       .limit(50);
-    if (error) return res.status(500).json({ error: error.message });
+    if (error) {
+      sendAutonomousListError(res, error, { runs: [] });
+      return;
+    }
     res.json({ runs: data ?? [] });
   });
 
@@ -213,7 +264,10 @@ export function registerAutonomousAgentStudioRoutes(app: express.Application): v
       })
       .select('*')
       .single();
-    if (error) return res.status(500).json({ error: error.message });
+    if (error) {
+      sendAutonomousMutationError(res, error);
+      return;
+    }
 
     await appendTeamEvent({
       supabase: supabaseAdmin!,
@@ -250,7 +304,10 @@ export function registerAutonomousAgentStudioRoutes(app: express.Application): v
       .eq('id', runId)
       .eq('org_id', ctx.orgId)
       .maybeSingle();
-    if (error) return res.status(500).json({ error: error.message });
+    if (error) {
+      sendAutonomousMutationError(res, error);
+      return;
+    }
     if (!data) return res.status(404).json({ error: 'Run not found' });
 
     const { data: steps } = await supabaseAdmin!
@@ -380,7 +437,10 @@ export function registerAutonomousAgentStudioRoutes(app: express.Application): v
       .eq('id', runId)
       .select('*')
       .single();
-    if (error) return res.status(500).json({ error: error.message });
+    if (error) {
+      sendAutonomousMutationError(res, error);
+      return;
+    }
 
     await appendTeamEvent({
       supabase: supabaseAdmin!,
@@ -407,7 +467,10 @@ export function registerAutonomousAgentStudioRoutes(app: express.Application): v
       .select('*')
       .eq('org_id', ctx.orgId)
       .eq('team_id', req.params.teamId);
-    if (error) return res.status(500).json({ error: error.message });
+    if (error) {
+      sendAutonomousListError(res, error, { contexts: [] });
+      return;
+    }
     res.json({ contexts: data ?? [] });
   });
 
@@ -422,7 +485,10 @@ export function registerAutonomousAgentStudioRoutes(app: express.Application): v
       .select('*')
       .eq('org_id', ctx.orgId)
       .order('created_at', { ascending: false });
-    if (error) return res.status(500).json({ error: error.message });
+    if (error) {
+      sendAutonomousListError(res, error, { runners: [] });
+      return;
+    }
     res.json({ runners: data ?? [] });
   });
 
@@ -444,7 +510,10 @@ export function registerAutonomousAgentStudioRoutes(app: express.Application): v
       })
       .select('*')
       .single();
-    if (error) return res.status(500).json({ error: error.message });
+    if (error) {
+      sendAutonomousMutationError(res, error);
+      return;
+    }
     res.status(201).json({
       runner: data,
       pairingCode: code,
@@ -526,7 +595,10 @@ export function registerAutonomousAgentStudioRoutes(app: express.Application): v
     const runnerId = req.query.runnerId as string | undefined;
     if (runnerId) q = q.eq('local_runner_id', runnerId);
     const { data, error } = await q.order('provider', { ascending: true });
-    if (error) return res.status(500).json({ error: error.message });
+    if (error) {
+      sendAutonomousListError(res, error, { vendors: [] });
+      return;
+    }
     res.json({ vendors: data ?? [] });
   });
 
@@ -556,7 +628,10 @@ export function registerAutonomousAgentStudioRoutes(app: express.Application): v
       )
       .select('*')
       .single();
-    if (error) return res.status(500).json({ error: error.message });
+    if (error) {
+      sendAutonomousMutationError(res, error);
+      return;
+    }
     res.status(201).json({ vendor: data });
   });
 
@@ -599,7 +674,10 @@ export function registerAutonomousAgentStudioRoutes(app: express.Application): v
       .or(`local_runner_id.eq.${runnerId},and(local_runner_id.is.null,status.eq.QUEUED)`)
       .order('created_at', { ascending: true })
       .limit(10);
-    if (error) return res.status(500).json({ error: error.message });
+    if (error) {
+      sendAutonomousListError(res, error, { jobs: [] });
+      return;
+    }
 
     res.json({ jobs: runs ?? [] });
   });

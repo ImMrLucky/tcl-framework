@@ -14,6 +14,7 @@ import { MatInputModule } from '@angular/material/input';
 import { MatSelectModule } from '@angular/material/select';
 import { AgentStudioService } from '../agent-studio.service';
 import { AgentTeam, AuditEvent, TeamCommandCenter, TeamRun, TeamRunMode } from '../agent-studio.types';
+import { migrationBannerText, migrationErrorText, responseNeedsMigration } from '../agent-studio-migration.util';
 
 @Component({
   selector: 'app-team-detail',
@@ -42,6 +43,11 @@ import { AgentTeam, AuditEvent, TeamCommandCenter, TeamRun, TeamRunMode } from '
     <div class="pause-banner team" *ngIf="cc && !cc.orgPaused && team?.paused_at">
       <mat-icon>pause_circle</mat-icon>
       <span>This team is paused.</span>
+    </div>
+
+    <div class="pause-banner migration" *ngIf="migrationWarning">
+      <mat-icon>warning</mat-icon>
+      <span>{{ migrationWarning }}</span>
     </div>
 
     <div class="state-block" *ngIf="loading">
@@ -279,6 +285,11 @@ import { AgentTeam, AuditEvent, TeamCommandCenter, TeamRun, TeamRunMode } from '
         border: 1px solid #fbbf24;
         color: #78350f;
       }
+      .pause-banner.migration {
+        background: #fff7ed;
+        border: 1px solid #fdba74;
+        color: #9a3412;
+      }
       .state-block {
         display: flex;
         align-items: center;
@@ -460,6 +471,7 @@ export class TeamDetailComponent implements OnInit {
   runMaxSteps = 25;
   activeRun: TeamRun | null = null;
   launching = false;
+  migrationWarning: string | null = null;
 
   constructor(
     private route: ActivatedRoute,
@@ -509,10 +521,19 @@ export class TeamDetailComponent implements OnInit {
   loadActiveRun(): void {
     this.studio.listTeamRuns(this.teamId).subscribe({
       next: (r) => {
+        if (responseNeedsMigration(r)) {
+          this.migrationWarning = migrationBannerText(r);
+          this.activeRun = null;
+          return;
+        }
         const active = (r.runs ?? []).find((run) =>
           ['QUEUED', 'RUNNING', 'PAUSED', 'WAITING_FOR_HUMAN', 'WAITING_FOR_REVIEW', 'BLOCKED'].includes(run.status)
         );
         this.activeRun = active ?? null;
+      },
+      error: (err) => {
+        const msg = migrationErrorText(err);
+        if (msg) this.migrationWarning = msg;
       },
     });
   }
@@ -535,7 +556,9 @@ export class TeamDetailComponent implements OnInit {
         },
         error: (err) => {
           this.launching = false;
-          this.snack.open(err?.error?.error || 'Launch failed', 'OK', { duration: 4000 });
+          const msg = migrationErrorText(err) ?? err?.error?.error ?? 'Launch failed';
+          this.migrationWarning = migrationErrorText(err) ?? this.migrationWarning;
+          this.snack.open(msg, 'OK', { duration: 8000 });
         },
       });
   }

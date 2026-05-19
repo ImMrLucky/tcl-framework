@@ -199,7 +199,7 @@ ALTER TABLE public.agent_studio_team_runs
   FOREIGN KEY (local_runner_id) REFERENCES public.agent_studio_local_runners(id) ON DELETE SET NULL;
 
 -- ----------------------------------------------------------------------------
--- RLS
+-- RLS (DROP IF EXISTS so this file is safe to re-run after a partial apply)
 -- ----------------------------------------------------------------------------
 ALTER TABLE public.agent_studio_team_runs ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.agent_studio_agent_runs ENABLE ROW LEVEL SECURITY;
@@ -208,6 +208,21 @@ ALTER TABLE public.agent_studio_team_event_log ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.agent_studio_agent_private_context ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.agent_studio_local_runners ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.agent_studio_local_vendor_refs ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "agent_studio_team_runs_select" ON public.agent_studio_team_runs;
+DROP POLICY IF EXISTS "agent_studio_team_runs_write" ON public.agent_studio_team_runs;
+DROP POLICY IF EXISTS "agent_studio_agent_runs_select" ON public.agent_studio_agent_runs;
+DROP POLICY IF EXISTS "agent_studio_agent_runs_write" ON public.agent_studio_agent_runs;
+DROP POLICY IF EXISTS "agent_studio_agent_run_steps_select" ON public.agent_studio_agent_run_steps;
+DROP POLICY IF EXISTS "agent_studio_agent_run_steps_write" ON public.agent_studio_agent_run_steps;
+DROP POLICY IF EXISTS "agent_studio_team_event_log_select" ON public.agent_studio_team_event_log;
+DROP POLICY IF EXISTS "agent_studio_team_event_log_insert" ON public.agent_studio_team_event_log;
+DROP POLICY IF EXISTS "agent_studio_agent_private_context_select" ON public.agent_studio_agent_private_context;
+DROP POLICY IF EXISTS "agent_studio_agent_private_context_write" ON public.agent_studio_agent_private_context;
+DROP POLICY IF EXISTS "agent_studio_local_runners_select" ON public.agent_studio_local_runners;
+DROP POLICY IF EXISTS "agent_studio_local_runners_write" ON public.agent_studio_local_runners;
+DROP POLICY IF EXISTS "agent_studio_local_vendor_refs_select" ON public.agent_studio_local_vendor_refs;
+DROP POLICY IF EXISTS "agent_studio_local_vendor_refs_write" ON public.agent_studio_local_vendor_refs;
 
 CREATE POLICY "agent_studio_team_runs_select" ON public.agent_studio_team_runs FOR SELECT
   USING (public.is_org_member(org_id));
