@@ -15,6 +15,8 @@ import {
   ContextEntry,
   ContextScope,
   IntegrationRow,
+  BoardPauseState,
+  BoardSettings,
   KanbanBoard,
   McpServerRow,
   Mistake,
@@ -254,15 +256,41 @@ export class AgentStudioService {
   // -------------------------------------------------------------------------
   // Board + tasks.
   // -------------------------------------------------------------------------
-  getBoard(teamId: string): Observable<{ board: KanbanBoard; tasks: Task[] }> {
-    return this.http.get<{ board: KanbanBoard; tasks: Task[] }>(this.url(`/teams/${teamId}/board`));
+  getBoard(teamId: string): Observable<{
+    board: KanbanBoard;
+    tasks: Task[];
+    reviewGatesByTaskId: Record<string, ReviewGate[]>;
+    pause: BoardPauseState;
+  }> {
+    return this.http.get<{
+      board: KanbanBoard;
+      tasks: Task[];
+      reviewGatesByTaskId: Record<string, ReviewGate[]>;
+      pause: BoardPauseState;
+    }>(this.url(`/teams/${teamId}/board`));
+  }
+
+  updateBoard(
+    boardId: string,
+    body: { settings?: BoardSettings; columns?: KanbanBoard['columns']; name?: string }
+  ): Observable<{ board: KanbanBoard }> {
+    return this.http.patch<{ board: KanbanBoard }>(this.url(`/boards/${boardId}`), body);
   }
 
   createTask(teamId: string, body: CreateTaskPayload): Observable<{ task: Task }> {
     return this.http.post<{ task: Task }>(this.url(`/teams/${teamId}/tasks`), body);
   }
 
-  updateTask(taskId: string, body: Partial<Task & { columnKey: string; assignedAgentId: string | null }>): Observable<{ task: Task }> {
+  updateTask(
+    taskId: string,
+    body: Partial<
+      Task & {
+        columnKey: string;
+        assignedAgentId: string | null;
+        metadata: Record<string, unknown>;
+      }
+    >
+  ): Observable<{ task: Task }> {
     return this.http.patch<{ task: Task }>(this.url(`/tasks/${taskId}`), body);
   }
 
@@ -277,8 +305,17 @@ export class AgentStudioService {
     return this.http.get<{ gates: ReviewGate[] }>(this.url(`/tasks/${taskId}/review-gates`));
   }
 
-  createReviewGate(taskId: string, gateType: ReviewGateType, requiredRole?: string): Observable<{ gate: ReviewGate }> {
-    return this.http.post<{ gate: ReviewGate }>(this.url(`/tasks/${taskId}/review-gates`), { gateType, requiredRole });
+  createReviewGate(
+    taskId: string,
+    gateType: ReviewGateType,
+    requiredRole?: string,
+    metadata?: Record<string, unknown>
+  ): Observable<{ gate: ReviewGate }> {
+    return this.http.post<{ gate: ReviewGate }>(this.url(`/tasks/${taskId}/review-gates`), {
+      gateType,
+      requiredRole,
+      metadata,
+    });
   }
 
   decideReviewGate(gateId: string, status: ReviewGateStatus, comment?: string): Observable<{ gate: ReviewGate }> {

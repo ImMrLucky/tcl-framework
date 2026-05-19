@@ -70,12 +70,43 @@ export interface BoardColumn {
   label: string;
 }
 
+export type ReviewMode = 'AUTO_APPROVED' | 'HUMAN' | 'AGENT' | 'MIXED';
+export type SwimlaneMode = 'none' | 'agent' | 'priority' | 'type';
+
+export interface BoardReviewPolicy {
+  defaultMode: ReviewMode;
+  requireGatesBeforeDone: boolean;
+  autoCreateGatesOnEnterReview: boolean;
+  defaultGateTypes: ReviewGateType[];
+}
+
+export interface BoardSettings {
+  swimlaneMode: SwimlaneMode;
+  reviewPolicy: BoardReviewPolicy;
+}
+
+export const DEFAULT_BOARD_SETTINGS: BoardSettings = {
+  swimlaneMode: 'none',
+  reviewPolicy: {
+    defaultMode: 'HUMAN',
+    requireGatesBeforeDone: true,
+    autoCreateGatesOnEnterReview: true,
+    defaultGateTypes: ['CODE_REVIEW', 'QA_REVIEW'],
+  },
+};
+
 export interface KanbanBoard {
   id: string;
   team_id: string;
   name: string;
   columns: BoardColumn[];
   is_default: boolean;
+  settings?: BoardSettings;
+}
+
+export interface BoardPauseState {
+  orgPaused: boolean;
+  teamPaused: boolean;
 }
 
 export type TaskType = 'STORY' | 'BUG' | 'SPIKE' | 'RESEARCH' | 'SPEC' | 'REVIEW' | 'CHORE';
@@ -125,6 +156,7 @@ export interface ReviewGate {
   comment: string | null;
   decided_by: string | null;
   decided_at: string | null;
+  metadata?: Record<string, unknown>;
   created_at: string;
   updated_at: string;
 }

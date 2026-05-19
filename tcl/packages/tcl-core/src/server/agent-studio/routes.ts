@@ -30,6 +30,7 @@ import { readPauseGate, type PauseGateState } from './pause-gate.js';
 import { handleAgentStudioDispatch } from './dispatch.js';
 import { handleIntegrationPing } from './integration-ping.js';
 import { buildAgentStudioSummary, buildTeamCommandCenter } from './summary.js';
+import { parseBoardSettings } from './board-settings.js';
 import { assertReviewGatesAllowTerminalMove } from './review-gate-move.js';
 import { registerAgentStudioTemplateFileRoutes } from './agent-studio-template-file-routes.js';
 import { resolveTemplatePackId, seedDefaultAgentMarkdownFiles } from './agent-files.js';
@@ -797,6 +798,14 @@ export function setupAgentStudioRoutes(app: express.Application): void {
     const ctx = await ensureContext(req, res);
     if (!ctx || dbDown(res)) return;
     const { teamId } = req.params;
+    const { data: team } = await supabaseAdmin!
+      .from('agent_studio_teams')
+      .select('id, paused_at')
+      .eq('id', teamId)
+      .eq('org_id', ctx.orgId)
+      .maybeSingle();
+    if (!team) return res.status(404).json({ error: 'Team not found' });
+
     const { data: board } = await supabaseAdmin!
       .from('agent_studio_boards')
       .select('*')
@@ -815,7 +824,75 @@ export function setupAgentStudioRoutes(app: express.Application): void {
       .order('position', { ascending: true });
     if (tasksError) return res.status(500).json({ error: tasksError.message });
 
-    res.json({ board, tasks: tasks ?? [] });
+    const taskList = tasks ?? [];
+    const taskIds = taskList.map((t) => t.id);
+    const reviewGatesByTaskId: Record<string, unknown[]> = {};
+    if (taskIds.length > 0) {
+      const { data: gates, error: gatesErr } = await supabaseAdmin!
+        .from('agent_studio_review_gates')
+        .select('*')
+        .eq('org_id', ctx.orgId)
+        .in('task_id', taskIds);
+      if (gatesErr) return res.status(500).json({ error: gatesErr.message });
+      for (const g of gates ?? []) {
+        const tid = g.task_id as string;
+        (reviewGatesByTaskId[tid] = reviewGatesByTaskId[tid] || []).push(g);
+      }
+    }
+
+    const { data: orgRow } = await supabaseAdmin!
+      .from('agent_studio_orgs')
+      .select('paused_at')
+      .eq('org_id', ctx.orgId)
+      .maybeSingle();
+
+    const settings = parseBoardSettings(board.settings);
+    res.json({
+      board: { ...board, settings },
+      tasks: taskList,
+      reviewGatesByTaskId,
+      pause: {
+        orgPaused: !!orgRow?.paused_at,
+        teamPaused: !!team.paused_at,
+      },
+    });
+  });
+
+  app.patch('/api/agent-studio/boards/:boardId', async (req, res) => {
+    const ctx = await ensureContext(req, res);
+    if (!ctx || !requireAnalyst(ctx, res) || dbDown(res)) return;
+    const { boardId } = req.params;
+    const { data: existing } = await supabaseAdmin!
+      .from('agent_studio_boards')
+      .select('id, team_id')
+      .eq('id', boardId)
+      .eq('org_id', ctx.orgId)
+      .maybeSingle();
+    if (!existing) return res.status(404).json({ error: 'Board not found' });
+
+    const gate = await readPauseGate({ orgId: ctx.orgId, teamId: existing.team_id });
+    if (blockedByPause(res, gate)) return;
+
+    const patch: Record<string, unknown> = {};
+    if (req.body?.name !== undefined) patch.name = req.body.name;
+    if (req.body?.columns !== undefined) patch.columns = req.body.columns;
+    if (req.body?.settings !== undefined) {
+      patch.settings = parseBoardSettings(req.body.settings);
+    }
+    if (!Object.keys(patch).length) {
+      return res.status(400).json({ error: 'No fields to update' });
+    }
+
+    const { data, error } = await supabaseAdmin!
+      .from('agent_studio_boards')
+      .update(patch)
+      .eq('id', boardId)
+      .eq('org_id', ctx.orgId)
+      .select('*')
+      .single();
+    if (error) return res.status(500).json({ error: error.message });
+
+    res.json({ board: { ...data, settings: parseBoardSettings(data.settings) } });
   });
 
   app.post('/api/agent-studio/teams/:teamId/tasks', async (req, res) => {
