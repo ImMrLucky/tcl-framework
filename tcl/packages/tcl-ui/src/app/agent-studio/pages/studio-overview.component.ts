@@ -63,7 +63,16 @@ interface AgentWithTeam extends Agent {
               <mat-icon>tune</mat-icon>
               Settings
             </a>
+            <a mat-stroked-button routerLink="vendors" fragment="what-to-install">
+              <mat-icon>download</mat-icon>
+              What to install
+            </a>
           </div>
+          <p class="install-hint muted">
+            Using Agent Studio in the browser only? You do not need npm packages.
+            <a routerLink="vendors" fragment="what-to-install">See what to install</a>
+            for local runners or TCL SDK integration.
+          </p>
         </mat-card-content>
       </mat-card>
 
@@ -398,6 +407,12 @@ interface AgentWithTeam extends Agent {
         margin-right: 4px;
         vertical-align: middle;
       }
+      .install-hint {
+        margin: 16px 0 0;
+        font-size: 13px;
+        line-height: 1.5;
+      }
+      .install-hint a { color: #6366f1; }
       .entity-list {
         list-style: none;
         margin: 0;
