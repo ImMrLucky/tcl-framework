@@ -42,11 +42,46 @@ import {
     <section class="page">
       <header class="header">
         <h2>Teams</h2>
-        <p class="muted intro">
+        <p class="muted intro" *ngIf="!teams.length">
           Pick a <strong>team in a box</strong> — we provision Jarvis, specialists, and config files. Add work, then
           <strong>Start Working</strong>.
         </p>
+        <p class="muted intro" *ngIf="teams.length">
+          Open a team at the top, or create another from a template below.
+        </p>
       </header>
+
+      <section class="your-teams" *ngIf="teams.length">
+        <h3 class="section-title">Your teams</h3>
+        <div class="grid">
+          <mat-card *ngFor="let team of teams" class="team-card">
+            <mat-card-title>
+              <a [routerLink]="['..', 'teams', team.id]">{{ team.name }}</a>
+              <mat-chip *ngIf="team.paused_at" color="warn" selected>paused</mat-chip>
+            </mat-card-title>
+            <mat-card-subtitle *ngIf="team.workflow_template_key">
+              {{ team.workflow_template_key }}
+            </mat-card-subtitle>
+            <mat-card-content>
+              <p class="muted" *ngIf="team.description">{{ team.description }}</p>
+            </mat-card-content>
+            <mat-card-actions class="team-actions">
+              <a mat-flat-button color="primary" class="card-action-btn" [routerLink]="['..', 'teams', team.id]">
+                <mat-icon>hub</mat-icon>
+                Command center
+              </a>
+              <a mat-stroked-button color="primary" class="card-action-btn" [routerLink]="['..', 'teams', team.id, 'agents']">
+                <mat-icon>smart_toy</mat-icon>
+                Agents
+              </a>
+              <a mat-stroked-button class="card-action-btn" [routerLink]="['..', 'teams', team.id, 'board']">
+                <mat-icon>view_kanban</mat-icon>
+                Board
+              </a>
+            </mat-card-actions>
+          </mat-card>
+        </div>
+      </section>
 
       <mat-card class="brainstorm-card">
         <mat-card-title>Describe your app or goals</mat-card-title>
@@ -153,28 +188,9 @@ import {
 
       <div *ngIf="!loading && !teams.length" class="empty">
         <mat-icon>groups</mat-icon>
-        <p>No teams yet. Choose a team type above to get started.</p>
+        <p>No teams yet. Choose a team type below to get started.</p>
       </div>
 
-      <h3 class="section-title" *ngIf="teams.length">Your teams</h3>
-      <div class="grid">
-        <mat-card *ngFor="let team of teams" class="team-card">
-          <mat-card-title>
-            <a [routerLink]="['..', 'teams', team.id]">{{ team.name }}</a>
-            <mat-chip *ngIf="team.paused_at" color="warn" selected>paused</mat-chip>
-          </mat-card-title>
-          <mat-card-subtitle *ngIf="team.workflow_template_key">
-            {{ team.workflow_template_key }}
-          </mat-card-subtitle>
-          <mat-card-content>
-            <p class="muted" *ngIf="team.description">{{ team.description }}</p>
-          </mat-card-content>
-          <mat-card-actions>
-            <a mat-button [routerLink]="['..', 'teams', team.id]">Command center</a>
-            <a mat-button [routerLink]="['..', 'teams', team.id, 'board']">Board</a>
-          </mat-card-actions>
-        </mat-card>
-      </div>
     </section>
   `,
   styles: [
@@ -209,11 +225,57 @@ import {
       .wizard-card { background: #fff; }
       .full { width: 100%; }
       .advanced { background: #fafafa; }
-      .section-title { margin: 8px 0 0; font-size: 1rem; color: #555; }
+      .your-teams { margin-bottom: 8px; }
+      .section-title { margin: 0 0 12px; font-size: 1.1rem; font-weight: 600; color: #1e293b; }
       .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 16px; }
-      .team-card { background: #fff; }
-      .team-card mat-card-title { display: flex; gap: 12px; align-items: center; }
-      .team-card a { color: inherit; text-decoration: none; }
+      .team-card {
+        background: #fff;
+        border: 1px solid #e2e8f0;
+        box-shadow: 0 1px 3px rgba(15, 23, 42, 0.06);
+      }
+      .team-card mat-card-title,
+      .team-card mat-card-subtitle,
+      .team-card mat-card-content {
+        padding: 0 16px;
+      }
+      .team-card mat-card-title {
+        padding-top: 16px;
+        display: flex;
+        gap: 12px;
+        align-items: center;
+      }
+      .team-card mat-card-subtitle { padding-bottom: 4px; }
+      .team-card mat-card-content { padding-bottom: 8px; }
+      .team-card mat-card-content p { margin: 0; }
+      .team-card mat-card-actions.team-actions {
+        padding: 0 12px 16px;
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        margin: 0;
+      }
+      .team-card a.title-link,
+      .team-card mat-card-title > a { color: inherit; text-decoration: none; }
+      .team-card mat-card-title > a:hover { color: #4f46e5; }
+      .card-action-btn mat-icon {
+        font-size: 18px;
+        width: 18px;
+        height: 18px;
+        margin-right: 4px;
+        vertical-align: middle;
+      }
+      .card-action-btn:not([color='primary']) {
+        border-color: #94a3b8;
+        color: #334155;
+        background: #f8fafc;
+      }
+      .brainstorm-card mat-card-content,
+      .wizard-card mat-card-content,
+      .box-card {
+        padding: 16px;
+      }
+      .box-card h3,
+      .box-card p { margin-left: 0; margin-right: 0; }
       .empty { text-align: center; padding: 48px 16px; color: #888; }
       .empty mat-icon { font-size: 48px; height: 48px; width: 48px; }
       .muted { color: #666; }
@@ -262,7 +324,9 @@ export class TeamsListComponent implements OnInit {
     this.loading = true;
     this.studio.listTeams().subscribe({
       next: (r) => {
-        this.teams = r.teams;
+        this.teams = [...(r.teams ?? [])].sort(
+          (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+        );
         this.loading = false;
       },
       error: (err) => {
