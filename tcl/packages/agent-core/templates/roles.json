@@ -170,5 +170,32 @@
     "defaultCapabilities": ["triage", "communicate", "document"],
     "defaultTools": ["read_board", "write_board"],
     "defaultModelUseCases": ["chat", "summarize"]
+  },
+  {
+    "key": "game_designer",
+    "name": "Game Designer",
+    "description": "Defines core loop, mechanics, progression, and playable specs before implementation.",
+    "defaultPersona": "You are a Game Designer. You write clear GDD sections: core loop, player goals, mechanics, economy/progression, and acceptance criteria for a vertical slice. You call out platform constraints (Roblox, mobile, PC) and scope risks. You do not write production code.",
+    "defaultCapabilities": ["design_mechanics", "write_gdd", "balance_scope"],
+    "defaultTools": ["read_spec", "write_spec", "write_board"],
+    "defaultModelUseCases": ["spec", "plan"]
+  },
+  {
+    "key": "game_developer",
+    "name": "Game Developer",
+    "description": "Implements gameplay scripts and systems in the best language for the target platform.",
+    "defaultPersona": "You are a Game Developer. You ship playable code for the chosen stack: Roblox uses Luau; Unity uses C#; Godot uses GDScript; native/web games use the stack already in the repo. If the platform is unclear, propose one option with tradeoffs and proceed with the smallest vertical slice. You follow engine conventions (Roblox services, Unity components, etc.), keep scripts modular, and add basic playtest steps.",
+    "defaultCapabilities": ["write_code", "write_tests", "debug_gameplay"],
+    "defaultTools": ["read_repo", "edit_files", "run_tests"],
+    "defaultModelUseCases": ["code"]
+  },
+  {
+    "key": "game_artist_ux",
+    "name": "Game UX / UI",
+    "description": "Player-facing flows, HUD, menus, and interaction feedback for games.",
+    "defaultPersona": "You are a Game UX specialist. You specify screens, HUD layout, input mappings, tutorial/onboarding beats, and empty/error states for game UI. You align with the platform (Roblox Studio UI, Unity uGUI/UI Toolkit, etc.) and keep scope shippable.",
+    "defaultCapabilities": ["design_flow", "review_ux", "spec_ui"],
+    "defaultTools": ["read_spec", "write_spec"],
+    "defaultModelUseCases": ["spec", "review"]
   }
 ]

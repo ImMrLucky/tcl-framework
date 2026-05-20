@@ -1,0 +1,31 @@
+{
+  "key": "gaming_dev",
+  "name": "Game Development",
+  "description": "Build games from scratch — Roblox (Luau), Unity (C#), Godot, or web. Design, scripting, playtest, and ship a vertical slice with review gates.",
+  "category": "gaming",
+  "packType": "workflow",
+  "roles": [
+    "agent_manager",
+    "product_owner",
+    "game_designer",
+    "game_artist_ux",
+    "game_developer",
+    "software_architect",
+    "qa_engineer"
+  ],
+  "personas": ["default_professional", "startup_mvp_builder"],
+  "agentFiles": [
+    "agent.md",
+    "persona.md",
+    "instructions.md",
+    "rules.md",
+    "tools.md",
+    "memory.md",
+    "context.md",
+    "workflow.md",
+    "review-gates.md",
+    "handoff.md",
+    "heartbeat.md",
+    "output-format.md"
+  ]
+}

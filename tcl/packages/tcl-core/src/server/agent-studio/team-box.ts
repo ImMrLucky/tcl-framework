@@ -91,6 +91,25 @@ export const TEAM_BOX_CATALOG: TeamBoxDefinition[] = [
     exampleObjective:
       'Research, spec, and implement the AI capability: document findings, define acceptance criteria, and deliver an integrated solution.',
   },
+  {
+    key: 'gaming_dev',
+    name: 'Game Development',
+    description:
+      'Create games from zero — Roblox (Luau), Unity (C#), Godot, or web. Game design, scripting, UX, architecture, and playtest QA with Jarvis coordinating delivery.',
+    icon: 'sports_esports',
+    workflowTemplateKey: 'generic_software_delivery',
+    templatePackKey: 'gaming_dev',
+    agents: [
+      { roleTemplateKey: 'product_owner', displayName: 'Game Producer' },
+      { roleTemplateKey: 'game_designer' },
+      { roleTemplateKey: 'game_artist_ux' },
+      { roleTemplateKey: 'software_architect', displayName: 'Technical Director' },
+      { roleTemplateKey: 'game_developer' },
+      { roleTemplateKey: 'qa_engineer', displayName: 'Playtest / QA' },
+    ],
+    exampleObjective:
+      'Ship a playable vertical slice: lock platform & language, document core loop in a GDD, implement core mechanics, and pass playtest acceptance.',
+  },
 ];
 
 export function findTeamBox(key: string): TeamBoxDefinition | null {
@@ -266,6 +285,26 @@ export async function provisionTeamBox(opts: {
     source: 'workflow',
     created_by: opts.userId,
   });
+
+  if (box.key === 'gaming_dev') {
+    await opts.supabase.from('agent_studio_contexts').insert({
+      org_id: opts.orgId,
+      scope: 'TEAM',
+      team_id: opts.teamId,
+      key: 'gaming_platform_guide',
+      content: [
+        'Default platform guidance for new game teams:',
+        '- Roblox: Luau in Roblox Studio; use services, RemoteEvents, and DataStores carefully.',
+        '- Unity: C# scripts + scenes; prefer a small vertical slice before polish.',
+        '- Godot: GDScript; scene tree and signals for gameplay.',
+        '- Web / casual: use the stack already in the repo (e.g. Phaser, Three.js).',
+        'If the user did not pick a platform, the Game Producer + Technical Director choose one and document it in team context before heavy implementation.',
+      ].join('\n'),
+      data: { stacks: ['roblox_luau', 'unity_csharp', 'godot_gdscript', 'web'] },
+      source: 'workflow',
+      created_by: opts.userId,
+    });
+  }
 
   await appendTeamEvent({
     supabase: opts.supabase,

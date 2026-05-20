@@ -78,6 +78,35 @@ const AI_HINTS = [
   'data science',
   'fine-tun',
 ];
+const GAME_HINTS = [
+  'game',
+  'gaming',
+  'roblox',
+  'lua',
+  'luau',
+  'unity',
+  'godot',
+  'unreal',
+  'gamedev',
+  'game dev',
+  'multiplayer',
+  'level design',
+  'gameplay',
+  'npc',
+  'quest',
+  'mmo',
+  'fps',
+  'platformer',
+  'rpg',
+  'simulator',
+  'obby',
+  'tycoon',
+  'studio',
+  'xbox',
+  'playstation',
+  'steam',
+  'itch.io',
+];
 
 const COMPLEX_HINTS = [
   'enterprise',
@@ -148,28 +177,33 @@ export function recommendTeamBox(idea: string, requirements?: string): TeamBoxRe
   const mobile = scoreHints(combined, MOBILE_HINTS);
   const web = scoreHints(combined, WEB_HINTS);
   const ai = scoreHints(combined, AI_HINTS);
+  const game = scoreHints(combined, GAME_HINTS);
 
   let teamBoxKey = 'web_app';
   let confidence: TeamBoxRecommendation['confidence'] = 'medium';
-  const max = Math.max(mobile, web, ai);
-  if (max === 0) {
+  const scores = [
+    { key: 'gaming_dev' as const, score: game },
+    { key: 'mobile_dev' as const, score: mobile },
+    { key: 'ai_team' as const, score: ai },
+    { key: 'web_app' as const, score: web },
+  ];
+  scores.sort((a, b) => b.score - a.score);
+  const top = scores[0];
+  const second = scores[1]?.score ?? 0;
+
+  if (top.score === 0) {
     teamBoxKey = 'web_app';
     confidence = 'low';
-  } else if (mobile >= web && mobile >= ai) {
-    teamBoxKey = 'mobile_dev';
-    confidence = mobile >= web + 1 ? 'high' : 'medium';
-  } else if (ai >= web && ai >= mobile) {
-    teamBoxKey = 'ai_team';
-    confidence = ai >= web + 1 ? 'high' : 'medium';
   } else {
-    teamBoxKey = 'web_app';
-    confidence = web >= mobile + 1 ? 'high' : 'medium';
+    teamBoxKey = top.key;
+    confidence = top.score >= second + 2 ? 'high' : top.score > second ? 'medium' : 'low';
   }
 
   const box = findTeamBox(teamBoxKey) ?? TEAM_BOX_CATALOG[1];
   const complexity = assessComplexity(idea, requirements);
 
   const rationaleParts: string[] = [];
+  if (game > 0 && teamBoxKey === 'gaming_dev') rationaleParts.push('game development signals detected');
   if (mobile > 0 && teamBoxKey === 'mobile_dev') rationaleParts.push('mobile platform signals detected');
   if (web > 0 && teamBoxKey === 'web_app') rationaleParts.push('web application signals detected');
   if (ai > 0 && teamBoxKey === 'ai_team') rationaleParts.push('AI/ML signals detected');
@@ -247,6 +281,55 @@ function specDrivenPlan(idea: string, requirements?: string): PlannedWorkItem[] 
   ];
 }
 
+function gameDrivenPlan(idea: string, requirements?: string): PlannedWorkItem[] {
+  const detail = requirements?.trim() || idea.trim();
+  return [
+    {
+      kind: 'APP_IDEA',
+      title: idea.trim().slice(0, 200) || 'Game project',
+      description: detail,
+      taskType: 'SPEC',
+      columnKey: 'backlog',
+      priority: 'HIGH',
+      children: [
+        {
+          kind: 'SPEC',
+          title: 'Platform & stack decision',
+          description:
+            'Choose target (Roblox/Luau, Unity/C#, Godot, web, etc.), repo layout, and vertical-slice scope. Record in team context.',
+          taskType: 'SPEC',
+          columnKey: 'backlog',
+          priority: 'HIGH',
+        },
+        {
+          kind: 'SPEC',
+          title: 'Game design doc — core loop & mechanics',
+          description: 'GDD: goals, core loop, mechanics, progression, and playtest acceptance for slice 1.',
+          taskType: 'SPEC',
+          columnKey: 'backlog',
+          priority: 'HIGH',
+        },
+        {
+          kind: 'STORY',
+          title: 'Vertical slice — playable build',
+          description: 'Implement core mechanics, minimal UI/HUD, and one complete player journey.',
+          taskType: 'STORY',
+          columnKey: 'backlog',
+          priority: 'HIGH',
+        },
+        {
+          kind: 'STORY',
+          title: 'Playtest, polish & QA pass',
+          description: 'Playtest script, bug fixes, performance sanity, and review gates.',
+          taskType: 'STORY',
+          columnKey: 'backlog',
+          priority: 'MEDIUM',
+        },
+      ],
+    },
+  ];
+}
+
 function taskDrivenPlan(idea: string, requirements?: string): PlannedWorkItem[] {
   const detail = requirements?.trim();
   return [
@@ -299,14 +382,17 @@ export function buildJarvisWorkPlan(opts: {
     mode = opts.deliveryMode;
   }
 
-  const items =
-    mode === 'SPEC_DRIVEN'
+  const useGamePlan = opts.teamBox?.key === 'gaming_dev';
+  const items = useGamePlan
+    ? gameDrivenPlan(opts.idea, opts.requirements)
+    : mode === 'SPEC_DRIVEN'
       ? specDrivenPlan(opts.idea, opts.requirements)
       : taskDrivenPlan(opts.idea, opts.requirements);
 
   const boxName = opts.teamBox?.name ?? 'team';
-  const summary =
-    mode === 'SPEC_DRIVEN'
+  const summary = useGamePlan
+    ? `Jarvis recommends game delivery for ${boxName}: pick platform/language, GDD + vertical slice, then playtest.`
+    : mode === 'SPEC_DRIVEN'
       ? `Jarvis recommends spec-driven delivery for ${boxName}: product + technical specs, then milestone stories.`
       : `Jarvis recommends task-driven delivery for ${boxName}: lean stories/tasks suitable for a focused change.`;
 

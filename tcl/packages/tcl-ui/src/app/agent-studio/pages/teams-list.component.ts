@@ -89,7 +89,7 @@ import {
         <mat-card-content>
           <mat-form-field appearance="outline" class="full">
             <mat-label>What do you want to build or accomplish?</mat-label>
-            <textarea matInput rows="3" [(ngModel)]="brainstormIdea" placeholder="e.g. A mobile app for field technicians…"></textarea>
+            <textarea matInput rows="3" [(ngModel)]="brainstormIdea" placeholder="e.g. A Roblox obby from scratch in Luau, or a Unity mobile game in C#…"></textarea>
           </mat-form-field>
           <mat-form-field appearance="outline" class="full">
             <mat-label>Requirements & constraints (optional)</mat-label>
@@ -117,10 +117,12 @@ import {
           [class.selected]="selectedBoxKey === box.key"
           (click)="selectBox(box)"
         >
-          <mat-icon class="box-icon">{{ box.icon }}</mat-icon>
-          <h3>{{ box.name }}</h3>
-          <p class="muted">{{ box.description }}</p>
-          <p class="meta muted">{{ box.agentRoleCount }} specialists + Jarvis</p>
+          <mat-card-content class="box-card-inner">
+            <mat-icon class="box-icon">{{ box.icon }}</mat-icon>
+            <h3>{{ box.name }}</h3>
+            <p class="muted">{{ box.description }}</p>
+            <p class="meta muted">{{ box.agentRoleCount }} specialists + Jarvis</p>
+          </mat-card-content>
         </mat-card>
       </div>
 
@@ -207,9 +209,16 @@ import {
         cursor: pointer;
         transition: box-shadow 0.15s, border-color 0.15s;
         border: 2px solid transparent;
+        background: #fff;
       }
       .box-card:hover { box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08); }
       .box-card.selected { border-color: var(--mat-sys-primary, #1976d2); }
+      .box-card .box-card-inner {
+        padding: 16px;
+      }
+      .box-card .box-card-inner:last-child {
+        padding-bottom: 16px;
+      }
       .box-icon {
         font-size: 40px;
         width: 40px;
@@ -269,11 +278,18 @@ import {
         color: #334155;
         background: #f8fafc;
       }
+      .brainstorm-card mat-card-title,
+      .brainstorm-card mat-card-subtitle,
       .brainstorm-card mat-card-content,
-      .wizard-card mat-card-content,
-      .box-card {
-        padding: 16px;
+      .wizard-card mat-card-title,
+      .wizard-card mat-card-content {
+        padding-left: 16px;
+        padding-right: 16px;
       }
+      .brainstorm-card mat-card-title,
+      .wizard-card mat-card-title { padding-top: 16px; }
+      .brainstorm-card mat-card-content,
+      .wizard-card mat-card-content { padding-bottom: 16px; }
       .box-card h3,
       .box-card p { margin-left: 0; margin-right: 0; }
       .empty { text-align: center; padding: 48px 16px; color: #888; }
