@@ -94,6 +94,27 @@ export interface Agent {
   agent_file_mode?: 'managed' | 'advanced' | 'custom';
 }
 
+export type AgentTaskDisposition = 'jarvis' | 'unassign';
+
+export interface AgentRemovalImpact {
+  agentId: string;
+  agentName: string;
+  isOrchestrator: boolean;
+  assignedOpenTaskCount: number;
+  jarvisAgentId: string | null;
+  jarvisAgentName: string | null;
+  defaultDisposition: AgentTaskDisposition;
+}
+
+export interface AgentRemovalResult {
+  agentId: string;
+  agentName: string;
+  teamId: string;
+  tasksUpdated: number;
+  disposition: AgentTaskDisposition;
+  jarvisAgentId: string | null;
+}
+
 export interface AgentConfigVersion {
   id: string;
   agent_id: string;

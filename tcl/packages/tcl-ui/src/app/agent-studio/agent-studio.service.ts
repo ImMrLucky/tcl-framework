@@ -5,6 +5,9 @@ import { AuthService } from '../auth.service';
 import {
   Agent,
   AgentConfigVersion,
+  AgentRemovalImpact,
+  AgentRemovalResult,
+  AgentTaskDisposition,
   AgentStudioSettings,
   AgentTeam,
   ProvisionedTeamAgent,
@@ -341,8 +344,14 @@ export class AgentStudioService {
     return this.http.patch<{ agent: Agent }>(this.url(`/agents/${agentId}`), body);
   }
 
-  deleteAgent(agentId: string): Observable<void> {
-    return this.http.delete<void>(this.url(`/agents/${agentId}`));
+  getAgentRemovalImpact(agentId: string): Observable<{ impact: AgentRemovalImpact }> {
+    return this.http.get<{ impact: AgentRemovalImpact }>(this.url(`/agents/${agentId}/removal-impact`));
+  }
+
+  deleteAgent(agentId: string, body?: { taskDisposition?: AgentTaskDisposition }): Observable<AgentRemovalResult> {
+    return this.http.request<AgentRemovalResult>('DELETE', this.url(`/agents/${agentId}`), {
+      body: body ?? {},
+    });
   }
 
   pauseAgent(agentId: string, reason?: string): Observable<{ agent: Agent }> {

@@ -15,8 +15,15 @@ import { MatSnackBar, MatSnackBarModule } from '@angular/material/snack-bar';
 import { MatStepperModule } from '@angular/material/stepper';
 import { MatTabsModule } from '@angular/material/tabs';
 import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
+import { MatDialog, MatDialogModule } from '@angular/material/dialog';
+import { MatTooltipModule } from '@angular/material/tooltip';
+import { MatMenuModule } from '@angular/material/menu';
 import { AgentStudioService } from '../agent-studio.service';
 import { Agent, AgentMarkdownFile, PersonaTemplate, RoleTemplate } from '../agent-studio.types';
+import {
+  RemoveAgentDialogComponent,
+  RemoveAgentDialogData,
+} from './remove-agent-dialog.component';
 
 const PACK_KEYS = [
   { key: 'generic_agent_setup', label: 'Generic Agent Setup (default)' },
@@ -50,11 +57,17 @@ const PACK_KEYS = [
     MatStepperModule,
     MatTabsModule,
     MatProgressSpinnerModule,
+    MatDialogModule,
+    MatTooltipModule,
+    MatMenuModule,
   ],
   template: `
     <section class="page">
       <header class="header">
-        <h2>Agents</h2>
+        <div>
+          <h2>Agents</h2>
+          <p class="muted small">Specialists can be removed with <strong>Remove agent</strong> (Jarvis cannot).</p>
+        </div>
         <button mat-flat-button color="primary" (click)="showForm = !showForm">
           <mat-icon>add</mat-icon>
           New agent
@@ -124,33 +137,61 @@ const PACK_KEYS = [
 
       <div class="grid">
         <mat-card *ngFor="let agent of agents" class="agent-card">
-          <mat-card-title>
-            {{ agent.name }}
-            <mat-chip *ngIf="agent.is_orchestrator" color="primary" selected>orchestrator</mat-chip>
-            <mat-chip *ngIf="agent.paused_at" color="warn" selected>paused</mat-chip>
-          </mat-card-title>
-          <mat-card-subtitle *ngIf="agent.role_template_key">{{ agent.role_template_key }}</mat-card-subtitle>
+          <div class="agent-card-head">
+            <div class="agent-title-block">
+              <mat-card-title>
+                {{ agent.name }}
+                <mat-chip *ngIf="isOrchestratorAgent(agent)" color="primary" selected>orchestrator</mat-chip>
+                <mat-chip *ngIf="agent.paused_at" color="warn" selected>paused</mat-chip>
+              </mat-card-title>
+              <mat-card-subtitle *ngIf="agent.role_template_key">{{ agent.role_template_key }}</mat-card-subtitle>
+            </div>
+            <button mat-icon-button [matMenuTriggerFor]="agentMenu" aria-label="Agent actions">
+              <mat-icon>more_vert</mat-icon>
+            </button>
+            <mat-menu #agentMenu="matMenu">
+              <button mat-menu-item (click)="openConfig(agent)">
+                <mat-icon>tune</mat-icon>
+                <span>Config &amp; files</span>
+              </button>
+              <button mat-menu-item *ngIf="canRemoveAgent(agent)" (click)="confirmRemove(agent)">
+                <mat-icon color="warn">delete</mat-icon>
+                <span>Remove agent</span>
+              </button>
+            </mat-menu>
+          </div>
           <mat-card-content>
-            <p class="muted" *ngIf="agent.persona">{{ agent.persona }}</p>
+            <p class="muted persona" *ngIf="agent.persona">{{ agent.persona }}</p>
             <div class="runtime">
               <span class="runtime-label">Runtime</span>
               <mat-chip class="tiny">{{ agent.status }}</mat-chip>
-              <mat-chip *ngIf="agent.is_orchestrator" class="tiny">Jarvis · orchestrate</mat-chip>
+              <mat-chip *ngIf="isOrchestratorAgent(agent)" class="tiny">Jarvis · orchestrate</mat-chip>
               <span class="muted small" *ngIf="agent.paused_at">Blocked: team/agent pause</span>
             </div>
             <mat-chip-set *ngIf="agent.capabilities?.length">
               <mat-chip *ngFor="let c of agent.capabilities">{{ c }}</mat-chip>
             </mat-chip-set>
           </mat-card-content>
-          <mat-card-actions>
-            <button mat-button color="warn" *ngIf="!agent.paused_at" (click)="pause(agent)">
+          <mat-card-actions class="agent-actions">
+            <button mat-stroked-button *ngIf="!agent.paused_at" (click)="pause(agent)">
               <mat-icon>pause</mat-icon> Pause
             </button>
-            <button mat-button color="accent" *ngIf="agent.paused_at" (click)="resume(agent)">
+            <button mat-stroked-button color="primary" *ngIf="agent.paused_at" (click)="resume(agent)">
               <mat-icon>play_arrow</mat-icon> Resume
             </button>
-            <button mat-button (click)="openConfig(agent)">
+            <button mat-stroked-button (click)="openConfig(agent)">
               <mat-icon>tune</mat-icon> Config
+            </button>
+            <button
+              mat-flat-button
+              color="warn"
+              class="remove-btn"
+              *ngIf="canRemoveAgent(agent)"
+              (click)="confirmRemove(agent)"
+              [disabled]="removingAgentId === agent.id"
+            >
+              <mat-icon>delete</mat-icon>
+              {{ removingAgentId === agent.id ? 'Removing…' : 'Remove agent' }}
             </button>
           </mat-card-actions>
 
@@ -229,7 +270,11 @@ const PACK_KEYS = [
       .header {
         display: flex;
         justify-content: space-between;
-        align-items: center;
+        align-items: flex-start;
+        gap: 16px;
+      }
+      .header h2 {
+        margin: 0 0 4px;
       }
       .full {
         width: 100%;
@@ -244,6 +289,38 @@ const PACK_KEYS = [
       }
       .agent-card {
         background: #fff;
+        border: 1px solid #e2e8f0;
+      }
+      .agent-card-head {
+        display: flex;
+        align-items: flex-start;
+        justify-content: space-between;
+        gap: 8px;
+        padding: 16px 16px 0;
+      }
+      .agent-title-block {
+        flex: 1;
+        min-width: 0;
+      }
+      .agent-card-head mat-card-title,
+      .agent-card-head mat-card-subtitle {
+        padding: 0;
+      }
+      .persona {
+        display: -webkit-box;
+        -webkit-line-clamp: 3;
+        -webkit-box-orient: vertical;
+        overflow: hidden;
+      }
+      .agent-actions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        padding: 8px 12px 16px !important;
+      }
+      .remove-btn {
+        margin-left: auto;
+        font-weight: 600;
       }
       .agent-card mat-card-title {
         display: flex;
@@ -332,10 +409,16 @@ export class TeamAgentsComponent implements OnInit {
   savingMarkdown = false;
   seedingFiles = false;
   configsLoadedFor: Record<string, boolean> = {};
+  removingAgentId: string | null = null;
 
   private teamId!: string;
 
-  constructor(private route: ActivatedRoute, private studio: AgentStudioService, private snack: MatSnackBar) {}
+  constructor(
+    private route: ActivatedRoute,
+    private studio: AgentStudioService,
+    private snack: MatSnackBar,
+    private dialog: MatDialog
+  ) {}
 
   ngOnInit(): void {
     this.teamId = this.route.snapshot.paramMap.get('teamId')!;
@@ -349,6 +432,18 @@ export class TeamAgentsComponent implements OnInit {
       next: (r) => (this.agents = r.agents),
       error: (err) => this.snack.open(err?.error?.error || 'Failed to load agents', 'OK', { duration: 4000 }),
     });
+  }
+
+  isOrchestratorAgent(agent: Agent): boolean {
+    return !!(
+      agent.is_orchestrator ||
+      agent.role_template_key === 'agent_manager' ||
+      agent.name?.trim().toLowerCase() === 'jarvis'
+    );
+  }
+
+  canRemoveAgent(agent: Agent): boolean {
+    return !this.isOrchestratorAgent(agent);
   }
 
   applyRoleDefaults(): void {
@@ -489,6 +584,52 @@ export class TeamAgentsComponent implements OnInit {
 
   resume(agent: Agent): void {
     this.studio.resumeAgent(agent.id).subscribe({ next: () => this.refresh() });
+  }
+
+  confirmRemove(agent: Agent): void {
+    if (!this.canRemoveAgent(agent)) {
+      this.snack.open('Jarvis cannot be removed — pause the orchestrator instead.', 'OK', { duration: 5000 });
+      return;
+    }
+    this.studio.getAgentRemovalImpact(agent.id).subscribe({
+      next: (r) => {
+        const ref = this.dialog.open(RemoveAgentDialogComponent, {
+          width: '480px',
+          data: { impact: r.impact } satisfies RemoveAgentDialogData,
+        });
+        ref.afterClosed().subscribe((result) => {
+          if (!result?.confirmed) return;
+          this.removingAgentId = agent.id;
+          this.studio
+            .deleteAgent(agent.id, {
+              taskDisposition: result.taskDisposition,
+            })
+            .subscribe({
+              next: (deleted) => {
+                this.removingAgentId = null;
+                if (this.expandedAgentId === agent.id) {
+                  this.expandedAgentId = null;
+                }
+                const msg =
+                  deleted.tasksUpdated > 0
+                    ? deleted.disposition === 'jarvis'
+                      ? `Removed ${deleted.agentName}. ${deleted.tasksUpdated} task(s) assigned to Jarvis.`
+                      : `Removed ${deleted.agentName}. ${deleted.tasksUpdated} task(s) unassigned.`
+                    : `Removed ${deleted.agentName}.`;
+                this.snack.open(msg, 'OK', { duration: 6000 });
+                this.refresh();
+              },
+              error: (err) => {
+                this.removingAgentId = null;
+                this.snack.open(err?.error?.error || 'Remove failed', 'OK', { duration: 5000 });
+              },
+            });
+        });
+      },
+      error: (err) => {
+        this.snack.open(err?.error?.error || 'Could not load removal details', 'OK', { duration: 4000 });
+      },
+    });
   }
 
   openConfig(agent: Agent): void {

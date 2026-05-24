@@ -28,6 +28,7 @@ import {
 import { bufFromDb, bufToDb } from './bytea.js';
 import { readPauseGate, type PauseGateState } from './pause-gate.js';
 import { handleAgentStudioDispatch } from './dispatch.js';
+import { getAgentRemovalImpact, removeAgentWithTaskHandling } from './agent-removal.js';
 import { handleIntegrationPing } from './integration-ping.js';
 import { buildAgentStudioSummary, buildTeamCommandCenter } from './summary.js';
 import { parseBoardSettings } from './board-settings.js';
@@ -649,32 +650,47 @@ export function setupAgentStudioRoutes(app: express.Application): void {
     res.json({ agent: data });
   });
 
+  app.get('/api/agent-studio/agents/:agentId/removal-impact', async (req, res) => {
+    const ctx = await ensureContext(req, res);
+    if (!ctx || !requireStaff(ctx, res) || dbDown(res)) return;
+    const { agentId } = req.params;
+    const impact = await getAgentRemovalImpact({
+      supabase: supabaseAdmin!,
+      orgId: ctx.orgId,
+      agentId,
+    });
+    if (!impact) return res.status(404).json({ error: 'Agent not found' });
+    res.json({ impact });
+  });
+
   app.delete('/api/agent-studio/agents/:agentId', async (req, res) => {
     const ctx = await ensureContext(req, res);
     if (!ctx || !requireStaff(ctx, res) || dbDown(res)) return;
     const { agentId } = req.params;
-    const { data: existing } = await supabaseAdmin!
-      .from('agent_studio_agents')
-      .select('team_id')
-      .eq('id', agentId)
-      .eq('org_id', ctx.orgId)
-      .maybeSingle();
-    const { error } = await supabaseAdmin!
-      .from('agent_studio_agents')
-      .delete()
-      .eq('id', agentId)
-      .eq('org_id', ctx.orgId);
-    if (error) return res.status(500).json({ error: error.message });
+    const taskDisposition = req.body?.taskDisposition as 'jarvis' | 'unassign' | undefined;
+
+    const removed = await removeAgentWithTaskHandling({
+      supabase: supabaseAdmin!,
+      orgId: ctx.orgId,
+      agentId,
+      userId: ctx.userId ?? null,
+      taskDisposition,
+    });
+    if (!removed.ok) {
+      return res.status(removed.status).json({ error: removed.error });
+    }
+
     await logAgentStudioAudit({
       orgId: ctx.orgId,
-      teamId: existing?.team_id ?? null,
+      teamId: removed.result.teamId,
       agentId,
       actorUserId: ctx.userId,
       eventType: 'agent.delete',
       resourceType: 'agent_studio_agents',
       resourceId: agentId,
+      payload: { ...removed.result },
     });
-    res.status(204).end();
+    res.json(removed.result);
   });
 
   app.post('/api/agent-studio/agents/:agentId/pause', async (req, res) => {
