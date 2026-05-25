@@ -21,6 +21,7 @@ import {
   respondAutonomousDbError,
   respondAutonomousListEmpty,
 } from './autonomous-db.js';
+import { resolveModelRouting, type DbRoutingRule } from './model-routing.js';
 
 const ANALYST_ROLES = new Set(['OWNER', 'ADMIN', 'MANAGER', 'ANALYST']);
 const STAFF_ROLES = new Set(['OWNER', 'ADMIN', 'MANAGER']);
@@ -637,38 +638,24 @@ export function registerAutonomousAgentStudioRoutes(app: express.Application): v
     const keyMode =
       mode === 'CLOUD_ENCRYPTED_OPTIONAL' ? 'CLOUD_ENCRYPTED' : 'LOCAL_COMPANION_VAULT';
 
-    let provider = 'openai';
-    let model = 'gpt-4o-mini';
-    let source: 'AGENT' | 'TEAM' | 'ORG' | 'DEFAULT' = 'DEFAULT';
-
     const { data: rules } = await supabaseAdmin!
-      .from('agent_studio_model_routing_rules')
+      .from('agent_studio_model_routing')
       .select('*')
       .eq('org_id', ctx.orgId)
-      .eq('use_case', uc)
       .eq('is_active', true);
 
-    const list = rules ?? [];
-    const agentRule = agentId
-      ? list.find((r) => r.scope === 'AGENT' && r.agent_id === agentId)
-      : null;
-    const teamRule = list.find((r) => r.scope === 'TEAM' && r.team_id === teamId);
-    const orgRule = list.find((r) => r.scope === 'ORG');
-    const picked = agentRule ?? teamRule ?? orgRule;
-    if (picked) {
-      provider = picked.provider;
-      model = picked.model;
-      source = agentRule ? 'AGENT' : teamRule ? 'TEAM' : 'ORG';
-    }
-
-    if (uc === 'orchestrate') {
-      model = model || 'gpt-4o-mini';
-    }
+    const resolved = resolveModelRouting((rules ?? []) as DbRoutingRule[], {
+      orgId: ctx.orgId,
+      teamId: String(teamId),
+      agentId: agentId ? String(agentId) : '',
+      useCase: uc,
+    });
 
     res.json({
-      provider,
-      model,
-      source,
+      provider: resolved.provider,
+      model: resolved.model,
+      source: resolved.source,
+      providerKeyId: resolved.providerKeyId,
       keyMode,
       executionMode: mode,
       reason:

@@ -1,4 +1,5 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
+import { buildRuntimeReadiness, type RuntimeReadiness } from './runtime-readiness.js';
 
 export type NeedsAttentionItem = {
   type: 'task' | 'agent' | 'review' | 'integration' | 'mcp';
@@ -39,6 +40,7 @@ export type TeamCommandCenter = {
   recentMistakes: unknown[];
   contextSummary: string | null;
   orgPaused: boolean;
+  runtimeReadiness: RuntimeReadiness;
 };
 
 async function teamIdsForOrg(supabase: SupabaseClient, orgId: string): Promise<string[]> {
@@ -298,6 +300,8 @@ export async function buildTeamCommandCenter(
           .join('\n')
       : null;
 
+  const runtimeReadiness = await buildRuntimeReadiness(supabase, orgId, { teamId });
+
   return {
     team,
     agentsTotal: agentsRes.count ?? 0,
@@ -313,5 +317,6 @@ export async function buildTeamCommandCenter(
     recentMistakes: mistakesRes.data ?? [],
     contextSummary,
     orgPaused: !!(orgRowRes.data as { paused_at?: string | null } | null)?.paused_at,
+    runtimeReadiness,
   };
 }

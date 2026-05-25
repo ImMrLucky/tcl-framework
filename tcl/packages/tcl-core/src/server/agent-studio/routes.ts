@@ -38,6 +38,12 @@ import { resolveTemplatePackId, seedDefaultAgentMarkdownFiles } from './agent-fi
 import { ensureSystemTemplatesSeeded } from './seed-system-templates.js';
 import { registerAutonomousAgentStudioRoutes } from './autonomous-routes.js';
 import { provisionJarvisForTeam } from './jarvis.js';
+import {
+  listAgentModelRules,
+  resolveModelRouting,
+  setAgentModelConfig,
+  type DbRoutingRule,
+} from './model-routing.js';
 import { registerTeamBoxRoutes } from './team-box-routes.js';
 import { registerContextSummaryRoutes } from './context-summary-routes.js';
 import { registerTclStudioRoutes } from './tcl-studio-routes.js';
@@ -751,6 +757,126 @@ export function setupAgentStudioRoutes(app: express.Application): void {
       resourceId: agentId,
     });
     res.json({ agent: data });
+  });
+
+  // ========================================================================
+  // Per-agent model + BYOK key (creates AGENT-scoped routing rules).
+  // ========================================================================
+
+  app.get('/api/agent-studio/agents/:agentId/model-config', async (req, res) => {
+    const ctx = await ensureContext(req, res);
+    if (!ctx || dbDown(res)) return;
+    const { agentId } = req.params;
+
+    const { data: agent, error: agentErr } = await supabaseAdmin!
+      .from('agent_studio_agents')
+      .select('id, team_id, is_orchestrator, name')
+      .eq('id', agentId)
+      .eq('org_id', ctx.orgId)
+      .maybeSingle();
+    if (agentErr) return res.status(500).json({ error: agentErr.message });
+    if (!agent) return res.status(404).json({ error: 'Agent not found' });
+
+    const rules = await listAgentModelRules(supabaseAdmin!, ctx.orgId, agentId);
+    const defaultRule = rules.find((r) => r.use_case === 'default') ?? rules[0] ?? null;
+
+    const { data: allRules } = await supabaseAdmin!
+      .from('agent_studio_model_routing')
+      .select('*')
+      .eq('org_id', ctx.orgId)
+      .eq('is_active', true);
+
+    const resolvedDefault = resolveModelRouting((allRules ?? []) as DbRoutingRule[], {
+      orgId: ctx.orgId,
+      teamId: agent.team_id as string,
+      agentId,
+      useCase: 'default',
+    });
+
+    res.json({
+      config: {
+        provider: defaultRule?.provider ?? resolvedDefault.provider,
+        model: defaultRule?.model ?? resolvedDefault.model,
+        providerKeyId: defaultRule?.provider_key_id ?? resolvedDefault.providerKeyId,
+        source: defaultRule ? 'AGENT' : resolvedDefault.source,
+      },
+      rules,
+      resolved: resolvedDefault,
+    });
+  });
+
+  app.put('/api/agent-studio/agents/:agentId/model-config', async (req, res) => {
+    const ctx = await ensureContext(req, res);
+    if (!ctx || !requireStaff(ctx, res) || dbDown(res)) return;
+    const { agentId } = req.params;
+    const { provider, model, providerKeyId } = req.body ?? {};
+
+    if (!provider || !model) {
+      return res.status(400).json({ error: 'provider and model are required' });
+    }
+
+    const { data: agent, error: agentErr } = await supabaseAdmin!
+      .from('agent_studio_agents')
+      .select('id, team_id, is_orchestrator, name')
+      .eq('id', agentId)
+      .eq('org_id', ctx.orgId)
+      .maybeSingle();
+    if (agentErr) return res.status(500).json({ error: agentErr.message });
+    if (!agent) return res.status(404).json({ error: 'Agent not found' });
+
+    if (providerKeyId) {
+      const { data: keyRow } = await supabaseAdmin!
+        .from('agent_studio_provider_keys')
+        .select('id, provider')
+        .eq('id', providerKeyId)
+        .eq('org_id', ctx.orgId)
+        .eq('is_active', true)
+        .maybeSingle();
+      if (!keyRow) {
+        return res.status(400).json({ error: 'providerKeyId not found or inactive' });
+      }
+      if (String(keyRow.provider).toLowerCase() !== String(provider).toLowerCase()) {
+        return res.status(400).json({
+          error: 'Provider mismatch: selected key is for a different vendor than provider.',
+        });
+      }
+    }
+
+    try {
+      const rules = await setAgentModelConfig({
+        supabase: supabaseAdmin!,
+        orgId: ctx.orgId,
+        teamId: agent.team_id as string,
+        agentId,
+        isOrchestrator: !!agent.is_orchestrator,
+        provider: String(provider).toLowerCase(),
+        model: String(model).trim(),
+        providerKeyId: providerKeyId ?? null,
+      });
+
+      await logAgentStudioAudit({
+        orgId: ctx.orgId,
+        teamId: agent.team_id as string,
+        agentId,
+        actorUserId: ctx.userId,
+        eventType: 'agent.model_config',
+        resourceType: 'agent_studio_agents',
+        resourceId: agentId,
+        payload: { provider, model, providerKeyId: providerKeyId ?? null, ruleCount: rules.length },
+      });
+
+      res.json({
+        config: {
+          provider: String(provider).toLowerCase(),
+          model: String(model).trim(),
+          providerKeyId: providerKeyId ?? null,
+        },
+        rules,
+      });
+    } catch (e) {
+      const message = e instanceof Error ? e.message : 'Failed to save model config';
+      res.status(500).json({ error: message });
+    }
   });
 
   // ========================================================================

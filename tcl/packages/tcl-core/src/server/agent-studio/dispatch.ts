@@ -5,42 +5,12 @@ import { bufFromDb } from './bytea.js';
 import { decryptString } from './crypto.js';
 import { logAgentStudioAudit } from './audit.js';
 import { composeAgentPrompt } from './prompt-composer.js';
+import { resolveModelRouting, type DbRoutingRule } from './model-routing.js';
 
 export interface DispatchOrgContext {
   orgId: string;
   userId?: string;
   role?: string;
-}
-
-interface DbRoutingRule {
-  id: string;
-  org_id: string;
-  team_id: string | null;
-  agent_id: string | null;
-  scope: string;
-  use_case: string;
-  provider: string;
-  model: string;
-  provider_key_id: string | null;
-  fallback: unknown;
-  params: Record<string, unknown>;
-  is_active: boolean;
-}
-
-function resolveRouting(
-  rules: DbRoutingRule[],
-  input: { orgId: string; teamId: string; agentId: string; useCase: string }
-): DbRoutingRule | null {
-  const active = rules.filter(
-    (r) => r.is_active && r.org_id === input.orgId && r.use_case === input.useCase
-  );
-  const agent = active.find((r) => r.scope === 'AGENT' && r.agent_id === input.agentId);
-  if (agent) return agent;
-  const team = active.find((r) => r.scope === 'TEAM' && r.team_id === input.teamId);
-  if (team) return team;
-  const org = active.find((r) => r.scope === 'ORG');
-  if (org) return org;
-  return null;
 }
 
 async function loadAndDecryptProviderKey(orgId: string, keyId: string): Promise<string> {
@@ -200,25 +170,17 @@ export async function handleAgentStudioDispatch(
       return;
     }
 
-    const rule = resolveRouting((rules || []) as DbRoutingRule[], {
+    const resolved = resolveModelRouting((rules || []) as DbRoutingRule[], {
       orgId: ctx.orgId,
       teamId,
       agentId,
       useCase: String(useCase),
     });
 
-    const defaultModel = 'gpt-4o-mini';
-    let provider = 'openai';
-    let model = defaultModel;
-    let providerKeyId: string | null = null;
-    let ruleId: string | null = null;
-
-    if (rule) {
-      provider = String(rule.provider).toLowerCase();
-      model = rule.model;
-      providerKeyId = rule.provider_key_id;
-      ruleId = rule.id;
-    }
+    const provider = resolved.provider;
+    const model = resolved.model;
+    const providerKeyId = resolved.providerKeyId;
+    const ruleId = resolved.rule?.id ?? null;
 
     if (!providerKeyId) {
       res.status(400).json({

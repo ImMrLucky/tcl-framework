@@ -261,6 +261,24 @@ export interface ProviderKeyRow {
   created_at: string;
 }
 
+export interface AgentModelConfig {
+  provider: string;
+  model: string;
+  providerKeyId: string | null;
+  source?: 'AGENT' | 'TEAM' | 'ORG' | 'DEFAULT';
+}
+
+export interface AgentModelConfigResponse {
+  config: AgentModelConfig;
+  rules: RoutingRule[];
+  resolved?: {
+    provider: string;
+    model: string;
+    providerKeyId: string | null;
+    source: string;
+  };
+}
+
 export interface RoutingRule {
   id: string;
   scope: 'ORG' | 'TEAM' | 'AGENT';
@@ -391,6 +409,21 @@ export interface TeamCommandCenter {
   recentMistakes: Mistake[];
   contextSummary: string | null;
   orgPaused: boolean;
+  runtimeReadiness: RuntimeReadiness;
+}
+
+export type RuntimeExecutionMode = 'none' | 'local' | 'cloud' | 'local_and_cloud';
+
+export interface RuntimeReadiness {
+  executionMode: RuntimeExecutionMode;
+  canRunAgents: boolean;
+  planningUsesLlm: boolean;
+  localRunnersTotal: number;
+  localRunnersOnline: number;
+  localVendorsReady: number;
+  cloudProviderKeys: number;
+  routingRulesActive: number;
+  hints: string[];
 }
 
 export interface TemplatePackRow {

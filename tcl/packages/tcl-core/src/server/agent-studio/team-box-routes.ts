@@ -20,8 +20,10 @@ import {
   buildJarvisWorkPlan,
   recommendTeamBox,
   type DeliveryMode,
+  type JarvisWorkPlan,
   type PlannedWorkItem,
 } from './team-intake.js';
+import { buildJarvisWorkPlanWithLlm } from './jarvis-llm-plan.js';
 import type { OrgContext } from '../auth-context.js';
 import type { PauseGateState } from './pause-gate.js';
 
@@ -370,7 +372,7 @@ async function applyJarvisWorkPlan(opts: {
   deliveryMode?: DeliveryMode;
   teamBoxKey?: string | null;
   replaceBacklog?: boolean;
-}): Promise<{ plan: ReturnType<typeof buildJarvisWorkPlan>; tasks: Record<string, unknown>[] }> {
+}): Promise<{ plan: JarvisWorkPlan; tasks: Record<string, unknown>[] }> {
   if (opts.replaceBacklog) {
     await supabaseAdmin!
       .from('agent_studio_tasks')
@@ -381,11 +383,16 @@ async function applyJarvisWorkPlan(opts: {
       .in('status', ['PLANNED', 'IN_PROGRESS']);
   }
 
-  const plan = buildJarvisWorkPlan({
+  const jarvisAgentId = await getJarvisAgentId(supabaseAdmin!, opts.orgId, opts.teamId);
+  const plan = await buildJarvisWorkPlanWithLlm({
+    supabase: supabaseAdmin!,
+    orgId: opts.orgId,
+    teamId: opts.teamId,
+    jarvisAgentId,
     idea: opts.idea,
     requirements: opts.requirements,
     deliveryMode: opts.deliveryMode,
-    teamBox: opts.teamBoxKey ? findTeamBox(opts.teamBoxKey) : null,
+    teamBoxKey: opts.teamBoxKey,
   });
 
   const tasks: Record<string, unknown>[] = [];

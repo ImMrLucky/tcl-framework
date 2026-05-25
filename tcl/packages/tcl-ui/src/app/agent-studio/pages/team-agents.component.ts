@@ -19,11 +19,22 @@ import { MatDialog, MatDialogModule } from '@angular/material/dialog';
 import { MatTooltipModule } from '@angular/material/tooltip';
 import { MatMenuModule } from '@angular/material/menu';
 import { AgentStudioService } from '../agent-studio.service';
-import { Agent, AgentMarkdownFile, PersonaTemplate, RoleTemplate } from '../agent-studio.types';
+import { Agent, AgentMarkdownFile, PersonaTemplate, ProviderKeyRow, RoleTemplate } from '../agent-studio.types';
 import {
   RemoveAgentDialogComponent,
   RemoveAgentDialogData,
 } from './remove-agent-dialog.component';
+
+const LLM_PROVIDERS = [
+  { value: 'openai', label: 'OpenAI' },
+  { value: 'anthropic', label: 'Anthropic' },
+  { value: 'google', label: 'Google' },
+  { value: 'azure-openai', label: 'Azure OpenAI' },
+  { value: 'mistral', label: 'Mistral' },
+  { value: 'groq', label: 'Groq' },
+  { value: 'ollama', label: 'Ollama' },
+  { value: 'custom', label: 'Custom (OpenAI-compatible)' },
+];
 
 const PACK_KEYS = [
   { key: 'generic_agent_setup', label: 'Generic Agent Setup (default)' },
@@ -165,6 +176,10 @@ const PACK_KEYS = [
             <div class="runtime">
               <span class="runtime-label">Runtime</span>
               <mat-chip class="tiny">{{ agent.status }}</mat-chip>
+              <mat-chip *ngIf="modelSummaryByAgent[agent.id]" class="tiny model-chip">
+                {{ modelSummaryByAgent[agent.id]!.provider }}/{{ modelSummaryByAgent[agent.id]!.model }}
+              </mat-chip>
+              <mat-chip *ngIf="!modelSummaryByAgent[agent.id]" class="tiny warn-chip">no model</mat-chip>
               <mat-chip *ngIf="isOrchestratorAgent(agent)" class="tiny">Jarvis · orchestrate</mat-chip>
               <span class="muted small" *ngIf="agent.paused_at">Blocked: team/agent pause</span>
             </div>
@@ -244,6 +259,53 @@ const PACK_KEYS = [
                   </div>
                 </div>
               </mat-tab>
+              <mat-tab label="Model &amp; API key">
+                <div class="tab-body">
+                  <p class="muted small">
+                    Assign a <strong>vendor</strong>, <strong>model</strong>, and cloud BYOK key for this agent.
+                    {{ isOrchestratorAgent(agent) ? 'Jarvis uses this for LLM planning and orchestration.' : 'Specialists use this for chat, code, and dispatch.' }}
+                    Add keys in <a routerLink="/agent-studio/settings">Studio settings</a>.
+                  </p>
+                  <div class="row actions" *ngIf="loadingModelConfig">
+                    <mat-spinner diameter="24"></mat-spinner>
+                    <span class="muted">Loading model config…</span>
+                  </div>
+                  <ng-container *ngIf="!loadingModelConfig">
+                    <mat-form-field appearance="outline" class="full">
+                      <mat-label>Provider</mat-label>
+                      <mat-select [(ngModel)]="modelDraft(agent).provider" (selectionChange)="onModelProviderChange(agent)">
+                        <mat-option *ngFor="let p of llmProviders" [value]="p.value">{{ p.label }}</mat-option>
+                      </mat-select>
+                    </mat-form-field>
+                    <mat-form-field appearance="outline" class="full">
+                      <mat-label>Model</mat-label>
+                      <input matInput [(ngModel)]="modelDraft(agent).model" placeholder="e.g. gpt-4o-mini, claude-sonnet-4-20250514" />
+                    </mat-form-field>
+                    <mat-form-field appearance="outline" class="full">
+                      <mat-label>Provider key (BYOK)</mat-label>
+                      <mat-select [(ngModel)]="modelDraft(agent).providerKeyId">
+                        <mat-option [value]="null">— None —</mat-option>
+                        <mat-option *ngFor="let k of keysForProvider(modelDraft(agent).provider)" [value]="k.id">
+                          {{ k.label }} ({{ k.provider }})
+                        </mat-option>
+                      </mat-select>
+                    </mat-form-field>
+                    <p class="muted small" *ngIf="!providerKeys.length">
+                      No cloud keys yet — add one under Studio settings → Provider keys.
+                    </p>
+                    <div class="row">
+                      <button
+                        mat-flat-button
+                        color="primary"
+                        [disabled]="savingModelConfig || !modelDraft(agent).provider || !modelDraft(agent).model"
+                        (click)="saveModelConfig(agent)"
+                      >
+                        {{ savingModelConfig ? 'Saving…' : 'Save model & key' }}
+                      </button>
+                    </div>
+                  </ng-container>
+                </div>
+              </mat-tab>
               <mat-tab label="Runtime config (JSON)">
                 <div class="tab-body">
                   <p class="muted small">Optional runtime overrides (model routing, feature flags). Prompt text comes from Markdown files.</p>
@@ -311,6 +373,24 @@ const PACK_KEYS = [
         -webkit-line-clamp: 3;
         -webkit-box-orient: vertical;
         overflow: hidden;
+      }
+      .runtime {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 6px;
+        margin: 8px 0;
+      }
+      .runtime-label {
+        font-size: 12px;
+        color: #666;
+        margin-right: 4px;
+      }
+      .model-chip {
+        background: #e8f4fd !important;
+      }
+      .warn-chip {
+        background: #fff3e0 !important;
       }
       .agent-actions {
         display: flex;
@@ -390,6 +470,8 @@ export class TeamAgentsComponent implements OnInit {
   roles: RoleTemplate[] = [];
   personas: PersonaTemplate[] = [];
   packKeys = PACK_KEYS;
+  llmProviders = LLM_PROVIDERS;
+  providerKeys: ProviderKeyRow[] = [];
   showForm = false;
   newName = '';
   newRoleKey: string | null = null;
@@ -409,6 +491,11 @@ export class TeamAgentsComponent implements OnInit {
   savingMarkdown = false;
   seedingFiles = false;
   configsLoadedFor: Record<string, boolean> = {};
+  modelConfigLoadedFor: Record<string, boolean> = {};
+  modelSummaryByAgent: Record<string, { provider: string; model: string } | null> = {};
+  modelDraftByAgent: Record<string, { provider: string; model: string; providerKeyId: string | null }> = {};
+  loadingModelConfig = false;
+  savingModelConfig = false;
   removingAgentId: string | null = null;
 
   private teamId!: string;
@@ -425,13 +512,50 @@ export class TeamAgentsComponent implements OnInit {
     this.refresh();
     this.studio.listRoleTemplates().subscribe({ next: (r) => (this.roles = r.templates) });
     this.studio.listPersonaTemplates().subscribe({ next: (r) => (this.personas = r.templates) });
+    this.studio.listProviderKeys().subscribe({ next: (r) => (this.providerKeys = r.keys) });
+  }
+
+  modelDraft(agent: Agent): { provider: string; model: string; providerKeyId: string | null } {
+    if (!this.modelDraftByAgent[agent.id]) {
+      this.modelDraftByAgent[agent.id] = { provider: 'openai', model: 'gpt-4o-mini', providerKeyId: null };
+    }
+    return this.modelDraftByAgent[agent.id];
+  }
+
+  keysForProvider(provider: string): ProviderKeyRow[] {
+    const p = provider.toLowerCase();
+    return this.providerKeys.filter((k) => k.provider.toLowerCase() === p && k.is_active);
   }
 
   refresh(): void {
     this.studio.listAgents(this.teamId).subscribe({
-      next: (r) => (this.agents = r.agents),
+      next: (r) => {
+        this.agents = r.agents;
+        this.loadModelSummaries(r.agents);
+      },
       error: (err) => this.snack.open(err?.error?.error || 'Failed to load agents', 'OK', { duration: 4000 }),
     });
+  }
+
+  private loadModelSummaries(agents: Agent[]): void {
+    for (const agent of agents) {
+      this.studio.getAgentModelConfig(agent.id).subscribe({
+        next: (r) => {
+          const cfg = r.config;
+          if (cfg.provider && cfg.model && cfg.providerKeyId) {
+            this.modelSummaryByAgent = {
+              ...this.modelSummaryByAgent,
+              [agent.id]: { provider: cfg.provider, model: cfg.model },
+            };
+          } else {
+            this.modelSummaryByAgent = { ...this.modelSummaryByAgent, [agent.id]: null };
+          }
+        },
+        error: () => {
+          this.modelSummaryByAgent = { ...this.modelSummaryByAgent, [agent.id]: null };
+        },
+      });
+    }
   }
 
   isOrchestratorAgent(agent: Agent): boolean {
@@ -648,10 +772,76 @@ export class TeamAgentsComponent implements OnInit {
   }
 
   onConfigTabChange(agent: Agent, tabIndex: number): void {
-    // Tab 1 = Runtime config (JSON); only fetch when user opens that tab.
     if (tabIndex === 1) {
+      this.loadModelConfig(agent);
+    }
+    if (tabIndex === 2) {
       this.loadAgentConfigs(agent);
     }
+  }
+
+  loadModelConfig(agent: Agent): void {
+    if (this.modelConfigLoadedFor[agent.id]) return;
+    this.loadingModelConfig = true;
+    this.studio.getAgentModelConfig(agent.id).subscribe({
+      next: (r) => {
+        this.loadingModelConfig = false;
+        this.modelConfigLoadedFor = { ...this.modelConfigLoadedFor, [agent.id]: true };
+        this.modelDraftByAgent[agent.id] = {
+          provider: r.config.provider || 'openai',
+          model: r.config.model || 'gpt-4o-mini',
+          providerKeyId: r.config.providerKeyId ?? null,
+        };
+        if (r.config.provider && r.config.model && r.config.providerKeyId) {
+          this.modelSummaryByAgent = {
+            ...this.modelSummaryByAgent,
+            [agent.id]: { provider: r.config.provider, model: r.config.model },
+          };
+        }
+      },
+      error: (err) => {
+        this.loadingModelConfig = false;
+        this.snack.open(err?.error?.error || 'Failed to load model config', 'OK', { duration: 4000 });
+      },
+    });
+  }
+
+  onModelProviderChange(agent: Agent): void {
+    const draft = this.modelDraft(agent);
+    const keys = this.keysForProvider(draft.provider);
+    if (draft.providerKeyId && !keys.some((k) => k.id === draft.providerKeyId)) {
+      draft.providerKeyId = keys[0]?.id ?? null;
+    }
+  }
+
+  saveModelConfig(agent: Agent): void {
+    const draft = this.modelDraft(agent);
+    this.savingModelConfig = true;
+    this.studio
+      .setAgentModelConfig(agent.id, {
+        provider: draft.provider,
+        model: draft.model.trim(),
+        providerKeyId: draft.providerKeyId,
+      })
+      .subscribe({
+        next: (r) => {
+          this.savingModelConfig = false;
+          this.modelConfigLoadedFor = { ...this.modelConfigLoadedFor, [agent.id]: true };
+          if (r.config.providerKeyId) {
+            this.modelSummaryByAgent = {
+              ...this.modelSummaryByAgent,
+              [agent.id]: { provider: r.config.provider, model: r.config.model },
+            };
+          } else {
+            this.modelSummaryByAgent = { ...this.modelSummaryByAgent, [agent.id]: null };
+          }
+          this.snack.open('Model & key saved for this agent.', 'OK', { duration: 3000 });
+        },
+        error: (err) => {
+          this.savingModelConfig = false;
+          this.snack.open(err?.error?.error || 'Save failed', 'OK', { duration: 4000 });
+        },
+      });
   }
 
   loadAgentConfigs(agent: Agent): void {

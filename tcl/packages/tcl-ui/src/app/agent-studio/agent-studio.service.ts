@@ -5,6 +5,7 @@ import { AuthService } from '../auth.service';
 import {
   Agent,
   AgentConfigVersion,
+  AgentModelConfigResponse,
   AgentRemovalImpact,
   AgentRemovalResult,
   AgentTaskDisposition,
@@ -371,6 +372,17 @@ export class AgentStudioService {
 
   publishAgentConfig(agentId: string, config: Record<string, unknown>, notes?: string): Observable<{ config: AgentConfigVersion }> {
     return this.http.post<{ config: AgentConfigVersion }>(this.url(`/agents/${agentId}/configs`), { config, notes });
+  }
+
+  getAgentModelConfig(agentId: string): Observable<AgentModelConfigResponse> {
+    return this.http.get<AgentModelConfigResponse>(this.url(`/agents/${agentId}/model-config`));
+  }
+
+  setAgentModelConfig(
+    agentId: string,
+    body: { provider: string; model: string; providerKeyId?: string | null }
+  ): Observable<AgentModelConfigResponse> {
+    return this.http.put<AgentModelConfigResponse>(this.url(`/agents/${agentId}/model-config`), body);
   }
 
   // -------------------------------------------------------------------------

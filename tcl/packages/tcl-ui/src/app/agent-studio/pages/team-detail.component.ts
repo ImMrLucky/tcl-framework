@@ -115,6 +115,49 @@ import { migrationBannerText, migrationErrorText, responseNeedsMigration } from 
         </mat-card>
       </div>
 
+      <mat-card class="runtime-card" [class.ok]="cc.runtimeReadiness?.canRunAgents" *ngIf="cc.runtimeReadiness as rr">
+        <mat-card-title>
+          <mat-icon>{{ rr.canRunAgents ? 'check_circle' : 'warning' }}</mat-icon>
+          AI runtime
+        </mat-card-title>
+        <mat-card-subtitle>
+          Per-agent models are set on the Agents page. Cloud BYOK keys live in Settings.
+          <span *ngIf="rr.canRunAgents"> Ready to run models.</span>
+          <span *ngIf="!rr.canRunAgents"> Not ready — agents cannot call models yet.</span>
+        </mat-card-subtitle>
+        <mat-card-content>
+          <div class="runtime-grid">
+            <div>
+              <span class="label">Local runner</span>
+              <strong>{{ rr.localRunnersOnline }} online</strong>
+              <span class="muted"> / {{ rr.localRunnersTotal }} paired</span>
+            </div>
+            <div>
+              <span class="label">Local keys</span>
+              <strong>{{ rr.localVendorsReady }}</strong>
+              <span class="muted"> vendor ref(s)</span>
+            </div>
+            <div>
+              <span class="label">Cloud BYOK</span>
+              <strong>{{ rr.cloudProviderKeys }}</strong>
+              <span class="muted"> key(s)</span>
+            </div>
+            <div>
+              <span class="label">Routing rules</span>
+              <strong>{{ rr.routingRulesActive }}</strong>
+              <span class="muted"> active</span>
+            </div>
+          </div>
+          <ul class="runtime-hints">
+            <li *ngFor="let h of rr.hints">{{ h }}</li>
+          </ul>
+          <div class="runtime-links">
+            <a mat-stroked-button color="primary" routerLink="/agent-studio/vendors">Vendors &amp; Runtime</a>
+            <a mat-stroked-button routerLink="/agent-studio/settings">Studio settings (cloud keys)</a>
+          </div>
+        </mat-card-content>
+      </mat-card>
+
       <mat-card class="actions-bar">
         <mat-card-content class="action-row">
           <button mat-flat-button color="primary" (click)="goBoard()">
@@ -144,6 +187,14 @@ import { migrationBannerText, migrationErrorText, responseNeedsMigration } from 
       <mat-card class="work-card">
         <mat-card-title>Assign work</mat-card-title>
         <mat-card-content>
+          <p class="muted small plan-note">
+            <strong>Plan with Jarvis</strong>
+            <span *ngIf="cc?.runtimeReadiness?.planningUsesLlm"> uses Jarvis's assigned LLM</span>
+            <span *ngIf="!cc?.runtimeReadiness?.planningUsesLlm"> adds template specs/stories (assign Jarvis a model + key for LLM planning)</span>
+            to the board.
+            Check the <a [routerLink]="['/agent-studio', 'teams', teamId, 'board']">board</a> for child cards under your idea.
+            <strong>Start Working</strong> and IDE dispatch need keys — see <strong>AI runtime</strong> above.
+          </p>
           <div class="work-kind-row">
             <button
               mat-stroked-button
@@ -177,7 +228,7 @@ import { migrationBannerText, migrationErrorText, responseNeedsMigration } from 
               mat-stroked-button
               (click)="planWithJarvis()"
               [disabled]="!workTitle.trim() || planning"
-              matTooltip="Break down into specs (complex) or stories (simple)"
+              matTooltip="Adds template specs/stories to the board (no LLM). Open the board to see child cards."
             >
               {{ planning ? 'Planning…' : 'Plan with Jarvis' }}
             </button>
@@ -387,6 +438,51 @@ import { migrationBannerText, migrationErrorText, responseNeedsMigration } from 
         display: grid;
         grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
         gap: 12px;
+      }
+      .runtime-card {
+        border-left: 4px solid #f59e0b;
+        background: #fffbeb;
+      }
+      .runtime-card.ok {
+        border-left-color: #10b981;
+        background: #f0fdf4;
+      }
+      .runtime-card mat-card-title {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+      .runtime-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+        gap: 12px;
+        margin-bottom: 12px;
+      }
+      .runtime-grid .label {
+        display: block;
+        font-size: 12px;
+        color: #64748b;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+      }
+      .runtime-hints {
+        margin: 0 0 12px;
+        padding-left: 18px;
+        font-size: 13px;
+        color: #475569;
+        line-height: 1.5;
+      }
+      .runtime-links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+      }
+      .plan-note {
+        margin: 0 0 12px;
+        line-height: 1.5;
+      }
+      .plan-note a {
+        color: #6366f1;
       }
       .metric {
         padding: 12px 14px !important;

@@ -150,7 +150,7 @@ import {
           </mat-form-field>
 
           <mat-checkbox [(ngModel)]="autoPlanOnCreate">
-            Let Jarvis break this into specs or stories on the board
+            Add template specs/stories to the board on create (Plan with Jarvis — no LLM yet)
           </mat-checkbox>
           <mat-checkbox [(ngModel)]="startWorkingOnCreate">
             Start Working immediately after create (queues autonomous run for local runner)
