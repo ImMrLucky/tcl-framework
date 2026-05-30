@@ -77,13 +77,69 @@ const PACK_KEYS = [
       <header class="header">
         <div>
           <h2>Agents</h2>
-          <p class="muted small">Specialists can be removed with <strong>Remove agent</strong> (Jarvis cannot).</p>
+          <p class="muted small">
+            Assign each agent a <strong>vendor</strong>, <strong>model</strong>, and <strong>API key</strong> via
+            <strong>Model &amp; key</strong> (Jarvis needs this for LLM planning).
+          </p>
         </div>
         <button mat-flat-button color="primary" (click)="showForm = !showForm">
           <mat-icon>add</mat-icon>
           New agent
         </button>
       </header>
+
+      <mat-card class="byok-banner">
+        <mat-card-content>
+          <mat-icon class="banner-icon">vpn_key</mat-icon>
+          <div>
+            <strong>Cloud API keys (BYOK) — two steps</strong>
+            <ol class="byok-steps">
+              <li>
+                <button mat-button type="button" class="linkish" (click)="openAddKeyPanel()">
+                  Add a provider key
+                </button>
+                (or
+                <a routerLink="/agent-studio/settings">Studio settings → Provider keys</a>)
+              </li>
+              <li>On each agent card, click <strong>Model &amp; key</strong> and choose vendor, model, and that key.</li>
+            </ol>
+            <p class="muted small" *ngIf="!providerKeys.length">
+              No keys stored yet — use <strong>Add a provider key</strong> below or in Settings.
+            </p>
+          </div>
+        </mat-card-content>
+      </mat-card>
+
+      <mat-expansion-panel class="add-key-panel" [(expanded)]="addKeyPanelExpanded">
+        <mat-expansion-panel-header>
+          <mat-panel-title>Add provider key (BYOK)</mat-panel-title>
+          <mat-panel-description>Encrypted in Studio; assign to agents after saving</mat-panel-description>
+        </mat-expansion-panel-header>
+        <div class="add-key-form">
+          <mat-form-field appearance="outline">
+            <mat-label>Provider</mat-label>
+            <mat-select [(ngModel)]="newKeyProvider">
+              <mat-option *ngFor="let p of llmProviders" [value]="p.value">{{ p.label }}</mat-option>
+            </mat-select>
+          </mat-form-field>
+          <mat-form-field appearance="outline">
+            <mat-label>Label</mat-label>
+            <input matInput [(ngModel)]="newKeyLabel" placeholder="e.g. prod-openai" />
+          </mat-form-field>
+          <mat-form-field appearance="outline" class="grow">
+            <mat-label>API secret</mat-label>
+            <input matInput type="password" [(ngModel)]="newKeySecret" />
+          </mat-form-field>
+          <button
+            mat-flat-button
+            color="primary"
+            [disabled]="!newKeyLabel.trim() || !newKeySecret.trim() || creatingProviderKey"
+            (click)="addProviderKey()"
+          >
+            {{ creatingProviderKey ? 'Saving…' : 'Save key' }}
+          </button>
+        </div>
+      </mat-expansion-panel>
 
       <mat-card *ngIf="showForm" class="create-card">
         <mat-card-title>Create agent (generic setup)</mat-card-title>
@@ -161,6 +217,10 @@ const PACK_KEYS = [
               <mat-icon>more_vert</mat-icon>
             </button>
             <mat-menu #agentMenu="matMenu">
+              <button mat-menu-item (click)="openModelConfig(agent)">
+                <mat-icon>vpn_key</mat-icon>
+                <span>Model &amp; API key</span>
+              </button>
               <button mat-menu-item (click)="openConfig(agent)">
                 <mat-icon>tune</mat-icon>
                 <span>Config &amp; files</span>
@@ -176,10 +236,12 @@ const PACK_KEYS = [
             <div class="runtime">
               <span class="runtime-label">Runtime</span>
               <mat-chip class="tiny">{{ agent.status }}</mat-chip>
-              <mat-chip *ngIf="modelSummaryByAgent[agent.id]" class="tiny model-chip">
+              <mat-chip *ngIf="hasModelAssigned(agent)" class="tiny model-chip">
                 {{ modelSummaryByAgent[agent.id]!.provider }}/{{ modelSummaryByAgent[agent.id]!.model }}
               </mat-chip>
-              <mat-chip *ngIf="!modelSummaryByAgent[agent.id]" class="tiny warn-chip">no model</mat-chip>
+              <mat-chip *ngIf="modelSummaryLoaded[agent.id] && !hasModelAssigned(agent)" class="tiny warn-chip">
+                no model / key
+              </mat-chip>
               <mat-chip *ngIf="isOrchestratorAgent(agent)" class="tiny">Jarvis · orchestrate</mat-chip>
               <span class="muted small" *ngIf="agent.paused_at">Blocked: team/agent pause</span>
             </div>
@@ -198,6 +260,14 @@ const PACK_KEYS = [
               <mat-icon>tune</mat-icon> Config
             </button>
             <button
+              mat-stroked-button
+              color="primary"
+              (click)="openModelConfig(agent)"
+              [class.needs-key]="modelSummaryLoaded[agent.id] && !hasModelAssigned(agent)"
+            >
+              <mat-icon>vpn_key</mat-icon> Model &amp; key
+            </button>
+            <button
               mat-flat-button
               color="warn"
               class="remove-btn"
@@ -211,7 +281,11 @@ const PACK_KEYS = [
           </mat-card-actions>
 
           <div *ngIf="expandedAgentId === agent.id" class="config-panel">
-            <mat-tab-group animationDuration="0ms" (selectedIndexChange)="onConfigTabChange(agent, $event)">
+            <mat-tab-group
+              animationDuration="0ms"
+              [(selectedIndex)]="selectedConfigTabIndex"
+              (selectedIndexChange)="onConfigTabChange(agent, $event)"
+            >
               <mat-tab label="Markdown files">
                 <div class="tab-body">
                   <div class="row actions" *ngIf="loadingFiles">
@@ -291,8 +365,15 @@ const PACK_KEYS = [
                       </mat-select>
                     </mat-form-field>
                     <p class="muted small" *ngIf="!providerKeys.length">
-                      No cloud keys yet — add one under Studio settings → Provider keys.
+                      No cloud keys yet — expand <strong>Add provider key</strong> at the top of this page, or use
+                      <a routerLink="/agent-studio/settings">Studio settings</a>.
                     </p>
+                    <p class="muted small" *ngIf="providerKeys.length && !keysForProvider(modelDraft(agent).provider).length">
+                      No keys for <strong>{{ modelDraft(agent).provider }}</strong> — add one above or change provider.
+                    </p>
+                    <button mat-stroked-button type="button" class="add-key-inline" (click)="openAddKeyPanel(modelDraft(agent).provider)">
+                      <mat-icon>add</mat-icon> Add provider key
+                    </button>
                     <div class="row">
                       <button
                         mat-flat-button
@@ -337,6 +418,47 @@ const PACK_KEYS = [
       }
       .header h2 {
         margin: 0 0 4px;
+      }
+      .byok-banner mat-card-content {
+        display: flex;
+        gap: 12px;
+        align-items: flex-start;
+      }
+      .banner-icon {
+        color: #1565c0;
+        margin-top: 2px;
+      }
+      .byok-steps {
+        margin: 8px 0 0;
+        padding-left: 20px;
+      }
+      .byok-steps li {
+        margin-bottom: 4px;
+      }
+      .linkish {
+        padding: 0 4px;
+        min-width: 0;
+        text-decoration: underline;
+      }
+      .add-key-panel {
+        background: #fff;
+      }
+      .add-key-form {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 12px;
+        align-items: flex-start;
+        padding: 8px 0 16px;
+      }
+      .add-key-form .grow {
+        flex: 1;
+        min-width: 200px;
+      }
+      .add-key-inline {
+        margin-bottom: 12px;
+      }
+      .needs-key {
+        border-color: #ed6c02 !important;
       }
       .full {
         width: 100%;
@@ -472,6 +594,12 @@ export class TeamAgentsComponent implements OnInit {
   packKeys = PACK_KEYS;
   llmProviders = LLM_PROVIDERS;
   providerKeys: ProviderKeyRow[] = [];
+  addKeyPanelExpanded = false;
+  newKeyProvider = 'openai';
+  newKeyLabel = '';
+  newKeySecret = '';
+  creatingProviderKey = false;
+  selectedConfigTabIndex = 0;
   showForm = false;
   newName = '';
   newRoleKey: string | null = null;
@@ -493,6 +621,7 @@ export class TeamAgentsComponent implements OnInit {
   configsLoadedFor: Record<string, boolean> = {};
   modelConfigLoadedFor: Record<string, boolean> = {};
   modelSummaryByAgent: Record<string, { provider: string; model: string } | null> = {};
+  modelSummaryLoaded: Record<string, boolean> = {};
   modelDraftByAgent: Record<string, { provider: string; model: string; providerKeyId: string | null }> = {};
   loadingModelConfig = false;
   savingModelConfig = false;
@@ -512,7 +641,53 @@ export class TeamAgentsComponent implements OnInit {
     this.refresh();
     this.studio.listRoleTemplates().subscribe({ next: (r) => (this.roles = r.templates) });
     this.studio.listPersonaTemplates().subscribe({ next: (r) => (this.personas = r.templates) });
+    this.studio.listProviderKeys().subscribe({
+      next: (r) => {
+        this.providerKeys = r.keys;
+        if (!r.keys.length) this.addKeyPanelExpanded = true;
+      },
+    });
+  }
+
+  hasModelAssigned(agent: Agent): boolean {
+    const s = this.modelSummaryByAgent[agent.id];
+    return !!s?.provider && !!s?.model;
+  }
+
+  refreshProviderKeys(): void {
     this.studio.listProviderKeys().subscribe({ next: (r) => (this.providerKeys = r.keys) });
+  }
+
+  openAddKeyPanel(provider?: string): void {
+    if (provider) this.newKeyProvider = provider;
+    this.addKeyPanelExpanded = true;
+    setTimeout(() => {
+      document.querySelector('.add-key-panel')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }, 100);
+  }
+
+  addProviderKey(): void {
+    if (!this.newKeyLabel.trim() || !this.newKeySecret.trim()) return;
+    this.creatingProviderKey = true;
+    this.studio
+      .createProviderKey({
+        provider: this.newKeyProvider,
+        label: this.newKeyLabel.trim(),
+        secret: this.newKeySecret,
+      })
+      .subscribe({
+        next: () => {
+          this.creatingProviderKey = false;
+          this.newKeyLabel = '';
+          this.newKeySecret = '';
+          this.refreshProviderKeys();
+          this.snack.open('API key saved. Now assign it on each agent via Model & key.', 'OK', { duration: 5000 });
+        },
+        error: (err) => {
+          this.creatingProviderKey = false;
+          this.snack.open(err?.error?.error || err?.error?.message || 'Save key failed', 'OK', { duration: 5000 });
+        },
+      });
   }
 
   modelDraft(agent: Agent): { provider: string; model: string; providerKeyId: string | null } {
@@ -539,9 +714,11 @@ export class TeamAgentsComponent implements OnInit {
 
   private loadModelSummaries(agents: Agent[]): void {
     for (const agent of agents) {
+      this.modelSummaryLoaded = { ...this.modelSummaryLoaded, [agent.id]: false };
       this.studio.getAgentModelConfig(agent.id).subscribe({
         next: (r) => {
           const cfg = r.config;
+          this.modelSummaryLoaded = { ...this.modelSummaryLoaded, [agent.id]: true };
           if (cfg.provider && cfg.model && cfg.providerKeyId) {
             this.modelSummaryByAgent = {
               ...this.modelSummaryByAgent,
@@ -552,6 +729,7 @@ export class TeamAgentsComponent implements OnInit {
           }
         },
         error: () => {
+          this.modelSummaryLoaded = { ...this.modelSummaryLoaded, [agent.id]: true };
           this.modelSummaryByAgent = { ...this.modelSummaryByAgent, [agent.id]: null };
         },
       });
@@ -756,19 +934,32 @@ export class TeamAgentsComponent implements OnInit {
     });
   }
 
-  openConfig(agent: Agent): void {
-    if (this.expandedAgentId === agent.id) {
+  openConfig(agent: Agent, tabIndex = 0): void {
+    if (this.expandedAgentId === agent.id && tabIndex === this.selectedConfigTabIndex) {
       this.expandedAgentId = null;
       this.selectedFile = null;
       this.selectedFileId = null;
       this.markdownDraft = '';
+      this.selectedConfigTabIndex = 0;
       return;
     }
     this.expandedAgentId = agent.id;
+    this.selectedConfigTabIndex = tabIndex;
     this.selectedFile = null;
     this.selectedFileId = null;
     this.markdownDraft = '';
-    this.loadFiles(agent, true);
+    if (tabIndex === 0) {
+      this.loadFiles(agent, true);
+    } else if (tabIndex === 1) {
+      this.loadModelConfig(agent);
+    } else if (tabIndex === 2) {
+      this.loadAgentConfigs(agent);
+    }
+  }
+
+  openModelConfig(agent: Agent): void {
+    this.modelConfigLoadedFor = { ...this.modelConfigLoadedFor, [agent.id]: false };
+    this.openConfig(agent, 1);
   }
 
   onConfigTabChange(agent: Agent, tabIndex: number): void {
@@ -832,6 +1023,7 @@ export class TeamAgentsComponent implements OnInit {
               ...this.modelSummaryByAgent,
               [agent.id]: { provider: r.config.provider, model: r.config.model },
             };
+            this.modelSummaryLoaded = { ...this.modelSummaryLoaded, [agent.id]: true };
           } else {
             this.modelSummaryByAgent = { ...this.modelSummaryByAgent, [agent.id]: null };
           }
