@@ -128,7 +128,16 @@ app.use(express.raw({ type: 'application/json', limit: '10mb' })); // For HMAC w
 app.use(express.urlencoded({ extended: true })); // Enable query string parsing
 // Health check endpoint - must work even if other imports fail
 app.get("/health", (req, res) => {
-    res.json({ status: "ok", service: "tcl-core" });
+    const encDedicated = !!process.env.AGENT_STUDIO_ENC_KEY?.trim();
+    const encFallback = !!process.env.SUPABASE_SERVICE_ROLE_KEY?.trim();
+    res.json({
+        status: "ok",
+        service: "tcl-core",
+        /** Dedicated AGENT_STUDIO_ENC_KEY visible to the process (Railway tcl-core service). */
+        agentStudioEncKeyEnv: encDedicated,
+        /** BYOK can work via dedicated key or Supabase service-role derivation. */
+        agentStudioByokEncryption: encDedicated || encFallback,
+    });
 });
 // Diagnostic endpoint - test the entire NLI + Spectral pipeline
 app.get("/diagnostic", async (req, res) => {
@@ -3258,6 +3267,17 @@ try {
         console.log(`Health check available at http://0.0.0.0:${port}/health`);
         console.log(`Environment: PORT=${process.env.PORT || 'default (8787)'}, NODE_ENV=${process.env.NODE_ENV || 'not set'}`);
         console.log(`TCL_SPECTRAL_URL: ${process.env.TCL_SPECTRAL_URL || 'NOT SET'}`);
+        const encKey = process.env.AGENT_STUDIO_ENC_KEY?.trim();
+        const serviceRole = process.env.SUPABASE_SERVICE_ROLE_KEY?.trim();
+        if (encKey) {
+            console.log('AGENT_STUDIO_ENC_KEY: set (BYOK provider key storage enabled)');
+        }
+        else if (serviceRole) {
+            console.warn('AGENT_STUDIO_ENC_KEY: NOT SET — BYOK will use key derived from SUPABASE_SERVICE_ROLE_KEY until you add AGENT_STUDIO_ENC_KEY');
+        }
+        else {
+            console.warn('AGENT_STUDIO_ENC_KEY: NOT SET — BYOK provider key save will fail (no Supabase service role either)');
+        }
         // Verify server is actually listening
         const address = server.address();
         if (address && typeof address === 'object') {

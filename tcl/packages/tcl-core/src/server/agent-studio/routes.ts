@@ -17,7 +17,7 @@
 import express from 'express';
 import { supabaseAdmin } from '../supabase.js';
 import { getOrgContext, type OrgContext } from '../auth-context.js';
-import { encryptString, decryptString, redact, type EncryptedBlob } from './crypto.js';
+import { encryptString, decryptString, redact, isAgentStudioEncryptionConfigured, getAgentStudioEncryptionKeySource, type EncryptedBlob } from './crypto.js';
 import { logAgentStudioAudit } from './audit.js';
 import { loadRoleTemplates, loadPersonaTemplates, loadWorkflowTemplates, findPersonaTemplate, getTemplateCatalogueDebug } from './templates.js';
 import {
@@ -271,6 +271,12 @@ export function setupAgentStudioRoutes(app: express.Application): void {
         firstRoleKey: (BUILTIN_ROLE_TEMPLATES as any)[0]?.key ?? null,
         firstPersonaKey: (BUILTIN_PERSONA_TEMPLATES as any)[0]?.key ?? null,
         firstWorkflowKey: (BUILTIN_WORKFLOW_TEMPLATES as any)[0]?.key ?? null,
+      },
+      byokEncryption: {
+        configured: isAgentStudioEncryptionConfigured(),
+        keySource: getAgentStudioEncryptionKeySource(),
+        agentStudioEncKeyEnv: !!process.env.AGENT_STUDIO_ENC_KEY?.trim(),
+        supabaseServiceRoleEnv: !!process.env.SUPABASE_SERVICE_ROLE_KEY?.trim(),
       },
     });
   });
@@ -1517,10 +1523,19 @@ export function setupAgentStudioRoutes(app: express.Application): void {
 
   app.post('/api/agent-studio/provider-keys', async (req, res) => {
     const ctx = await ensureContext(req, res);
-    if (!ctx || !requireOwnerOrAdmin(ctx, res) || dbDown(res)) return;
+    if (!ctx || !requireStaff(ctx, res) || dbDown(res)) return;
     const { provider, label, secret, teamId, metadata } = req.body ?? {};
     if (!provider || !label || !secret) {
       return res.status(400).json({ error: 'provider, label, and secret are required' });
+    }
+
+    if (!isAgentStudioEncryptionConfigured()) {
+      return res.status(503).json({
+        error: 'ENCRYPTION_NOT_CONFIGURED',
+        message:
+          'BYOK encryption is not available: set AGENT_STUDIO_ENC_KEY on the tcl-core server (Railway), ' +
+          'or ensure SUPABASE_SERVICE_ROLE_KEY is configured, then redeploy tcl-core.',
+      });
     }
 
     let blob: EncryptedBlob;
@@ -1547,7 +1562,23 @@ export function setupAgentStudioRoutes(app: express.Application): void {
       })
       .select('id, org_id, team_id, provider, label, key_alg, key_version, metadata, is_active, created_at')
       .single();
-    if (error) return res.status(500).json({ error: error.message });
+    if (error) {
+      const msg = (error.message ?? '').toLowerCase();
+      if (error.code === '42P01' || msg.includes('agent_studio_provider_keys') && msg.includes('does not exist')) {
+        return res.status(503).json({
+          error: 'MIGRATION_REQUIRED',
+          message: 'Agent Studio tables are missing. Apply supabase/sql/045_agent_studio.sql in Supabase.',
+          migration: '045_agent_studio.sql',
+        });
+      }
+      if (error.code === '23505') {
+        return res.status(409).json({
+          error: 'DUPLICATE_LABEL',
+          message: `A ${provider} key labeled "${label}" already exists. Use a different label or delete the old key.`,
+        });
+      }
+      return res.status(500).json({ error: error.message });
+    }
 
     await logAgentStudioAudit({
       orgId: ctx.orgId,

@@ -27,42 +27,94 @@ const IV_LEN = 12;
 const KEY_LEN = 32;
 
 let cachedKey: Buffer | null = null;
+let cachedKeySource: 'dedicated' | 'derived' | null = null;
+let loggedDerivedKeyWarning = false;
+
+/** Strip whitespace and optional surrounding quotes (common when pasting into Railway). */
+function normalizeEncKeyRaw(raw: string): string {
+  let s = raw.trim();
+  if (
+    (s.startsWith('"') && s.endsWith('"')) ||
+    (s.startsWith("'") && s.endsWith("'"))
+  ) {
+    s = s.slice(1, -1).trim();
+  }
+  return s;
+}
+
+function parseDedicatedKey(raw: string): Buffer | null {
+  const normalized = normalizeEncKeyRaw(raw);
+  if (!normalized) return null;
+
+  if (/^[0-9a-fA-F]{64}$/.test(normalized)) {
+    const buf = Buffer.from(normalized, 'hex');
+    return buf.length === KEY_LEN ? buf : null;
+  }
+
+  try {
+    const candidate = Buffer.from(normalized, 'base64');
+    if (candidate.length === KEY_LEN) {
+      return candidate;
+    }
+  } catch {
+    // fall through
+  }
+
+  return null;
+}
+
+/**
+ * When AGENT_STUDIO_ENC_KEY is missing from the runtime env (common Railway
+ * misconfig), derive a stable 32-byte key from SUPABASE_SERVICE_ROLE_KEY so
+ * BYOK still works. Prefer setting AGENT_STUDIO_ENC_KEY for key rotation
+ * independence from the Supabase service role.
+ */
+function deriveKeyFromServiceRole(): Buffer | null {
+  const material = process.env.SUPABASE_SERVICE_ROLE_KEY?.trim();
+  if (!material) return null;
+  return crypto
+    .createHash('sha256')
+    .update('protectqa:agent-studio:byok:v1:', 'utf8')
+    .update(material, 'utf8')
+    .digest();
+}
 
 function loadKey(): Buffer {
   if (cachedKey) return cachedKey;
 
   const raw = process.env.AGENT_STUDIO_ENC_KEY;
-  if (!raw || raw.trim().length === 0) {
-    throw new Error(
-      'AGENT_STUDIO_ENC_KEY is not set. Generate one with: ' +
-        'node -e "console.log(require(\'crypto\').randomBytes(32).toString(\'base64\'))"'
-    );
-  }
-
-  let buf: Buffer | null = null;
-
-  if (/^[0-9a-fA-F]{64}$/.test(raw.trim())) {
-    buf = Buffer.from(raw.trim(), 'hex');
-  } else {
-    try {
-      const candidate = Buffer.from(raw.trim(), 'base64');
-      if (candidate.length === KEY_LEN) {
-        buf = candidate;
-      }
-    } catch {
-      // fall through
+  if (raw && normalizeEncKeyRaw(raw).length > 0) {
+    const dedicated = parseDedicatedKey(raw);
+    if (!dedicated) {
+      throw new Error(
+        `AGENT_STUDIO_ENC_KEY must decode to exactly ${KEY_LEN} bytes. ` +
+          'Use 64 hex chars or a 32-byte base64 string.'
+      );
     }
+    cachedKey = dedicated;
+    cachedKeySource = 'dedicated';
+    return dedicated;
   }
 
-  if (!buf || buf.length !== KEY_LEN) {
-    throw new Error(
-      `AGENT_STUDIO_ENC_KEY must decode to exactly ${KEY_LEN} bytes ` +
-        `(got ${buf?.length ?? 0}). Use 64 hex chars or a 32-byte base64 string.`
-    );
+  const derived = deriveKeyFromServiceRole();
+  if (derived) {
+    if (!loggedDerivedKeyWarning) {
+      console.warn(
+        '⚠️ AGENT_STUDIO_ENC_KEY is not set — deriving BYOK encryption key from SUPABASE_SERVICE_ROLE_KEY. ' +
+          'Set AGENT_STUDIO_ENC_KEY on tcl-core for a dedicated encryption key.'
+      );
+      loggedDerivedKeyWarning = true;
+    }
+    cachedKey = derived;
+    cachedKeySource = 'derived';
+    return derived;
   }
 
-  cachedKey = buf;
-  return buf;
+  throw new Error(
+    'AGENT_STUDIO_ENC_KEY is not set and SUPABASE_SERVICE_ROLE_KEY is unavailable. ' +
+      'Generate a dedicated key with: ' +
+      'node -e "console.log(require(\'crypto\').randomBytes(32).toString(\'base64\'))"'
+  );
 }
 
 export interface EncryptedBlob {
@@ -151,4 +203,26 @@ export function generateEncryptionKeyBase64(): string {
  */
 export function _resetCachedKeyForTests(): void {
   cachedKey = null;
+  cachedKeySource = null;
+  loggedDerivedKeyWarning = false;
+}
+
+/** True when the server can encrypt BYOK provider keys. */
+export function isAgentStudioEncryptionConfigured(): boolean {
+  try {
+    loadKey();
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** How BYOK encryption is keyed at runtime. */
+export function getAgentStudioEncryptionKeySource(): 'dedicated' | 'derived' | 'none' {
+  try {
+    loadKey();
+    return cachedKeySource ?? 'none';
+  } catch {
+    return 'none';
+  }
 }

@@ -29,6 +29,7 @@ git push
    - Click on your service → Variables
    - Add:
      - `PORT` = `8787` (optional, Railway auto-assigns)
+     - **`AGENT_STUDIO_ENC_KEY`** = output of `node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"` (**required** for Agent Studio BYOK — save OpenAI/Anthropic keys in the UI)
      - `TCL_SPECTRAL_URL` = `http://your-spectral:8080` (if using)
      - `OPENAI_API_KEY` = `your-key` (if using)
      - **CRITICAL for Audio Transcription:**

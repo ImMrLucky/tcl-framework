@@ -5,6 +5,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { getJarvisAgentId } from './jarvis.js';
 import { resolveModelRouting, type DbRoutingRule } from './model-routing.js';
+import { isAgentStudioEncryptionConfigured } from './crypto.js';
 
 export type RuntimeExecutionMode = 'none' | 'local' | 'cloud' | 'local_and_cloud';
 
@@ -14,6 +15,8 @@ export interface RuntimeReadiness {
   canRunAgents: boolean;
   /** Jarvis board planning uses LLM when Jarvis has routing + BYOK key. */
   planningUsesLlm: boolean;
+  /** Server can encrypt cloud BYOK keys (AGENT_STUDIO_ENC_KEY on tcl-core). */
+  byokEncryptionConfigured: boolean;
   localRunnersTotal: number;
   localRunnersOnline: number;
   localVendorsReady: number;
@@ -92,9 +95,15 @@ export async function buildRuntimeReadiness(
   }
 
   const hints: string[] = [];
+  const byokEncryptionConfigured = isAgentStudioEncryptionConfigured();
   hints.push(
     'Each agent gets its own vendor + model via Agents → Model & key. Cloud keys live in Studio Settings → Provider keys.'
   );
+  if (!byokEncryptionConfigured) {
+    hints.push(
+      'Cloud BYOK key save is disabled: set AGENT_STUDIO_ENC_KEY on the tcl-core server (Railway), then redeploy.'
+    );
+  }
   hints.push(
     planningUsesLlm
       ? 'Plan with Jarvis uses the LLM assigned to Jarvis (Agents → Model & key).'
@@ -121,6 +130,7 @@ export async function buildRuntimeReadiness(
     executionMode,
     canRunAgents: hasLocal || hasCloud,
     planningUsesLlm,
+    byokEncryptionConfigured,
     localRunnersTotal: runners.length,
     localRunnersOnline,
     localVendorsReady,
