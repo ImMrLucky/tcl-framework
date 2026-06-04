@@ -42,6 +42,8 @@ import {
   listAgentModelRules,
   resolveModelRouting,
   setAgentModelConfig,
+  applyProviderKeyToAgents,
+  assignDefaultModelFromOrgKeys,
   type DbRoutingRule,
 } from './model-routing.js';
 import { registerTeamBoxRoutes } from './team-box-routes.js';
@@ -605,6 +607,20 @@ export function setupAgentStudioRoutes(app: express.Application): void {
       resourceId: data.id,
       payload: { name, roleTemplateKey, isOrchestrator: !!isOrchestrator },
     });
+
+    try {
+      await assignDefaultModelFromOrgKeys({
+        supabase: supabaseAdmin!,
+        orgId: ctx.orgId,
+        teamId,
+        agentId: data.id,
+        isOrchestrator: !!isOrchestrator,
+        preferredProvider: 'openai',
+      });
+    } catch (e) {
+      console.warn('[agent-studio] default model assignment for new agent skipped', e);
+    }
+
     res.status(201).json({ agent: data });
   });
 
@@ -1524,10 +1540,11 @@ export function setupAgentStudioRoutes(app: express.Application): void {
   app.post('/api/agent-studio/provider-keys', async (req, res) => {
     const ctx = await ensureContext(req, res);
     if (!ctx || !requireStaff(ctx, res) || dbDown(res)) return;
-    const { provider, label, secret, teamId, metadata } = req.body ?? {};
+    const { provider, label, secret, teamId, metadata, defaultModel, applyToAllAgents } = req.body ?? {};
     if (!provider || !label || !secret) {
       return res.status(400).json({ error: 'provider, label, and secret are required' });
     }
+    const shouldApplyToAgents = applyToAllAgents !== false;
 
     if (!isAgentStudioEncryptionConfigured()) {
       return res.status(503).json({
@@ -1590,7 +1607,56 @@ export function setupAgentStudioRoutes(app: express.Application): void {
       payload: { provider, label, redactedSecret: redact(secret) },
     });
 
-    res.status(201).json({ key: data });
+    let modelAssignment: { assigned: number; skipped: number } | null = null;
+    if (shouldApplyToAgents) {
+      try {
+        modelAssignment = await applyProviderKeyToAgents({
+          supabase: supabaseAdmin!,
+          orgId: ctx.orgId,
+          provider: String(provider).toLowerCase(),
+          providerKeyId: data.id,
+          model: defaultModel ? String(defaultModel).trim() : undefined,
+          teamId: teamId ?? null,
+        });
+      } catch (e: any) {
+        console.warn('[agent-studio] apply provider key to agents failed', e?.message ?? e);
+        modelAssignment = { assigned: 0, skipped: 0 };
+      }
+    }
+
+    res.status(201).json({ key: data, modelAssignment });
+  });
+
+  app.post('/api/agent-studio/provider-keys/:id/apply-to-agents', async (req, res) => {
+    const ctx = await ensureContext(req, res);
+    if (!ctx || !requireStaff(ctx, res) || dbDown(res)) return;
+    const { id } = req.params;
+    const { defaultModel } = req.body ?? {};
+
+    const { data: keyRow, error: keyErr } = await supabaseAdmin!
+      .from('agent_studio_provider_keys')
+      .select('id, provider, team_id, is_active')
+      .eq('id', id)
+      .eq('org_id', ctx.orgId)
+      .maybeSingle();
+    if (keyErr) return res.status(500).json({ error: keyErr.message });
+    if (!keyRow || !keyRow.is_active) {
+      return res.status(404).json({ error: 'Provider key not found or inactive' });
+    }
+
+    try {
+      const modelAssignment = await applyProviderKeyToAgents({
+        supabase: supabaseAdmin!,
+        orgId: ctx.orgId,
+        provider: String(keyRow.provider).toLowerCase(),
+        providerKeyId: keyRow.id as string,
+        model: defaultModel ? String(defaultModel).trim() : undefined,
+        teamId: (keyRow.team_id as string | null) ?? null,
+      });
+      res.json({ modelAssignment });
+    } catch (e: any) {
+      res.status(500).json({ error: e?.message ?? 'apply failed' });
+    }
   });
 
   app.delete('/api/agent-studio/provider-keys/:id', async (req, res) => {

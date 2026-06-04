@@ -513,8 +513,23 @@ export class AgentStudioService {
     secret: string;
     teamId?: string;
     metadata?: Record<string, unknown>;
-  }): Observable<{ key: ProviderKeyRow }> {
-    return this.http.post<{ key: ProviderKeyRow }>(this.url('/provider-keys'), body);
+    defaultModel?: string;
+    applyToAllAgents?: boolean;
+  }): Observable<{ key: ProviderKeyRow; modelAssignment?: { assigned: number; skipped: number } }> {
+    return this.http.post<{ key: ProviderKeyRow; modelAssignment?: { assigned: number; skipped: number } }>(
+      this.url('/provider-keys'),
+      body
+    );
+  }
+
+  applyProviderKeyToAgents(
+    keyId: string,
+    body?: { defaultModel?: string }
+  ): Observable<{ modelAssignment: { assigned: number; skipped: number } }> {
+    return this.http.post<{ modelAssignment: { assigned: number; skipped: number } }>(
+      this.url(`/provider-keys/${keyId}/apply-to-agents`),
+      body ?? {}
+    );
   }
 
   deleteProviderKey(id: string): Observable<void> {

@@ -1,6 +1,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { seedDefaultAgentMarkdownFiles } from './agent-files.js';
 import { appendTeamEvent } from './team-events.js';
+import { assignDefaultModelFromOrgKeys } from './model-routing.js';
 
 export const JARVIS_AGENT_NAME = 'Jarvis';
 export const JARVIS_ROLE_KEY = 'agent_manager';
@@ -140,6 +141,19 @@ export async function provisionJarvisForTeam(opts: {
     agentId,
     jsonl: { roleKey: JARVIS_ROLE_KEY },
   });
+
+  try {
+    await assignDefaultModelFromOrgKeys({
+      supabase: opts.supabase,
+      orgId: opts.orgId,
+      teamId: opts.teamId,
+      agentId,
+      isOrchestrator: true,
+      preferredProvider: 'openai',
+    });
+  } catch (e) {
+    console.warn('[agent-studio][jarvis] default model assignment skipped', e);
+  }
 
   return { agentId, created: true };
 }

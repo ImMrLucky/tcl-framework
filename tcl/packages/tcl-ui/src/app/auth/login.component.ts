@@ -8,7 +8,7 @@ import { MatInputModule } from '@angular/material/input';
 import { MatButtonModule } from '@angular/material/button';
 import { MatIconModule } from '@angular/material/icon';
 import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
-import { AuthService } from '../auth.service';
+import { AuthService, AuthResult } from '../auth.service';
 import { LogoComponent } from '../shared/logo.component';
 import type { AuthError } from '@supabase/supabase-js';
 
@@ -170,6 +170,7 @@ export class LoginComponent implements OnInit {
   isSignUp = false;
   hidePassword = true;
   loading = false;
+  redirecting = false;
   errorMessage = '';
   successMessage = '';
 
@@ -207,7 +208,7 @@ export class LoginComponent implements OnInit {
     const { email, password } = this.authForm.value;
 
     try {
-      let result: { error: AuthError | null; duplicateAccount?: boolean };
+      let result: AuthResult;
       if (this.isSignUp) {
         result = await this.authService.signUp(email, password);
       } else {
@@ -245,19 +246,16 @@ export class LoginComponent implements OnInit {
           this.errorMessage = result.error.message || 'Authentication failed';
         }
       } else {
-        const user = this.authService.getCurrentUser();
-        const token = this.authService.getAccessTokenSync();
-        if (user?.id) {
-          this.authService.prepareLoginRedirect(user.id, user.email ?? email, token ?? undefined);
-        }
-        // Hard navigation after session is in storage — avoids AuthGuard / SIGNED_OUT races.
-        await this.authService.finishLoginRedirect('/dashboard');
+        this.redirecting = true;
+        await this.authService.finishLoginRedirect('/dashboard', result.authenticated);
         return;
       }
     } catch (error: any) {
       this.errorMessage = error.message || 'An unexpected error occurred';
     } finally {
-      this.loading = false;
+      if (!this.redirecting) {
+        this.loading = false;
+      }
     }
   }
 }

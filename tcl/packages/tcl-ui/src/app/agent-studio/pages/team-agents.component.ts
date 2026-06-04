@@ -92,20 +92,30 @@ const PACK_KEYS = [
         <mat-card-content>
           <mat-icon class="banner-icon">vpn_key</mat-icon>
           <div>
-            <strong>Cloud API keys (BYOK) — two steps</strong>
+            <strong>Cloud API keys (BYOK)</strong>
             <ol class="byok-steps">
               <li>
                 <button mat-button type="button" class="linkish" (click)="openAddKeyPanel()">
                   Add a provider key
                 </button>
-                (or
-                <a routerLink="/agent-studio/settings">Studio settings → Provider keys</a>)
+                — saved keys are applied to all agents automatically (default model: gpt-4o-mini for OpenAI).
               </li>
-              <li>On each agent card, click <strong>Model &amp; key</strong> and choose vendor, model, and that key.</li>
+              <li>
+                Override any agent via <strong>Model &amp; key</strong> if you want a different model or vendor.
+              </li>
             </ol>
             <p class="muted small" *ngIf="!providerKeys.length">
               No keys stored yet — use <strong>Add a provider key</strong> below or in Settings.
             </p>
+            <div class="bulk-assign" *ngIf="canBulkAssignModel">
+              <button
+                mat-stroked-button
+                [disabled]="assigningAllAgents"
+                (click)="assignModelToAllAgents()"
+              >
+                {{ assigningAllAgents ? 'Applying…' : 'Apply saved key to unassigned agents' }}
+              </button>
+            </div>
           </div>
         </mat-card-content>
       </mat-card>
@@ -378,7 +388,13 @@ const PACK_KEYS = [
                       <button
                         mat-flat-button
                         color="primary"
-                        [disabled]="savingModelConfig || !modelDraft(agent).provider || !modelDraft(agent).model"
+                        [disabled]="
+                          savingModelConfig ||
+                          !modelDraft(agent).provider ||
+                          !modelDraft(agent).model ||
+                          (keysForProvider(modelDraft(agent).provider).length > 0 &&
+                            !modelDraft(agent).providerKeyId)
+                        "
                         (click)="saveModelConfig(agent)"
                       >
                         {{ savingModelConfig ? 'Saving…' : 'Save model & key' }}
@@ -434,6 +450,13 @@ const PACK_KEYS = [
       }
       .byok-steps li {
         margin-bottom: 4px;
+      }
+      .bulk-assign {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 12px;
+        margin-top: 12px;
       }
       .linkish {
         padding: 0 4px;
@@ -625,6 +648,9 @@ export class TeamAgentsComponent implements OnInit {
   modelDraftByAgent: Record<string, { provider: string; model: string; providerKeyId: string | null }> = {};
   loadingModelConfig = false;
   savingModelConfig = false;
+  assigningAllAgents = false;
+  wiringSavedKey = false;
+  private savedKeyWireAttempted = false;
   removingAgentId: string | null = null;
 
   private teamId!: string;
@@ -645,8 +671,68 @@ export class TeamAgentsComponent implements OnInit {
       next: (r) => {
         this.providerKeys = r.keys;
         if (!r.keys.length) this.addKeyPanelExpanded = true;
+        this.applyDefaultKeysToDrafts();
       },
     });
+  }
+
+  get canBulkAssignModel(): boolean {
+    return (
+      this.providerKeys.some((k) => k.is_active) &&
+      this.agents.length > 0 &&
+      this.agents.some((a) => !this.hasModelAssigned(a))
+    );
+  }
+
+  private pickProviderKeyForBulk(): ProviderKeyRow | null {
+    const active = this.providerKeys.filter((k) => k.is_active);
+    return active.find((k) => k.provider === 'openai') ?? active[0] ?? null;
+  }
+
+  assignModelToAllAgents(): void {
+    const key = this.pickProviderKeyForBulk();
+    if (!key) {
+      this.snack.open('Add a provider key first.', 'OK', { duration: 4000 });
+      return;
+    }
+
+    this.assigningAllAgents = true;
+    this.studio.applyProviderKeyToAgents(key.id).subscribe({
+      next: (r) => {
+        this.assigningAllAgents = false;
+        this.refresh();
+        const { assigned, skipped } = r.modelAssignment;
+        if (assigned === 0 && skipped > 0) {
+          this.snack.open('All agents already have custom model/key settings.', 'OK', { duration: 4000 });
+        } else {
+          this.snack.open(
+            assigned > 0
+              ? `Applied ${key.provider} to ${assigned} agent(s)${skipped ? ` (${skipped} custom overrides kept)` : ''}.`
+              : 'No agents needed updating.',
+            'OK',
+            { duration: 5000 }
+          );
+        }
+      },
+      error: (err) => {
+        this.assigningAllAgents = false;
+        this.refresh();
+        this.snack.open(err?.error?.error || err?.error?.message || 'Apply failed', 'OK', {
+          duration: 5000,
+        });
+      },
+    });
+  }
+
+  private applyDefaultKeysToDrafts(): void {
+    for (const agent of this.agents) {
+      const draft = this.modelDraft(agent);
+      if (draft.providerKeyId) continue;
+      const keys = this.keysForProvider(draft.provider);
+      if (keys.length === 1) {
+        draft.providerKeyId = keys[0].id;
+      }
+    }
   }
 
   hasModelAssigned(agent: Agent): boolean {
@@ -655,7 +741,12 @@ export class TeamAgentsComponent implements OnInit {
   }
 
   refreshProviderKeys(): void {
-    this.studio.listProviderKeys().subscribe({ next: (r) => (this.providerKeys = r.keys) });
+    this.studio.listProviderKeys().subscribe({
+      next: (r) => {
+        this.providerKeys = r.keys;
+        this.applyDefaultKeysToDrafts();
+      },
+    });
   }
 
   openAddKeyPanel(provider?: string): void {
@@ -674,14 +765,24 @@ export class TeamAgentsComponent implements OnInit {
         provider: this.newKeyProvider,
         label: this.newKeyLabel.trim(),
         secret: this.newKeySecret,
+        applyToAllAgents: true,
       })
       .subscribe({
-        next: () => {
+        next: (r) => {
           this.creatingProviderKey = false;
           this.newKeyLabel = '';
           this.newKeySecret = '';
           this.refreshProviderKeys();
-          this.snack.open('API key saved. Now assign it on each agent via Model & key.', 'OK', { duration: 5000 });
+          this.refresh();
+          const assigned = r.modelAssignment?.assigned ?? 0;
+          const skipped = r.modelAssignment?.skipped ?? 0;
+          this.snack.open(
+            assigned > 0
+              ? `API key saved and applied to ${assigned} agent(s)${skipped ? ` (${skipped} custom overrides kept)` : ''}.`
+              : 'API key saved.',
+            'OK',
+            { duration: 6000 }
+          );
         },
         error: (err) => {
           this.creatingProviderKey = false;
@@ -706,6 +807,7 @@ export class TeamAgentsComponent implements OnInit {
     this.studio.listAgents(this.teamId).subscribe({
       next: (r) => {
         this.agents = r.agents;
+        this.applyDefaultKeysToDrafts();
         this.loadModelSummaries(r.agents);
       },
       error: (err) => this.snack.open(err?.error?.error || 'Failed to load agents', 'OK', { duration: 4000 }),
@@ -713,6 +815,14 @@ export class TeamAgentsComponent implements OnInit {
   }
 
   private loadModelSummaries(agents: Agent[]): void {
+    if (!agents.length) return;
+    let pending = agents.length;
+    const done = () => {
+      pending -= 1;
+      if (pending === 0) {
+        this.ensureAgentsWiredToSavedKey();
+      }
+    };
     for (const agent of agents) {
       this.modelSummaryLoaded = { ...this.modelSummaryLoaded, [agent.id]: false };
       this.studio.getAgentModelConfig(agent.id).subscribe({
@@ -727,13 +837,36 @@ export class TeamAgentsComponent implements OnInit {
           } else {
             this.modelSummaryByAgent = { ...this.modelSummaryByAgent, [agent.id]: null };
           }
+          done();
         },
         error: () => {
           this.modelSummaryLoaded = { ...this.modelSummaryLoaded, [agent.id]: true };
           this.modelSummaryByAgent = { ...this.modelSummaryByAgent, [agent.id]: null };
+          done();
         },
       });
     }
+  }
+
+  /** Backfill: if a key exists but agents were created before auto-apply shipped. */
+  private ensureAgentsWiredToSavedKey(): void {
+    if (this.wiringSavedKey || this.assigningAllAgents || this.savedKeyWireAttempted) return;
+    const key = this.pickProviderKeyForBulk();
+    if (!key || !this.agents.some((a) => !this.hasModelAssigned(a))) return;
+    this.wiringSavedKey = true;
+    this.studio.applyProviderKeyToAgents(key.id).subscribe({
+      next: (r) => {
+        this.wiringSavedKey = false;
+        this.savedKeyWireAttempted = true;
+        if ((r.modelAssignment?.assigned ?? 0) > 0) {
+          this.refresh();
+        }
+      },
+      error: () => {
+        this.wiringSavedKey = false;
+        this.savedKeyWireAttempted = true;
+      },
+    });
   }
 
   isOrchestratorAgent(agent: Agent): boolean {

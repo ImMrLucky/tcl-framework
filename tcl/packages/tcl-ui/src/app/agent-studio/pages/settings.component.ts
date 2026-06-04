@@ -231,13 +231,28 @@ export class SettingsComponent implements OnInit {
   addKey(): void {
     if (!this.newProvider || !this.newLabel || !this.newSecret) return;
     this.creatingKey = true;
-    this.studio.createProviderKey({ provider: this.newProvider, label: this.newLabel, secret: this.newSecret }).subscribe({
-      next: () => {
-        this.creatingKey = false;
-        this.newLabel = '';
-        this.newSecret = '';
-        this.refreshKeys();
-      },
+    this.studio
+      .createProviderKey({
+        provider: this.newProvider,
+        label: this.newLabel,
+        secret: this.newSecret,
+        applyToAllAgents: true,
+      })
+      .subscribe({
+        next: (r) => {
+          this.creatingKey = false;
+          this.newLabel = '';
+          this.newSecret = '';
+          this.refreshKeys();
+          const assigned = r.modelAssignment?.assigned ?? 0;
+          this.snack.open(
+            assigned > 0
+              ? `API key saved and applied to ${assigned} agent(s).`
+              : 'API key saved.',
+            'OK',
+            { duration: 5000 }
+          );
+        },
       error: (err) => {
         this.creatingKey = false;
         this.snack.open(err?.error?.error || err?.error?.message || 'Save failed', 'OK', { duration: 4000 });

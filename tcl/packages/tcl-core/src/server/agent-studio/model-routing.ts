@@ -205,3 +205,127 @@ export async function setAgentModelConfig(opts: {
   }
   return rules;
 }
+
+export const DEFAULT_MODEL_BY_PROVIDER: Record<string, string> = {
+  openai: 'gpt-4o-mini',
+  anthropic: 'claude-sonnet-4-20250514',
+  google: 'gemini-2.0-flash',
+  'azure-openai': 'gpt-4o-mini',
+  mistral: 'mistral-large-latest',
+  groq: 'llama-3.3-70b-versatile',
+  ollama: 'llama3.2',
+  custom: 'gpt-4o-mini',
+};
+
+export function defaultModelForProvider(provider: string): string {
+  return DEFAULT_MODEL_BY_PROVIDER[String(provider).toLowerCase()] ?? 'gpt-4o-mini';
+}
+
+/** True when this agent already has an AGENT-scoped routing rule with a BYOK key. */
+export async function agentHasCustomModelKey(
+  supabase: SupabaseClient,
+  orgId: string,
+  agentId: string
+): Promise<boolean> {
+  const rules = await listAgentModelRules(supabase, orgId, agentId);
+  return rules.some((r) => !!r.provider_key_id);
+}
+
+/**
+ * Assign provider + model + key to agents that do not yet have a custom BYOK assignment.
+ * Org-level keys apply org-wide; team-scoped keys apply only on that team.
+ */
+export async function applyProviderKeyToAgents(opts: {
+  supabase: SupabaseClient;
+  orgId: string;
+  provider: string;
+  providerKeyId: string;
+  model?: string;
+  teamId?: string | null;
+}): Promise<{ assigned: number; skipped: number }> {
+  const provider = String(opts.provider).toLowerCase();
+  const model = (opts.model?.trim() || defaultModelForProvider(provider)).trim();
+
+  let agentQuery = opts.supabase
+    .from('agent_studio_agents')
+    .select('id, team_id, is_orchestrator')
+    .eq('org_id', opts.orgId);
+  if (opts.teamId) {
+    agentQuery = agentQuery.eq('team_id', opts.teamId);
+  }
+
+  const { data: agents, error } = await agentQuery;
+  if (error) throw new Error(error.message);
+
+  let assigned = 0;
+  let skipped = 0;
+
+  for (const row of agents ?? []) {
+    const agentId = row.id as string;
+    const teamId = row.team_id as string;
+    const isOrchestrator = !!row.is_orchestrator;
+
+    if (await agentHasCustomModelKey(opts.supabase, opts.orgId, agentId)) {
+      skipped += 1;
+      continue;
+    }
+
+    await setAgentModelConfig({
+      supabase: opts.supabase,
+      orgId: opts.orgId,
+      teamId,
+      agentId,
+      isOrchestrator,
+      provider,
+      model,
+      providerKeyId: opts.providerKeyId,
+    });
+    assigned += 1;
+  }
+
+  return { assigned, skipped };
+}
+
+/** Wire a newly created agent to the org's default provider key when one exists. */
+export async function assignDefaultModelFromOrgKeys(opts: {
+  supabase: SupabaseClient;
+  orgId: string;
+  teamId: string;
+  agentId: string;
+  isOrchestrator: boolean;
+  preferredProvider?: string;
+}): Promise<boolean> {
+  if (await agentHasCustomModelKey(opts.supabase, opts.orgId, opts.agentId)) {
+    return false;
+  }
+
+  const { data: keys, error } = await opts.supabase
+    .from('agent_studio_provider_keys')
+    .select('id, provider, team_id')
+    .eq('org_id', opts.orgId)
+    .eq('is_active', true)
+    .order('created_at', { ascending: false });
+  if (error || !keys?.length) return false;
+
+  const prefer = opts.preferredProvider?.toLowerCase();
+  const key =
+    keys.find((k) => k.team_id === opts.teamId && k.provider === prefer) ??
+    keys.find((k) => !k.team_id && k.provider === prefer) ??
+    keys.find((k) => k.team_id === opts.teamId) ??
+    keys.find((k) => !k.team_id) ??
+    keys[0];
+  if (!key) return false;
+
+  const provider = String(key.provider).toLowerCase();
+  await setAgentModelConfig({
+    supabase: opts.supabase,
+    orgId: opts.orgId,
+    teamId: opts.teamId,
+    agentId: opts.agentId,
+    isOrchestrator: opts.isOrchestrator,
+    provider,
+    model: defaultModelForProvider(provider),
+    providerKeyId: key.id as string,
+  });
+  return true;
+}

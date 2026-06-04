@@ -6,6 +6,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { logAgentStudioAudit } from './audit.js';
 import { seedDefaultAgentMarkdownFiles, resolveTemplatePackId } from './agent-files.js';
 import { provisionJarvisForTeam, JARVIS_ROLE_KEY } from './jarvis.js';
+import { assignDefaultModelFromOrgKeys } from './model-routing.js';
 import { appendTeamEvent } from './team-events.js';
 import {
   findPersonaTemplate,
@@ -185,7 +186,36 @@ async function provisionAgentFromSlot(opts: {
     console.warn('[team-box] seed agent files skipped', e);
   }
 
+  await wireDefaultModelForAgent({
+    supabase: opts.supabase,
+    orgId: opts.orgId,
+    teamId: opts.teamId,
+    agentId: data.id as string,
+    isOrchestrator: false,
+  });
+
   return { agentId: data.id as string, name };
+}
+
+async function wireDefaultModelForAgent(opts: {
+  supabase: SupabaseClient;
+  orgId: string;
+  teamId: string;
+  agentId: string;
+  isOrchestrator: boolean;
+}): Promise<void> {
+  try {
+    await assignDefaultModelFromOrgKeys({
+      supabase: opts.supabase,
+      orgId: opts.orgId,
+      teamId: opts.teamId,
+      agentId: opts.agentId,
+      isOrchestrator: opts.isOrchestrator,
+      preferredProvider: 'openai',
+    });
+  } catch (e) {
+    console.warn('[team-box] default model assignment skipped', e);
+  }
 }
 
 async function applyWorkflowBoardColumns(opts: {

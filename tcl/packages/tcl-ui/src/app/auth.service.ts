@@ -39,6 +39,18 @@ export interface User {
   projectId?: string; // Current project ID (from user context)
 }
 
+export interface AuthenticatedSession {
+  userId: string;
+  email?: string;
+  accessToken: string;
+}
+
+export interface AuthResult {
+  error: AuthError | null;
+  duplicateAccount?: boolean;
+  authenticated?: AuthenticatedSession;
+}
+
 @Injectable({
   providedIn: 'root'
 })
@@ -127,6 +139,10 @@ export class AuthService {
     // Listen for auth changes
     // Set up activity tracking for inactivity timeout
     this.setupActivityTracking();
+
+    // Hydrate immediately so AuthGuard works on first navigation (before the deferred probe).
+    this.restoreLoginGraceFromStorage();
+    this.ensureAuthHintsApplied();
 
     this.supabase.auth.onAuthStateChange(async (event, session) => {
       if (event === 'SIGNED_IN' && session?.user) {
@@ -453,20 +469,36 @@ export class AuthService {
    * Reliable post-login navigation: wait until session is visible in storage, then hard-navigate.
    * Avoids router + AuthGuard races with Supabase LockManager and transient SIGNED_OUT events.
    */
-  async finishLoginRedirect(targetPath = '/dashboard'): Promise<void> {
+  async finishLoginRedirect(
+    targetPath = '/dashboard',
+    credentials?: AuthenticatedSession
+  ): Promise<void> {
     if (typeof window === 'undefined') {
       return;
     }
 
-    const user = this.currentUserSubject.value;
-    const token = this.getAccessTokenSync();
-    if (user?.id) {
-      this.markPostLoginSession(user.id, user.email, token ?? undefined);
+    if (credentials?.userId && credentials.accessToken) {
+      this.markPostLoginSession(credentials.userId, credentials.email, credentials.accessToken);
+      if (!this.currentUserSubject.value?.id) {
+        this.currentUserSubject.next({ id: credentials.userId, email: credentials.email });
+      }
+    } else {
+      const user = this.currentUserSubject.value;
+      const token = this.getAccessTokenSync();
+      if (user?.id) {
+        this.markPostLoginSession(user.id, user.email, token ?? undefined);
+      }
     }
 
-    // Just finished password login — navigate immediately when credentials are present.
-    if (user?.id && token) {
-      window.location.assign(targetPath);
+    this.ensureAuthHintsApplied();
+
+    const ready =
+      !!(credentials?.userId && credentials.accessToken) ||
+      this.hasValidSessionSync() ||
+      !!this.peekPostLoginSessionHint()?.accessToken;
+
+    if (ready) {
+      window.location.replace(targetPath);
       return;
     }
 
@@ -478,7 +510,7 @@ export class AuthService {
       await new Promise((resolve) => setTimeout(resolve, 50));
     }
 
-    window.location.assign(targetPath);
+    window.location.replace(targetPath);
   }
 
   private beginLoginAttempt(): void {
@@ -496,11 +528,22 @@ export class AuthService {
     if (this.loginSessionGraceUntil && Date.now() < this.loginSessionGraceUntil.until) {
       return true;
     }
+    const hint = this.peekPostLoginSessionHint();
+    if (hint?.userId && hint.until != null && Date.now() < hint.until) {
+      return true;
+    }
     if (this.getValidSessionFromStorage()?.access_token) {
       return true;
     }
-    const hint = this.peekPostLoginSessionHint();
     return !!(hint?.userId && (hint.accessToken || this.getValidSessionFromStorage()?.access_token));
+  }
+
+  /** Restore in-memory grace window from sessionStorage after a full page reload. */
+  private restoreLoginGraceFromStorage(): void {
+    const hint = this.peekPostLoginSessionHint();
+    if (hint?.userId && hint.until != null && Date.now() < hint.until) {
+      this.loginSessionGraceUntil = { userId: hint.userId, until: hint.until };
+    }
   }
 
   private restoreUserFromLoginHints(): void {
@@ -629,6 +672,57 @@ export class AuthService {
     }
   }
 
+  /**
+   * Persist session, hydrate in-memory user, and stamp post-login hints — shared by signIn/signUp.
+   */
+  private finalizeCredentialAuth(
+    session: {
+      access_token: string;
+      refresh_token?: string | null;
+      expires_at?: number;
+      expires_in?: number;
+      token_type?: string;
+      user?: { id: string; email?: string | null } | null;
+    },
+    emailFallback: string
+  ): AuthenticatedSession | null {
+    this.persistSignInSession(session);
+
+    const embeddedUser = session.user;
+    let userId = embeddedUser?.id;
+    let userEmail = embeddedUser?.email ?? emailFallback;
+
+    if (!userId && session.access_token) {
+      const fromJwt = this.userFromAccessToken(session.access_token);
+      if (fromJwt?.id) {
+        userId = fromJwt.id;
+        userEmail = fromJwt.email ?? emailFallback;
+      }
+    }
+
+    if (!userId) {
+      return null;
+    }
+
+    this.currentUserSubject.next({
+      id: userId,
+      email: userEmail || undefined,
+    });
+    this.authStateEpoch++;
+    this.markPostLoginSession(userId, userEmail || undefined, session.access_token);
+    this.resetSessionTimer();
+    this.resetInactivityTimer();
+    this.ensureUserProvisioned(userId, userEmail || emailFallback);
+    this.loadUserProfileAsync(userId);
+    void this.syncSupabaseSessionProbe(5000);
+
+    return {
+      userId,
+      email: userEmail || undefined,
+      accessToken: session.access_token,
+    };
+  }
+
   private markPostLoginSession(userId: string, email?: string, accessToken?: string): void {
     this.loginSessionGraceUntil = { userId, until: Date.now() + 120_000 };
     if (typeof sessionStorage === 'undefined') {
@@ -671,7 +765,7 @@ export class AuthService {
     }
   }
 
-  async signUp(email: string, password: string): Promise<{ error: AuthError | null; duplicateAccount?: boolean }> {
+  async signUp(email: string, password: string): Promise<AuthResult> {
     // Check if user already exists before attempting signup
     try {
       const apiUrl = this.getApiBaseUrl();
@@ -762,11 +856,28 @@ export class AuthService {
       // Don't fail signup if provision fails
     }
 
-    // Load profile after signup
-    await this.loadUserProfile(data.user.id);
-    this.authStateEpoch++;
+    this.beginLoginAttempt();
+    const authenticated = this.finalizeCredentialAuth(
+      {
+        ...data.session,
+        user: data.user ?? data.session.user ?? undefined,
+      },
+      email
+    );
 
-    return { error: null, duplicateAccount: false };
+    if (!authenticated) {
+      this.loginInProgressUntil = 0;
+      return {
+        error: {
+          message: 'Could not retrieve user information. Please try again.',
+          name: 'UserError',
+          status: 500,
+        } as AuthError,
+        duplicateAccount: false,
+      };
+    }
+
+    return { error: null, duplicateAccount: false, authenticated };
   }
 
   public getApiBaseUrl(): string {
@@ -780,7 +891,7 @@ export class AuthService {
     return '/api';
   }
 
-  async signIn(email: string, password: string): Promise<{ error: AuthError | null; duplicateAccount?: boolean }> {
+  async signIn(email: string, password: string): Promise<AuthResult> {
     this.beginLoginAttempt();
     // Clear any expired sessions before attempting login
     // This prevents hanging on getSession() calls with expired tokens
@@ -809,56 +920,28 @@ export class AuthService {
       };
     }
 
-    this.persistSignInSession(data.session);
+    const authenticated = this.finalizeCredentialAuth(
+      {
+        ...data.session,
+        user: data.user ?? data.session.user ?? undefined,
+      },
+      email
+    );
 
-    // User is authenticated - set user state immediately
-    const user = data.user ?? data.session?.user ?? null;
-    if (!user?.id) {
-      const fromJwt = data.session?.access_token
-        ? this.userFromAccessToken(data.session.access_token)
-        : null;
-      if (!fromJwt?.id) {
-        await this.supabase.auth.signOut();
-        return {
-          error: {
-            message: 'Could not retrieve user information. Please try again.',
-            name: 'UserError',
-            status: 500,
-          } as AuthError,
-          duplicateAccount: false,
-        };
-      }
-      this.currentUserSubject.next({
-        id: fromJwt.id,
-        email: fromJwt.email,
-      });
-      this.authStateEpoch++;
-      this.markPostLoginSession(fromJwt.id, fromJwt.email, data.session.access_token);
-      this.resetSessionTimer();
-      this.ensureUserProvisioned(fromJwt.id, fromJwt.email || email);
-      this.loadUserProfileAsync(fromJwt.id);
-      void this.syncSupabaseSessionProbe(5000);
-      return { error: null, duplicateAccount: false };
+    if (!authenticated) {
+      this.loginInProgressUntil = 0;
+      await this.supabase.auth.signOut();
+      return {
+        error: {
+          message: 'Could not retrieve user information. Please try again.',
+          name: 'UserError',
+          status: 500,
+        } as AuthError,
+        duplicateAccount: false,
+      };
     }
 
-    // Set user state immediately so the UI updates
-    this.currentUserSubject.next({
-      id: user.id,
-      email: user.email
-    });
-    this.authStateEpoch++;
-    this.markPostLoginSession(user.id, user.email ?? undefined, data.session.access_token);
-
-    // Reset session timers for new login
-    this.resetSessionTimer();
-
-    // Do background tasks without blocking the login flow
-    this.ensureUserProvisioned(user.id, user.email || '');
-    this.loadUserProfileAsync(user.id);
-
-    void this.syncSupabaseSessionProbe(5000);
-
-    return { error: null, duplicateAccount: false };
+    return { error: null, duplicateAccount: false, authenticated };
   }
 
   /**

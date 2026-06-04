@@ -47,12 +47,15 @@ export class DashboardComponent implements OnInit {
   ) {}
 
   async ngOnInit() {
-    // AuthGuard already validated the route; only bounce if sync + hints are both empty.
+    // AuthGuard already validated the route; only bounce if sync + async checks both fail.
     this.authService.ensureAuthHintsApplied();
     if (!this.authService.hasValidSessionSync()) {
-      console.log('Not authenticated, redirecting to login');
-      this.router.navigate(['/login']);
-      return;
+      const hasSession = await this.authService.checkSession();
+      if (!hasSession) {
+        console.log('Not authenticated, redirecting to login');
+        this.router.navigate(['/login']);
+        return;
+      }
     }
     this.authService.clearPostLoginSessionHint();
 
